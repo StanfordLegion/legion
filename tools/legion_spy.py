@@ -238,7 +238,7 @@ def check_preconditions(preconditions, op):
     return None
 
 def add_preconditions(preconditions, op):
-    for pre in src_preconditions:
+    for pre in preconditions:
         pre.physical_outgoing.add(op)
         op.physical_incoming.add(pre)
 
@@ -5644,7 +5644,7 @@ class EquivalenceSet(object):
             fill.record_version_number(self)
             preconditions = inst.find_verification_copy_dependences(
                 self.field, self.point, op, req.index, False, 0, self.version_number)
-            add_precondition(preconditions, fill, self.depth)
+            add_preconditions(preconditions, fill)
             inst.add_verification_copy_user(self.field, 
                 self.point, fill, req.index, False, 0, self.version_number)
             return True
@@ -7086,9 +7086,9 @@ class Operation(object):
         all_reqs = list()
         # Find all non-projection requirements, and ensure that they are
         # compatible with themselves (as they will be used by all point tasks)
-        for req in itervalues(self.reqs):
-            if not req.is_projection():
-                if len(self.points) > 1:
+        if len(self.points) > 1:
+            for req in itervalues(self.reqs):
+                if not req.is_projection() and not req.is_collective():
                     dep_type = compute_dependence_type(req, req)
                     if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
                         print(("Non index region requirement %d of index space "
@@ -7100,6 +7100,12 @@ class Operation(object):
                 for req in itervalues(point_task.op.reqs):
                     all_reqs.append((req,point_task.op))
         else:
+            # Check to see if this is an indirection copy, if it is then we're
+            # just going to assume that things are non-interfering since there
+            # is no way to prove that it is non-interfering without knowing 
+            # what the data is in the indirection field(s)
+            if self.kind == COPY_OP_KIND and self.copy_kind > 0:
+                return False
             for point in itervalues(self.points):
                 for req in itervalues(point.reqs):
                     all_reqs.append((req,point))

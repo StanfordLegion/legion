@@ -4342,7 +4342,8 @@ namespace Legion {
     void ReplDependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp::activate();
+      ReplCollectiveViewCreator<CollectiveViewCreator<
+        DependentPartitionOp> >::activate();
       sharding_function = NULL;
       shard_points = NULL;
       gather = NULL;
@@ -4359,7 +4360,8 @@ namespace Legion {
     void ReplDependentPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      DependentPartitionOp::deactivate(false/*free*/);
+      ReplCollectiveViewCreator<CollectiveViewCreator<
+        DependentPartitionOp> >::deactivate(false/*free*/);
       if (gather != NULL)
         delete gather;
       if (scatter != NULL)
@@ -4792,6 +4794,10 @@ namespace Legion {
                          instances, &remote_targets, &deppart_results);
         }
       }
+      // If we don't have any points then we need to complete our execution
+      // now since we're not going to get any calls for it later
+      if (points.empty())
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6729,11 +6735,11 @@ namespace Legion {
               *external_resource, requests));
         if (single_broadcast != NULL)
           single_broadcast->broadcast({instance, ready_event, unique_event});
-        if (runtime->profiler != NULL)
+        if (implicit_profiler != NULL)
         {
-          runtime->profiler->record_physical_instance_region(unique_event,
+          implicit_profiler->register_physical_instance_region(unique_event,
                                                       requirement.region);
-          runtime->profiler->record_physical_instance_layout(unique_event,
+          implicit_profiler->register_physical_instance_layout(unique_event,
               requirement.region.field_space, layout_constraint_set);
         }
       }
@@ -8758,6 +8764,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < ctx->get_max_trace_templates(); idx++)
           status_collective_ids.push_back(
               ctx->get_next_collective_index(COLLECTIVE_LOC_91));
+        slow_barrier_id = ctx->get_next_collective_index(COLLECTIVE_LOC_95);
       }
     }
 
@@ -8767,6 +8774,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       OP::activate();
+      slow_barrier = NULL;
+      slow_barrier_id = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -8779,6 +8788,8 @@ namespace Legion {
 #endif
       OP::deactivate(free);
       status_collective_ids.clear();
+      if (slow_barrier != NULL)
+        delete slow_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -8823,6 +8834,27 @@ namespace Legion {
       valid = status.all_valid;
       status_collective_ids.pop_back();
       return status.any_not_acquired;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplTraceBegin<OP>::perform_template_creation_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(slow_barrier_id > 0);
+      assert(slow_barrier == NULL);
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+      slow_barrier = new SlowBarrier(repl_ctx, slow_barrier_id);
+      slow_barrier->perform_collective_async();
+      this->map_applied_conditions.insert(
+          slow_barrier->perform_collective_wait(false));
     }
 
     template class ReplTraceBegin<ReplBeginOp>;
@@ -8942,6 +8974,10 @@ namespace Legion {
         PhysicalTrace *physical = trace->get_physical_trace();
         const bool replaying = physical->begin_physical_trace(this,
             map_applied_conditions, execution_preconditions);
+        if (!replaying)
+          // Have to do the slow barrier here to make sure that
+          // all the shards have made their templates for recording
+          perform_template_creation_barrier();
         // Tell the parent context whether we are replaying
         parent_ctx->record_physical_trace_replay(mapped_event, replaying);
         // Do the normal physical fence analysis
@@ -8995,10 +9031,7 @@ namespace Legion {
         has_intermediate_fence = trace->has_intermediate_fence();
       remove_trace_reference = remove_ref;
       initialize_begin(ctx, trace);
-      initialize_complete(ctx);
-      // Check to see if we need a slow barrier ID
-      if (trace->has_physical_trace())
-        slow_barrier_id = ctx->get_next_collective_index(COLLECTIVE_LOC_95);
+      initialize_complete(ctx); 
     }
 
     //--------------------------------------------------------------------------
@@ -9007,8 +9040,6 @@ namespace Legion {
     {
       ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >::activate();
       previous = NULL;
-      slow_barrier = NULL;
-      slow_barrier_id = 0;
       has_blocking_call = false;
       has_intermediate_fence = false;
       remove_trace_reference = false;
@@ -9018,9 +9049,7 @@ namespace Legion {
     void ReplTraceRecurrentOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >::deactivate(false);
-      if (slow_barrier != NULL)
-        delete slow_barrier;
+      ReplTraceBegin<ReplTraceComplete<ReplRecurrentOp> >::deactivate(false); 
       if (freeop)
         runtime->free_repl_recurrent_op(this);
     }
@@ -9197,25 +9226,7 @@ namespace Legion {
       }
       else
         ReplTraceOp::trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplTraceRecurrentOp::perform_template_creation_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(slow_barrier_id > 0);
-      assert(slow_barrier == NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      slow_barrier = new SlowBarrier(repl_ctx, slow_barrier_id);
-      slow_barrier->perform_collective_async();
-      map_applied_conditions.insert(
-          slow_barrier->perform_collective_wait(false));
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Shard Mapping

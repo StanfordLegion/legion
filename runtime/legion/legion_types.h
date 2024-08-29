@@ -33,8 +33,10 @@
 #include <limits>
 #include <deque>
 #include <vector>
+#include <optional>
 #include <typeinfo>
 #include <type_traits>
+#include <string_view>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -140,6 +142,7 @@ namespace Legion {
   typedef ::legion_resource_constraint_t ResourceKind;
   typedef ::legion_launch_constraint_t LaunchKind;
   typedef ::legion_specialized_constraint_t SpecializedKind;
+  typedef ::legion_unbounded_pool_scope_t UnboundPoolScope;
 
   // Forward declarations for user level objects
   // legion.h
@@ -406,6 +409,7 @@ namespace Legion {
       LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
+      LG_DEFER_MAPPER_COLLECTION_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
@@ -515,6 +519,7 @@ namespace Legion {
         "Defer Index Partition Find Shard Rects",                 \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
+        "Deferred Mapper Instance Collective",                    \
         "Remote View Creation",                                   \
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
@@ -971,6 +976,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
+      SEND_EQUIVALENCE_SET_FILTER_INVALIDATIONS,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1300,6 +1306,7 @@ namespace Legion {
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Instances",                      \
+        "Send Equivalence Set Filter Invalidations",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \
@@ -2338,8 +2345,12 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
     extern thread_local TaskContext *implicit_context;
+    // Mapper context if we're inside of a mapper call
+    extern thread_local MappingCallInfo *implicit_mapper_call;
     // Same thing for the runtime
     extern thread_local Runtime *implicit_runtime;
+    // Implicit thread-local profiler
+    extern thread_local LegionProfInstance *implicit_profiler;
     // Another nasty global variable for tracking the fast
     // reservations that we are holding
     extern thread_local AutoLock *local_lock_list;
@@ -2362,9 +2373,6 @@ namespace Legion {
     // changes to remote distributed collectable that can be
     // delayed and batched together.
     extern thread_local ImplicitReferenceTracker *implicit_reference_tracker; 
-#ifdef DEBUG_LEGION_WAITS
-    extern thread_local int meta_task_id;
-#endif
 #ifdef DEBUG_LEGION_CALLERS
     extern thread_local LgTaskID implicit_task_kind;
     extern thread_local LgTaskID implicit_task_caller;
@@ -2594,6 +2602,7 @@ namespace Legion {
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
   typedef ::legion_shard_id_t ShardID;
+  typedef ::legion_provenance_id_t ProvenanceID;
   typedef ::legion_internal_color_t LegionColor;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
                 Runtime *rt, const std::set<Processor> &local_procs);
@@ -2890,6 +2899,8 @@ namespace Legion {
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
+      void record_event_wait(LegionProfInstance *profiler, 
+                             Realm::Backtrace &bt) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3237,14 +3248,8 @@ namespace Legion {
     inline void LgEvent::wait(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION_WAITS
-      const int local_meta_task_id = Internal::meta_task_id;
-      const long long start = Realm::Clock::current_time_in_microseconds();
-#endif
-      // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
+      if (!exists())
+        return;
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3254,6 +3259,24 @@ namespace Legion {
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
       Internal::implicit_reference_tracker = NULL;
+      LegionProfInstance *local_profiler = Internal::implicit_profiler;
+      if (local_profiler != NULL)
+      {
+        // Cannot call back into wait while recording a wait
+        implicit_profiler = NULL;
+        Realm::Backtrace bt;
+        bt.capture_backtrace();
+        record_event_wait(local_profiler, bt);
+      }
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      Internal::implicit_context = NULL;
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      Internal::implicit_mapper_call = NULL;
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      Internal::implicit_provenance = 0;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3293,8 +3316,12 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the mapper call back
+      Internal::implicit_mapper_call = local_call;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+      // Restore the local profiler
+      Internal::implicit_profiler = local_profiler;
 #ifdef DEBUG_LEGION_CALLERS
       Internal::implicit_task_kind = local_kind;
       Internal::implicit_task_caller = local_caller;
@@ -3306,26 +3333,17 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
-#ifdef DEBUG_LEGION_WAITS
-      Internal::meta_task_id = local_meta_task_id;
-      const long long stop = Realm::Clock::current_time_in_microseconds();
-      if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
-        assert(false);
-#endif
     }
 
     //--------------------------------------------------------------------------
     inline void LgEvent::wait_faultaware(bool &poisoned, bool from_app) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION_WAITS
-      const int local_meta_task_id = Internal::meta_task_id;
-      const long long start = Realm::Clock::current_time_in_microseconds();
-#endif
-      // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
+      if (!exists())
+        return;
+      if (has_triggered_faultaware(poisoned))
+        return;
+      
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3335,6 +3353,24 @@ namespace Legion {
       // Save the reference tracker that we have
       ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
       Internal::implicit_reference_tracker = NULL;
+      LegionProfInstance *local_profiler = Internal::implicit_profiler;
+      if (local_profiler != NULL)
+      {
+        // Cannot call back into wait while recording a wait
+        implicit_profiler = NULL;
+        Realm::Backtrace bt;
+        bt.capture_backtrace();
+        record_event_wait(local_profiler, bt);
+      }
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      Internal::implicit_context = NULL;
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      Internal::implicit_mapper_call = NULL;
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      Internal::implicit_provenance = 0;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3374,8 +3410,12 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the mapper call back
+      Internal::implicit_mapper_call = local_call;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
+      // Restore the local profiler
+      Internal::implicit_profiler = local_profiler;
 #ifdef DEBUG_LEGION_CALLERS
       Internal::implicit_task_kind = local_kind;
       Internal::implicit_task_caller = local_caller;
@@ -3387,12 +3427,6 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
-#ifdef DEBUG_LEGION_WAITS
-      Internal::meta_task_id = local_meta_task_id;
-      const long long stop = Realm::Clock::current_time_in_microseconds();
-      if (((stop - start) >= LIMIT) && (local_meta_task_id == BAD_TASK_ID))
-        assert(false);
-#endif
     }
 
   }; // namespace Internal 

@@ -53,6 +53,7 @@ namespace Legion {
       bool operator<(const PhysicalInstance &rhs) const;
       bool operator==(const PhysicalInstance &rhs) const;
       bool operator!=(const PhysicalInstance &rhs) const;
+      std::size_t hash(void) const;
     public:
       // Get the location of this physical instance
       Memory get_location(void) const;
@@ -126,6 +127,7 @@ namespace Legion {
       bool operator<(const CollectiveView &rhs) const;
       bool operator==(const CollectiveView &rhs) const;
       bool operator!=(const CollectiveView &rhs) const;
+      std::size_t hash(void) const;
     public:
       void find_instances_in_memory(Memory memory,
                                     std::vector<PhysicalInstance> &insts) const;
@@ -159,6 +161,8 @@ namespace Legion {
         { return (impl.id == rhs.impl.id); }
       inline bool operator<(const MapperEvent &rhs) const
         { return (impl.id < rhs.impl.id); }
+      inline std::size_t hash(void) const
+        { return std::hash<unsigned long long>{}(impl.id); }
     private:
       Internal::RtUserEvent impl;
     };
@@ -609,6 +613,7 @@ namespace Legion {
         std::set<unsigned>                          untracked_valid_regions;
         std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
+        std::map<Memory,PoolBounds>                 leaf_pool_bounds;
         VariantID                                   chosen_variant; // = 0 
         TaskPriority                                task_priority;  // = 0
         RealmPriority                               copy_fill_priority;

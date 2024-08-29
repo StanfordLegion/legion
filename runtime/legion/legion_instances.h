@@ -336,7 +336,8 @@ namespace Legion {
                       ApEvent use_event, LgEvent unique_event,
                       InstanceKind kind, const ReductionOp *op = NULL,
                       CollectiveMapping *collective_mapping = NULL,
-                      ApEvent producer_event = ApEvent::NO_AP_EVENT);
+                      ApEvent producer_event = ApEvent::NO_AP_EVENT,
+                      GarbageCollectionState init = COLLECTABLE_GC_STATE);
       PhysicalManager(const PhysicalManager &rhs) = delete;
       virtual ~PhysicalManager(void);
     public:
@@ -425,8 +426,10 @@ namespace Legion {
       IndividualView* construct_top_view(AddressSpaceID logical_owner,
                                          DistributedID did, InnerContext *ctx,
                                          CollectiveMapping *mapping);
-      bool register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
-      void unregister_deletion_subscriber(InstanceDeletionSubscriber *subscrib);
+      bool register_deletion_subscriber(InstanceDeletionSubscriber *subscriber,
+                                        bool allow_duplicates = false);
+      void unregister_deletion_subscriber(
+                                        InstanceDeletionSubscriber *subscriber);
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
@@ -454,7 +457,6 @@ namespace Legion {
     protected:
       void pack_garbage_collection_state(Serializer &rez,
                                          AddressSpaceID target, bool need_lock);
-      void initialize_remote_gc_state(GarbageCollectionState state);
     public:
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
@@ -517,7 +519,7 @@ namespace Legion {
       ApUserEvent use_event;
       // Event that signifies if the instance name is available
       RtUserEvent instance_ready;
-      InstanceKind kind;
+      std::atomic<InstanceKind> kind;
       // Keep the pointer for owned external instances
       uintptr_t external_pointer;
       // Completion event of the task that sets a realm instance

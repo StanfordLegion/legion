@@ -99,6 +99,7 @@ legion_cxx_tests = [
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+    ['test/mapper/mapper', []],
 
     # Tutorial/realm
     ['tutorial/realm/hello_world/realm_hello_world', []],
@@ -821,6 +822,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmake_cmd.append('-DGASNet_CONDUIT=' + env['CONDUIT'])
         if 'EMBED_GASNET_SRC' in env:
             cmake_cmd.append('-DLegion_EMBED_GASNet_LOCALSRC=' + env['EMBED_GASNET_SRC'])
+    if 'USE_GASNETEX_WRAPPER' in env:
+        cmake_cmd.append('-DLegion_USE_GASNETEX_WRAPPER=%s' % ('ON' if env['USE_GASNETEX_WRAPPER'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
     if 'GPU_ARCH' in env:
         cmake_cmd.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
@@ -897,6 +900,16 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
+
+    # Check the build with various settings to make sure we're not breaking anything
+    allow_unused_variables_env = dict(list(env.items()) + [
+        ('RUSTFLAGS', '-Aunused_variables'), # When not all features are enabled, some variables may be unused
+    ])
+    cmd(['cargo', 'check', '--no-default-features'],
+        env=allow_unused_variables_env, cwd=legion_prof_dir)
+    cmd(['cargo', 'check', '--release'],
+        env=env, cwd=legion_prof_dir)
+
     cmd(['cargo', 'install',
          '--all-features',
          '--locked',
@@ -1040,7 +1053,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * NVTX:       %s' % use_nvtx)
     print('###   * LIBDW:      %s' % use_libdw)
     print('###   * Max DIM:    %s' % max_dim)
-    print('###   * CXX STD:    %s' % cxx_standard)
+    print('###   * C++ STD:    %s' % cxx_standard)
     print('#'*60)
     print()
     sys.stdout.flush()
@@ -1141,14 +1154,15 @@ def run_tests(test_modules=None,
     launcher = launcher.split() if launcher is not None else []
 
     # CXX Standard
-    cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
+    cxx_standard = os.environ.get('CXX_STANDARD', '')
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
-    if use_cmake == False:
-        if cxx_standard != '':
-            if 'CXX_STANDARD' in os.environ:
-                os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
-            else:
-                os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']
+    if not use_cmake and cxx_standard != '':
+        cxx_std_flag = " -std=c++" + cxx_standard
+        os.environ['CXXFLAGS'] = os.environ.get('CXXFLAGS', '') + cxx_std_flag
+        if use_cuda:
+            os.environ['NVCC_FLAGS'] = os.environ.get('NVCC_FLAGS', '') + cxx_std_flag
+        if use_hip:
+            os.environ['HIPCC_FLAGS'] = os.environ.get('HIPCC_FLAGS', '') + cxx_std_flag
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 

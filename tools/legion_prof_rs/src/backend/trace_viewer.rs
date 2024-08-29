@@ -65,6 +65,9 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
                     ProcEntryKind::RuntimeCall(kind) => {
                         state.runtime_call_kinds.get(&kind).unwrap().name.clone()
                     }
+                    ProcEntryKind::ApplicationCall(prov) => {
+                        state.find_provenance(prov).unwrap().to_owned()
+                    }
                     ProcEntryKind::ProfTask => "ProfTask".to_owned(),
                 };
 

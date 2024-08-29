@@ -2,6 +2,7 @@ use std::cmp::{max, Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::OnceLock;
 
 use derive_more::{Add, From, LowerHex, Sub};
@@ -368,7 +369,7 @@ pub trait ContainerEntry {
     fn time_range_mut(&mut self) -> &mut TimeRange;
     fn waiters(&self) -> Option<&Waiters>;
     fn initiation(&self) -> Option<OpID>;
-    fn creator(&self) -> Option<EventID>;
+    fn creator(&self) -> Option<ProfUID>;
 
     // Methods that require State access
     fn name(&self, state: &State) -> String;
@@ -382,6 +383,7 @@ pub enum ProcEntryKind {
     MetaTask(VariantID),
     MapperCall(MapperID, ProcID, MapperCallKindID),
     RuntimeCall(RuntimeCallKindID),
+    ApplicationCall(ProvenanceID),
     GPUKernel(TaskID, VariantID),
     ProfTask,
 }
@@ -393,10 +395,8 @@ pub struct ProcEntry {
     pub initiation_op: Option<OpID>,
     pub kind: ProcEntryKind,
     pub time_range: TimeRange,
-    pub creator: EventID,
-    pub fevent: EventID,
+    pub creator: Option<ProfUID>,
     pub waiters: Waiters,
-    pub subcalls: Vec<(ProfUID, Timestamp, Timestamp)>,
 }
 
 impl ProcEntry {
@@ -406,8 +406,7 @@ impl ProcEntry {
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
-        creator: EventID,
-        fevent: EventID,
+        creator: Option<ProfUID>,
     ) -> Self {
         ProcEntry {
             base,
@@ -416,9 +415,7 @@ impl ProcEntry {
             kind,
             time_range,
             creator,
-            fevent,
             waiters: Waiters::new(),
-            subcalls: Vec::new(),
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
@@ -451,8 +448,8 @@ impl ContainerEntry for ProcEntry {
         self.initiation_op
     }
 
-    fn creator(&self) -> Option<EventID> {
-        Some(self.creator)
+    fn creator(&self) -> Option<ProfUID> {
+        self.creator
     }
 
     fn name(&self, state: &State) -> String {
@@ -487,6 +484,7 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().name.clone()
             }
+            ProcEntryKind::ApplicationCall(prov) => state.find_provenance(prov).unwrap().to_owned(),
             ProcEntryKind::GPUKernel(task_id, variant_id) => {
                 let task_name = &state.task_kinds.get(&task_id).unwrap().name;
                 let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
@@ -530,6 +528,9 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::RuntimeCall(kind) => {
                 state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
             }
+            ProcEntryKind::ApplicationCall(prov) => {
+                state.provenances.get(&prov).unwrap().color.unwrap()
+            }
             ProcEntryKind::ProfTask => {
                 // FIXME don't hardcode this here
                 Color(0xFFC0CB)
@@ -569,10 +570,11 @@ impl ProcID {
 #[derive(Debug)]
 pub struct Proc {
     pub proc_id: ProcID,
-    pub kind: ProcKind,
+    pub kind: Option<ProcKind>,
     entries: BTreeMap<ProfUID, ProcEntry>,
     tasks: BTreeMap<OpID, ProfUID>,
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
+    event_waits: BTreeMap<ProfUID, BTreeMap<EventID, BacktraceID>>,
     max_levels: u32,
     max_levels_ready: u32,
     time_points: Vec<ProcPoint>,
@@ -587,13 +589,14 @@ pub struct Proc {
 }
 
 impl Proc {
-    fn new(proc_id: ProcID, kind: ProcKind) -> Self {
+    fn new(proc_id: ProcID) -> Self {
         Proc {
             proc_id,
-            kind,
+            kind: None,
             entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
+            event_waits: BTreeMap::new(),
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
@@ -615,25 +618,14 @@ impl Proc {
         initiation_op: Option<OpID>,
         kind: ProcEntryKind,
         time_range: TimeRange,
-        creator: EventID,
-        fevent: EventID,
+        creator: Option<ProfUID>,
         op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
         prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
-        fevents: &mut BTreeMap<EventID, ProfUID>,
     ) -> &mut ProcEntry {
         if let Some(op_id) = op {
             op_prof_uid.insert(op_id, base.prof_uid);
         }
         prof_uid_proc.insert(base.prof_uid, self.proc_id);
-        // Insert the fevents for tasks into the data structure
-        match kind {
-            ProcEntryKind::Task(_, _) | ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
-                // We should only see an event once
-                assert!(!fevents.contains_key(&fevent));
-                fevents.insert(fevent, base.prof_uid);
-            }
-            _ => {}
-        }
         match kind {
             ProcEntryKind::Task(_, _) => {
                 self.tasks.insert(op.unwrap(), base.prof_uid);
@@ -647,9 +639,22 @@ impl Proc {
             // If we don't need to look up later... don't bother building the index
             _ => {}
         }
-        self.entries.entry(base.prof_uid).or_insert_with(|| {
-            ProcEntry::new(base, op, initiation_op, kind, time_range, creator, fevent)
-        })
+        self.entries
+            .entry(base.prof_uid)
+            .or_insert_with(|| ProcEntry::new(base, op, initiation_op, kind, time_range, creator))
+    }
+
+    fn record_event_wait(&mut self, task_uid: ProfUID, event: EventID, backtrace: BacktraceID) {
+        self.event_waits
+            .entry(task_uid)
+            .or_insert_with(BTreeMap::new)
+            .insert(event, backtrace);
+    }
+
+    fn set_kind(&mut self, kind: ProcKind) -> &mut Self {
+        assert!(self.kind.map_or(true, |x| x == kind));
+        self.kind = Some(kind);
+        self
     }
 
     pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
@@ -692,20 +697,21 @@ impl Proc {
         self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
-    fn sort_calls_and_waits(&mut self, fevents: &BTreeMap<EventID, ProfUID>) {
+    fn sort_calls_and_waits(&mut self) {
         // Before we sort things, we need to rearrange the waiters from
         // any tasks into the appropriate runtime/mapper calls and make the
         // runtime/mapper calls appear as waiters in the original tasks
         let mut subcalls = BTreeMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
-                ProcEntryKind::MapperCall(..) | ProcEntryKind::RuntimeCall(_) => {
-                    let task_uid = fevents.get(&entry.fevent).unwrap();
+                ProcEntryKind::MapperCall(..)
+                | ProcEntryKind::RuntimeCall(_)
+                | ProcEntryKind::ApplicationCall(_) => {
                     let call_start = entry.time_range.start.unwrap();
                     let call_stop = entry.time_range.stop.unwrap();
                     assert!(call_start <= call_stop);
                     subcalls
-                        .entry(*task_uid)
+                        .entry(entry.creator.unwrap())
                         .or_insert_with(Vec::new)
                         .push((*uid, call_start, call_stop));
                 }
@@ -715,11 +721,18 @@ impl Proc {
         for (task_uid, calls) in subcalls.iter_mut() {
             // Remove the old entry from the map to keep the borrow checker happy
             let mut task_entry = self.entries.remove(&task_uid).unwrap();
+            // Also find any event waiter backtrace information
+            let mut event_waits = self.event_waits.remove(&task_uid).unwrap_or_default();
             // Sort subcalls by their size from smallest to largest
             calls.sort_by_key(|a| a.2 - a.1);
             // Push waits into the smallest subcall we can find
             let mut to_remove = Vec::new();
-            for (idx, wait) in task_entry.waiters.wait_intervals.iter().enumerate() {
+            for (idx, wait) in task_entry.waiters.wait_intervals.iter_mut().enumerate() {
+                let mut backtrace = if let Some(event) = wait.event {
+                    event_waits.remove(&event)
+                } else {
+                    None
+                };
                 // Find the smallest containing call
                 for (call_uid, call_start, call_stop) in calls.iter() {
                     if (*call_start <= wait.start) && (wait.end <= *call_stop) {
@@ -727,14 +740,23 @@ impl Proc {
                         call_entry
                             .waiters
                             .wait_intervals
-                            .push(WaitInterval::new(wait.start, wait.ready, wait.end));
+                            .push(WaitInterval::from_event(
+                                wait.start,
+                                wait.ready,
+                                wait.end,
+                                wait.event.unwrap(),
+                                backtrace,
+                            ));
                         to_remove.push(idx);
+                        backtrace = None;
                         break;
                     } else {
                         // Waits should not be partially overlapping with calls
                         assert!((wait.end <= *call_start) || (*call_stop <= wait.start));
                     }
                 }
+                // Save the remaining backtrace if there is one to this waiter
+                wait.backtrace = backtrace;
             }
             // Remove any waits that we moved into a call
             for idx in to_remove.iter().rev() {
@@ -744,29 +766,40 @@ impl Proc {
             // it and add a wait for it, if one isn't found then we add the
             // wait to the task for that subcall
             for (idx1, (call_uid, call_start, call_stop)) in calls.iter().enumerate() {
-                let mut found = false;
+                let mut caller_uid = None;
                 for idx2 in idx1 + 1..calls.len() {
                     let (next_uid, next_start, next_stop) = calls[idx2];
                     if (next_start <= *call_start) && (*call_stop <= next_stop) {
                         let next_entry = self.entries.get_mut(&next_uid).unwrap();
-                        next_entry.waiters.wait_intervals.push(WaitInterval::new(
-                            *call_start,
-                            *call_stop,
-                            *call_stop,
-                        ));
-                        found = true;
+                        next_entry
+                            .waiters
+                            .wait_intervals
+                            .push(WaitInterval::from_caller(
+                                *call_start,
+                                *call_stop,
+                                *call_uid,
+                            ));
+                        // Keep the wait intervals sorted by starting time
+                        next_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
+                        caller_uid = Some(next_uid);
                         break;
                     } else {
                         // Calls should not be partially overlapping with eachother
                         assert!((*call_stop <= next_start) || (next_stop <= *call_start));
                     }
                 }
-                if !found {
-                    task_entry.waiters.wait_intervals.push(WaitInterval::new(
-                        *call_start,
-                        *call_stop,
-                        *call_stop,
-                    ));
+                if caller_uid.is_none() {
+                    task_entry
+                        .waiters
+                        .wait_intervals
+                        .push(WaitInterval::from_caller(
+                            *call_start,
+                            *call_stop,
+                            *call_uid,
+                        ));
+                    // Keep the wait intervals sorted by starting time
+                    task_entry.waiters.wait_intervals.sort_by_key(|w| w.start);
+                    caller_uid = Some(*task_uid);
                 }
                 // Update the operation info for the calls
                 let call_entry = self.entries.get_mut(&call_uid).unwrap();
@@ -781,15 +814,25 @@ impl Proc {
                         panic!("bad processor entry kind");
                     }
                 }
+                // Update the call entry creator
+                call_entry.creator = caller_uid;
             }
-            // Save any calls on the proc entry
-            std::mem::swap(&mut task_entry.subcalls, calls);
             // Finally add the task entry back in now that we're done mutating it
             self.entries.insert(*task_uid, task_entry);
         }
+        // Finally update all the backtrace event waits we have left
+        for (task_uid, waiters) in self.event_waits.iter_mut() {
+            let task_entry = self.entries.get_mut(&task_uid).unwrap();
+            for wait in task_entry.waiters.wait_intervals.iter_mut() {
+                if let Some(event) = wait.event {
+                    wait.backtrace = waiters.remove(&event);
+                }
+            }
+        }
+        self.event_waits.clear();
     }
 
-    fn sort_time_range(&mut self, fevents: &BTreeMap<EventID, ProfUID>) {
+    fn sort_time_range(&mut self) {
         fn add(
             time: &TimeRange,
             prof_uid: ProfUID,
@@ -827,7 +870,7 @@ impl Proc {
         }
 
         // Before we do anything sort the runtime/mapper calls and waiters
-        self.sort_calls_and_waits(fevents);
+        self.sort_calls_and_waits();
 
         let mut all_points = Vec::new();
         let mut points = Vec::new();
@@ -837,7 +880,7 @@ impl Proc {
         let mut points_device = Vec::new();
         let mut util_points_device = Vec::new();
 
-        if self.kind == ProcKind::GPU {
+        if self.kind.unwrap() == ProcKind::GPU {
             // On GPUs, split the entries between GPU kernels (which
             // we put on the device timeline) and other tasks (which
             // we put on the host timeline).
@@ -1020,7 +1063,7 @@ impl Container for Proc {
 
 pub type MemEntry = Inst;
 
-pub type MemPoint = TimePoint<InstUID, Timestamp>;
+pub type MemPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
@@ -1042,7 +1085,7 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<InstUID, Inst>,
+    pub insts: BTreeMap<ProfUID, Inst>,
     time_points: Vec<MemPoint>,
     time_points_stacked: Vec<Vec<MemPoint>>,
     util_time_points: Vec<MemPoint>,
@@ -1066,7 +1109,7 @@ impl Mem {
     }
 
     fn add_inst(&mut self, inst: Inst) {
-        self.insts.insert(inst.inst_uid, inst);
+        self.insts.insert(inst.base.prof_uid, inst);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1150,7 +1193,7 @@ impl Mem {
 }
 
 impl Container for Mem {
-    type E = InstUID;
+    type E = ProfUID;
     type S = Timestamp;
     type Entry = Inst;
 
@@ -1181,12 +1224,12 @@ impl Container for Mem {
         &self.util_time_points
     }
 
-    fn entry(&self, inst_uid: InstUID) -> &Inst {
-        self.insts.get(&inst_uid).unwrap()
+    fn entry(&self, prof_uid: ProfUID) -> &Inst {
+        self.insts.get(&prof_uid).unwrap()
     }
 
-    fn entry_mut(&mut self, inst_uid: InstUID) -> &mut Inst {
-        self.insts.get_mut(&inst_uid).unwrap()
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut Inst {
+        self.insts.get_mut(&prof_uid).unwrap()
     }
 }
 
@@ -1281,11 +1324,11 @@ impl ContainerEntry for ChanEntry {
         }
     }
 
-    fn creator(&self) -> Option<EventID> {
+    fn creator(&self) -> Option<ProfUID> {
         match self {
-            ChanEntry::Copy(copy) => Some(copy.creator),
-            ChanEntry::Fill(fill) => Some(fill.creator),
-            ChanEntry::DepPart(deppart) => Some(deppart.creator),
+            ChanEntry::Copy(copy) => copy.creator,
+            ChanEntry::Fill(fill) => fill.creator,
+            ChanEntry::DepPart(deppart) => deppart.creator,
         }
     }
 
@@ -1365,8 +1408,6 @@ impl ChanID {
 pub struct Chan {
     pub chan_id: ChanID,
     entries: BTreeMap<ProfUID, ChanEntry>,
-    copies: BTreeMap<EventID, ProfUID>,
-    fills: BTreeMap<EventID, ProfUID>,
     depparts: BTreeMap<OpID, Vec<ProfUID>>,
     time_points: Vec<ChanPoint>,
     time_points_stacked: Vec<Vec<ChanPoint>>,
@@ -1380,8 +1421,6 @@ impl Chan {
         Chan {
             chan_id,
             entries: BTreeMap::new(),
-            copies: BTreeMap::new(),
-            fills: BTreeMap::new(),
             depparts: BTreeMap::new(),
             time_points: Vec::new(),
             time_points_stacked: Vec::new(),
@@ -1392,14 +1431,12 @@ impl Chan {
     }
 
     fn add_copy(&mut self, copy: Copy) {
-        self.copies.insert(copy.fevent, copy.base.prof_uid);
         self.entries
             .entry(copy.base.prof_uid)
             .or_insert(ChanEntry::Copy(copy));
     }
 
     fn add_fill(&mut self, fill: Fill) {
-        self.fills.insert(fill.fevent, fill.base.prof_uid);
         self.entries
             .entry(fill.base.prof_uid)
             .or_insert(ChanEntry::Fill(fill));
@@ -1795,7 +1832,6 @@ pub struct Dim(pub u32);
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
-    pub inst_uid: InstUID,
     pub inst_id: Option<InstID>,
     pub op_id: Option<OpID>,
     mem_id: Option<MemID>,
@@ -1807,14 +1843,13 @@ pub struct Inst {
     pub fields: BTreeMap<FSpaceID, Vec<FieldID>>,
     pub align_desc: BTreeMap<FSpaceID, Vec<Align>>,
     pub dim_order: BTreeMap<Dim, DimKind>,
-    pub creator: Option<EventID>,
+    pub creator: Option<ProfUID>,
 }
 
 impl Inst {
-    fn new(base: Base, inst_uid: InstUID) -> Self {
+    fn new(base: Base) -> Self {
         Inst {
             base,
-            inst_uid,
             inst_id: None,
             op_id: None,
             mem_id: None,
@@ -1896,9 +1931,9 @@ impl Inst {
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         self.time_range.trim_time_range(start, stop)
     }
-    fn set_creator(&mut self, creator: EventID) -> &mut Self {
-        assert!(self.creator.map_or(true, |c| c == creator));
-        self.creator = Some(creator);
+    fn set_creator(&mut self, creator: Option<ProfUID>) -> &mut Self {
+        assert!(self.creator.map_or(true, |c| c == creator.unwrap()));
+        self.creator = creator;
         self
     }
 }
@@ -1948,7 +1983,7 @@ impl ContainerEntry for Inst {
         self.op_id
     }
 
-    fn creator(&self) -> Option<EventID> {
+    fn creator(&self) -> Option<ProfUID> {
         self.creator
     }
 
@@ -2063,6 +2098,28 @@ impl RuntimeCallKind {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct ProvenanceID(pub NonZeroU64);
+
+#[derive(Debug)]
+pub struct Provenance {
+    pub name: String,
+    pub color: Option<Color>,
+}
+
+impl Provenance {
+    fn new(name: &str) -> Self {
+        Provenance {
+            name: name.to_owned(),
+            color: None,
+        }
+    }
+    fn set_color(&mut self, color: Color) -> &mut Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
@@ -2092,7 +2149,7 @@ pub struct VariantID(pub u32);
 pub struct Variant {
     variant_id: VariantID,
     message: bool,
-    ordered_vc: bool,
+    _ordered_vc: bool, // Not used currently
     pub name: String,
     task_id: Option<TaskID>,
     pub color: Option<Color>,
@@ -2103,7 +2160,7 @@ impl Variant {
         Variant {
             variant_id,
             message,
-            ordered_vc,
+            _ordered_vc: ordered_vc,
             name: name.to_owned(),
             task_id: None,
             color: None,
@@ -2132,7 +2189,14 @@ pub struct Base {
 impl Base {
     fn new(allocator: &mut ProfUIDAllocator) -> Self {
         Base {
-            prof_uid: allocator.get_prof_uid(),
+            prof_uid: allocator.create_fresh(),
+            level: None,
+            level_ready: None,
+        }
+    }
+    fn from_fevent(allocator: &mut ProfUIDAllocator, fevent: EventID) -> Self {
+        Base {
+            prof_uid: allocator.create_object(fevent),
             level: None,
             level_ready: None,
         }
@@ -2151,6 +2215,11 @@ impl Base {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimeRange {
+    // Unlike other TimeRange components, spawn is measured on the node that
+    // spawns a (meta-)task, and therefore can potentially skew relative to the
+    // other Timestamp values, whereas all the other four values are measured
+    // all on the same node so will all be temporally consistent.
+    pub spawn: Option<Timestamp>,
     pub create: Option<Timestamp>,
     pub ready: Option<Timestamp>,
     pub start: Option<Timestamp>,
@@ -2158,20 +2227,40 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
-    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+    fn new_message(
+        spawn: Timestamp,
+        create: Timestamp,
+        ready: Timestamp,
+        start: Timestamp,
+        stop: Timestamp,
+    ) -> Self {
         assert!(create <= ready);
         assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: Some(spawn),
             create: Some(create),
             ready: Some(ready),
             start: Some(start),
             stop: Some(stop),
         }
     }
-    fn new_start(start: Timestamp, stop: Timestamp) -> Self {
+    fn new_full(create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp) -> Self {
+        assert!(create <= ready);
+        assert!(ready <= start);
         assert!(start <= stop);
         TimeRange {
+            spawn: None,
+            create: Some(create),
+            ready: Some(ready),
+            start: Some(start),
+            stop: Some(stop),
+        }
+    }
+    fn new_call(start: Timestamp, stop: Timestamp) -> Self {
+        assert!(start <= stop);
+        TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: Some(start),
@@ -2180,6 +2269,7 @@ impl TimeRange {
     }
     fn new_empty() -> Self {
         TimeRange {
+            spawn: None,
             create: None,
             ready: None,
             start: None,
@@ -2213,13 +2303,42 @@ pub struct WaitInterval {
     pub start: Timestamp,
     pub ready: Timestamp,
     pub end: Timestamp,
+    pub callee: Option<ProfUID>,
+    pub event: Option<EventID>,
+    pub backtrace: Option<BacktraceID>,
 }
 
 impl WaitInterval {
-    fn new(start: Timestamp, ready: Timestamp, end: Timestamp) -> Self {
+    fn from_event(
+        start: Timestamp,
+        ready: Timestamp,
+        end: Timestamp,
+        event: EventID,
+        backtrace: Option<BacktraceID>,
+    ) -> Self {
         assert!(start <= ready);
         assert!(ready <= end);
-        WaitInterval { start, ready, end }
+        WaitInterval {
+            start,
+            ready,
+            end,
+            callee: None,
+            event: Some(event),
+            backtrace,
+        }
+    }
+    fn from_caller(start: Timestamp, end: Timestamp, callee: ProfUID) -> Self {
+        assert!(start <= end);
+        // Calls from a caller should be "ready" as soon as they are done since
+        // function calls always return immediately
+        WaitInterval {
+            start,
+            ready: end,
+            end,
+            callee: Some(callee),
+            event: None,
+            backtrace: None,
+        }
     }
 }
 
@@ -2292,13 +2411,13 @@ impl OpKind {
 
 #[derive(Debug)]
 pub struct OperationInstInfo {
-    pub inst_uid: InstUID,
+    pub inst_uid: ProfUID,
     _index: u32,
     _field_id: FieldID,
 }
 
 impl OperationInstInfo {
-    fn new(inst_uid: InstUID, index: u32, field_id: FieldID) -> Self {
+    fn new(inst_uid: ProfUID, index: u32, field_id: FieldID) -> Self {
         OperationInstInfo {
             inst_uid,
             _index: index,
@@ -2309,17 +2428,15 @@ impl OperationInstInfo {
 
 #[derive(Debug)]
 pub struct Operation {
-    pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
-    pub provenance: Option<String>,
+    pub provenance: Option<ProvenanceID>,
     pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
 impl Operation {
-    fn new(base: Base) -> Self {
+    fn new() -> Self {
         Operation {
-            base,
             parent_id: None,
             kind: None,
             provenance: None,
@@ -2336,8 +2453,9 @@ impl Operation {
         self.kind = Some(kind);
         self
     }
-    fn set_provenance(&mut self, provenance: &str) -> &mut Self {
-        self.provenance = Some(provenance.to_owned());
+    fn set_provenance(&mut self, provenance: Option<ProvenanceID>) -> &mut Self {
+        assert!(self.provenance.is_none());
+        self.provenance = provenance;
         self
     }
 }
@@ -2345,8 +2463,24 @@ impl Operation {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct EventID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct InstUID(pub u64);
+impl EventID {
+    fn exists(&self) -> bool {
+        self.0 != 0
+    }
+    fn existing(&self) -> Option<EventID> {
+        if self.exists() {
+            Some(*self)
+        } else {
+            None
+        }
+    }
+    // Important: keep this in sync with realm/id.h
+    // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
+    // owner_node = proc_id[63:47]
+    pub fn node_id(&self) -> NodeID {
+        NodeID((self.0 >> 47) & ((1 << 16) - 1))
+    }
+}
 
 impl From<spy::serialize::EventID> for EventID {
     fn from(e: spy::serialize::EventID) -> Self {
@@ -2375,9 +2509,8 @@ pub struct CopyInstInfo {
     dst: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
-    pub src_inst_uid: InstUID,
-    pub dst_inst_uid: InstUID,
-    _fevent: EventID,
+    pub src_inst_uid: Option<ProfUID>,
+    pub dst_inst_uid: Option<ProfUID>,
     pub num_hops: u32,
     pub indirect: bool,
 }
@@ -2388,9 +2521,8 @@ impl CopyInstInfo {
         dst: Option<MemID>,
         src_fid: FieldID,
         dst_fid: FieldID,
-        src_inst_uid: InstUID,
-        dst_inst_uid: InstUID,
-        fevent: EventID,
+        src_inst_uid: Option<ProfUID>,
+        dst_inst_uid: Option<ProfUID>,
         num_hops: u32,
         indirect: bool,
     ) -> Self {
@@ -2401,7 +2533,6 @@ impl CopyInstInfo {
             dst_fid,
             src_inst_uid,
             dst_inst_uid,
-            _fevent: fevent,
             num_hops,
             indirect,
         }
@@ -2411,8 +2542,7 @@ impl CopyInstInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    creator: EventID,
-    fevent: EventID,
+    creator: Option<ProfUID>,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: OpID,
@@ -2428,14 +2558,12 @@ impl Copy {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: EventID,
-        fevent: EventID,
+        creator: Option<ProfUID>,
         collective: u32,
     ) -> Self {
         Copy {
             base,
             creator,
-            fevent,
             time_range,
             chan_id: None,
             op_id,
@@ -2520,17 +2648,15 @@ impl Copy {
 pub struct FillInstInfo {
     _dst: MemID,
     pub fid: FieldID,
-    pub dst_inst_uid: InstUID,
-    _fevent: EventID,
+    pub dst_inst_uid: ProfUID,
 }
 
 impl FillInstInfo {
-    fn new(dst: MemID, fid: FieldID, dst_inst_uid: InstUID, fevent: EventID) -> Self {
+    fn new(dst: MemID, fid: FieldID, dst_inst_uid: ProfUID) -> Self {
         FillInstInfo {
             _dst: dst,
             fid,
             dst_inst_uid,
-            _fevent: fevent,
         }
     }
 }
@@ -2538,8 +2664,7 @@ impl FillInstInfo {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    creator: EventID,
-    fevent: EventID,
+    creator: Option<ProfUID>,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: OpID,
@@ -2553,13 +2678,11 @@ impl Fill {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: EventID,
-        fevent: EventID,
+        creator: Option<ProfUID>,
     ) -> Self {
         Fill {
             base,
             creator,
-            fevent,
             time_range,
             chan_id: None,
             op_id,
@@ -2587,7 +2710,7 @@ impl Fill {
 #[derive(Debug)]
 pub struct DepPart {
     base: Base,
-    creator: EventID,
+    creator: Option<ProfUID>,
     pub part_op: DepPartKind,
     time_range: TimeRange,
     pub op_id: OpID,
@@ -2599,7 +2722,7 @@ impl DepPart {
         part_op: DepPartKind,
         time_range: TimeRange,
         op_id: OpID,
-        creator: EventID,
+        creator: Option<ProfUID>,
     ) -> Self {
         DepPart {
             base,
@@ -2665,12 +2788,13 @@ struct LFSR {
 impl LFSR {
     fn new(size: u64) -> Self {
         let needed_bits = (size as f64).log2().floor() as u32 + 1;
-        let seed_configuration = 0b1010010011110011;
+        let seed_configuration = 0b101001001111001110100011;
         LFSR {
-            register: (seed_configuration & (((1 << needed_bits) - 1) << (16 - needed_bits)))
-                >> (16 - needed_bits),
+            register: (seed_configuration & (((1 << needed_bits) - 1) << (24 - needed_bits)))
+                >> (24 - needed_bits),
             bits: needed_bits,
             max_value: 1 << needed_bits,
+            // Polynomials from https://en.wikipedia.org/wiki/Linear-feedback_shift_register#Example_polynomials_for_maximal_LFSRs
             taps: match needed_bits {
                 2 => vec![2, 1],
                 3 => vec![3, 2],
@@ -2686,8 +2810,16 @@ impl LFSR {
                 13 => vec![13, 12, 11, 8],
                 14 => vec![14, 13, 12, 2],
                 15 => vec![15, 14],
-                16 => vec![16, 14, 13, 11],
-                _ => unreachable!(), // if we need more than 16 bits that is a lot tasks
+                16 => vec![16, 15, 13, 4],
+                17 => vec![17, 14],
+                18 => vec![18, 11],
+                19 => vec![19, 18, 17, 14],
+                20 => vec![20, 17],
+                21 => vec![21, 19],
+                22 => vec![22, 21],
+                23 => vec![23, 18],
+                24 => vec![24, 23, 22, 17],
+                _ => unreachable!(), // if we need more than 24 bits that is a lot tasks
             },
         }
     }
@@ -2705,12 +2837,42 @@ impl LFSR {
 #[derive(Debug, Default)]
 struct ProfUIDAllocator {
     next_prof_uid: ProfUID,
+    fevents: BTreeMap<EventID, ProfUID>,
+    used_fevents: BTreeSet<EventID>,
+    reverse_lookup: BTreeMap<ProfUID, EventID>,
 }
 
 impl ProfUIDAllocator {
-    fn get_prof_uid(&mut self) -> ProfUID {
+    fn create_fresh(&mut self) -> ProfUID {
         self.next_prof_uid.0 += 1;
         self.next_prof_uid
+    }
+    fn create_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
+        if let Some(event) = fevent.existing() {
+            Some(*self.fevents.entry(event).or_insert_with(|| {
+                self.next_prof_uid.0 += 1;
+                self.next_prof_uid
+            }))
+        } else {
+            None
+        }
+    }
+    fn create_object(&mut self, fevent: EventID) -> ProfUID {
+        assert!(fevent.exists());
+        assert!(!self.used_fevents.contains(&fevent));
+        self.used_fevents.insert(fevent);
+        self.create_reference(fevent).unwrap()
+    }
+    fn complete_parse(&mut self) {
+        // Invert the mapping so we can lookup fevents from ProfUIDs too
+        for (event, prof_uid) in &self.fevents {
+            self.reverse_lookup.insert(*prof_uid, *event);
+        }
+        self.fevents.clear();
+        self.used_fevents.clear();
+    }
+    fn find_fevent(&self, prof_uid: ProfUID) -> EventID {
+        *self.reverse_lookup.get(&prof_uid).unwrap()
     }
 }
 
@@ -2770,6 +2932,9 @@ impl fmt::Display for RuntimeConfig {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct BacktraceID(pub u64);
+
 #[derive(Debug, Default)]
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
@@ -2796,23 +2961,21 @@ pub struct State {
     pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<InstUID, MemID>,
+    pub insts: BTreeMap<ProfUID, MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
-    pub has_prof_data: bool,
+    has_prof_data: bool,
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
-    pub fevents: BTreeMap<EventID, ProfUID>,
+    pub provenances: BTreeMap<ProvenanceID, Provenance>,
+    pub backtraces: BTreeMap<BacktraceID, String>,
 }
 
 impl State {
     fn create_op(&mut self, op_id: OpID) -> &mut Operation {
-        let alloc = &mut self.prof_uid_allocator;
-        self.operations
-            .entry(op_id)
-            .or_insert_with(|| Operation::new(Base::new(alloc)))
+        self.operations.entry(op_id).or_insert_with(Operation::new)
     }
 
     pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
@@ -2824,7 +2987,16 @@ impl State {
     }
 
     fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
-        self.find_op(op_id).and_then(|op| op.provenance.as_deref())
+        self.find_op(op_id)
+            .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
+    }
+
+    fn create_fevent_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
+        self.prof_uid_allocator.create_reference(fevent)
+    }
+
+    pub fn find_fevent(&self, prof_uid: ProfUID) -> EventID {
+        self.prof_uid_allocator.find_fevent(prof_uid)
     }
 
     pub fn get_op_color(&self, op_id: OpID) -> Color {
@@ -2851,6 +3023,10 @@ impl State {
         Color::BLACK
     }
 
+    pub fn find_provenance(&self, pid: ProvenanceID) -> Option<&str> {
+        self.provenances.get(&pid).map(|p| p.name.as_str())
+    }
+
     fn create_task(
         &mut self,
         op_id: OpID,
@@ -2867,18 +3043,17 @@ impl State {
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let proc = self.procs.get_mut(&proc_id).unwrap();
+        let creator_uid = alloc.create_reference(creator);
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
-            Base::new(alloc),
+            Base::from_fevent(alloc, fevent),
             Some(op_id),
             parent_id,
             ProcEntryKind::Task(task_id, variant_id),
             time_range,
-            creator,
-            fevent,
+            creator_uid,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            &mut self.fevents,
         )
     }
 
@@ -2905,18 +3080,17 @@ impl State {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let proc = self.procs.get_mut(&proc_id).unwrap();
+        let creator_uid = alloc.create_reference(creator);
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
-            Base::new(alloc),
+            Base::from_fevent(alloc, fevent),
             None,
             Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::MetaTask(variant_id),
             time_range,
-            creator,
-            fevent,
+            creator_uid,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            &mut self.fevents,
         )
     }
 
@@ -2939,7 +3113,8 @@ impl State {
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        let proc = self.procs.get_mut(&proc_id).unwrap();
+        let creator_uid = alloc.create_reference(fevent);
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             None,
@@ -2950,11 +3125,9 @@ impl State {
             },
             ProcEntryKind::MapperCall(mapper_id, mapper_proc, kind),
             time_range,
-            fevent,
-            fevent,
+            creator_uid,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            &mut self.fevents,
         )
     }
 
@@ -2966,18 +3139,40 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let proc = self.procs.get_mut(&proc_id).unwrap();
+        let creator_uid = alloc.create_reference(fevent);
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             None,
             None,
             ProcEntryKind::RuntimeCall(kind),
             time_range,
-            fevent,
-            fevent,
+            creator_uid,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            &mut self.fevents,
+        )
+    }
+
+    fn create_application_call(
+        &mut self,
+        provenance: ProvenanceID,
+        proc_id: ProcID,
+        time_range: TimeRange,
+        fevent: EventID,
+    ) -> &mut ProcEntry {
+        assert!(self.provenances.contains_key(&provenance));
+        let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.create_reference(fevent);
+        let proc = self.procs.create_proc(proc_id);
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::ApplicationCall(provenance),
+            time_range,
+            creator_uid,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
         )
     }
 
@@ -2991,18 +3186,17 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let proc = self.procs.get_mut(&proc_id).unwrap();
+        let creator_uid = alloc.create_reference(fevent);
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
             Some(op_id),
             None,
             ProcEntryKind::GPUKernel(task_id, variant_id),
             time_range,
-            fevent,
-            fevent,
+            creator_uid,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            &mut self.fevents,
         )
     }
 
@@ -3015,18 +3209,17 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let proc = self.procs.get_mut(&proc_id).unwrap();
+        let creator_uid = alloc.create_reference(creator);
+        let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
-            Base::new(alloc),
+            Base::from_fevent(alloc, fevent),
             None,
             Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::ProfTask,
             time_range,
-            creator,
-            fevent,
+            creator_uid,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
-            &mut self.fevents,
         )
     }
 
@@ -3041,6 +3234,7 @@ impl State {
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.create_reference(creator);
         assert!(!copies.contains_key(&fevent));
         copies.entry(fevent).or_insert_with(|| {
             Copy::new(
@@ -3048,8 +3242,7 @@ impl State {
                 time_range,
                 op_id,
                 size,
-                creator,
-                fevent,
+                creator_uid,
                 collective,
             )
         })
@@ -3065,10 +3258,11 @@ impl State {
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
+        let creator_uid = alloc.create_reference(creator);
         assert!(!fills.contains_key(&fevent));
-        fills.entry(fevent).or_insert_with(|| {
-            Fill::new(Base::new(alloc), time_range, op_id, size, creator, fevent)
-        })
+        fills
+            .entry(fevent)
+            .or_insert_with(|| Fill::new(Base::new(alloc), time_range, op_id, size, creator_uid))
     }
 
     fn create_deppart(
@@ -3080,9 +3274,11 @@ impl State {
         creator: EventID,
     ) {
         self.create_op(op_id);
-        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
+        let alloc = &mut self.prof_uid_allocator;
+        let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
+        let creator_uid = alloc.create_reference(creator);
         let chan = self.find_deppart_chan_mut(node_id);
-        chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator));
+        chan.add_deppart(DepPart::new(base, part_op, time_range, op_id, creator_uid));
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
@@ -3100,16 +3296,16 @@ impl State {
 
     fn create_inst<'a>(
         &'a mut self,
-        inst_uid: InstUID,
-        insts: &'a mut BTreeMap<InstUID, Inst>,
+        fevent: EventID,
+        insts: &'a mut BTreeMap<ProfUID, Inst>,
     ) -> &'a mut Inst {
-        let alloc = &mut self.prof_uid_allocator;
+        let prof_uid = self.prof_uid_allocator.create_reference(fevent).unwrap();
         insts
-            .entry(inst_uid)
-            .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
+            .entry(prof_uid)
+            .or_insert_with(|| Inst::new(Base::from_fevent(&mut self.prof_uid_allocator, fevent)))
     }
 
-    pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
+    pub fn find_inst(&self, inst_uid: ProfUID) -> Option<&Inst> {
         let mem_id = self.insts.get(&inst_uid)?;
         let mem = self.mems.get(mem_id)?;
         mem.insts.get(&inst_uid)
@@ -3196,6 +3392,11 @@ impl State {
         self.has_prof_data = true;
     }
 
+    pub fn complete_parse(&mut self) -> bool {
+        self.prof_uid_allocator.complete_parse();
+        self.has_prof_data
+    }
+
     fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
         if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
             let proc = self.procs.get(proc_id).unwrap();
@@ -3239,30 +3440,140 @@ impl State {
         assert!(threshold >= 0.0);
         assert!((0.0..100.0).contains(&warn_percentage));
 
+        // First go through and compute the skew between the nodes
+        let mut skew_messages = 0;
         let mut total_messages = 0;
-        let mut bad_messages = 0;
-        let mut longest_latency = Timestamp::from_us(0);
+        let mut total_skew = Timestamp::ZERO;
+        let mut skew_nodes = BTreeMap::new();
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(variant_id).unwrap();
-                if !variant.message || variant.ordered_vc {
+                if !variant.message {
                     continue;
                 }
                 total_messages += meta_tasks.len();
                 for meta_uid in meta_tasks {
                     let meta_task = proc.entry(*meta_uid);
-                    let latency =
-                        meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
-                    if threshold <= latency.to_us() {
-                        bad_messages += 1;
+                    // Check for the presence of skew
+                    if meta_task.time_range.spawn.unwrap() <= meta_task.time_range.create.unwrap() {
+                        continue;
                     }
-                    longest_latency = max(longest_latency, latency);
+                    skew_messages += 1;
+                    let skew =
+                        meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
+                    total_skew += skew;
+                    // Find the creator processor for the creator
+                    // The meta task might not have a creator if it was started by an
+                    // external thread
+                    if let Some(creator) = meta_task.creator {
+                        // The creator might not have a processor if it was the start-up
+                        // or endpoint meta-task which are not profiled currently or
+                        // if the user didn't give us a file for the node of the creator
+                        if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
+                            // Creator node should be different than execution node
+                            assert!(creator_proc.node_id() != proc.proc_id.node_id());
+                            let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                            let node_skew =
+                                skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                            // Wellford's algorithm for online variance calculation
+                            node_skew.0 += 1;
+                            let value = skew.to_ns() as f64;
+                            let delta = value - node_skew.1;
+                            node_skew.1 += delta / node_skew.0 as f64;
+                            let delta2 = value - node_skew.1;
+                            node_skew.2 += delta * delta2;
+                        }
+                    }
                 }
             }
         }
         if total_messages == 0 {
             return;
         }
+        if skew_messages != 0 {
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            println!(
+                "Detected timing skew! Legion Prof found {} messages between nodes \
+                    that appear to have been sent before the (meta-)task on the \
+                    creating node started (which is clearly impossible because messages \
+                    can't time-travel into the future). The average skew was at least {:.2} us. \
+                    Please report this case to the Legion developers along with an \
+                    accompanying Legion Prof profile and a description of the machine \
+                    it was run on so we can understand why the timing skew is occuring. \
+                    In the meantime you can still use this profile to performance debug \
+                    but you should be aware that the relative position of boxes on \
+                    different nodes might not be accurate.",
+                skew_messages,
+                total_skew.to_us() / skew_messages as f64
+            );
+            for (nodes, skew) in skew_nodes.iter() {
+                // Compute the average skew
+                println!(
+                    "Node {} appears to be {:.3} us behind node {} for {} messages with standard deviation {:.3} us.",
+                    nodes.0 .0,
+                    skew.1 / 1000.0, // convert to us
+                    nodes.1 .0,
+                    skew.0,
+                    (skew.2 / skew.0 as f64).sqrt() / 1000.0 // convert variance to standard deviation and then to us
+                );
+                // Skew is hopefully only going in one direction, if not warn ourselves
+                let alt = (nodes.1, nodes.0);
+                if skew_nodes.contains_key(&alt) {
+                    println!(
+                        "WARNING: detected bi-directional skew between nodes {} and {}",
+                        nodes.0 .0, nodes.1 .0
+                    );
+                }
+            }
+            println!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        }
+
+        // Now we can go through and look for long-latency messages while also taking
+        // into account any skew that we might have observed going the other way
+
+        let mut bad_messages = 0;
+        let mut longest_latency = Timestamp::ZERO;
+
+        for proc in self.procs.values() {
+            for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
+                let variant = self.meta_variants.get(variant_id).unwrap();
+                if !variant.message {
+                    continue;
+                }
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
+                    // Check if there was skew to begin with
+                    let spawn = meta_task.time_range.spawn.unwrap();
+                    let mut create = meta_task.time_range.create.unwrap();
+                    // If there was any skew shift the create time forward by the average skew amount
+                    // The meta task might not have a creator if it was started by an
+                    // external thread
+                    if let Some(creator) = meta_task.creator {
+                        // The creator might not have a processor if it was the start-up
+                        // or endpoint meta-task which are not profiled currently or
+                        // if the user didn't give us a file for the node of the creator
+                        if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
+                            let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                            if let Some(skew) = skew_nodes.get(&nodes) {
+                                // Just truncate fractional nanoseconds, they won't matter
+                                create += Timestamp::from_ns(skew.1 as u64);
+                            }
+                            // If we still have skew we're just going to ignore it for now
+                            // Otherwise we can check the latency of message delivery
+                            if spawn <= create {
+                                // No skew
+                                let latency = create - spawn;
+                                if threshold <= latency.to_us() {
+                                    bad_messages += 1;
+                                }
+                                longest_latency = max(longest_latency, latency);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let percentage = 100.0 * bad_messages as f64 / total_messages as f64;
         if warn_percentage <= percentage {
             for _ in 0..5 {
@@ -3293,7 +3604,7 @@ impl State {
     pub fn sort_time_range(&mut self) {
         self.procs
             .par_iter_mut()
-            .for_each(|(_, proc)| proc.sort_time_range(&self.fevents));
+            .for_each(|(_, proc)| proc.sort_time_range());
         self.mems
             .par_iter_mut()
             .for_each(|(_, mem)| mem.sort_time_range());
@@ -3319,7 +3630,8 @@ impl State {
             + self.meta_variants.len()
             + self.op_kinds.len()
             + self.mapper_call_kinds.len()
-            + self.runtime_call_kinds.len()) as u64;
+            + self.runtime_call_kinds.len()
+            + self.provenances.len()) as u64;
         let mut lfsr = LFSR::new(num_colors);
         let num_colors = lfsr.max_value;
         for variant in self.variants.values_mut() {
@@ -3344,6 +3656,9 @@ impl State {
         }
         for kind in self.runtime_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
+        }
+        for prov in self.provenances.values_mut() {
+            prov.set_color(compute_color(lfsr.next(), num_colors));
         }
     }
 
@@ -3798,11 +4113,21 @@ impl SpyState {
     }
 }
 
+trait CreateProc {
+    fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc;
+}
+
+impl CreateProc for BTreeMap<ProcID, Proc> {
+    fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc {
+        self.entry(proc_id).or_insert_with(|| Proc::new(proc_id))
+    }
+}
+
 fn process_record(
     record: &Record,
     state: &mut State,
     node: &mut Option<NodeID>,
-    insts: &mut BTreeMap<InstUID, Inst>,
+    insts: &mut BTreeMap<ProfUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
     call_threshold: Timestamp,
@@ -3885,6 +4210,9 @@ fn process_record(
         Record::ZeroTime { zero_time } => {
             state.zero_time = TimestampDelta(*zero_time);
         }
+        Record::Provenance { pid, provenance } => {
+            state.provenances.insert(*pid, Provenance::new(provenance));
+        }
         Record::CalibrationErr { calibration_err } => {
             state._calibration_err = *calibration_err;
         }
@@ -3893,10 +4221,7 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => panic!("bad processor kind"),
             };
-            state
-                .procs
-                .entry(*proc_id)
-                .or_insert_with(|| Proc::new(*proc_id, kind));
+            state.procs.create_proc(*proc_id).set_kind(kind);
         }
         Record::MemDesc {
             mem_id,
@@ -4012,36 +4337,38 @@ fn process_record(
                 .or_insert_with(|| Region::new(*ispace_id, fspace_id, *tree_id, name));
         }
         Record::PhysicalInstRegionDesc {
-            inst_uid,
+            fevent,
             ispace_id,
             fspace_id,
             tree_id,
         } => {
+            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
         }
         Record::PhysicalInstLayoutDesc {
-            inst_uid,
+            fevent,
             field_id,
             fspace_id,
             has_align,
             eqk,
             align_desc,
         } => {
+            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
         Record::PhysicalInstDimOrderDesc {
-            inst_uid,
+            fevent,
             dim,
             dim_kind,
         } => {
@@ -4050,18 +4377,21 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => unreachable!("bad dim kind"),
             };
+            assert!(fevent.exists());
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .add_dim_order(dim, dim_kind);
         }
         Record::PhysicalInstanceUsage {
-            inst_uid,
+            fevent,
             op_id,
             index_id,
             field_id,
         } => {
+            assert!(fevent.exists());
             state.create_op(*op_id);
-            let operation_inst_info = OperationInstInfo::new(*inst_uid, *index_id, *field_id);
+            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            let operation_inst_info = OperationInstInfo::new(inst_uid, *index_id, *field_id);
             state
                 .find_op_mut(*op_id)
                 .unwrap()
@@ -4101,7 +4431,7 @@ fn process_record(
                 .create_op(*op_id)
                 .set_parent_id(*parent_id)
                 .set_kind(kind)
-                .set_provenance(provenance);
+                .set_provenance(*provenance);
             // Hack: we have to do this in two places, because we don't know what
             // order the logger calls are going to come in. If the task gets
             // logged first, this will come back Some(_) and we'll store it below.
@@ -4126,13 +4456,20 @@ fn process_record(
             wait_start: start,
             wait_ready: ready,
             wait_end: end,
+            wait_event: event,
             ..
         } => {
             state
                 .find_task_mut(*op_id)
                 .unwrap()
                 .waiters
-                .add_wait_interval(WaitInterval::new(*start, *ready, *end));
+                .add_wait_interval(WaitInterval::from_event(
+                    *start,
+                    *ready,
+                    *end,
+                    event.existing().unwrap(),
+                    None,
+                ));
         }
         Record::MetaWaitInfo {
             op_id,
@@ -4140,13 +4477,20 @@ fn process_record(
             wait_start: start,
             wait_ready: ready,
             wait_end: end,
+            wait_event: event,
         } => {
             state.create_op(*op_id);
             state
                 .find_last_meta_mut(*op_id, *lg_id)
                 .unwrap()
                 .waiters
-                .add_wait_interval(WaitInterval::new(*start, *ready, *end));
+                .add_wait_interval(WaitInterval::from_event(
+                    *start,
+                    *ready,
+                    *end,
+                    event.existing().unwrap(),
+                    None,
+                ));
         }
         Record::TaskInfo {
             op_id,
@@ -4193,7 +4537,7 @@ fn process_record(
             if gpu_start > *gpu_stop {
                 gpu_start = *gpu_stop - Timestamp::ONE;
             }
-            let gpu_range = TimeRange::new_start(gpu_start, *gpu_stop);
+            let gpu_range = TimeRange::new_call(gpu_start, *gpu_stop);
             state.create_gpu_kernel(*op_id, *proc_id, *task_id, *variant_id, gpu_range, *fevent);
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
             state.create_task(
@@ -4219,6 +4563,22 @@ fn process_record(
             fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
+            state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
+            state.update_last_time(*stop);
+        }
+        Record::MessageInfo {
+            op_id,
+            lg_id,
+            proc_id,
+            spawn,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_message(*spawn, *create, *ready, *start, *stop);
             state.create_meta(*op_id, *lg_id, *proc_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
         }
@@ -4266,9 +4626,10 @@ fn process_record(
             if *dst != MemID(0) {
                 dst_mem = Some(*dst);
             }
+            let src_uid = state.create_fevent_reference(*src_inst);
+            let dst_uid = state.create_fevent_reference(*dst_inst);
             let copy_inst_info = CopyInstInfo::new(
-                src_mem, dst_mem, *src_fid, *dst_fid, *src_inst, *dst_inst, *fevent, *num_hops,
-                *indirect,
+                src_mem, dst_mem, *src_fid, *dst_fid, src_uid, dst_uid, *num_hops, *indirect,
             );
             copy.add_copy_inst_info(copy_inst_info);
         }
@@ -4293,12 +4654,13 @@ fn process_record(
             dst_inst,
             fevent,
         } => {
-            let fill_inst_info = FillInstInfo::new(*dst, *fid, *dst_inst, *fevent);
+            let dst_uid = state.create_fevent_reference(*dst_inst).unwrap();
+            let fill_inst_info = FillInstInfo::new(*dst, *fid, dst_uid);
             let fill = fills.get_mut(fevent).unwrap();
             fill.add_fill_inst_info(fill_inst_info);
         }
         Record::InstTimelineInfo {
-            inst_uid,
+            fevent,
             inst_id,
             mem_id,
             size,
@@ -4308,16 +4670,19 @@ fn process_record(
             destroy,
             creator,
         } => {
+            assert!(fevent.exists());
             state.create_op(*op_id);
-            state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
+            let creator_uid = state.create_fevent_reference(*creator);
+            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            state.insts.entry(inst_uid).or_insert_with(|| *mem_id);
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .set_inst_id(*inst_id)
                 .set_op_id(*op_id)
                 .set_start_stop(*create, *ready, *destroy)
                 .set_mem(*mem_id)
                 .set_size(*size)
-                .set_creator(*creator);
+                .set_creator(creator_uid);
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {
@@ -4350,7 +4715,7 @@ fn process_record(
             // Check to make sure it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.mapper_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_mapper_call(
                     *mapper_id,
                     *mapper_proc,
@@ -4373,10 +4738,21 @@ fn process_record(
             // Check to make sure that it is above the call threshold
             if call_threshold <= (*stop - *start) {
                 assert!(state.runtime_call_kinds.contains_key(kind));
-                let time_range = TimeRange::new_start(*start, *stop);
+                let time_range = TimeRange::new_call(*start, *stop);
                 state.create_runtime_call(*kind, *proc_id, time_range, *fevent);
                 state.update_last_time(*stop);
             }
+        }
+        Record::ApplicationCallInfo {
+            provenance,
+            start,
+            stop,
+            proc_id,
+            fevent,
+        } => {
+            let time_range = TimeRange::new_call(*start, *stop);
+            state.create_application_call(*provenance, *proc_id, time_range, *fevent);
+            state.update_last_time(*stop);
         }
         Record::ProfTaskInfo {
             proc_id,
@@ -4386,9 +4762,28 @@ fn process_record(
             creator,
             fevent,
         } => {
-            let time_range = TimeRange::new_start(*start, *stop);
+            let time_range = TimeRange::new_call(*start, *stop);
             state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             state.update_last_time(*stop);
+        }
+        Record::BacktraceDesc {
+            backtrace_id,
+            backtrace,
+        } => {
+            state
+                .backtraces
+                .entry(*backtrace_id)
+                .or_insert_with(|| backtrace.to_string());
+        }
+        Record::EventWaitInfo {
+            proc_id,
+            fevent,
+            event,
+            backtrace_id,
+        } => {
+            let task_uid = state.create_fevent_reference(*fevent).unwrap();
+            let proc = state.procs.get_mut(proc_id).unwrap();
+            proc.record_event_wait(task_uid, *event, *backtrace_id);
         }
     }
 }

@@ -640,8 +640,8 @@ namespace Legion {
         // details see https://github.com/StanfordLegion/legion/issues/1384
         // Cap at a maximum of 128 byte alignment for GPUs
         const size_t field_alignment =
-          (alignment_finder != alignments.end()) ? alignment_finder->second : 1;
-          //std::min<size_t>(it->first & ~(it->first - 1), 128/*max alignment*/);
+          (alignment_finder != alignments.end()) ? alignment_finder->second :
+          std::min<size_t>(it->first & ~(it->first - 1), 128/*max alignment*/);
         if (field_alignment > 1)
         {
           offset = round_up(offset, field_alignment);
@@ -2646,7 +2646,7 @@ namespace Legion {
         {
           if (context->runtime->legion_spy_enabled)
             this->log_index_space_points(tight_space);
-          if (context->runtime->profiler != NULL)
+          if (implicit_profiler != NULL)
             this->log_profiler_index_space_points(tight_space);
         }
       }
@@ -2772,22 +2772,22 @@ namespace Legion {
             dense_volume = tight_space.bounds.volume();
             sparse_volume = tight_space.volume();
           }
-        context->runtime->profiler->record_index_space_size(
+        implicit_profiler->register_index_space_size(
                           handle.get_id(), dense_volume, sparse_volume, !is_dense);
         // Iterate over the rectangles and print them out
         for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space);
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
-            context->runtime->profiler->record_index_space_point(
+            implicit_profiler->record_index_space_point(
                 handle.get_id(), Point<DIM,T>(itr.rect.lo));
           else
-            context->runtime->profiler->record_index_space_rect(
+            implicit_profiler->record_index_space_rect(
                 handle.get_id(), Rect<DIM,T>(itr.rect));
         }
       }
       else
-        context->runtime->profiler->record_empty_index_space(handle.get_id());
+        implicit_profiler->register_empty_index_space(handle.get_id());
     }
 
     //--------------------------------------------------------------------------

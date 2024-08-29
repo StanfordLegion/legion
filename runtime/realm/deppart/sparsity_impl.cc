@@ -31,6 +31,24 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class SparsityMapUntyped
+
+  SparsityMapUntyped::SparsityMapUntyped(::realm_id_t _id)
+    : id(_id)
+  {}
+
+  void SparsityMapUntyped::add_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).add_references(count);
+  }
+
+  void SparsityMapUntyped::remove_references(unsigned count)
+  {
+    SparsityMapRefCounter(id).remove_references(count);
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class SparsityMapRefCounter
 
   SparsityMapRefCounter::SparsityMapRefCounter(::realm_id_t _id)
@@ -180,7 +198,6 @@ namespace Realm {
       sparsity.id = 0;
       return sparsity;
     }
-
     // construct and fill in a sparsity map
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(Network::my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
@@ -238,6 +255,12 @@ namespace Realm {
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     if(map_impl.load() != 0) {
+      if(need_refcount) {
+        log_dpops.fatal() << "leaking sparsity map me:" << me
+                          << " refs:" << references.load()
+                          << " node:" << Network::my_node_id;
+        assert(0);
+      }
       (*map_deleter)(map_impl.load());
     }
   }
@@ -246,6 +269,23 @@ namespace Realm {
   {
     me = _me;
     owner = _init_owner;
+  }
+
+  void SparsityMapImplWrapper::recycle(void)
+  {
+    assert(subscribers.empty());
+
+    void *impl = map_impl.load();
+    if(impl != nullptr) {
+      assert(map_deleter);
+      (*map_deleter)(impl);
+      map_impl.store(0);
+      type_tag.store(0);
+    }
+
+    if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
+      get_runtime()->free_sparsity_impl(this);
+    }
   }
 
   void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
@@ -257,19 +297,43 @@ namespace Realm {
     }
   }
 
+  class RemoveReferenceAcknowledeged {
+  public:
+    RemoveReferenceAcknowledeged(SparsityMapImplWrapper *_wrapper, NodeID _node)
+      : wrapper(_wrapper)
+      , node(_node)
+    {}
+
+    void operator()() const { wrapper->unsubscribe(node); }
+
+  protected:
+    SparsityMapImplWrapper *wrapper;
+    NodeID node;
+  };
+
   void SparsityMapImplWrapper::remove_references(unsigned count)
   {
     if(need_refcount) {
+      assert(references.load() >= count);
       if(references.fetch_sub_acqrel(count) == count) {
-        void *impl = map_impl.load();
-        if(impl != nullptr) {
-          assert(map_deleter);
-          (*map_deleter)(impl);
-          map_impl.store(0);
-          type_tag.store(0);
+        assert(Network::my_node_id == NodeID(me.sparsity_creator_node()) ||
+               subscribers.empty());
+
+        // broadcast delete to remote subscribers
+        for(NodeID node : subscribers) {
+          ActiveMessage<
+              typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+              amsg(node);
+          amsg.add_remote_completion(RemoveReferenceAcknowledeged(this, node));
+          amsg->id = me.id;
+          amsg->count = 0;
+          amsg.commit();
         }
-        if(Network::my_node_id == NodeID(ID(me).sparsity_creator_node())) {
-          get_runtime()->free_sparsity_impl(this);
+
+        if(Network::my_node_id != NodeID(me.sparsity_creator_node()) ||
+           subscribers.empty()) {
+
+          recycle();
         }
       }
     }
@@ -302,6 +366,13 @@ namespace Realm {
 
     // create one and try to swap it in
     SparsityMapImpl<N,T> *new_impl = new SparsityMapImpl<N,T>(me);
+
+    if(need_refcount && NodeID(ID(me).sparsity_creator_node()) != Network::my_node_id) {
+      ActiveMessage<SubscribeDeleteMessage> amsg(NodeID(ID(me).sparsity_creator_node()));
+      amsg->id = me.id;
+      amsg.commit();
+    }
+
     if(map_impl.compare_exchange(impl, new_impl)) {
       // ours is the winner - return it
       map_deleter = &delete_sparsity_map_impl<N,T>;
@@ -313,6 +384,50 @@ namespace Realm {
     }
   }
 
+  void SparsityMapImplWrapper::subscribe(NodeID node)
+  {
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+    if(references.load() == 0) {
+      assert(subscribers.empty());
+      assert(map_impl.load() == nullptr);
+      // already deleted
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+          amsg(node);
+      amsg->id = me.id;
+      amsg->count = 0;
+      amsg.commit();
+    } else {
+      AutoLock<> al(mutex);
+      subscribers.add(node);
+    }
+  }
+
+  void SparsityMapImplWrapper::unsubscribe(NodeID node)
+  {
+    AutoLock<> al(mutex);
+
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+
+    assert(subscribers.contains(node));
+    subscribers.remove(node);
+    if(subscribers.empty()) {
+      recycle();
+    }
+  }
+
+  void SparsityMapImplWrapper::SubscribeDeleteMessage::handle_message(
+      NodeID sender, const SubscribeDeleteMessage &msg, const void *data, size_t datalen)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
+    if(wrapper) {
+      assert(sender != Network::my_node_id);
+      wrapper->subscribe(sender);
+    }
+  }
+
+  /*static*/ ActiveMessageHandlerReg<
+      typename SparsityMapImplWrapper::SubscribeDeleteMessage>
+      SparsityMapImplWrapper::subscribe_delete_message_handler_reg;
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1051,96 +1166,98 @@ namespace Realm {
       else if(N == 1) {
 	// demand that our input data is sorted
 	for(size_t i = 1; i < count; i++)
-	  assert(rects[i-1].hi.x < (rects[i].lo.x - 1));
+          assert(rects[i - 1].hi[0] < (rects[i].lo[0] - 1));
 
-	// fast case - all these rectangles are after all the ones we have now
-	if(this->entries.empty() || (this->entries.rbegin()->bounds.hi.x < rects[0].lo.x)) {
-	  // special case when merging occurs with the last entry from before
-	  size_t n = this->entries.size();
-	  if((n > 0) && (this->entries.rbegin()->bounds.hi.x == (rects[0].lo.x - 1))) {
-	    this->entries.resize(n + count - 1);
-	    assert(!this->entries[n - 1].sparsity.exists());
-	    assert(this->entries[n - 1].bitmap == 0);
-	    this->entries[n - 1].bounds.hi = rects[0].hi;
-	    for(size_t i = 1; i < count; i++) {
-	      this->entries[n - 1 + i].bounds = rects[i];
-	      this->entries[n - 1 + i].sparsity.id = 0; // no sparsity map
-	      this->entries[n - 1 + i].bitmap = 0;
-	    }
-	  } else {
-	    this->entries.resize(n + count);
-	    for(size_t i = 0; i < count; i++) {
-	      this->entries[n + i].bounds = rects[i];
-	      this->entries[n + i].sparsity.id = 0; // no sparsity map
-	      this->entries[n + i].bitmap = 0;
-	    }
-	  }
-	} else {
-	  // do a merge of the new data with the old
-	  std::vector<SparsityMapEntry<N,T> > old_data;
-	  old_data.swap(this->entries);
-	  size_t i = 0;
-	  size_t n = 0;
-	  typename std::vector<SparsityMapEntry<N,T> >::const_iterator old_it = old_data.begin();
-	  while((i < count) && (old_it != old_data.end())) {
-	    if(rects[i].hi.x < (old_it->bounds.lo.x - 1)) {
-	      this->entries.resize(n + 1);
-	      this->entries[n].bounds = rects[i];
-	      this->entries[n].sparsity.id = 0; // no sparsity map
-	      this->entries[n].bitmap = 0;
-	      n++;
-	      i++;
-	      continue;
-	    }
+        // fast case - all these rectangles are after all the ones we have now
+        if(this->entries.empty() ||
+           (this->entries.rbegin()->bounds.hi[0] < rects[0].lo[0])) {
+          // special case when merging occurs with the last entry from before
+          size_t n = this->entries.size();
+          if((n > 0) && (this->entries.rbegin()->bounds.hi[0] == (rects[0].lo[0] - 1))) {
+            this->entries.resize(n + count - 1);
+            assert(!this->entries[n - 1].sparsity.exists());
+            assert(this->entries[n - 1].bitmap == 0);
+            this->entries[n - 1].bounds.hi = rects[0].hi;
+            for(size_t i = 1; i < count; i++) {
+              this->entries[n - 1 + i].bounds = rects[i];
+              this->entries[n - 1 + i].sparsity.id = 0; // no sparsity map
+              this->entries[n - 1 + i].bitmap = 0;
+            }
+          } else {
+            this->entries.resize(n + count);
+            for(size_t i = 0; i < count; i++) {
+              this->entries[n + i].bounds = rects[i];
+              this->entries[n + i].sparsity.id = 0; // no sparsity map
+              this->entries[n + i].bitmap = 0;
+            }
+          }
+        } else {
+          // do a merge of the new data with the old
+          std::vector<SparsityMapEntry<N, T>> old_data;
+          old_data.swap(this->entries);
+          size_t i = 0;
+          size_t n = 0;
+          typename std::vector<SparsityMapEntry<N, T>>::const_iterator old_it =
+              old_data.begin();
+          while((i < count) && (old_it != old_data.end())) {
+            if(rects[i].hi[0] < (old_it->bounds.lo[0] - 1)) {
+              this->entries.resize(n + 1);
+              this->entries[n].bounds = rects[i];
+              this->entries[n].sparsity.id = 0; // no sparsity map
+              this->entries[n].bitmap = 0;
+              n++;
+              i++;
+              continue;
+            }
 
-	    if(old_it->bounds.hi.x < (rects[i].lo.x - 1)) {
-	      this->entries.push_back(*old_it);
-	      n++;
-	      old_it++;
-	      continue;
-	    }
+            if(old_it->bounds.hi[0] < (rects[i].lo[0] - 1)) {
+              this->entries.push_back(*old_it);
+              n++;
+              old_it++;
+              continue;
+            }
 
-	    Rect<N,T> u = rects[i].union_bbox(old_it->bounds);
-	    // step rects, but not old_it - want sanity checks below to be done
-	    i++;
-	    while(true) {
-	      if((i < count) && (rects[i].lo.x <= (u.hi.x + 1))) {
-		u.hi.x = std::max(u.hi.x, rects[i].hi.x);
-		i++;
-		continue;
-	      }
-	      if((old_it != old_data.end()) && (old_it->bounds.lo.x <= (u.hi.x + 1))) {
-		assert(!old_it->sparsity.exists());
-		assert(old_it->bitmap == 0);
-		u.hi.x = std::max(u.hi.x, old_it->bounds.hi.x);
-		old_it++;
-		continue;
-	      }
-	      // if neither test passed, the chain is broken
-	      break;
-	    }
-	    this->entries.resize(n + 1);
-	    this->entries[n].bounds = u;
-	    this->entries[n].sparsity.id = 0; // no sparsity map
-	    this->entries[n].bitmap = 0;
-	    n++;
-	  }
+            Rect<N, T> u = rects[i].union_bbox(old_it->bounds);
+            // step rects, but not old_it - want sanity checks below to be done
+            i++;
+            while(true) {
+              if((i < count) && (rects[i].lo[0] <= (u.hi[0] + 1))) {
+                u.hi[0] = std::max(u.hi[0], rects[i].hi[0]);
+                i++;
+                continue;
+              }
+              if((old_it != old_data.end()) && (old_it->bounds.lo[0] <= (u.hi[0] + 1))) {
+                assert(!old_it->sparsity.exists());
+                assert(old_it->bitmap == 0);
+                u.hi[0] = std::max(u.hi[0], old_it->bounds.hi[0]);
+                old_it++;
+                continue;
+              }
+              // if neither test passed, the chain is broken
+              break;
+            }
+            this->entries.resize(n + 1);
+            this->entries[n].bounds = u;
+            this->entries[n].sparsity.id = 0; // no sparsity map
+            this->entries[n].bitmap = 0;
+            n++;
+          }
 
-	  // leftovers...
-	  while(i < count) {
-	    this->entries.resize(n + 1);
-	    this->entries[n].bounds = rects[i];
-	    this->entries[n].sparsity.id = 0; // no sparsity map
-	    this->entries[n].bitmap = 0;
-	    n++;
-	    i++;
-	  }
+          // leftovers...
+          while(i < count) {
+            this->entries.resize(n + 1);
+            this->entries[n].bounds = rects[i];
+            this->entries[n].sparsity.id = 0; // no sparsity map
+            this->entries[n].bitmap = 0;
+            n++;
+            i++;
+          }
 
-	  while(old_it != old_data.end()) {
-	    this->entries.push_back(*old_it);
-	    old_it++;
-	  }
-	}
+          while(old_it != old_data.end()) {
+            this->entries.push_back(*old_it);
+            old_it++;
+          }
+        }
       } else {
 	// each new rectangle has to be tested against existing ones for
         //  containment, overlap (which can cause splitting), or mergeability
@@ -1490,7 +1607,7 @@ namespace Realm {
     std::vector<T> gap_sizes(max_rects - 1, 0);
     std::vector<int> gap_idxs(max_rects - 1, -1);
     for(int i = 1; i < n; i++) {
-      T gap = entries[i].bounds.lo.x - entries[i - 1].bounds.hi.x;
+      T gap = entries[i].bounds.lo[0] - entries[i - 1].bounds.hi[0];
       if(gap <= gap_sizes[0])
 	continue;
       // the smallest gap is discarded and we insertion-sort this new value in

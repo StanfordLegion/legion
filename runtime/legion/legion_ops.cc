@@ -36,90 +36,150 @@ namespace Legion {
     // Provenance
     /////////////////////////////////////////////////////////////
 
-    /*static*/ const std::string Provenance::no_provenance;
-    /*static*/ constexpr char Provenance::delimeter;
+    /*static*/ constexpr std::string_view Provenance::no_provenance;
 
     //--------------------------------------------------------------------------
-    Provenance::Provenance(const char *prov)
+    Provenance::Provenance(ProvenanceID p, const char *prov)
+      : pid(p), full(prov)
     //--------------------------------------------------------------------------
     {
-      initialize(prov, strlen(prov));
+      initialize();
     }
 
     //--------------------------------------------------------------------------
-    Provenance::Provenance(const void *buffer, size_t size)
+    Provenance::Provenance(ProvenanceID p, const void *buffer, size_t size)
+      : pid(p), full((const char*)buffer, size)
     //--------------------------------------------------------------------------
     {
-      initialize((const char*)buffer, size);
+      initialize();
     }
 
     //--------------------------------------------------------------------------
-    Provenance::Provenance(const std::string &prov)
+    Provenance::Provenance(ProvenanceID p, const std::string &prov)
+      : pid(p), full(prov)
     //--------------------------------------------------------------------------
     {
-      initialize(prov.c_str(), prov.length());
+      initialize();
     }
 
     //--------------------------------------------------------------------------
-    void Provenance::initialize(const char *prov, size_t size)
+    void Provenance::initialize(void)
     //--------------------------------------------------------------------------
     {
-      unsigned split = 0;
-      while (split < size)
+#ifdef DEBUG_LEGION
+      assert(!full.empty());
+#endif
+      if (!parse_provenance_parts())
       {
-        if (prov[split] == delimeter)
+        // If we have a bracket assume this whole this is a JSON string
+        // and therefore we're going to assume the whole thing is JSON
+        // Otherwise if things don't parse then everything is the just
+        // the human readable string.
+        if (full[0] == '{')
+          machine = std::string_view(full.c_str());
+        else
+          human = std::string_view(full.c_str());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool Provenance::parse_provenance_parts(void)
+    //--------------------------------------------------------------------------
+    {
+      {
+        size_t len = full.length();
+
+        // shortest valid input: ["",{}]
+        if (len < 7)
+          return false;
+
+        // must start with: ["
+        if (full[0] != '[' || full[1] != '"')
+          return false;
+
+        // must end with: }]
+        if (full[len-2] != '}' || full[len-1] != ']')
+          return false;
+      }
+
+      unsigned human_size = 0;
+      bool human_closed = false;
+      std::string::iterator it = full.begin()+2;
+      for (; it != full.end(); it++) {
+        if (*it == '\\') {
+          // Remove the escape character
+          it = full.erase(it);
+          if (it == full.end())
+            return false;
+          switch (*it) {
+            case '"':
+            case '\\':
+            case '/':
+              break;
+            case 'b':
+              *it = '\b';
+              break;
+            case 'f':
+              *it = '\f';
+              break;
+            case 'n':
+              *it = '\n';
+              break;
+            case 'r':
+              *it = '\r';
+              break;
+            case 't':
+              *it = '\t';
+              break;
+            case 'u':
+              return false; // Unicode is unsupported
+            default:
+              return false; // Bad escape
+          }
+          human_size++;
+        } else if (*it == '"') {
+          human_closed = true;
           break;
-        split++;
+        } else
+          human_size++;
       }
-      if (split > 0)
-        human.assign(prov, split);
-      if ((split+1) < size)
-        machine.assign(prov+split+1, size-(split+1));
-    }
 
-    //--------------------------------------------------------------------------
-    char* Provenance::clone(void) const
-    //--------------------------------------------------------------------------
-    {
-      char *result = (char*)malloc(
-          human.length() + (!machine.empty() ? machine.length() + 1 : 0) + 1);
-      unsigned offset = 0;
-      for (unsigned idx = 0; idx < human.length(); idx++)
-        result[offset++] = human[idx];
-      if (!machine.empty())
-      {
-        result[offset++] = delimeter; 
-        for (unsigned idx = 0; idx < machine.length(); idx++)
-          result[offset++] = machine[idx];
+      if (!human_closed)
+        return false;
+
+      human = std::string_view(full.c_str()+2, human_size);
+
+      for (; it != full.end(); it++) {
+        if (*it == '{') {
+          size_t offset = std::distance(full.begin(), it);
+          // Start from our current offset and go to the
+          // end but don't include the closing ']'
+          machine = std::string_view(full.c_str()+offset,
+              full.length() - (offset+1));
+          return true;
+        }
       }
-      result[offset] = '\0';
-      return result;
+
+      // machine part never opened
+      return false;
     }
 
     //--------------------------------------------------------------------------
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      size_t strlen = human.length() + machine.length();
-      if (strlen > 0)
-      {
-        strlen++; // handle the delimeter
-        rez.serialize(strlen);
-        if (human.length() > 0)
-          rez.serialize(human.c_str(), human.length());
-        rez.serialize(delimeter);
-        if (machine.length() > 0)
-          rez.serialize(machine.c_str(), machine.length());
-      }
-      else
-        rez.serialize(strlen);
+#ifdef DEBUG_LEGION
+      assert(!full.empty());
+#endif
+      rez.serialize<size_t>(full.size());
+      rez.serialize(full.c_str(), full.size() + 1/*null terminator*/);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Provenance::serialize_null(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(SIZE_MAX);
+      rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -128,10 +188,11 @@ namespace Legion {
     {
       size_t length;
       derez.deserialize(length);
-      if (length < SIZE_MAX)
+      if (length > 0)
       {
-        Provenance *result = new Provenance(derez.get_current_pointer(),length);
-        derez.advance_pointer(length);
+        Provenance *result = implicit_runtime->find_or_create_provenance(
+            (const char*)derez.get_current_pointer(), length);
+        derez.advance_pointer(length + 1/*null terminator*/);
         return result;
       }
       else
@@ -1471,8 +1532,8 @@ namespace Legion {
                                               inst_event);
           }
         }
-        if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
-          runtime->profiler->record_physical_instance_use(inst_event,
+        if ((implicit_profiler != NULL) && !manager->is_virtual_manager())
+          implicit_profiler->register_physical_instance_use(inst_event,
                                       unique_op_id, index, valid_fields);
       }
     }
@@ -1523,8 +1584,8 @@ namespace Legion {
           LegionSpy::log_operation_provenance(unique_op_id,
                                               prov->human_str());
       }
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4930,7 +4991,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MapOp::get_provenance_string(bool human) const
+    const std::string_view& MapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -7494,7 +7555,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CopyOp::get_provenance_string(bool human) const
+    const std::string_view& CopyOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -10870,7 +10931,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CloseOp::get_provenance_string(bool human) const
+    const std::string_view& CloseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -12312,7 +12373,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& AcquireOp::get_provenance_string(bool human) const
+    const std::string_view& AcquireOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -13161,7 +13222,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ReleaseOp::get_provenance_string(bool human) const
+    const std::string_view& ReleaseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -14300,7 +14361,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MustEpochOp::get_provenance_string(bool human) const
+    const std::string_view& MustEpochOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -17290,7 +17351,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& DependentPartitionOp::get_provenance_string(
+    const std::string_view& DependentPartitionOp::get_provenance_string(
                                                                bool human) const
     //--------------------------------------------------------------------------
     {
@@ -18142,7 +18203,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& FillOp::get_provenance_string(bool human) const
+    const std::string_view& FillOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -18340,31 +18401,10 @@ namespace Legion {
       {
         const RtEvent future_ready_event =
           future.impl->find_runtime_instance_ready(); 
-        if (!future_ready_event.has_triggered())
-          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
-        else
-          trigger_execution(); // can do the completion now
+        complete_execution(future_ready_event);
       }
       else
-        trigger_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_execution(void)
-    //--------------------------------------------------------------------------
-    {
-      if (set_view)
-      {
-#ifdef DEBUG_LEGION
-        assert(fill_view != NULL);
-#endif
-        size_t value_size = 0;
-        const void *value = 
-          future.impl->find_runtime_buffer(parent_ctx, value_size);
-        if (fill_view->set_value(value, value_size))
-          delete fill_view;
-      }
-      complete_execution();
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -18372,9 +18412,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now that we've mapped we can remove the reference on our fill_view
-      if ((fill_view != NULL) && 
-          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-        delete fill_view;
+      if (fill_view != NULL)
+      {
+        if (set_view)
+        {
+          size_t value_size = 0;
+          const void *value = 
+            future.impl->find_runtime_buffer(parent_ctx, value_size);
+          if (fill_view->set_value(value, value_size))
+            delete fill_view;
+        }
+        if (fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+          delete fill_view;
+      }
       // See if we have any arrivals to trigger
       if (!arrive_barriers.empty())
       {
@@ -18841,7 +18891,16 @@ namespace Legion {
       assert(received < points.size());
 #endif
       if ((received + 1) == points.size())
-        complete_execution();
+      {
+        if (set_view)
+        {
+          const RtEvent future_ready_event =
+            future.impl->find_runtime_instance_ready(); 
+          complete_execution(future_ready_event);
+        }
+        else
+          complete_execution();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20045,11 +20104,11 @@ namespace Legion {
       ready_event = ApEvent(PhysicalInstance::create_external_instance(
             result, external_resource->suggested_memory(), ilg, 
             *external_resource, requests));
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
-        runtime->profiler->record_physical_instance_region(unique_event,
+        implicit_profiler->register_physical_instance_region(unique_event,
                                                            requirement.region);
-        runtime->profiler->record_physical_instance_layout(unique_event,
+        implicit_profiler->register_physical_instance_layout(unique_event,
             requirement.region.field_space, layout_constraint_set);
       }
       // Check to see if this instance is local or whether we need
@@ -23115,7 +23174,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteMapOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteMapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23240,7 +23299,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCopyOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteCopyOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23398,7 +23458,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCloseOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteCloseOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23524,7 +23585,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteAcquireOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteAcquireOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23622,7 +23684,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteReleaseOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteReleaseOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23747,7 +23810,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteFillOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteFillOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -23918,7 +23982,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemotePartitionOp::get_provenance_string(
+    const std::string_view& RemotePartitionOp::get_provenance_string(
                                                                bool human) const
     //--------------------------------------------------------------------------
     {

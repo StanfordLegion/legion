@@ -96,6 +96,7 @@ namespace Legion {
       inline bool operator!=(const IndexSpace &rhs) const;
       inline bool operator<(const IndexSpace &rhs) const;
       inline bool operator>(const IndexSpace &rhs) const;
+      inline std::size_t hash(void) const;
       inline IndexSpaceID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
@@ -151,6 +152,7 @@ namespace Legion {
       inline bool operator!=(const IndexPartition &rhs) const;
       inline bool operator<(const IndexPartition &rhs) const;
       inline bool operator>(const IndexPartition &rhs) const;
+      inline std::size_t hash(void) const;
       inline IndexPartitionID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
@@ -209,6 +211,7 @@ namespace Legion {
       inline bool operator!=(const FieldSpace &rhs) const;
       inline bool operator<(const FieldSpace &rhs) const;
       inline bool operator>(const FieldSpace &rhs) const;
+      inline std::size_t hash(void) const;
       inline FieldSpaceID get_id(void) const { return id; }
       inline bool exists(void) const { return (id != 0); }
     private:
@@ -243,6 +246,7 @@ namespace Legion {
       inline bool operator==(const LogicalRegion &rhs) const;
       inline bool operator!=(const LogicalRegion &rhs) const;
       inline bool operator<(const LogicalRegion &rhs) const;
+      std::size_t hash(void) const;
     public:
       inline IndexSpace get_index_space(void) const { return index_space; }
       inline FieldSpace get_field_space(void) const { return field_space; }
@@ -310,6 +314,7 @@ namespace Legion {
       inline bool operator==(const LogicalPartition &rhs) const;
       inline bool operator!=(const LogicalPartition &rhs) const;
       inline bool operator<(const LogicalPartition &rhs) const;
+      std::size_t hash(void) const;
     public:
       inline IndexPartition get_index_partition(void) const 
         { return index_partition; }
@@ -1195,6 +1200,7 @@ namespace Legion {
         { return impl < f.impl; }
       Future& operator=(const Future &f);
       Future& operator=(Future &&f) noexcept;
+      std::size_t hash(void) const;
     public:
       /**
        * Wait on the result of this future.  Return
@@ -1273,6 +1279,17 @@ namespace Legion {
                              bool check_extent = false,
                              bool silence_warnings = false,
                              const char *warning_string = NULL) const;
+
+      /**
+       * Report an instantaneous set of available memories where instances
+       * for the this future exist. These will only be memories local to
+       * the current process in which the call is performed. The result of
+       * this query might be come stale as soon as it is returned since it
+       * is only a snapshot of the memories where the future has copies.
+       */
+      void get_memories(std::set<Memory> &memories,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) const;
 
       /**
        * Return a const reference to the future.
@@ -1399,6 +1416,7 @@ namespace Legion {
         { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
       FutureMap& operator=(FutureMap &&f) noexcept;
+      std::size_t hash(void) const;
     public:
       /**
        * Block until we can return the result for the
@@ -2472,6 +2490,27 @@ namespace Legion {
     };
 
     /**
+     * \struct PoolBounds
+     * A small helper class for tracking the bounds on what
+     * memory pools can support when they are created
+     */
+    struct PoolBounds {
+    public:
+      PoolBounds(UnboundPoolScope s) 
+        : size(0), alignment(0), scope(s) { }
+      PoolBounds(size_t s = 0, uint32_t a = 16)
+        : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
+      PoolBounds(const PoolBounds&) = default;
+      PoolBounds(PoolBounds&&) = default;
+      PoolBounds& operator=(const PoolBounds&) = default;
+      PoolBounds& operator=(PoolBounds&&) = default;
+    public:
+      size_t size; // upper bound of the pool in bytes
+      uint32_t alignment; // maximum alignment supported
+      UnboundPoolScope scope; // scope for unbound pools
+    };
+
+    /**
      * \struct TaskVariantRegistrar
      * This structure captures all the meta-data information necessary for
      * describing a task variant including the logical task ID, the execution
@@ -2517,6 +2556,15 @@ namespace Legion {
       ExecutionConstraintSet            execution_constraints; 
       TaskLayoutConstraintSet           layout_constraints;
     public:
+      // If this is a leaf task variant then the application can
+      // request that the runtime preserve a pool in the memory of
+      // the corresponding kind with the closest affinity to the target
+      // processor for handling dynamic memory allocations during the
+      // execution of the task. Pool bounds can also be set to request
+      // an unbounded pool allocation. Note that requesting an unbound 
+      // memory allocation will likely result in severe performance degradation.
+      std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
+    public:
       // TaskIDs for which this variant can serve as a generator
       std::set<TaskID>                  generator_tasks;
     public: // properties
@@ -2559,6 +2607,7 @@ namespace Legion {
         { return (impl == reg.impl); }
       inline bool operator<(const PhysicalRegion &reg) const
         { return (impl < reg.impl); }
+      std::size_t hash(void) const;
     public:
       /**
        * Check to see if this represents a mapped physical region. 
@@ -3672,7 +3721,7 @@ namespace Legion {
     class DeferredValue {
     public:
       DeferredValue(T initial_value,
-                    size_t alignment = 16);
+                    size_t alignment = std::alignment_of<T>());
     public:
       __CUDA_HD__
       inline T read(void) const;
@@ -3707,7 +3756,8 @@ namespace Legion {
     template<typename REDOP, bool EXCLUSIVE=false>
     class DeferredReduction: public DeferredValue<typename REDOP::RHS> {
     public:
-      DeferredReduction(size_t alignment = 16);
+      DeferredReduction(
+          size_t alignment = std::alignment_of<typename REDOP::RHS>());
     public:
       __CUDA_HD__
       inline void reduce(typename REDOP::RHS val) const;
@@ -3783,45 +3833,45 @@ namespace Legion {
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory::Kind kind,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific memory
       DeferredBuffer(Memory memory, 
                      const Domain &bounds,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
                      Memory memory,
                      const T *initial_value = NULL,
-                     size_t alignment = 16,
+                     size_t alignment = std::alignment_of<T>(),
                      bool fortran_order_dims = false);
     public: // Constructors specifying a specific ordering
       DeferredBuffer(Memory::Kind kind,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory::Kind kind,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(Memory memory,
                      const Domain &bounds,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
       DeferredBuffer(const Rect<DIM,COORD_T> &bounds,
                      Memory memory,
                      std::array<DimensionKind,DIM> ordering,
                      const T *initial_value = NULL,
-                     size_t alignment = 16);
+                     size_t alignment = std::alignment_of<T>());
     protected:
       Memory get_memory_from_kind(Memory::Kind kind);
       void initialize_layout(size_t alignment, bool fortran_order_dims);
@@ -4279,7 +4329,7 @@ namespace Legion {
       // Get the provenance string for this mappable
       // By default we return the human readable component but
       // you can also get the machine component as well
-      virtual const std::string& get_provenance_string(
+      virtual const std::string_view& get_provenance_string(
                                 bool human = true) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const = 0;
@@ -8477,6 +8527,20 @@ namespace Legion {
        * to GPU driver (be very careful with non-blocking communicators).
        */
       void concurrent_task_barrier(Context ctx);
+
+      /**
+       * Start an application profiling range in this context. This must be
+       * matched with a corresponding stop application profiling range
+       * call in the same context. You can nest application profiling ranges
+       * but it is up to the user to make sure that no ABAB patterns occur
+       * or the boxes will not appear the way the user intended. If profiling
+       * is not enabled then these calls will be no-ops. The provenance string
+       * passed to the stop call is a normal provenance string and can have
+       * both a human and machine components separated by a delimiter that will
+       * be parsed by the profiler.
+       */
+      void start_profiling_range(Context ctx);
+      void stop_profiling_range(Context ctx, const char *provenance);
     public:
       //------------------------------------------------------------------------
       // MPI Interoperability 
@@ -9307,6 +9371,7 @@ namespace Legion {
        * ------------- 
        * -lg:warn     Enable all verbose runtime warnings
        * -lg:warn_backtrace Print a backtrace for each warning
+       * -lg:werror   Promote all legion warnings into errors
        * -lg:leaks    Report information about resource leaks
        * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 
@@ -9377,6 +9442,11 @@ namespace Legion {
        *              that are less than this threshold will be discarded
        *              and will not be recorded in the profiling logs. The
        *              default value is 0 (us) so all calls are logged.
+       * -lg:prof_self Perform self-profiling so that the profiling 
+       *              response meta-tasks are also recorded in the profile.
+       *              In general these are tiny and not worth profiling,
+       *              but you might still want to see them. They are not
+       *              recorded by default.
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
@@ -10283,6 +10353,7 @@ namespace Legion {
 }; // namespace Legion
 
 #include "legion/legion.inl"
+
 // Include this here so we get the mapper interface in the header file
 // We have to put it here though since the mapper interface depends
 // on the rest of the legion interface

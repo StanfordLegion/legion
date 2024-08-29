@@ -83,7 +83,7 @@ class LegionDeserializer(ABC):
         """
         self.state = state
         self.callbacks: Dict[Any, Callable] = callbacks # type: ignore # Any is str or int
-        self.always_parsed_logs = ["ProcDesc", "MemDesc", "ProcMDesc", "TaskInfo", "GPUTaskInfo", "MetaInfo", "CopyInfo", "CopyInstInfo", "FillInfo", "FillInstInfo", "InstTimelineInfo", "PartitionInfo"]
+        self.always_parsed_logs = ["ProcDesc", "MemDesc", "ProcMDesc", "TaskInfo", "GPUTaskInfo", "MetaInfo", "MessageInfo", "CopyInfo", "CopyInstInfo", "FillInfo", "FillInstInfo", "InstTimelineInfo", "PartitionInfo"]
         self.visible_nodes: Optional[List[int]] = None
 
     def deserialize(self, filename: str) -> None:
@@ -98,7 +98,7 @@ class LegionDeserializer(ABC):
         if node_id not in self.visible_nodes:
             if log in ["ProcDesc", "MemDesc", "ProcMDesc", "CopyInfo", "FillInfo", "PartitionInfo"]:
                 return True
-            elif log in ["TaskInfo", "GPUTaskInfo", "MetaInfo"]:
+            elif log in ["TaskInfo", "GPUTaskInfo", "MetaInfo", "MessageInfo"]:
                 return is_on_visible_nodes(self.visible_nodes, (kwargs["proc_id"],))
             elif log == "CopyInstInfo":
                 return is_on_visible_nodes(self.visible_nodes, (kwargs["src"], kwargs["dst"]))
@@ -162,6 +162,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<version>[0-9]+)'),
         "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+) (?P<version>[0-9]+) (?P<hostname>[a-zA-Z0-9_ ]+) (?P<host_id>[0-9]+) (?P<process_id>[0-9]+)'),
         "ZeroTime": re.compile(prefix + r'Zero Time (?P<zero_time>[0-9]+)'),
+        "Provenance": re.compile(prefix + r'Provenance (?P<provenance>[0-9]+) (?P<prov>[a-zA-Z0-9_ ]*)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
         "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<bandwidth>[0-9]+) (?P<latency>[0-9]+)'),
@@ -182,14 +183,15 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "IndexSpaceSizeDesc": re.compile(prefix + r'Index Space Size Desc (?P<unique_id>[0-9]+) (?P<dense_size>[0-9]+) (?P<sparse_size>[0-9]+) (?P<is_sparse>[0-1])'),
         "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+) (?P<overwrite>[0-1])'),
         "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>., ]+)'),
-        "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<parent_id>[0-9]+) (?P<kind>[0-9]+) (?P<provenance>[a-zA-Z0-9_ ]*)'),
+        "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<parent_id>[0-9]+) (?P<kind>[0-9]+) (?P<provenance>[0-9]+)'),
         "MultiTask": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<task_id>[0-9]+)'),
         "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
-        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
-        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
+        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+) (?P<wait_event>[0-9a-f]+)'),
+        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+) (?P<wait_event>[0-9a-f]+)'),
         "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "GPUTaskInfo": re.compile(prefix + r'Prof GPU Task Info (?P<op_id>[0-9]+) (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<gpu_start>[0-9]+) (?P<gpu_stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
+        "MessageInfo": re.compile(prefix + r'Prof Message Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<spawn>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[a-f0-9]+) (?P<collective>[0-9]+)'),
         "CopyInstInfo": re.compile(prefix + r'Prof Copy Inst Info (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<src_fid>[a-f0-9]+) (?P<dst_fid>[a-f0-9]+) (?P<src_inst>[a-f0-9]+) (?P<dst_inst>[a-f0-9]+) (?P<fevent>[a-f0-9]+) (?P<num_hops>[0-9]+) (?P<indirect>[0-1])'),
         "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[a-f0-9]+)'),
@@ -198,8 +200,11 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "PartitionInfo": re.compile(prefix + r'Prof Partition Timeline (?P<op_id>[0-9]+) (?P<part_op>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+)'),
         "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<mapper_id>[0-9]+) (?P<mapper_proc>[0-9a-f]+) (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
         "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
+        "ApplicationCallInfo": re.compile(prefix + r'Prof Application Call Info (?P<provenance>[0-9]+) (?P<proc_id>[0-9a-f]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<fevent>[0-9a-f]+)'),
         "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<creator>[0-9a-f]+) (?P<fevent>[0-9a-f]+)'),
         "CalibrationErr": re.compile(prefix + r'Calibration Err (?P<calibration_err>[0-9]+)'),
+        "BacktraceDesc": re.compile(prefix + r'Prof Backtrace Desc (?P<backtrace_id>[0-9]+) (?P<backtrace>.+)'),
+        "EventWaitInfo": re.compile(prefix + r'Prof Event Wait Info (?P<proc_id>[0-9a-f]+) (?P<fevent>[0-9a-f]+) (?P<wait_event>[0-9a-f]+) (?P<backtrace_id>[0-9]+)'),
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
@@ -209,6 +214,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "capacity": int,
         "variant_id": int,
         "lg_id": int,
+        "backtrace_id": int,
         "uid": int,
         "overwrite": int,
         "task_id": int,
@@ -246,7 +252,9 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_uid": lambda x: int(x, 16),
         "creator": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
+        "wait_event": lambda x: int(x, 16),
         "indirect": int,
+        "spawn": int,
         "create": int,
         "destroy": int,
         "start": int,
@@ -269,17 +277,19 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "message" : bool,
         "ordered_vc" : bool,
         "desc": lambda x: x,
-        "provenance": lambda x: x,
+        "provenance": int,
+        "prov" : lambda x: x,
         "node_id": int,
         "num_nodes": int,
         "zero_time": int,
         "version": int,
         "hostname": str,
+        "backtrace": str,
         "host_id": int,
         "process_id": int,
         "calibration_err": int,
         "mapper_id": int,
-        "mapper_proc": int,
+        "mapper_proc": lambda x: int(x, 16),
         "debug": bool,
         "gc": bool,
         "spy": bool,

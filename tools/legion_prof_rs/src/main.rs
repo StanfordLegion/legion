@@ -3,16 +3,16 @@ use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 
 use rayon::prelude::*;
+
+use url::Url;
 
 #[cfg(feature = "client")]
 use legion_prof_viewer::{
     app, deferred_data::DeferredDataSource, http::client::HTTPClientDataSource,
 };
-#[cfg(feature = "client")]
-use url::Url;
 
 #[cfg(feature = "archiver")]
 use legion_prof::backend::archiver;
@@ -25,40 +25,10 @@ use legion_prof::serialize::deserialize;
 use legion_prof::spy;
 use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
 
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
+#[derive(Debug, Clone, Args)]
+struct ParserArgs {
     #[arg(required = true, help = "input Legion Prof log filenames")]
     filenames: Vec<OsString>,
-
-    #[arg(
-        short,
-        long,
-        default_value = "legion_prof",
-        help = "output directory pathname"
-    )]
-    output: OsString,
-
-    #[arg(long, help = "dump an archive of the profile for sharing")]
-    archive: bool,
-
-    #[arg(long, help = "connect viewer to the specified HTTP profile server")]
-    attach: bool,
-
-    #[arg(long, help = "start profile HTTP server")]
-    serve: bool,
-
-    #[arg(long, help = "start interactive profile viewer")]
-    view: bool,
-
-    #[arg(long, hide = true, help = "print statistics")]
-    statistics: bool,
-
-    #[arg(long, hide = true, help = "emit JSON for Google Trace Viewer")]
-    trace: bool,
-
-    #[arg(long, help = "dump parsed log files in a JSON format")]
-    dump: bool,
 
     #[arg(long, help = "start time in microseconds to trim the profile")]
     start_trim: Option<u64>,
@@ -97,34 +67,105 @@ struct Cli {
     )]
     no_filter_input: bool,
 
-    #[arg(short, long, help = "overwrite output directory if it exists")]
-    force: bool,
-
     #[arg(short, long, help = "print verbose profiling information")]
     verbose: bool,
+}
 
+#[derive(Debug, Clone, Args)]
+struct OutputArgs {
     #[arg(
+        short,
         long,
-        default_value = "127.0.0.1",
-        help = "host to bind for HTTP server"
+        default_value = "legion_prof",
+        help = "output directory pathname"
     )]
-    host: String,
+    output: OsString,
 
-    #[arg(long, default_value_t = 8080, help = "port to bind for HTTP server")]
-    port: u16,
+    #[arg(short, long, help = "overwrite output directory if it exists")]
+    force: bool,
+}
 
-    #[arg(long, default_value_t = 4, help = "number of zoom levels to archive")]
-    levels: u32,
+#[derive(Debug, Clone, Subcommand)]
+enum Commands {
+    #[command(about = "dump an archive of the profile for sharing")]
+    Archive {
+        #[command(flatten)]
+        args: ParserArgs,
 
-    #[arg(long, default_value_t = 4, help = "branch factor for archive")]
-    branch_factor: u64,
+        #[command(flatten)]
+        out: OutputArgs,
 
-    #[arg(
-        long,
-        default_value_t = 10,
-        help = "zstd compression factor for archive"
-    )]
-    zstd_compression: i32,
+        #[arg(long, default_value_t = 4, help = "number of zoom levels to archive")]
+        levels: u32,
+
+        #[arg(long, default_value_t = 4, help = "branch factor for archive")]
+        branch_factor: u64,
+
+        #[arg(
+            long,
+            default_value_t = 10,
+            help = "zstd compression factor for archive"
+        )]
+        zstd_compression: i32,
+    },
+    #[command(about = "connect viewer to the specified HTTP profile server")]
+    Attach {
+        #[arg(required = true, help = "URL(s) to attach to")]
+        urls: Vec<Url>,
+    },
+    #[command(about = "dump parsed log files in a JSON format")]
+    Dump {
+        #[command(flatten)]
+        args: ParserArgs,
+    },
+    #[command(about = "dump a legacy format profile for sharing")]
+    Legacy {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[command(flatten)]
+        out: OutputArgs,
+    },
+    #[command(about = "start profile HTTP server")]
+    Serve {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[arg(
+            long,
+            default_value = "127.0.0.1",
+            help = "host to bind for HTTP server"
+        )]
+        host: String,
+
+        #[arg(long, default_value_t = 8080, help = "port to bind for HTTP server")]
+        port: u16,
+    },
+    #[command(about = "start interactive profile viewer")]
+    View {
+        #[command(flatten)]
+        args: ParserArgs,
+    },
+    #[command(about = "print statistics")]
+    Statistics {
+        #[command(flatten)]
+        args: ParserArgs,
+    },
+    #[command(about = "emit JSON for Google Trace Viewer")]
+    Trace {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[command(flatten)]
+        out: OutputArgs,
+    },
+}
+
+#[derive(Debug, Clone, Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
 fn main() -> io::Result<()> {
@@ -132,14 +173,76 @@ fn main() -> io::Result<()> {
 
     let cli = Cli::parse();
 
-    let start_trim = cli.start_trim.map(Timestamp::from_us);
-    let stop_trim = cli.stop_trim.map(Timestamp::from_us);
-    let message_threshold = cli.message_threshold;
-    let message_percentage = cli.message_percentage;
+    match cli.command {
+        Commands::Archive { .. } => {
+            #[cfg(not(feature = "archiver"))]
+            panic!(
+                "Legion Prof was not built with the \"archiver\" feature. \
+                 Rebuild with --features=archiver to enable."
+            );
+        }
+        Commands::Attach { .. } => {
+            #[cfg(not(feature = "client"))]
+            panic!(
+                "Legion Prof was not built with the \"client\" feature. \
+                 Rebuild with --features=client to enable."
+            );
+        }
+        Commands::Serve { .. } => {
+            #[cfg(not(feature = "server"))]
+            panic!(
+                "Legion Prof was not built with the \"server\" feature. \
+                 Rebuild with --features=server to enable."
+            );
+        }
+        Commands::View { .. } => {
+            #[cfg(not(feature = "viewer"))]
+            panic!(
+                "Legion Prof was not built with the \"viewer\" feature. \
+                 Rebuild with --features=viewer to enable."
+            );
+        }
+        _ => {}
+    }
+
+    match cli.command {
+        Commands::Attach { urls } => {
+            #[cfg(feature = "client")]
+            {
+                let data_sources: Vec<_> = urls
+                    .into_iter()
+                    .map(|url| {
+                        let data_source: Box<dyn DeferredDataSource> =
+                            Box::new(HTTPClientDataSource::new(url));
+                        data_source
+                    })
+                    .collect();
+                app::start(data_sources);
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    let args = match cli.command {
+        Commands::Archive { ref args, .. }
+        | Commands::Dump { ref args, .. }
+        | Commands::Legacy { ref args, .. }
+        | Commands::View { ref args, .. }
+        | Commands::Serve { ref args, .. }
+        | Commands::Statistics { ref args, .. }
+        | Commands::Trace { ref args, .. } => args,
+        Commands::Attach { .. } => unreachable!(),
+    };
+
+    let start_trim = args.start_trim.map(Timestamp::from_us);
+    let stop_trim = args.stop_trim.map(Timestamp::from_us);
+    let message_threshold = args.message_threshold;
+    let message_percentage = args.message_percentage;
 
     let mut node_list: Vec<NodeID> = Vec::new();
     let mut filter_input = false;
-    if let Some(nodes_str) = cli.nodes {
+    if let Some(nodes_str) = &args.nodes {
         node_list = nodes_str
             .split(",")
             .flat_map(|x| {
@@ -154,84 +257,10 @@ fn main() -> io::Result<()> {
                 }
             })
             .collect();
-        filter_input = !cli.no_filter_input;
+        filter_input = !args.no_filter_input;
     }
 
-    #[cfg(not(feature = "archiver"))]
-    if cli.archive {
-        panic!(
-            "Legion Prof was not built with the \"archiver\" feature. \
-                Rebuild with --features=archiver to enable."
-        );
-    }
-
-    #[cfg(not(feature = "client"))]
-    if cli.attach {
-        panic!(
-            "Legion Prof was not built with the \"client\" feature. \
-                Rebuild with --features=client to enable."
-        );
-    }
-
-    #[cfg(not(feature = "server"))]
-    if cli.serve {
-        panic!(
-            "Legion Prof was not built with the \"server\" feature. \
-                Rebuild with --features=server to enable."
-        );
-    }
-
-    #[cfg(not(feature = "viewer"))]
-    if cli.view {
-        panic!(
-            "Legion Prof was not built with the \"viewer\" feature. \
-                Rebuild with --features=viewer to enable."
-        );
-    }
-
-    if [
-        cli.archive,
-        cli.attach,
-        cli.serve,
-        cli.view,
-        cli.statistics,
-        cli.trace,
-    ]
-    .iter()
-    .filter(|x| **x)
-    .count()
-        > 1
-    {
-        panic!(
-            "Legion Prof takes at most one of --attach, --serve, --view, --statistics, or --trace"
-        );
-    }
-
-    if cli.attach {
-        #[cfg(feature = "client")]
-        {
-            let urls: Vec<_> = cli
-                .filenames
-                .into_iter()
-                .map(|x| {
-                    Url::parse(x.to_str().expect("URL contains invalid UTF-8"))
-                        .expect("invalid profile URL")
-                })
-                .collect();
-            let data_sources: Vec<_> = urls
-                .into_iter()
-                .map(|url| {
-                    let data_source: Box<dyn DeferredDataSource> =
-                        Box::new(HTTPClientDataSource::new(url));
-                    data_source
-                })
-                .collect();
-            app::start(data_sources);
-        }
-        return Ok(());
-    }
-
-    let records: Result<Vec<Records>, _> = cli
+    let records: Result<Vec<Records>, _> = args
         .filenames
         .par_iter()
         .map(|filename| {
@@ -242,23 +271,26 @@ fn main() -> io::Result<()> {
             )
         })
         .collect();
-    if cli.dump {
-        for record in records? {
-            match record {
-                Records::Prof(r) => {
-                    dump::dump_record(&r)?;
-                }
-                Records::Spy(r) => {
-                    dump::dump_spy_record(&r)?;
+    match cli.command {
+        Commands::Dump { .. } => {
+            for record in records? {
+                match record {
+                    Records::Prof(r) => {
+                        dump::dump_record(&r)?;
+                    }
+                    Records::Spy(r) => {
+                        dump::dump_spy_record(&r)?;
+                    }
                 }
             }
+            return Ok(());
         }
-        return Ok(());
+        _ => {}
     }
 
     let mut state = State::default();
 
-    let paths: Vec<_> = cli.filenames.iter().map(PathBuf::from).collect();
+    let paths: Vec<_> = args.filenames.iter().map(PathBuf::from).collect();
 
     let mut unique_paths = BTreeSet::<String>::new();
     for p in paths {
@@ -278,7 +310,7 @@ fn main() -> io::Result<()> {
         match record {
             Records::Prof(r) => {
                 println!("Matched {} objects", r.len());
-                state.process_records(&r, Timestamp::from_us(cli.call_threshold));
+                state.process_records(&r, Timestamp::from_us(args.call_threshold));
             }
             Records::Spy(r) => {
                 println!("Matched {} objects", r.len());
@@ -287,7 +319,7 @@ fn main() -> io::Result<()> {
         }
     }
 
-    if !state.has_prof_data {
+    if !state.complete_parse() {
         println!("Nothing to do");
         return Ok(());
     }
@@ -295,8 +327,8 @@ fn main() -> io::Result<()> {
     let mut have_alllogs = true;
     // if number of files
     let num_nodes: usize = state.num_nodes.try_into().unwrap();
-    if num_nodes > cli.filenames.len() {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", num_nodes, cli.filenames.len());
+    if num_nodes > args.filenames.len() {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", num_nodes, args.filenames.len());
         have_alllogs = false;
     }
 
@@ -306,7 +338,7 @@ fn main() -> io::Result<()> {
         have_alllogs = false;
     }
 
-    Config::set_config(filter_input, cli.verbose, have_alllogs);
+    Config::set_config(filter_input, args.verbose, have_alllogs);
 
     spy_state.postprocess_spy_records(&state);
 
@@ -315,41 +347,56 @@ fn main() -> io::Result<()> {
     state.sort_time_range();
     state.check_message_latencies(message_threshold, message_percentage);
     state.filter_output();
-    if cli.statistics {
-        analyze::analyze_statistics(&state);
-    } else if cli.trace {
-        trace_viewer::emit_trace(&state, cli.output, cli.force)?;
-    } else if cli.archive {
-        #[cfg(feature = "archiver")]
-        {
-            state.stack_time_points();
-            state.assign_colors();
-            archiver::write(
-                state,
-                cli.levels,
-                cli.branch_factor,
-                cli.output,
-                cli.force,
-                cli.zstd_compression,
-            )?;
+
+    match cli.command {
+        Commands::Archive {
+            out,
+            levels,
+            branch_factor,
+            zstd_compression,
+            ..
+        } => {
+            #[cfg(feature = "archiver")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                archiver::write(
+                    state,
+                    levels,
+                    branch_factor,
+                    out.output,
+                    out.force,
+                    zstd_compression,
+                )?;
+            }
         }
-    } else if cli.serve {
-        #[cfg(feature = "server")]
-        {
-            state.stack_time_points();
+        Commands::Legacy { out, .. } => {
             state.assign_colors();
-            server::start(state, &cli.host, cli.port);
+            visualize::emit_interactive_visualization(&state, &spy_state, out.output, out.force)?;
         }
-    } else if cli.view {
-        #[cfg(feature = "viewer")]
-        {
-            state.stack_time_points();
-            state.assign_colors();
-            viewer::start(state);
+        Commands::View { .. } => {
+            #[cfg(feature = "viewer")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                viewer::start(state);
+            }
         }
-    } else {
-        state.assign_colors();
-        visualize::emit_interactive_visualization(&state, &spy_state, cli.output, cli.force)?;
+        Commands::Serve { host, port, .. } => {
+            #[cfg(feature = "server")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                server::start(state, &host, port);
+            }
+        }
+        Commands::Statistics { .. } => {
+            analyze::analyze_statistics(&state);
+        }
+        Commands::Trace { out, .. } => {
+            trace_viewer::emit_trace(&state, out.output, out.force)?;
+        }
+        Commands::Attach { .. } | Commands::Dump { .. } => unreachable!(),
     }
 
     Ok(())

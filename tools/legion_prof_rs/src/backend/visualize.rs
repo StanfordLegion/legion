@@ -356,10 +356,15 @@ impl Proc {
         let level = max(self.max_levels(device), 1);
 
         Ok(ProcessorRecord {
-            full_text: format!("{:?}{} Processor 0x{:x}", self.kind, suffix, self.proc_id),
+            full_text: format!(
+                "{:?}{} Processor 0x{:x}",
+                self.kind.unwrap(),
+                suffix,
+                self.proc_id
+            ),
             text: format!(
                 "{:?}{} Proc {}",
-                self.kind,
+                self.kind.unwrap(),
                 suffix,
                 self.proc_id.proc_in_node(),
             ),
@@ -1036,7 +1041,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let proc_records: BTreeMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty() && proc.is_visible())
-        .flat_map(|proc| match proc.kind {
+        .flat_map(|proc| match proc.kind.unwrap() {
             ProcKind::GPU => vec![
                 (proc, Some(DeviceKind::Device)),
                 (proc, Some(DeviceKind::Host)),
@@ -1107,10 +1112,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
             let parent_id = op.parent_id;
-            let provenance = Some(op.provenance.as_deref().unwrap_or(""));
+            let provenance = op.provenance.and_then(|pid| state.find_provenance(pid));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
-                let proc_full_text = format!("{:?} Processor 0x{:x}", proc.kind, proc.proc_id);
+                let proc_full_text =
+                    format!("{:?} Processor 0x{:x}", proc.kind.unwrap(), proc.proc_id);
                 let task = proc.find_task(*op_id).unwrap();
                 let (task_id, variant_id) = match task.kind {
                     ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),

@@ -603,8 +603,10 @@ namespace Legion {
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
-      inline void begin_wait(bool from_application);
-      inline void end_wait(bool from_application);
+      inline void begin_wait(LgEvent event, bool from_application);
+      inline void end_wait(LgEvent event, bool from_application);
+      void start_profiling_range(void);
+      void stop_profiling_range(const char *provenance);
       void remap_unmapped_regions(LogicalTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions,
                            Provenance *provenance);
@@ -673,12 +675,12 @@ namespace Legion {
       };
       OverheadProfiler *overhead_profiler; 
     protected:
-      class ImplicitProfiler {
+      class ImplicitTaskProfiler {
       public:
-        std::vector<std::pair<long long,long long> > waits; 
+        std::deque<LegionProfInstance::WaitInfo> waits;
         long long start_time;
       };
-      ImplicitProfiler *implicit_profiler;
+      ImplicitTaskProfiler *implicit_task_profiler;
     protected:
       std::map<LocalVariableID,
                std::pair<void*,void (*)(void*)> > task_local_variables;
@@ -689,6 +691,8 @@ namespace Legion {
       // Map of task local instances including their unique events
       // from the profilters perspective
       std::map<PhysicalInstance,LgEvent> task_local_instances;
+    protected:
+      std::vector<long long> user_profiling_ranges;
     protected:
       bool task_executed;
       bool mutable_priority;
@@ -3333,7 +3337,8 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
       virtual Domain get_shard_domain(void) const;
       virtual bool has_trace(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
     public:
       RemoteContext *const owner;
       uint64_t context_index;
@@ -3949,7 +3954,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::begin_wait(bool from_application)
+    inline void TaskContext::begin_wait(LgEvent event, bool from_application)
     //--------------------------------------------------------------------------
     {
       if (overhead_profiler != NULL)
@@ -3963,15 +3968,16 @@ namespace Legion {
           overhead_profiler->application_time += diff;
         overhead_profiler->previous_profiling_time = current;
       }
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        implicit_profiler->waits.emplace_back(std::make_pair(current, current));
+        implicit_task_profiler->waits.emplace_back(
+            LegionProfInstance::WaitInfo{ current, current, current, event });
       }
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskContext::end_wait(bool from_application)
+    inline void TaskContext::end_wait(LgEvent event, bool from_application)
     //--------------------------------------------------------------------------
     {
       if (overhead_profiler != NULL)
@@ -3982,10 +3988,20 @@ namespace Legion {
         overhead_profiler->wait_time += diff;
         overhead_profiler->previous_profiling_time = current;
       }
-      if (implicit_profiler != NULL)
+      if (implicit_task_profiler != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
-        implicit_profiler->waits.back().second = current;
+#ifdef DEBUG_LEGION
+        assert(!implicit_task_profiler->waits.empty());
+#endif
+        LegionProfInstance::WaitInfo &info = 
+          implicit_task_profiler->waits.back();
+#ifdef DEBUG_LEGION
+        assert(info.wait_event == event);
+#endif
+        // Assume that implicit tasks resume as soon as the event is triggered
+        info.wait_ready = current;
+        info.wait_end = current;
       }
     }
 

@@ -321,6 +321,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskOp::is_forward_progress_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!is_index_space)
+        return false;
+      if (forward_progress_cached)
+        return is_forward_progress;
+      // A forward progress task is any task that needs to have some or all
+      // of its point tasks mapped in order to avoid blocking the mapping
+      // of other point tasks. This includes dependent index space task 
+      // launches, index space task launches with collective mapping region
+      // requirements, or concurrent index space task launches.
+      is_forward_progress = false;
+      if (!concurrent_task && check_collective_regions.empty())
+      {
+        for (std::vector<RegionRequirement>::const_iterator it =
+              regions.begin(); it != regions.end(); it++)
+        {
+          if (IS_COLLECTIVE(*it))
+          {
+            is_forward_progress = true;
+            break;
+          }
+          // If we're not writing then there are no intra-space dependences
+          if (!IS_WRITE(*it))
+            continue;
+          if (it->handle_type == LEGION_SINGULAR_PROJECTION)
+            continue;
+          if (it->projection == 0)
+          {
+            if (it->handle_type == LEGION_REGION_PROJECTION)
+            {
+              is_forward_progress = true;
+              break;
+            }
+            else
+              continue;
+          }
+          ProjectionFunction *function = 
+            runtime->find_projection_function(it->projection);
+          if (function->is_invertible)
+          {
+            is_forward_progress = true;
+            break;
+          }
+        }
+      }
+      else
+        is_forward_progress = true;
+      forward_progress_cached = true;
+      return is_forward_progress;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::set_current_proc(Processor current)
     //--------------------------------------------------------------------------
     {
@@ -348,6 +402,7 @@ namespace Legion {
       elide_future_return = false;
       replicate = false; 
       local_cached = false;
+      forward_progress_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
       mapper = NULL;
@@ -779,7 +834,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
             const RegionRequirement &req = regions[idx];
-            if (!IS_WRITE(req))
+            if (!IS_WRITE(req) || IS_COLLECTIVE(req))
               continue;
             if (((req.projection == 0) &&
                 (req.handle_type == LEGION_REGION_PROJECTION)) ||
@@ -1044,7 +1099,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& TaskOp::get_provenance_string(bool human) const
+    const std::string_view& TaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -1467,15 +1522,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool TaskOp::prepare_steal(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_origin_mapped())
-        return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::finalize_output_region_trees(void)
     //--------------------------------------------------------------------------
     {
@@ -1597,10 +1643,61 @@ namespace Legion {
       // Check the layout constraints first
       const TaskLayoutConstraintSet &layout_constraints = 
         impl->get_layout_constraints();
-      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
-            layout_constraints.layouts.begin(); it != 
-            layout_constraints.layouts.end(); it++)
-      {
+      unsigned req_id = 0;
+      unsigned cur_id = 0;
+      // fields explicitly specified in any constraint for region requirement
+      std::set<FieldID> explicit_fields, align_fields, offset_fields;
+      for (auto it =
+	     layout_constraints.layouts.begin(); it !=
+	     layout_constraints.layouts.end(); it++) {
+	// obtain all fields explicitly specified in task layout constraints for
+	// a region requirement
+	cur_id = it->first;
+	if (req_id == cur_id) {
+	  explicit_fields.clear();
+	  align_fields.clear();
+	  offset_fields.clear();
+	  req_id++;
+	  for (auto lay_it =
+		 layout_constraints.layouts.lower_bound(it->first); lay_it !=
+		 layout_constraints.layouts.upper_bound(it->first); lay_it++) {
+	    // Get the layout constraints from the task layout set
+	    const LayoutConstraints *index_constraints =
+	      runtime->find_layout_constraints(lay_it->second);
+	    const std::vector<FieldID> &constraint_fields =
+	      index_constraints->field_constraint.get_field_set();
+	    // check if there are any field constraints in the current task layout constraint
+	    for (FieldID fid: constraint_fields) {
+	      // check if the field is included in the needed_fields
+	      auto finder = explicit_fields.find(fid);
+	      if (finder == explicit_fields.end()) {
+		explicit_fields.insert(fid);
+	      }
+	    }
+	    // alignment constraints may have an explicit field
+	    if (!index_constraints->alignment_constraints.empty()) {
+	      for (unsigned idx = 0; idx < index_constraints->alignment_constraints.size(); idx++) {
+		auto fid = index_constraints->alignment_constraints[idx].fid;
+		auto finder = explicit_fields.find(fid);
+		if (finder == explicit_fields.end()) {
+		  explicit_fields.insert(fid);
+		  align_fields.insert(fid);
+		}
+	      }
+	    }
+	    // offset constraints may have an explicit field
+	    if (!index_constraints->offset_constraints.empty()) {
+	      for (unsigned idx = 0; idx < index_constraints->offset_constraints.size(); idx++) {
+		auto fid = index_constraints->offset_constraints[idx].fid;
+		auto finder = explicit_fields.find(fid);
+		if (finder == explicit_fields.end()) {
+		  explicit_fields.insert(fid);
+		  offset_fields.insert(fid);
+		}
+	      }
+	    }
+	  }
+	}
         // Might have constraints for extra region requirements
         if (it->first >= physical_instances.size())
           continue;
@@ -1609,20 +1706,29 @@ namespace Legion {
           continue;
         LayoutConstraints *constraints = 
           runtime->find_layout_constraints(it->second);
-        // If we don't have any fields then this constraint isn't
-        // going to apply to any actual instances
+
+
         const std::vector<FieldID> &field_vec = 
           constraints->field_constraint.field_set;
         FieldMask constraint_mask;
-        if (!field_vec.empty())
-        {
-          FieldSpaceNode *field_node = runtime->forest->get_node(
-                              regions[it->first].region.get_field_space());
-          std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+	FieldSpaceNode *field_node = runtime->forest->get_node(
+                                     regions[it->first].region.get_field_space());
+	std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+	if (!field_vec.empty()) {
           constraint_mask = field_node->get_field_mask(field_set);
         }
-        else
-          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+	else if (!constraints->alignment_constraints.empty()) {
+	  constraint_mask = field_node->get_field_mask(align_fields);
+	}
+	else if (!constraints->offset_constraints.empty()) {
+	  constraint_mask = field_node->get_field_mask(offset_fields);
+	}
+	else {
+	  // task layout constraint without explicit fields can
+	  // apply to remaining fields in the region requirement
+          constraint_mask = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES) ^
+	    field_node->get_field_mask(explicit_fields);
+	}
         const LayoutConstraint *conflict_constraint = NULL;
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {
@@ -2029,7 +2135,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTaskOp::get_provenance_string(bool human) const
+    const std::string_view& RemoteTaskOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
@@ -4040,22 +4147,35 @@ namespace Legion {
         single_task_termination = Runtime::create_ap_user_event(NULL); 
         record_completion_effect(single_task_termination);
       }
+      // If we have any intra-space mapping dependences that haven't triggered
+      // then we need to defer ourselves until they have occurred, do this
+      // before we invoke the mapper since the mapper might make instances
+      // and we need that to happen in program order
+      if (!intra_space_mapping_dependences.empty())
+      {
+        const RtEvent ready =
+          Runtime::merge_events(intra_space_mapping_dependences);
+        intra_space_mapping_dependences.clear();
+        if (ready.exists() && !ready.has_triggered())
+          return defer_perform_mapping(ready, must_epoch_op,
+                                       defer_args, 1/*invocation count*/);
+      }
       // Only do this the first or second time through
-      if ((defer_args == NULL) || (defer_args->invocation_count < 2))
+      if ((defer_args == NULL) || (defer_args->invocation_count < 3))
       {
         if (request_valid_instances)
         {
           // If the mapper wants valid instances we first need to do our
           // versioning analysis and then call the mapper
           if ((defer_args == NULL/*first invocation*/) ||
-              (defer_args->invocation_count == 0))
+              (defer_args->invocation_count < 2))
           {
             const RtEvent version_ready_event = 
               perform_versioning_analysis(false/*post mapper*/);
             if (version_ready_event.exists() && 
                 !version_ready_event.has_triggered())
             return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                         defer_args, 1/*invocation count*/);
+                                         defer_args, 2/*invocation count*/);
           }
           // Now do the mapping call
           invoke_mapper(must_epoch_op);
@@ -4065,7 +4185,7 @@ namespace Legion {
           // If the mapper doesn't need valid instances, we do the mapper
           // call first and then see if we need to do any versioning analysis
           if ((defer_args == NULL/*first invocation*/) ||
-              (defer_args->invocation_count == 0))
+              (defer_args->invocation_count < 2))
           {
             invoke_mapper(must_epoch_op);
             const RtEvent version_ready_event = 
@@ -4073,20 +4193,9 @@ namespace Legion {
             if (version_ready_event.exists() && 
                 !version_ready_event.has_triggered())
             return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                         defer_args, 1/*invocation count*/);
+                                         defer_args, 2/*invocation count*/);
           }
         }
-      }
-      // If we have any intra-space mapping dependences that haven't triggered
-      // then we need to defer ourselves until they have occurred
-      if (!intra_space_mapping_dependences.empty())
-      {
-        const RtEvent ready = 
-          Runtime::merge_events(intra_space_mapping_dependences);
-        intra_space_mapping_dependences.clear();
-        if (ready.exists() && !ready.has_triggered())
-          return defer_perform_mapping(ready, must_epoch_op,
-                                       defer_args, 2/*invocation count*/);
       } 
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization
@@ -4723,6 +4832,11 @@ namespace Legion {
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, start_condition,
                                         single_task_termination);
+        // Chain the start event into the unmap events so Legion Spy can see
+        // the dependences between child operations the start of the parent task
+        for (unsigned idx = 0; idx < unmap_events.size(); idx++)
+          if (unmap_events[idx].exists())
+            LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
 #endif
         LegionSpy::log_task_priority(unique_op_id, task_priority);
         for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -4802,13 +4916,6 @@ namespace Legion {
           MispredicationTaskArgs::TASK_ID].fetch_sub(1);
 #endif
       }
-#ifdef LEGION_SPY
-      // Chain the start event into the unmap events so Legion Spy can see
-      // the dependences between child operations the start of the parent task
-      for (unsigned idx = 0; idx < unmap_events.size(); idx++)
-        if (unmap_events[idx].exists())
-          LegionSpy::log_event_dependence(start_condition, unmap_events[idx]);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5154,8 +5261,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_MULTI_CALL);
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_multi_task(this, task_id);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_multi_task(this, task_id);
       CollectiveViewCreator<TaskOp>::deactivate(freeop);
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
@@ -6627,8 +6734,8 @@ namespace Legion {
       // we get cleaned up after the resolve speculation call
       if (runtime->legion_spy_enabled)
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -6850,8 +6957,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_DEACTIVATE_CALL);
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       SingleTask::deactivate(false/*free*/);
@@ -7293,8 +7400,8 @@ namespace Legion {
       else
         complete_mapping();
       slice_owner->record_point_mapped(get_mapped_event());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
       return false;
     }
 
@@ -9900,8 +10007,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(get_unique_op_id(),
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(get_unique_op_id(),
                                                 result->get_unique_op_id());
       return result;
     }
@@ -11321,8 +11428,8 @@ namespace Legion {
       derez.deserialize(internal_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(remote_unique_id,
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(remote_unique_id,
             get_unique_op_id());
       num_unmapped_points = num_points;
       num_uncompleted_points.store(num_points);
@@ -11375,8 +11482,8 @@ namespace Legion {
       }
       else // Set the first mapping to false since we know things are mapped
         first_mapping = false;
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_operation(this);
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_operation(this);
       // Return true to add this to the ready queue
       return true;
     }
@@ -11453,8 +11560,8 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_slice_owner(get_unique_op_id(),
+      if (implicit_profiler != NULL)
+        implicit_profiler->register_slice_owner(get_unique_op_id(),
             result->get_unique_op_id());
       return result;
     }

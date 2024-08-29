@@ -68,6 +68,21 @@ namespace Realm {
       };
       DeferredCreate deferred_create;
 
+      class DeferredRedistrict : public EventWaiter {
+      public:
+        void defer(RegionInstanceImpl *_inst, std::vector<RegionInstanceImpl *> &insts,
+                   Event after, Event wait_on);
+        virtual void event_triggered(bool poisoned, TimeLimit work_until);
+        virtual void print(std::ostream &os) const;
+        virtual Event get_finish_event(void) const;
+
+      protected:
+        RegionInstanceImpl *inst;
+        std::vector<RegionInstanceImpl *> new_insts;
+        Event after;
+      };
+      DeferredRedistrict deferred_redistrict;
+
       class DeferredDestroy : public EventWaiter {
       public:
 	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem, Event wait_on);
@@ -90,8 +105,7 @@ namespace Realm {
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
 
-      // TODO(apryakhin@): Add deferred execution
-      Event redistrict(RegionInstance *instances, InstanceLayoutGeneric **layouts,
+      Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
                        size_t num_layouts, const ProfilingRequestSet *prs,
                        Event wait_on = Event::NO_EVENT);
 

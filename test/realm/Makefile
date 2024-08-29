@@ -22,7 +22,7 @@ override LG_RT_DIR := $(patsubst %/,%,$(LG_RT_DIR))
 
 #Flags for directing the runtime makefile what to include
 DEBUG=1                   # Include debugging symbols
-OUTPUT_LEVEL=LEVEL_INFO  # Compile time print level
+OUTPUT_LEVEL ?= LEVEL_INFO  # Compile time print level
 #ALT_MAPPERS=1		  # Compile the alternative mappers
 
 # Put the binary file name here
@@ -76,6 +76,8 @@ TESTS += machine_config
 TESTS += rect_transform_test
 TESTS += rsrv_acquire_poisoned
 TESTS += sparsity_destroy
+TESTS += refcount_image_test
+TESTS += refcount_preimage_test
 TESTS += inst_chain_redistrict
 
 ifeq ($(strip $(USE_CUDA)),1)
@@ -91,7 +93,7 @@ TESTS += task_stream
 endif
 
 # can set arguments to be passed to a test when running
-#TESTARGS_inst_chain_redistrict := -ll:csize 1
+TESTARGS_inst_chain_redistrict := -i 2
 TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
 TESTARGS_proc_group := -ll:cpu 4
 TESTARGS_compqueue := -ll:cpu 4 -timeout 120
@@ -124,6 +126,8 @@ ifeq ($(strip $(USE_CUDA)),1)
 REALM_CUDA_OBJS := $(patsubst %.cu,$(REALM_CUDA_DIR)/%.o,$(notdir $(REALM_CUDA_SRC)))
 endif
 
+REALM_LIBS := -lrealm
+
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
 RUNTIME_VPATH := $(subst $(SPACE),:,$(sort $(dir $(REALM_SRC))))
@@ -132,21 +136,37 @@ vpath %.S .:$(RUNTIME_VPATH)
 #VPATH = .:$(RUNTIME_VPATH)
 
 ifdef LG_INSTALL_DIR
-ifeq ($(strip $(SHARED_OBJECTS)),0)
-REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.a
+  ifeq ($(strip $(SHARED_OBJECTS)),0)
+    REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.a
+  else # ifeq ($(strip $(SHARED_OBJECTS)),0)
+    ifeq ($(shell uname -s),Darwin)
+      REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.dylib
+    else
+      REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.so
+    endif
+  endif
 else
-ifeq ($(shell uname -s),Darwin)
-REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.dylib
-else
-REALM_LIB := $(LG_INSTALL_DIR)/lib/librealm.so
-endif
-endif
-else
-REALM_LIB := librealm.a
-
-$(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
-	rm -f $(REALM_LIB)
-	ar rc $(REALM_LIB) $(REALM_OBJS) $(REALM_CUDA_OBJS)
+  ifeq ($(strip $(SHARED_OBJECTS)),0)
+    REALM_LIB := librealm.a
+    $(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS)
+			rm -f $(REALM_LIB)
+			ar rc $(REALM_LIB) $(REALM_OBJS) $(REALM_CUDA_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS)
+  else # ifeq ($(strip $(SHARED_OBJECTS)),0)
+    ifeq ($(shell uname -s),Darwin)
+      REALM_LIB := librealm.dylib
+    else
+      REALM_LIB := librealm.so
+    endif
+    ifeq ($(strip $(REALM_USE_GASNETEX_WRAPPER)),1)
+      $(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS)
+				rm -f $@
+				$(CXX) $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) $(SLIB_REALM_DEPS)
+    else
+      $(REALM_LIB) : $(REALM_OBJS) $(REALM_CUDA_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS)
+				rm -f $@
+				$(CXX) $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) $(SLIB_REALM_DEPS)
+    endif
+  endif  # ifeq ($(strip $(SHARED_OBJECTS)),0)
 endif
 
 TEST_OBJS := $(TESTS:%=%.o)
@@ -167,16 +187,16 @@ build : $(TESTS)
 
 ifdef LG_INSTALL_DIR
 clean :
-	rm -f $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(REALM_CUHOOK_OBJS)
+	rm -f $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(REALM_CUHOOK_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 else
 clean :
-	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
+	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS) $(SLIB_REALM_GASNETEX_WRAPPER) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 endif
 
 machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
-$(TESTS) : % : %.o $(REALM_LIB) $(SLIB_REALM_CUHOOK)
-	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. $(LD_FLAGS) -lrealm $(LEGION_LD_FLAGS) 
+$(TESTS) : % : %.o $(REALM_LIB) $(SLIB_REALM_CUHOOK) $(SLIB_REALM_GASNETEX_WRAPPER)
+	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. $(LD_FLAGS) $(REALM_LIBS) $(LEGION_LD_FLAGS) 
 
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
@@ -203,6 +223,16 @@ $(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HE
 	$(CXX) -MMD -fPIC -o $@ -c $< $(CC_FLAGS) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 endif
 
+ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+$(REALM_GASNETEX_WRAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_CXX_CHECK) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_GASNETEX_WRAPPER_INC_FLAGS)
+ifeq ($(strip $(REALM_USE_GASNETEX_WRAPPER)),1)
+$(SLIB_REALM_GASNETEX_WRAPPER) : $(REALM_GASNETEX_WRAPPER_OBJS)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) $(REALM_GASNETEX_WRAPPER_LD_FLAGS) $(SLIB_REALM_DEPS)
+endif
+endif
+
 ifeq ($(strip $(USE_HIP)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
@@ -220,6 +250,8 @@ endif
 
 %.o : %.cc $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS) $(REALM_CXX_CHECK)
+
+$(REALM_OBJS) : $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 
 $(REALM_OBJS) : CC_FLAGS+=$(REALM_SYMBOL_VISIBILITY)
 
