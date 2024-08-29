@@ -65,47 +65,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RegionInstanceImpl::DeferredRedistrict
-  //
-
-  void RegionInstanceImpl::DeferredRedistrict::defer(
-      RegionInstanceImpl *_inst, std::vector<RegionInstanceImpl *> &_new_insts,
-      Event _after, Event wait_on)
-  {
-    inst = _inst;
-    new_insts.swap(_new_insts);
-    after = _after;
-    EventImpl::add_waiter(wait_on, this);
-  }
-
-  void RegionInstanceImpl::DeferredRedistrict::event_triggered(bool poisoned,
-                                                               TimeLimit work_until)
-  {
-    if(poisoned) {
-      for(RegionInstanceImpl *new_inst : new_insts) {
-        new_inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
-                                    0 /*offset*/, TimeLimit::responsive());
-      }
-      GenEventImpl::trigger(after, true /*poisoned*/, work_until);
-    } else {
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(inst->memory);
-      m_impl->reuse_allocated_range(inst, new_insts);
-      GenEventImpl::trigger(after, false /*poisoned*/, work_until);
-    }
-  }
-
-  void RegionInstanceImpl::DeferredRedistrict::print(std::ostream &os) const
-  {
-    os << "deferred instance redistrict";
-  }
-
-  Event RegionInstanceImpl::DeferredRedistrict::get_finish_event(void) const
-  {
-    return after;
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class RegionInstanceImpl::DeferredDestroy
   //
 
@@ -1013,25 +972,47 @@ namespace Realm {
         insts[i]->metadata.layout->compile_lookup_program(
             insts[i]->metadata.lookup_program);
       }
-
-      bool poisoned = false;
-      bool triggered = wait_on.has_triggered_faultaware(poisoned);
-
-      if(!triggered) {
-        Event after = GenEventImpl::create_genevent()->current_event();
-        deferred_redistrict.defer(this, insts, after, wait_on);
-        return after;
-      } else if(poisoned) {
-        for(RegionInstanceImpl *inst : insts)
-          inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
-                                  0 /*offset*/, TimeLimit::responsive());
-        Event after = GenEventImpl::create_genevent()->current_event();
-        GenEventImpl::trigger(after, true /*poisoned*/, TimeLimit::responsive());
-        return after;
-      } else {
-        m_impl->reuse_allocated_range(this, insts);
-        return Event::NO_EVENT;
+      // request reuse of storage - note that due to the asynchronous
+      //  nature of any profiling responses, it is not safe to refer to the
+      //  instance metadata (whether the allocation succeeded or not) after
+      //  this point)
+      Event ready_event;
+      switch(m_impl->reuse_storage_deferrable(this, insts, wait_on)) {
+      case MemoryImpl::ALLOC_INSTANT_SUCCESS:
+      {
+        ready_event = Event::NO_EVENT;
+        break;
       }
+
+      case MemoryImpl::ALLOC_INSTANT_FAILURE:
+      case MemoryImpl::ALLOC_CANCELLED:
+      {
+        // generate a poisoned event for completion
+        // NOTE: it is unsafe to look at the impl->metadata or the
+        //  passed-in instance layout at this point due to the possibility
+        //  of an asynchronous destruction of the instance in a profiling
+        //  handler
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        ready_event = ev->current_event();
+        GenEventImpl::trigger(ready_event, true /*poisoned*/);
+        break;
+      }
+
+      case MemoryImpl::ALLOC_DEFERRED:
+      {
+        // We've done all the work to make set up the new instances
+        // they will be ready the instant the deferral event triggers
+        // as that is when we'll switch from the old mode to the new mode
+        ready_event = wait_on;
+        break;
+      }
+
+      case MemoryImpl::ALLOC_EVENTUAL_SUCCESS:
+      case MemoryImpl::ALLOC_EVENTUAL_FAILURE:
+        // should not occur
+        assert(0);
+      }
+      return ready_event;
     }
 
     void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)
