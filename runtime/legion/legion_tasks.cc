@@ -10349,7 +10349,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexTask::set_prev_point_wise_user(const LogicalUser *prev,
-        unsigned region_idx)
+        unsigned region_idx, unsigned dep_type, unsigned prev_region_idx)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -10361,7 +10361,8 @@ namespace Legion {
                                   prev->shard_proj->sharding,
                                   prev->shard_proj->sharding_domain,
                                   static_cast<IndexTask*>(prev->op)->index_domain,
-                                  prev->op, prev->gen, prev->ctx_index)
+                                  prev->op, prev->gen, prev->ctx_index, dep_type,
+                                  prev_region_idx)
                               });
       set_connect_to_prev_point();
       return true;

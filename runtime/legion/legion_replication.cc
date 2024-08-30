@@ -1978,6 +1978,16 @@ namespace Legion {
            finder->second.sharding->find_owner(previous_index_task_points[0],
               finder->second.index_domain);
 
+#ifdef LEGION_SPY
+        LegionSpy::log_mapping_point_wise_dependence(
+            get_context()->get_unique_id(),
+            finder->second.ctx_index, previous_index_task_points[0].get_index(),
+            finder->second.region_idx,
+            context_index, point.get_index(),
+            region_idx,
+            finder->second.dep_type);
+#endif
+
         if (prev_shard != parent_ctx->get_shard_id())
         {
           // send to the shard where the point is

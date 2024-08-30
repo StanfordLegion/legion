@@ -16612,7 +16612,7 @@ namespace Legion {
                                 prev.shard_proj, prev.ctx_index);
                           }
                           static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
-                              &prev, user.idx);
+                              &prev, user.idx, dtype, prev.idx);
                         }
                       }
                     }

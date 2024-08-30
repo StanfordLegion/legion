@@ -1501,6 +1501,20 @@ namespace Legion {
 		      next_id, next_idx, dep_type);
       }
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      static inline void log_mapping_point_wise_dependence(UniqueID context,
+                unsigned prev_ctx_idx, DomainPoint prev_point,
+                unsigned prev_region_idx,
+                unsigned next_ctx_idx, DomainPoint next_point,
+                unsigned next_region_idx,
+                unsigned dep_type)
+      {
+        log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u %u %d",
+		      context, prev_ctx_idx, prev_point_idx, prev_region_idx,
+		      next_ctx_idx, next_point_idx, next_region_idx, dep_type);
+      }
+#endif
+
       // Logger calls for realm events
       static inline void log_event_dependence(LgEvent one, LgEvent two)
       {
