@@ -3455,11 +3455,9 @@ impl State {
         if let Some(index) = self.event_lookup.get(&event) {
             return *index;
         }
-        let index = self.event_graph.add_node(EventEntry::new(
-            EventEntryKind::UnknownEvent,
-            None,
-            None,
-        ));
+        let index =
+            self.event_graph
+                .add_node(EventEntry::new(EventEntryKind::UnknownEvent, None, None));
         self.event_lookup.insert(event, index);
         // This is an important detail: Realm barriers have to trigger
         // in order so add a dependence between this generation and the
