@@ -47,6 +47,21 @@ pub enum ProcKind {
     Python = 8,
 }
 
+impl ProcKind {
+    fn name(&self) -> &'static str {
+        match *self {
+            ProcKind::GPU => "GPU",
+            ProcKind::CPU => "CPU",
+            ProcKind::Utility => "Utility",
+            ProcKind::IO => "I/O",
+            ProcKind::ProcGroup => "Group",
+            ProcKind::ProcSet => "Set",
+            ProcKind::OpenMP => "OpenMP",
+            ProcKind::Python => "Python",
+        }
+    }
+}
+
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(i32)]
@@ -66,6 +81,28 @@ pub enum MemKind {
     L1Cache = 12,
     GPUManaged = 13,
     GPUDynamic = 14,
+}
+
+impl MemKind {
+    fn name(&self) -> &'static str {
+        match *self {
+            MemKind::NoMemKind => "Unknown",
+            MemKind::Global => "Global",
+            MemKind::System => "System",
+            MemKind::Registered => "Registered",
+            MemKind::Socket => "Socket",
+            MemKind::ZeroCopy => "Zero-Copy",
+            MemKind::Framebuffer => "Framebuffer",
+            MemKind::Disk => "Disk",
+            MemKind::HDF5 => "HDF5",
+            MemKind::File => "Posix File",
+            MemKind::L3Cache => "L3 Cache",
+            MemKind::L2Cache => "L2 Cache",
+            MemKind::L1Cache => "L1 Cache",
+            MemKind::GPUManaged => "GPU UVM",
+            MemKind::GPUDynamic => "GPU Dynamic",
+        }
+    }
 }
 
 impl fmt::Display for MemKind {
@@ -474,11 +511,7 @@ impl ContainerEntry for ProcEntry {
     }
 
     fn creation_time(&self) -> Timestamp {
-        if let Some(spawn) = self.time_range.spawn {
-            spawn
-        } else {
-            self.time_range.create.unwrap()
-        }
+        self.time_range.spawn.or(self.time_range.create).unwrap()
     }
 
     fn is_meta(&self) -> bool {
@@ -644,23 +677,6 @@ impl Proc {
             time_points_stacked_device: Vec::new(),
             util_time_points_device: Vec::new(),
             visible: true,
-        }
-    }
-
-    fn kind_name(&self) -> &str {
-        if let Some(kind) = self.kind {
-            match kind {
-                ProcKind::GPU => "GPU",
-                ProcKind::CPU => "CPU",
-                ProcKind::Utility => "Utility",
-                ProcKind::IO => "I/O",
-                ProcKind::ProcGroup => "Group",
-                ProcKind::ProcSet => "Set",
-                ProcKind::OpenMP => "OpenMP",
-                ProcKind::Python => "Python",
-            }
-        } else {
-            "Unknown"
         }
     }
 
@@ -1074,13 +1090,13 @@ impl Proc {
         let mut result = self.entries.get(&prof_uid);
         while let Some(entry) = result {
             assert!(entry.time_range.start.unwrap() <= creation_time);
-            assert!(creation_time <= entry.time_range.stop.unwrap());
+            assert!(creation_time < entry.time_range.stop.unwrap());
             let mut next = None;
             // Iterate over all the "waiters" which includes both event waits and subcalls
-            for wait in entry.waiters.wait_intervals.iter() {
+            for wait in &entry.waiters.wait_intervals {
                 // We're only interested if there is a callee
                 if let Some(callee) = wait.callee {
-                    if wait.start <= creation_time && creation_time <= wait.end {
+                    if wait.start <= creation_time && creation_time < wait.end {
                         next = self.entries.get(&callee);
                         break;
                     }
@@ -1103,7 +1119,7 @@ impl Container for Proc {
 
     fn name(&self, _: &State) -> String {
         let node = self.proc_id.node_id();
-        let kind = self.kind_name();
+        let kind = self.kind.unwrap().name();
         format!(
             "{} Processor {:#x} (Node: {})",
             kind, self.proc_id.0, node.0
@@ -1173,37 +1189,26 @@ impl Container for Proc {
         }
         let mut result = None;
         // Iterate all the levels of the stack
-        for level in self.time_points_stacked.iter() {
+        for level in &self.time_points_stacked {
             if level.is_empty() {
                 // I don't know whey this happens but we'll ignore it
                 continue;
             }
-            // Find the lower bound for the start time to get the
-            // last task to start before the start time
-            let mut lower = 0;
-            let mut upper = level.len();
-            while lower < upper {
-                let mid = (lower + upper) / 2;
-                if level[mid].time < start {
-                    lower = mid + 1;
-                } else {
-                    upper = mid;
-                }
-            }
-            // lower is now the "upper" bound
-            upper = lower;
+            // Find the first range to start after the timestamp
+            let upper = level.partition_point(|&r| r.time < start);
+            // Check to make sure there is at least one task that starts
+            // before the start time
             if upper == 0 {
-                // Found nothing that started before start
                 continue;
             }
             // This makes lower the first point less than than the timestamp
-            lower = upper - 1;
+            let lower = upper - 1;
             let prof_uid = level[lower].entry;
             let entry = self.entries.get(&prof_uid).unwrap();
             // Find the last running range that happens before the start time
             let mut running_start = entry.time_range.start.unwrap();
             assert!(running_start < start);
-            for wait in entry.waiters.wait_intervals.iter() {
+            for wait in &entry.waiters.wait_intervals {
                 // Should need to wait before the start happens
                 assert!(wait.start <= start);
                 // We're only interested in ranges that happen after the ready time
@@ -1233,7 +1238,7 @@ impl Container for Proc {
                 let running_stop = entry.time_range.stop.unwrap();
                 assert!(running_stop <= start);
                 // We're only interested in ranges that end after the ready time
-                if ready <= running_stop {
+                if ready < running_stop {
                     let diff = start - running_stop;
                     // See if this is the closest running range to the start
                     if let Some((_, _, prev_stop)) = result {
@@ -1296,26 +1301,6 @@ impl Mem {
             util_time_points: Vec::new(),
             max_live_insts: 0,
             visible: true,
-        }
-    }
-
-    fn kind_name(&self) -> &str {
-        match self.kind {
-            MemKind::NoMemKind => "Unknown",
-            MemKind::Global => "Global",
-            MemKind::System => "System",
-            MemKind::Registered => "Registered",
-            MemKind::Socket => "Socket",
-            MemKind::ZeroCopy => "Zero-Copy",
-            MemKind::Framebuffer => "Framebuffer",
-            MemKind::Disk => "Disk",
-            MemKind::HDF5 => "HDF5",
-            MemKind::File => "Posix File",
-            MemKind::L3Cache => "L3 Cache",
-            MemKind::L2Cache => "L2 Cache",
-            MemKind::L1Cache => "L1 Cache",
-            MemKind::GPUManaged => "GPU UVM",
-            MemKind::GPUDynamic => "GPU Dynamic",
         }
     }
 
@@ -1410,7 +1395,7 @@ impl Container for Mem {
 
     fn name(&self, _: &State) -> String {
         let node = self.mem_id.node_id();
-        let kind = self.kind_name();
+        let kind = self.kind.name();
         format!("{} Memory {:#x} (Node: {})", kind, self.mem_id.0, node.0)
     }
 
@@ -1770,25 +1755,25 @@ impl Container for Chan {
                 let dst_mem = state.mems.get(&dst).unwrap();
                 let src_name = src_mem.name(state);
                 let dst_name = dst_mem.name(state);
-                format!("Copy channel from {} to {}", src_name, dst_name)
+                format!("Copy Channel from {} to {}", src_name, dst_name)
             }
             ChanID::Fill { dst } => {
                 let dst_mem = state.mems.get(&dst).unwrap();
                 let dst_name = dst_mem.name(state);
-                format!("Fill channel to {}", dst_name)
+                format!("Fill Channel to {}", dst_name)
             }
             ChanID::Gather { dst } => {
                 let dst_mem = state.mems.get(&dst).unwrap();
                 let dst_name = dst_mem.name(state);
-                format!("Gather channel to {}", dst_name)
+                format!("Gather Channel to {}", dst_name)
             }
             ChanID::Scatter { src } => {
                 let src_mem = state.mems.get(&src).unwrap();
                 let src_name = src_mem.name(state);
-                format!("Scatter channel to {}", src_name)
+                format!("Scatter Channel to {}", src_name)
             }
             ChanID::DepPart { node_id } => {
-                format!("Dependent Partition channel on {}", node_id.0)
+                format!("Dependent Partition Channel on {}", node_id.0)
             }
         }
     }
@@ -2943,7 +2928,7 @@ impl Copy {
         mut self,
         allocator: &mut ProfUIDAllocator,
         event_lookup: &BTreeMap<EventID, CriticalPathVertex>,
-        event_graph: &mut Graph<EventEntry, (), Directed, usize>,
+        event_graph: &mut CriticalPathGraph,
         fevent: EventID,
     ) -> Vec<Self> {
         assert!(self.chan_id.is_none());
@@ -3468,43 +3453,41 @@ impl State {
     fn find_event_node(&mut self, event: EventID) -> CriticalPathVertex {
         assert!(event.exists());
         if let Some(index) = self.event_lookup.get(&event) {
-            *index
-        } else {
-            let index = self.event_graph.add_node(EventEntry::new(
-                EventEntryKind::UnknownEvent,
-                None,
-                None,
-            ));
-            self.event_lookup.insert(event, index);
-            // This is an important detail: Realm barriers have to trigger
-            // in order so add a dependence between this generation and the
-            // previous generation of the barrier to capture this property
-            if event.is_barrier() {
-                if let Some(previous) = event.get_previous_phase() {
-                    let previous_index = self.find_event_node(previous);
-                    self.event_graph.add_edge(previous_index, index, ());
-                }
-            }
-            index
+            return *index;
         }
+        let index = self.event_graph.add_node(EventEntry::new(
+            EventEntryKind::UnknownEvent,
+            None,
+            None,
+        ));
+        self.event_lookup.insert(event, index);
+        // This is an important detail: Realm barriers have to trigger
+        // in order so add a dependence between this generation and the
+        // previous generation of the barrier to capture this property
+        if event.is_barrier() {
+            if let Some(previous) = event.get_previous_phase() {
+                let previous_index = self.find_event_node(previous);
+                self.event_graph.add_edge(previous_index, index, ());
+            }
+        }
+        index
     }
 
     pub fn find_critical_entry(&self, event: EventID) -> Option<&EventEntry> {
         assert!(event.exists());
-        if let Some(node_id) = self.event_lookup.get(&event) {
-            let node_entry = self.event_graph.node_weight(*node_id).unwrap();
-            if let Some(critical_id) = node_entry.critical {
-                if critical_id == *node_id {
-                    Some(node_entry)
-                } else {
-                    self.event_graph.node_weight(critical_id)
-                }
-            } else {
-                assert!(node_entry.kind == EventEntryKind::UnknownEvent);
+        let Some(node_id) = self.event_lookup.get(&event) else {
+            return None;
+        };
+        let node_entry = self.event_graph.node_weight(*node_id).unwrap();
+        if let Some(critical_id) = node_entry.critical {
+            if critical_id == *node_id {
                 Some(node_entry)
+            } else {
+                self.event_graph.node_weight(critical_id)
             }
         } else {
-            None
+            assert!(node_entry.kind == EventEntryKind::UnknownEvent);
+            Some(node_entry)
         }
     }
 
