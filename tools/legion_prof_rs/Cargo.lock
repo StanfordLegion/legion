@@ -1585,6 +1585,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixedbitset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
+
+[[package]]
 name = "flate2"
 version = "1.0.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2168,6 +2174,7 @@ dependencies = [
  "nom",
  "nonmax",
  "num_enum",
+ "petgraph",
  "rayon",
  "serde",
  "serde_json",
@@ -2177,9 +2184,9 @@ dependencies = [
 
 [[package]]
 name = "legion_prof_viewer"
-version = "0.2.4"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421927871b30dafb2880895a7ebe11c88d9a0c9fbe34a632c36de45854f3c9d9"
+checksum = "2c3638945f9b44eda24b148493a062a7a320f68a1ecc7927f83291d656dd1d83"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -2846,6 +2853,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fd23b938276f14057220b707937bcb42fa76dda7560e57a2da30cb52d557937"
 dependencies = [
  "num",
+]
+
+[[package]]
+name = "petgraph"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+dependencies = [
+ "fixedbitset",
+ "indexmap",
 ]
 
 [[package]]

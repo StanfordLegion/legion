@@ -721,7 +721,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
-      Internal::Runtime::phase_barrier_arrive(*this, count);
+      Internal::implicit_runtime->phase_barrier_arrive(*this, count);
     }
 
     //--------------------------------------------------------------------------
@@ -775,7 +775,7 @@ namespace Legion {
                                    unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::phase_barrier_arrive(*this, count, 
+      Internal::implicit_runtime->phase_barrier_arrive(*this, count, 
                                   Internal::ApEvent::NO_AP_EVENT, value, size);
     }
 
