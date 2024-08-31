@@ -2000,8 +2000,10 @@ namespace Legion {
     protected:
       // These runtime objects will be created by Legion
       friend class Internal::Runtime;
-      MapperRuntime(void);
+      MapperRuntime(Internal::Runtime *runtime);
       ~MapperRuntime(void);
+    private:
+      Internal::Runtime *const runtime;
     public:
       //------------------------------------------------------------------------
       // Methods for managing access to mapper state in the concurrent model
@@ -2124,24 +2126,24 @@ namespace Legion {
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
       VariantID register_task_variant(MapperContext ctx,
-                                      const TaskVariantRegistrar &registrar);
+                                  const TaskVariantRegistrar &registrar) const;
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
       VariantID register_task_variant(MapperContext ctx,
                                       const TaskVariantRegistrar &registrar,
-                                      const UDT &user_data);
+                                      const UDT &user_data) const;
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
       VariantID register_task_variant(MapperContext ctx,
-                                      const TaskVariantRegistrar &registrar);
+                                  const TaskVariantRegistrar &registrar) const;
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
       VariantID register_task_variant(MapperContext ctx,
                                       const TaskVariantRegistrar &registrar,
-                                      const UDT &user_data);
+                                      const UDT &user_data) const;
       VariantID register_task_variant(MapperContext ctx, 
                                       const TaskVariantRegistrar &registrar,
 				      const CodeDescriptor &codedesc,
@@ -2149,7 +2151,7 @@ namespace Legion {
 				      size_t user_len = 0,
                                       size_t return_type_size =
                                               LEGION_MAX_RETURN_SIZE,
-                                      bool has_return_type = false);
+                                      bool has_return_type = false) const;
     public:
       //------------------------------------------------------------------------
       // Methods for accelerating mapping decisions
@@ -2157,17 +2159,17 @@ namespace Legion {
       // Filter variants based on the chosen instances
       void filter_variants(MapperContext ctx, const Task &task,
              const std::vector<std::vector<PhysicalInstance> > &chosen_intances,
-                           std::vector<VariantID>              &variants);
+                           std::vector<VariantID>              &variants) const;
       // Filter instances based on a chosen variant
       void filter_instances(MapperContext ctx, const Task &task,
                                       VariantID chosen_variant, 
                         std::vector<std::vector<PhysicalInstance> > &instances,
-                               std::vector<std::set<FieldID> > &missing_fields);
+                        std::vector<std::set<FieldID> > &missing_fields) const;
       // Filter a specific set of instances for one region requirement
       void filter_instances(MapperContext ctx, const Task &task,
                                       unsigned index, VariantID chosen_variant,
                                       std::vector<PhysicalInstance> &instances,
-                                      std::set<FieldID> &missing_fields);
+                                      std::set<FieldID> &missing_fields) const;
     public:
       //------------------------------------------------------------------------
       // Methods for managing physical instances 
@@ -2491,69 +2493,74 @@ namespace Legion {
       //------------------------------------------------------------------------
       bool retrieve_semantic_information(MapperContext ctx, 
           TaskID task_id, SemanticTag tag, const void *&result, size_t &size, 
-          bool can_fail = false, bool wait_until_ready = false);
+          bool can_fail = false, bool wait_until_ready = false) const;
 
       bool retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
-          bool can_fail = false, bool wait_until_ready = false);
+          bool can_fail = false, bool wait_until_ready = false) const;
 
       bool retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
-          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+          size_t &size, bool can_fail = false, 
+          bool wait_until_ready = false) const;
 
       bool retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
-          bool can_fail = false, bool wait_until_ready = false);
+          bool can_fail = false, bool wait_until_ready = false) const;
 
       bool retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
-          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+          size_t &size, bool can_fail = false,
+          bool wait_until_ready = false) const;
 
       bool retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
-          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+          size_t &size, bool can_fail = false,
+          bool wait_until_ready = false) const;
 
       bool retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
-          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+          size_t &size, bool can_fail = false,
+          bool wait_until_ready = false) const;
 
       void retrieve_name(MapperContext ctx, TaskID task_id,
-                                   const char *&result);
+                                   const char *&result) const;
 
       void retrieve_name(MapperContext ctx, IndexSpace handle,
-                                   const char *&result);
+                                   const char *&result) const;
 
       void retrieve_name(MapperContext ctx, IndexPartition handle,
-                                   const char *&result);
+                                   const char *&result) const;
       
       void retrieve_name(MapperContext ctx, FieldSpace handle,
-                                   const char *&result);
+                                   const char *&result) const;
 
       void retrieve_name(MapperContext ctx, FieldSpace handle, 
-                                   FieldID fid, const char *&result);
+                                   FieldID fid, const char *&result) const;
 
       void retrieve_name(MapperContext ctx, LogicalRegion handle,
-                                   const char *&result);
+                                   const char *&result) const;
 
       void retrieve_name(MapperContext ctx, LogicalPartition handle,
-                                   const char *&result);
+                                   const char *&result) const;
     public:
       //------------------------------------------------------------------------
       // Methods for MPI interoperability
       //------------------------------------------------------------------------
-      bool is_MPI_interop_configured(MapperContext ctx);
+      bool is_MPI_interop_configured(MapperContext ctx) const;
       const std::map<int/*rank*/,AddressSpace>& 
-                                    find_forward_MPI_mapping(MapperContext ctx); 
+                              find_forward_MPI_mapping(MapperContext ctx) const;
 
       const std::map<AddressSpace,int/*rank*/>&
-                                    find_reverse_MPI_mapping(MapperContext ctx);
-      int find_local_MPI_rank(MapperContext ctx);
+                              find_reverse_MPI_mapping(MapperContext ctx) const;
+      int find_local_MPI_rank(MapperContext ctx) const;
     public:
       //------------------------------------------------------------------------
       // Support for packing tunable values
       //------------------------------------------------------------------------
       template<typename T>
-      void pack_tunable(const T &result, Mapper::SelectTunableOutput &output)
+      void pack_tunable(const T &result,
+          Mapper::SelectTunableOutput &output) const
       {
         static_assert(std::is_trivially_copyable<T>::value,
                       "tunable type must be trivially copyable");

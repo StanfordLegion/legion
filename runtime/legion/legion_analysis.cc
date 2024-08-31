@@ -9325,7 +9325,7 @@ namespace Legion {
         assert(check_initialized);
         assert(uninitialized_reported.exists());
 #endif
-        region->report_uninitialized_usage(op, index, usage, uninitialized,
+        region->report_uninitialized_usage(op, index, uninitialized,
                                            uninitialized_reported);
       }
       if (!input_aggregators.empty())
@@ -10363,8 +10363,8 @@ namespace Legion {
         assert(uninitialized_reported.exists());
 #endif
         RegionNode *src_node = runtime->forest->get_node(src_region);
-        src_node->report_uninitialized_usage(op, src_index, src_usage, 
-                                uninitialized, uninitialized_reported);
+        src_node->report_uninitialized_usage(op, src_index, uninitialized,
+                                             uninitialized_reported);
       }
       if (across_aggregator != NULL)
       {

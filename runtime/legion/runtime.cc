@@ -16918,7 +16918,7 @@ namespace Legion {
                      const std::map<Processor,AddressSpaceID> &processor_spaces,
                      bool default_mapper)
       : external(new Legion::Runtime(this)),
-        mapper_runtime(new Legion::Mapping::MapperRuntime()),
+        mapper_runtime(new Legion::Mapping::MapperRuntime(this)),
         machine(m), runtime_system_memory(system), address_space(unique), 
         total_address_spaces(address_spaces.size()),
         runtime_stride(address_spaces.size()), profiler(NULL),
