@@ -48,8 +48,8 @@ pub enum ProcKind {
 }
 
 impl ProcKind {
-    fn name(&self) -> &'static str {
-        match *self {
+    fn name(self) -> &'static str {
+        match self {
             ProcKind::GPU => "GPU",
             ProcKind::CPU => "CPU",
             ProcKind::Utility => "Utility",
@@ -84,8 +84,8 @@ pub enum MemKind {
 }
 
 impl MemKind {
-    fn name(&self) -> &'static str {
-        match *self {
+    fn name(self) -> &'static str {
+        match self {
             MemKind::NoMemKind => "Unknown",
             MemKind::Global => "Global",
             MemKind::System => "System",
