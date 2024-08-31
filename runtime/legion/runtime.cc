@@ -2401,10 +2401,26 @@ namespace Legion {
             {
               std::map<Memory,PendingInstance>::iterator pending =
                 pending_instances.begin();
+              // If we haven't allocated the instance yet then we can do that
+              // now because we know the size of the future result
+              if (pending->second.instance == NULL)
+              {
+#ifdef DEBUG_LEGION
+                assert(pending->second.alloc_ready.exists());
+#endif
+                MemoryManager *manager =
+                  runtime->find_memory_manager(pending->first);
+                pending->second.instance = manager->create_future_instance(
+                    pending->second.op, pending->second.uid, future_size,
+                    pending->second.eager);
+                Runtime::trigger_event(pending->second.alloc_ready);
+              }
               // Issue the copy to the pending instance
               ApEvent ready = pending->second.instance->copy_from(instance,
                     pending->second.op, precondition);
               Runtime::trigger_event(NULL, postcondition, ready);
+              if (pending->second.inst_ready.exists())
+                Runtime::trigger_event(NULL, pending->second.inst_ready, ready);
               instances.emplace(std::make_pair(pending->second.instance->memory,
                     FutureInstanceTracker(pending->second.instance, ready)));
 #ifdef DEBUG_LEGION
