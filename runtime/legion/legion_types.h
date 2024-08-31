@@ -44,6 +44,7 @@
 
 // Make sure we have the appropriate defines in place for including realm
 #include "realm.h"
+#include "realm/id.h"
 #include "realm/dynamic_templates.h"
 
 // this may be set before including legion.h to eliminate deprecation warnings
@@ -751,7 +752,8 @@ namespace Legion {
       MIGRATION_VIRTUAL_CHANNEL = 12,
       TRACING_VIRTUAL_CHANNEL = 13,
       RENDEZVOUS_VIRTUAL_CHANNEL = 14,
-      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
+      PROFILING_VIRTUAL_CHANNEL = 15,
+      MAX_NUM_VIRTUAL_CHANNELS = 16, // this one must be last
     };
 
     enum MessageKind {
@@ -1082,6 +1084,8 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
       SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
+      SEND_PROFILER_EVENT_TRIGGER,
+      SEND_PROFILER_EVENT_POISON,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1416,6 +1420,8 @@ namespace Legion {
         "Control Replication Collective Cross Product Exchange",      \
         "Control Replication Collective Tracing Set Deduplication",   \
         "Control Replication Collective Slow Barrier",                \
+        "Send Profiler Event Trigger",                                \
+        "Send Profiler Event Poison",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -2065,23 +2071,7 @@ namespace Legion {
     class LayoutConstraints;
     class ProjectionFunction;
     class ShardingFunction;
-    class Runtime;
-    // A small interface class for handling profiling responses
-    struct ProfilingResponseBase;
-    class ProfilingResponseHandler {
-    public:
-      virtual void handle_profiling_response(
-                const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response,
-                const void *orig, size_t orig_length) = 0;
-    };
-    struct ProfilingResponseBase {
-    public:
-      ProfilingResponseBase(ProfilingResponseHandler *h)
-        : handler(h) { }
-    public:
-      ProfilingResponseHandler *const handler;
-    };
+    class Runtime; 
 
     // legion_ops.h
     class Provenance;
@@ -2369,6 +2359,11 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern thread_local ::legion_unique_id_t implicit_provenance;
+    // Use this global variable to track name of the "finish event"
+    // for whatever (meta-)task we're running on at the moment.
+    // It should always be the case that the owner node of the
+    // "finish" event" is the same as the node we're on.
+    extern thread_local LgEvent implicit_fevent;
     // Use this to track if we're inside of a registration 
     // callback function which we know to be deduplicated
     enum RegistrationCallbackMode {
@@ -2909,11 +2904,13 @@ namespace Legion {
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
       inline void wait_faultaware(bool &poisoned, bool from_application) const;
+      inline bool is_barrier(void) const;
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
+      void record_event_trigger(LgEvent precondition) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3287,6 +3284,9 @@ namespace Legion {
       // Save the mapper call locally
       Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
       Internal::implicit_mapper_call = NULL;
+      // Save the implicit fevent
+      LgEvent local_fevent = Internal::implicit_fevent;
+      Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
       Internal::implicit_provenance = 0;
@@ -3311,6 +3311,17 @@ namespace Legion {
           end_context_wait(local_ctx, false/*from application*/);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (local_profiler != NULL)
+        {
+          // Make sure to restore this before recording
+          Internal::implicit_fevent = local_fevent;
+          Internal::implicit_profiler = local_profiler;
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
@@ -3331,6 +3342,8 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the mapper call back
       Internal::implicit_mapper_call = local_call;
+      // Write the implicit fevent back
+      Internal::implicit_fevent = local_fevent;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler
@@ -3356,7 +3369,6 @@ namespace Legion {
         return;
       if (has_triggered_faultaware(poisoned))
         return;
-      
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3381,6 +3393,9 @@ namespace Legion {
       // Save the mapper call locally
       Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
       Internal::implicit_mapper_call = NULL;
+      // Save the fevent
+      LgEvent local_fevent = Internal::implicit_fevent;
+      Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
       // Save the task provenance information
       UniqueID local_provenance = Internal::implicit_provenance;
       Internal::implicit_provenance = 0;
@@ -3405,6 +3420,17 @@ namespace Legion {
           end_context_wait(local_ctx, from_app);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (local_profiler != NULL)
+        {
+          // Make sure to restore this before recording
+          Internal::implicit_fevent = local_fevent;
+          Internal::implicit_profiler = local_profiler;
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
@@ -3425,6 +3451,8 @@ namespace Legion {
       Internal::implicit_context = local_ctx;
       // Write the mapper call back
       Internal::implicit_mapper_call = local_call;
+      // Write the implicit fevent back
+      Internal::implicit_fevent = local_fevent;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler
@@ -3440,6 +3468,14 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LgEvent::is_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+      const Realm::ID identity(id);
+      return identity.is_barrier();
     }
 
   }; // namespace Internal 

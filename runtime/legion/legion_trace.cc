@@ -7328,7 +7328,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!bar.exists());
 #endif
-      bar = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
+      bar = implicit_runtime->create_ap_barrier(total_arrivals); 
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -7944,8 +7944,8 @@ namespace Legion {
         assert(it->second.shards.back() == 0);
 #endif
         it->second.barrier.destroy_barrier();
-        it->second.barrier =
-          RtBarrier(Realm::Barrier::create_barrier(it->second.participants));
+        it->second.barrier = 
+          implicit_runtime->create_rt_barrier(it->second.participants);
       }
       return RtEvent::NO_RT_EVENT;
     }
@@ -8692,10 +8692,11 @@ namespace Legion {
       if (barrier_finder == managed_barriers.end())
       {
         // Make a new barrier and record it in the events
-        ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
+        ApBarrier barrier =
+          implicit_runtime->create_ap_barrier(1/*arrival count*/);
         // The first generation of each barrier should be triggered when
         // it is recorded in a barrier arrival instruction
-        Runtime::phase_barrier_arrive(barrier, 1/*count*/);
+        implicit_runtime->phase_barrier_arrive(barrier, 1/*count*/);
         // Record this in the instruction stream
 #ifdef DEBUG_LEGION
         const unsigned lhs = convert_event(barrier, false/*check*/);
@@ -8784,8 +8785,8 @@ namespace Legion {
       if (barrier_finder == local_frontiers.end())
       {
         // Make a barrier and record it 
-        const ApBarrier result(
-            Realm::Barrier::create_barrier(1/*arrival count*/));
+        const ApBarrier result =
+          implicit_runtime->create_ap_barrier(1/*arrival count*/);
         barrier_finder = local_frontiers.insert(
             std::make_pair(finder->second, result)).first;
       }
@@ -9316,8 +9317,8 @@ namespace Legion {
           for (std::map<unsigned,ApBarrier>::iterator it = 
                 local_frontiers.begin(); it != local_frontiers.end(); it++)
           {
-            const ApBarrier new_barrier(
-                Realm::Barrier::create_barrier(1/*arrival count*/));
+            const ApBarrier new_barrier =
+              implicit_runtime->create_ap_barrier(1/*arrival count*/);
 #ifdef DEBUG_LEGION
             assert(local_subscriptions.find(it->first) !=
                     local_subscriptions.end());
@@ -9410,7 +9411,7 @@ namespace Legion {
         for (std::map<unsigned,ApBarrier>::iterator it = 
               local_frontiers.begin(); it != local_frontiers.end(); it++)
         {
-          Runtime::phase_barrier_arrive(it->second, 1/*count*/, 
+          implicit_runtime->phase_barrier_arrive(it->second, 1/*count*/, 
                                         events[it->first]);
           if (advance_barriers)
             Runtime::advance_barrier(it->second);
@@ -9479,7 +9480,7 @@ namespace Legion {
         {
           it->second.barrier.destroy_barrier();
           it->second.barrier = 
-            RtBarrier(Realm::Barrier::create_barrier(it->second.participants));
+            implicit_runtime->create_rt_barrier(it->second.participants);
           for (unsigned idx = 1; idx < it->second.shards.size(); idx++)
           {
             ShardID shard = it->second.shards[idx];
@@ -10706,7 +10707,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
 #endif
-      Runtime::phase_barrier_arrive(barrier, total_arrivals, events[rhs]);
+      implicit_runtime->phase_barrier_arrive(
+          barrier, total_arrivals, events[rhs]);
       events[lhs] = barrier;
       if (managed)
         Runtime::advance_barrier(barrier);
@@ -10816,7 +10818,7 @@ namespace Legion {
       // Destroy the old barrier
       barrier.destroy_barrier();
       // Make the new barrier
-      barrier = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
+      barrier = implicit_runtime->create_ap_barrier(total_arrivals);
       for (std::vector<ShardID>::const_iterator it = 
             subscribed_shards.begin(); it != subscribed_shards.end(); it++)
         notifications[*it][key] = barrier;

@@ -124,19 +124,20 @@ namespace Legion {
       if (!replay)
         priority =
           op->add_copy_profiling_request(trace_info, requests, true/*fill*/);
-      if (forest->runtime->profiler != NULL)
-      {
-        SmallNameClosure<1> *closure = new SmallNameClosure<1>();
-        closure->record_instance_name(dst_fields.front().inst, unique_event);
-        forest->runtime->profiler->add_fill_request(requests, closure, 
-                                                    op, collective);
-      }
+      
       ApEvent fill_pre;
       if (pred_guard.exists())
         // No need for tracing to know about the precondition
         fill_pre = Runtime::merge_events(NULL,precondition,ApEvent(pred_guard));
       else
         fill_pre = precondition;
+      if (forest->runtime->profiler != NULL)
+      {
+        SmallNameClosure<1> *closure = new SmallNameClosure<1>();
+        closure->record_instance_name(dst_fields.front().inst, unique_event);
+        forest->runtime->profiler->add_fill_request(requests, closure, 
+                                                    op, fill_pre, collective);
+      }
       ApEvent result = ApEvent(space.fill(dst_fields, requests,
               fill_value, fill_size, fill_pre, priority));
       if (pred_guard.exists())
@@ -222,14 +223,6 @@ namespace Legion {
       if (!replay)
         priority =
           op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
-      if (forest->runtime->profiler != NULL)
-      {
-        SmallNameClosure<2> *closure = new SmallNameClosure<2>();
-        closure->record_instance_name(src_fields.front().inst, src_unique);
-        closure->record_instance_name(dst_fields.front().inst, dst_unique);
-        forest->runtime->profiler->add_copy_request(requests, closure,
-                                                    op, 1/*count*/, collective);
-      }
       ApEvent copy_pre;
       if (pred_guard.exists())
         copy_pre = Runtime::merge_events(NULL,precondition,ApEvent(pred_guard));
@@ -239,6 +232,14 @@ namespace Legion {
             reservations.begin(); it != reservations.end(); it++)
         copy_pre = Runtime::acquire_ap_reservation(*it, 
                                         true/*exclusive*/, copy_pre);
+      if (forest->runtime->profiler != NULL)
+      {
+        SmallNameClosure<2> *closure = new SmallNameClosure<2>();
+        closure->record_instance_name(src_fields.front().inst, src_unique);
+        closure->record_instance_name(dst_fields.front().inst, dst_unique);
+        forest->runtime->profiler->add_copy_request(requests, closure, op,
+            copy_pre, 1/*count*/, collective);
+      }
       ApEvent result = ApEvent(space.copy(src_fields, dst_fields, requests,
                                           copy_pre, priority));
       // Release any reservations after the copy is done
@@ -1600,7 +1601,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
-                      implicit_provenance, DEP_PART_UNION_REDUCTION);
+            implicit_provenance, DEP_PART_UNION_REDUCTION, precondition);
       this->realm_index_space_ready = ApEvent(
           Realm::IndexSpace<DIM,T>::compute_union(
               spaces, this->realm_index_space, requests, precondition));
@@ -1749,7 +1750,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if (ctx->runtime->profiler != NULL)
         ctx->runtime->profiler->add_partition_request(requests,
-                implicit_provenance, DEP_PART_INTERSECTION_REDUCTION);
+            implicit_provenance, DEP_PART_INTERSECTION_REDUCTION, precondition);
       this->realm_index_space_ready = ApEvent(
           Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, this->realm_index_space, requests, precondition));
@@ -1908,7 +1909,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (ctx->runtime->profiler != NULL)
           ctx->runtime->profiler->add_partition_request(requests,
-                                implicit_provenance, DEP_PART_DIFFERENCE);
+              implicit_provenance, DEP_PART_DIFFERENCE, precondition);
         this->realm_index_space_ready = ApEvent(
             Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
                               this->realm_index_space, requests, precondition));
@@ -2811,7 +2812,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
-                                        op, DEP_PART_UNION_REDUCTION);
+              op, DEP_PART_UNION_REDUCTION, precondition);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_union(
               spaces, result_space, requests, precondition));
         if (set_realm_index_space(result_space, result))
@@ -2823,7 +2824,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
-                                op, DEP_PART_INTERSECTION_REDUCTION);
+              op, DEP_PART_INTERSECTION_REDUCTION, precondition);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, result_space, requests, precondition));
         if (set_realm_index_space(result_space, result))
@@ -2876,7 +2877,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
-                                        op, DEP_PART_UNION_REDUCTION);
+              op, DEP_PART_UNION_REDUCTION, precondition);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_union(
               spaces, result_space, requests, precondition));
         if (set_realm_index_space(result_space, result))
@@ -2888,7 +2889,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
-                                op, DEP_PART_INTERSECTION_REDUCTION);
+              op, DEP_PART_INTERSECTION_REDUCTION, precondition);
         ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, result_space, requests, precondition));
         if (set_realm_index_space(result_space, result))
@@ -2939,12 +2940,8 @@ namespace Legion {
       Realm::ProfilingRequestSet union_requests;
       Realm::ProfilingRequestSet diff_requests;
       if (context->runtime->profiler != NULL)
-      {
         context->runtime->profiler->add_partition_request(union_requests,
-                                            op, DEP_PART_UNION_REDUCTION);
-        context->runtime->profiler->add_partition_request(diff_requests,
-                                            op, DEP_PART_DIFFERENCE);
-      }
+            op, DEP_PART_UNION_REDUCTION, precondition);
       // Compute the union of the handles for the right-hand side
       Realm::IndexSpace<DIM,T> rhs_space;
       ApEvent rhs_ready(Realm::IndexSpace<DIM,T>::compute_union(
@@ -2953,9 +2950,12 @@ namespace Legion {
         static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(init));
       Realm::IndexSpace<DIM,T> lhs_space, result_space;
       ApEvent lhs_ready = lhs_node->get_realm_index_space(lhs_space, false);
+      ApEvent diff_pre = Runtime::merge_events(NULL, lhs_ready, rhs_ready);
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(diff_requests,
+            op, DEP_PART_DIFFERENCE, diff_pre);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_difference(
-            lhs_space, rhs_space, result_space, diff_requests,
-            Runtime::merge_events(NULL, lhs_ready, rhs_ready)));
+            lhs_space, rhs_space, result_space, diff_requests, diff_pre));
       if (set_realm_index_space(result_space, result))
         assert(false); // should never hit this
       // Destroy the tempory rhs space once the computation is done
@@ -3339,15 +3339,15 @@ namespace Legion {
       {
         // Common case is not control replication
         std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-        Realm::ProfilingRequestSet requests;
-        if (context->runtime->profiler != NULL)
-          context->runtime->profiler->add_partition_request(requests,
-                                                  op, DEP_PART_EQUAL);
         Realm::IndexSpace<DIM,T> local_space;
         ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
         if (op->has_execution_fence_event())
           ready = Runtime::merge_events(NULL, ready, 
                     op->get_execution_fence_event());
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                                  op, DEP_PART_EQUAL, ready);
         ApEvent result(local_space.create_equal_subspaces(count, 
               granularity, subspaces, requests, ready));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -3395,7 +3395,7 @@ namespace Legion {
           Realm::ProfilingRequestSet requests;
           if (context->runtime->profiler != NULL)
             context->runtime->profiler->add_partition_request(requests,
-                                                    op, DEP_PART_EQUAL);
+                op, DEP_PART_EQUAL, local_ready);
           Realm::IndexSpace<DIM,T> subspace;
           ApEvent result(local_space.create_equal_subspace(count, 
             granularity, color_offset, subspace, requests, local_ready)); 
@@ -3448,14 +3448,14 @@ namespace Legion {
       }
       if (lhs_spaces.empty())
         return ApEvent::NO_AP_EVENT;
-      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                              op, DEP_PART_UNIONS);
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces; 
       if (op->has_execution_fence_event())
         preconditions.push_back(op->get_execution_fence_event());
       const ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_UNIONS, precondition);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_unions(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -3521,13 +3521,13 @@ namespace Legion {
       if (lhs_spaces.empty())
         return ApEvent::NO_AP_EVENT;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                        op, DEP_PART_INTERSECTIONS);
       if (op->has_execution_fence_event())
         preconditions.push_back(op->get_execution_fence_event());
       const ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_INTERSECTIONS, precondition);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -3596,10 +3596,6 @@ namespace Legion {
       }
       else
       {
-        Realm::ProfilingRequestSet requests;
-        if (context->runtime->profiler != NULL)
-          context->runtime->profiler->add_partition_request(requests,
-                                          op, DEP_PART_INTERSECTIONS);
         Realm::IndexSpace<DIM,T> lhs_space;
         ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
         if (left_ready.exists())
@@ -3607,6 +3603,10 @@ namespace Legion {
         if (op->has_execution_fence_event())
           preconditions.push_back(op->get_execution_fence_event());
         precondition = Runtime::merge_events(NULL, preconditions);
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+              op, DEP_PART_INTERSECTIONS, precondition);
         result = ApEvent(Realm::IndexSpace<DIM,T>::compute_intersections(
               lhs_space, rhs_spaces, subspaces, requests, precondition));  
       }
@@ -3674,13 +3674,13 @@ namespace Legion {
       if (lhs_spaces.empty())
         return ApEvent::NO_AP_EVENT;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                          op, DEP_PART_DIFFERENCES);
       if (op->has_execution_fence_event())
         preconditions.push_back(op->get_execution_fence_event());
       const ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_DIFFERENCES, precondition);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_differences(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -3892,7 +3892,7 @@ namespace Legion {
             Realm::ProfilingRequestSet requests;
             if (context->runtime->profiler != NULL)
               context->runtime->profiler->add_partition_request(requests,
-                                              op, DEP_PART_INTERSECTIONS);
+                  op, DEP_PART_INTERSECTIONS, parent_ready);
             Realm::IndexSpace<DIM,T> result;
             child_ready = ApEvent(
                 Realm::IndexSpace<DIM,T>::compute_intersection(
@@ -3983,15 +3983,15 @@ namespace Legion {
                                           color_space->handle.get_type_tag());
         }
       }
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                                op, DEP_PART_WEIGHTS);
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (op->has_execution_fence_event())
         ready = Runtime::merge_events(NULL, ready, 
                   op->get_execution_fence_event());
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_WEIGHTS, ready);
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       ApEvent result(weights.empty() ?
           local_space.create_weighted_subspaces(count,
@@ -4106,12 +4106,7 @@ namespace Legion {
         dst.index_space = src.domain;
         dst.inst = src.inst;
         dst.field_offset = fid;
-      }
-      // Get the profiling requests
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                            op, DEP_PART_BY_FIELD);
+      } 
       // Perform the operation
       Realm::IndexSpace<DIM,T> local_space;
       ApEvent parent_ready = get_realm_index_space(local_space, false/*tight*/);
@@ -4123,6 +4118,11 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.push_back(op->get_execution_fence_event());
       ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_BY_FIELD, precondition);
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       ApEvent result(local_space.create_subspaces_by_field(
             descriptors, colors, subspaces, requests, precondition));
@@ -4257,7 +4257,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
-                                              op, DEP_PART_BY_IMAGE);
+              op, DEP_PART_BY_IMAGE, precondition);
         Realm::IndexSpace<DIM1,T1> subspace;
         ApEvent result(local_space.create_subspace_by_image(descriptors,
               source, subspace, requests, precondition));
@@ -4377,7 +4377,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
-                                        op, DEP_PART_BY_IMAGE_RANGE);
+              op, DEP_PART_BY_IMAGE_RANGE, precondition);
         Realm::IndexSpace<DIM1,T1> subspace;
         ApEvent result(local_space.create_subspace_by_image(descriptors,
               source, subspace, requests, precondition));
@@ -4543,11 +4543,6 @@ namespace Legion {
         dst.inst = src.inst;
         dst.field_offset = fid;
       }
-      // Get the profiling requests
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                            op, DEP_PART_BY_PREIMAGE);
       // Perform the operation
       Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
@@ -4559,6 +4554,11 @@ namespace Legion {
         preconditions.push_back(op->get_execution_fence_event());
       std::vector<Realm::IndexSpace<DIM1,T1> > subspaces;
       ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_BY_PREIMAGE, precondition);
       ApEvent result(local_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests, precondition));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -4738,12 +4738,7 @@ namespace Legion {
         dst.index_space = src.domain;
         dst.inst = src.inst;
         dst.field_offset = fid;
-      }
-      // Get the profiling requests
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                    op, DEP_PART_BY_PREIMAGE_RANGE);
+      } 
       // Perform the operation
       Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
@@ -4755,6 +4750,11 @@ namespace Legion {
         preconditions.push_back(op->get_execution_fence_event());
       std::vector<Realm::IndexSpace<DIM1,T1> > subspaces;
       ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_BY_PREIMAGE_RANGE, precondition);
       ApEvent result(local_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests, precondition));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -4846,11 +4846,6 @@ namespace Legion {
       std::vector<ApEvent> preconditions;
       if (range_ready.exists())
         preconditions.push_back(range_ready);
-      // Get the profiling requests
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                          op, DEP_PART_ASSOCIATION);
       Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent local_ready = get_realm_index_space(local_space, false/*tight*/);
       if (local_ready.exists())
@@ -4861,6 +4856,11 @@ namespace Legion {
         preconditions.push_back(op->get_execution_fence_event());
       // Issue the operation
       ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+            op, DEP_PART_ASSOCIATION, precondition);
       ApEvent result(local_space.create_association(descriptors,
             range_space, requests, precondition));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -10050,9 +10050,7 @@ namespace Legion {
         individual_field_indexes.empty() ? 1 : individual_field_indexes.size();
       if (!replay)
         priority = op->add_copy_profiling_request(trace_info, requests,
-                                          false/*fill*/, total_copies);
-      if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, this, op, total_copies);
+                                          false/*fill*/, total_copies); 
       ApEvent copy_pre;
       if (pred_guard.exists())
         copy_pre =
@@ -10064,6 +10062,9 @@ namespace Legion {
             reservations.begin(); it != reservations.end(); it++)
         copy_pre = Runtime::acquire_ap_reservation(it->first, 
                                         it->second, copy_pre);
+      if (runtime->profiler != NULL)
+        runtime->profiler->add_copy_request(requests, this, op,
+            copy_pre, total_copies);
       if (!indirections.empty())
       {
         if (individual_field_indexes.empty())
@@ -10260,7 +10261,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_partition_request(requests, op, 
-                                    DEP_PART_BY_PREIMAGE_RANGE);
+                                    DEP_PART_BY_PREIMAGE_RANGE, precondition);
         result = ApEvent(copy_domain.create_subspaces_by_preimage(
               descriptors, targets, preimages, requests, precondition));
       }
@@ -10279,7 +10280,7 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         if (runtime->profiler != NULL)
           runtime->profiler->add_partition_request(requests, op, 
-                                          DEP_PART_BY_PREIMAGE);
+                                          DEP_PART_BY_PREIMAGE, precondition);
         result = ApEvent(copy_domain.create_subspaces_by_preimage(
               descriptors, targets, preimages, requests, precondition));
       }
