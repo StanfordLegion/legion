@@ -1213,7 +1213,7 @@ namespace Legion {
         ctx->report_unsafe_allocation_in_unbounded_pool(target_memory,
             Internal::MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       if (success && acquire)
-        ctx->record_acquired_instance(result.impl, true/*created*/);
+        ctx->record_acquired_instance(result.impl);
       return success;
     }
 
@@ -1263,7 +1263,7 @@ namespace Legion {
         ctx->report_unsafe_allocation_in_unbounded_pool(target_memory,
             Internal::MAPPER_CREATE_PHYSICAL_INSTANCE_CALL);
       if (success && acquire)
-        ctx->record_acquired_instance(result.impl, true/*created*/);
+        ctx->record_acquired_instance(result.impl);
       return success;
     }
 
@@ -1317,7 +1317,7 @@ namespace Legion {
         ctx->report_unsafe_allocation_in_unbounded_pool(target_memory,
             Internal::MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       if (success && acquire)
-        ctx->record_acquired_instance(result.impl, created);
+        ctx->record_acquired_instance(result.impl);
       return success;
     }
 
@@ -1372,7 +1372,7 @@ namespace Legion {
         ctx->report_unsafe_allocation_in_unbounded_pool(target_memory,
             Internal::MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
       if (success && acquire)
-        ctx->record_acquired_instance(result.impl, created);
+        ctx->record_acquired_instance(result.impl);
       return success;
     }
 
@@ -1400,7 +1400,7 @@ namespace Legion {
       bool success = runtime->find_physical_instance(target_memory, constraints,
                                  regions, result, acquire, tight_region_bounds);
       if (success && acquire)
-        ctx->record_acquired_instance(result.impl, false/*created*/);
+        ctx->record_acquired_instance(result.impl);
       return success;
     }
 
@@ -1430,7 +1430,7 @@ namespace Legion {
       bool success = runtime->find_physical_instance(target_memory, cons,
                           regions, result, acquire, tight_region_bounds);
       if (success && acquire)
-        ctx->record_acquired_instance(result.impl, false/*created*/);
+        ctx->record_acquired_instance(result.impl);
       return success;
     }
 
@@ -1461,7 +1461,7 @@ namespace Legion {
       if ((initial_size < results.size()) && acquire)
       {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
-          ctx->record_acquired_instance(results[idx].impl, false/*created*/);
+          ctx->record_acquired_instance(results[idx].impl);
       }
     }
 
@@ -1494,7 +1494,7 @@ namespace Legion {
       if ((initial_size < results.size()) && acquire)
       {
         for (unsigned idx = initial_size; idx < results.size(); idx++)
-          ctx->record_acquired_instance(results[idx].impl, false/*created*/);
+          ctx->record_acquired_instance(results[idx].impl);
       }
     }
 
@@ -1548,7 +1548,7 @@ namespace Legion {
       AutoMapperCall call(ctx, Internal::MAPPER_ACQUIRE_INSTANCE_CALL);
       if (manager->acquire_instance(Internal::MAPPING_ACQUIRE_REF))
       {
-        ctx->record_acquired_instance(manager, false/*created*/);
+        ctx->record_acquired_instance(manager);
         return true;
       }
       else
@@ -1828,6 +1828,80 @@ namespace Legion {
           Internal::Runtime::merge_events(wait_for);
         wait_on.wait();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::redistrict_instance(MapperContext ctx,
+        PhysicalInstance &instance, const LayoutConstraintSet &constraints,
+        const std::vector<LogicalRegion> &regions, bool acquire,
+        GCPriority priority, bool tight_region_bounds)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager() ||
+          instance.impl->is_external_instance())
+        return false;
+      if (regions.empty())
+        return false;
+      check_region_consistency(ctx, "redistrict_instance", regions);
+      if (ctx->operation == NULL)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+            "Ignoring request to redistrict_instance in unsupported mapper "
+            "call %s in mapper %s. Physical instances can only be redistricted "
+            "in mapper calls associated with a Mappable operation.",
+            ctx->get_mapper_call_name(), ctx->get_mapper_name());
+        return false;
+      }
+#ifdef DEBUG_LEGION
+      assert(ctx->acquired_instances != NULL);
+#endif
+      AutoMapperCall call(ctx, Internal::MAPPER_REDISTRICT_INSTANCE_CALL);
+      Internal::MemoryManager *manager = 
+        instance.impl->as_physical_manager()->memory_manager;
+      const bool success = manager->redistrict_physical_instance(instance,
+          constraints, regions, ctx->manager->processor, acquire, priority,
+          tight_region_bounds, ctx->operation->get_unique_op_id());
+      if (success && acquire)
+        ctx->record_acquired_instance(instance.impl);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::redistrict_instance(MapperContext ctx,
+        PhysicalInstance &instance, LayoutConstraintID layout_id,
+        const std::vector<LogicalRegion> &regions, bool acquire,
+        GCPriority priority, bool tight_region_bounds)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager() ||
+          instance.impl->is_external_instance())
+        return false;
+      if (regions.empty())
+        return false;
+      check_region_consistency(ctx, "redistrict_instance", regions);
+      if (ctx->operation == NULL)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+            "Ignoring request to redistrict_instance in unsupported mapper "
+            "call %s in mapper %s. Physical instances can only be redistricted "
+            "in mapper calls associated with a Mappable operation.",
+            ctx->get_mapper_call_name(), ctx->get_mapper_name());
+        return false;
+      }
+#ifdef DEBUG_LEGION
+      assert(ctx->acquired_instances != NULL);
+#endif
+      AutoMapperCall call(ctx, Internal::MAPPER_REDISTRICT_INSTANCE_CALL);
+      Internal::LayoutConstraints *cons = 
+        runtime->find_layout_constraints(layout_id);
+      Internal::MemoryManager *manager =
+        instance.impl->as_physical_manager()->memory_manager;
+      const bool success = manager->redistrict_physical_instance(instance,
+          cons, regions, ctx->manager->processor, acquire, priority,
+          tight_region_bounds, ctx->operation->get_unique_op_id());
+      if (success && acquire)
+        ctx->record_acquired_instance(instance.impl);
+      return success;
     }
 
     //--------------------------------------------------------------------------

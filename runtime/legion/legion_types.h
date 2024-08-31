@@ -1465,6 +1465,7 @@ namespace Legion {
       MAPPER_FILTER_INSTANCES_CALL,
       MAPPER_CREATE_PHYSICAL_INSTANCE_CALL,
       MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL,
+      MAPPER_REDISTRICT_INSTANCE_CALL,
       MAPPER_FIND_PHYSICAL_INSTANCE_CALL,
       MAPPER_FIND_PHYSICAL_INSTANCES_CALL,
       MAPPER_SET_GC_PRIORITY_CALL,
@@ -1695,6 +1696,7 @@ namespace Legion {
       "MapperRuntime::filter_instances",                              \
       "MapperRuntime::create_physical_instance",                      \
       "MapperRuntime::find_or_create_physical_instance",              \
+      "MapperRuntime::redistrict_instance",                           \
       "MapperRuntime::find_physical_instance",                        \
       "MapperRuntime::find_physical_instances",                       \
       "MapperRuntime::set_garbage_collection_priority",               \

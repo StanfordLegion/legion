@@ -58,8 +58,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MappingCallInfo::record_acquired_instance(InstanceManager *man,
-                                                   bool created)
+    void MappingCallInfo::record_acquired_instance(InstanceManager *man)
     //--------------------------------------------------------------------------
     {
       if (man->is_virtual_manager())

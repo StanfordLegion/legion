@@ -2297,6 +2297,25 @@ namespace Legion {
       void collect_instances(MapperContext ctx,
                              const std::vector<PhysicalInstance> &instances,
                              std::vector<bool> &collected) const;
+      // This method will attempt to redistrict an instance from one layout
+      // to another one, thereby reusing the memory associated with the first
+      // instance to create the new instance (thereby deleting the original 
+      // instance in the process). This will only be permitted if the original
+      // instance does not not contain any valid data and if the new layout
+      // fits within the footprint of the original instance. The runtime will
+      // return a boolean indicating whether the redistricting was successful.
+      // If the invocation is successful, the 'instance' will be overwritten
+      // with a handle to the new instance.
+      bool redistrict_instance(MapperContext ctx, PhysicalInstance &instance,
+                               const LayoutConstraintSet &constraints,
+                               const std::vector<LogicalRegion> &regions,
+                               bool acquire = true, GCPriority priority = 0,
+                               bool tight_region_bounds = false);
+      bool redistrict_instance(MapperContext ctx, PhysicalInstance &instance,
+                               LayoutConstraintID layout_id,
+                               const std::vector<LogicalRegion> &regions,
+                               bool acquire = true, GCPriority priority = 0,
+                               bool tight_region_bounds = false);
     public:
       // Futures can also be acquired to ensure that they are available in
       // particular memories prior to running a task.

@@ -1610,6 +1610,8 @@ namespace Legion {
         CREATE_INSTANCE_LAYOUT,
         FIND_OR_CREATE_CONSTRAINTS,
         FIND_OR_CREATE_LAYOUT,
+        REDISTRICT_INSTANCE_CONSTRAINTS,
+        REDISTRICT_INSTANCE_LAYOUT,
         FIND_ONLY_CONSTRAINTS,
         FIND_ONLY_LAYOUT,
         FIND_MANY_CONSTRAINTS,
@@ -1742,6 +1744,18 @@ namespace Legion {
                                     unsigned *unsat_index, size_t *footprint, 
                                     RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
+      bool redistrict_physical_instance(MappingInstance &instance,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id);
+      bool redistrict_physical_instance(MappingInstance &instance,
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire,
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,

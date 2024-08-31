@@ -10354,6 +10354,233 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MemoryManager::redistrict_physical_instance(MappingInstance &instance,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire,
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+#ifdef DEBUG_LEGION
+      assert(manager->memory_manager == this);
+#endif
+      if (!is_owner)
+      {
+        // Not the owner, send a meessage to the owner to request the redistrict
+        Serializer rez;
+        std::atomic<bool> success(false);
+        std::atomic<PhysicalManager*> remote_manager(NULL);
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(REDISTRICT_INSTANCE_CONSTRAINTS);
+          rez.serialize(ready_event);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          // No need to pack a reference, held by the MapppingInstance
+          rez.serialize(manager->did);
+          constraints.serialize(rez);
+          rez.serialize(processor);
+          rez.serialize(priority);
+          rez.serialize<bool>(tight_bounds);
+          rez.serialize(creator_id);
+          rez.serialize(&remote_manager);
+          rez.serialize(&success);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          instance = MappingInstance(manager);
+          manager->unpack_global_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
+          else
+            return true;
+        }
+        return success.load();
+      }
+      else
+      {
+        // Try to do the collection
+        // We don't need to get the allocation privileges here because 
+        // we're redistricting an existing instance
+        RtEvent collected;
+        PhysicalInstance hole = PhysicalInstance::NO_INST;
+        if (manager->collect(collected, &hole) && hole.exists())
+        {
+          // Create the builder and initialize it before getting
+          // the allocation privilege to avoid deadlock scenario
+          InstanceBuilder builder(regions,constraints,runtime,this,creator_id);
+          builder.initialize(runtime->forest);
+          size_t footprint = 0;
+          PhysicalManager *manager = builder.create_physical_instance(
+              runtime->forest, NULL/*unsat kind*/, NULL/*unset index*/,
+              &footprint, collected, hole);
+          if (manager != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(footprint <= manager->instance_footprint);
+#endif
+            if (runtime->legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
+            instance = MappingInstance(manager);
+            record_created_instance(manager, acquire, priority);
+            // Update the footprint if necessary
+            if (footprint < manager->instance_footprint)
+            {
+              const size_t diff = manager->instance_footprint - footprint;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const size_t previous =
+#endif
+#endif
+                remaining_capacity.fetch_add(diff);
+#ifdef DEBUG_LEGION
+              assert((previous + diff) <= capacity);
+#endif
+            }
+            return true;
+          }
+          else
+          {
+            // The previous instance was deleted but we didn't reallocate
+            // so we freed up all the space for it
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const size_t previous =
+#endif
+#endif
+              remaining_capacity.fetch_add(manager->instance_footprint);
+#ifdef DEBUG_LEGION
+            assert((previous + manager->instance_footprint) <= capacity);
+#endif
+          }
+        }
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::redistrict_physical_instance(MappingInstance &instance,
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire,
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+#ifdef DEBUG_LEGION
+      assert(manager->memory_manager == this);
+#endif
+      if (!is_owner)
+      {
+        // Not the owner, send a meessage to the owner to request the redistrict
+        Serializer rez;
+        std::atomic<bool> success(false);
+        std::atomic<PhysicalManager*> remote_manager(NULL);
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(REDISTRICT_INSTANCE_LAYOUT);
+          rez.serialize(ready_event);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          // No need to pack a reference, held by the MapppingInstance
+          rez.serialize(manager->did);
+          rez.serialize(constraints->layout_id);
+          rez.serialize(processor);
+          rez.serialize(priority);
+          rez.serialize<bool>(tight_bounds);
+          rez.serialize(creator_id);
+          rez.serialize(&remote_manager);
+          rez.serialize(&success);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          instance = MappingInstance(manager);
+          manager->unpack_global_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
+          else
+            return true;
+        }
+        return success.load();
+      }
+      else
+      {
+        // Try to do the collection
+        // We don't need to get the allocation privileges here because 
+        // we're redistricting an existing instance
+        RtEvent collected;
+        PhysicalInstance hole = PhysicalInstance::NO_INST;
+        PhysicalManager *manager = instance.impl->as_physical_manager();
+        if (manager->collect(collected, &hole) && hole.exists())
+        {
+          // Create the builder and initialize it before getting
+          // the allocation privilege to avoid deadlock scenario
+          InstanceBuilder builder(regions,*constraints,runtime,this,creator_id);
+          builder.initialize(runtime->forest);
+          size_t footprint = 0;
+          PhysicalManager *manager = builder.create_physical_instance(
+              runtime->forest, NULL/*unsat kind*/, NULL/*unset index*/,
+              &footprint, collected, hole);
+          if (manager != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(footprint <= manager->instance_footprint);
+#endif
+            if (runtime->legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
+            instance = MappingInstance(manager);
+            record_created_instance(manager, acquire, priority);
+            // Update the footprint if necessary
+            if (footprint < manager->instance_footprint)
+            {
+              const size_t diff = manager->instance_footprint - footprint;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const size_t previous =
+#endif
+#endif
+                remaining_capacity.fetch_add(diff);
+#ifdef DEBUG_LEGION
+              assert((previous + diff) <= capacity);
+#endif
+            }
+            return true;
+          }
+          else
+          {
+            // The previous instance was deleted but we didn't reallocate
+            // so we freed up all the space for it
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const size_t previous =
+#endif
+#endif
+              remaining_capacity.fetch_add(manager->instance_footprint);
+#ifdef DEBUG_LEGION
+            assert((previous + manager->instance_footprint) <= capacity);
+#endif
+          }
+        }
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool MemoryManager::find_physical_instance(
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
@@ -10966,6 +11193,114 @@ namespace Legion {
               Runtime::trigger_event(to_trigger);
             break;
           }
+        case REDISTRICT_INSTANCE_CONSTRAINTS:
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_instance_manager(did, ready);
+            LayoutConstraintSet constraints;
+            constraints.deserialize(derez);
+            Processor processor;
+            derez.deserialize(processor);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool tight_region_bounds;
+            derez.deserialize<bool>(tight_region_bounds);
+            UniqueID creator_id;
+            derez.deserialize(creator_id);
+            std::atomic<PhysicalManager*> *remote_target;
+            derez.deserialize(remote_target);
+            std::atomic<bool> *remote_success;
+            derez.deserialize(remote_success);
+            ready.wait();
+            MappingInstance result(manager);
+            bool success = redistrict_physical_instance(result, constraints,
+                regions, processor, false/*acquire*/, priority,
+                tight_region_bounds, creator_id);
+            if (success)
+            {
+              // Send back the response starting with the instance
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(kind);
+                rez.serialize<bool>(true);
+                InstanceManager *manager = result.impl;
+                manager->pack_global_ref();
+                rez.serialize(manager->did);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                // No things for us to pass back here
+                rez.serialize<LayoutConstraintKind*>(NULL);
+                rez.serialize<unsigned*>(NULL);
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<RtEvent*>(NULL);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we can just trigger the done event since we failed
+              Runtime::trigger_event(to_trigger);
+            break;
+          }
+        case REDISTRICT_INSTANCE_LAYOUT:
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_instance_manager(did, ready);
+            LayoutConstraintID layout_id;
+            derez.deserialize(layout_id);
+            Processor processor;
+            derez.deserialize(processor);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool tight_region_bounds;
+            derez.deserialize<bool>(tight_region_bounds);
+            UniqueID creator_id;
+            derez.deserialize(creator_id);
+            std::atomic<PhysicalManager*> *remote_target;
+            derez.deserialize(remote_target);
+            std::atomic<bool> *remote_success;
+            derez.deserialize(remote_success);
+            LayoutConstraints *constraints = 
+              runtime->find_layout_constraints(layout_id);
+            ready.wait();
+            MappingInstance result(manager);
+            bool success = redistrict_physical_instance(result, constraints,
+                regions, processor, false/*acquire*/, priority,
+                tight_region_bounds, creator_id);
+            if (success)
+            {
+              // Send back the response starting with the instance
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(kind);
+                rez.serialize<bool>(true);
+                InstanceManager *manager = result.impl;
+                manager->pack_global_ref();
+                rez.serialize(manager->did);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                // No things for us to pass back here
+                rez.serialize<LayoutConstraintKind*>(NULL);
+                rez.serialize<unsigned*>(NULL);
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<RtEvent*>(NULL);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we can just trigger the done event since we failed
+              Runtime::trigger_event(to_trigger);
+            break;
+          }
         case FIND_ONLY_CONSTRAINTS:
           {
             LayoutConstraintSet constraints; 
@@ -11160,7 +11495,9 @@ namespace Legion {
           target->store(manager);
         }
         if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
-            (kind == CREATE_INSTANCE_LAYOUT))
+            (kind == CREATE_INSTANCE_LAYOUT) ||
+            (kind == REDISTRICT_INSTANCE_CONSTRAINTS) ||
+            (kind == REDISTRICT_INSTANCE_LAYOUT))
         {
           std::atomic<bool> *remote_success;
           derez.deserialize(remote_success);

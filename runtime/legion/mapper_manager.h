@@ -413,7 +413,7 @@ namespace Legion {
       inline void report_unsafe_allocation_in_unbounded_pool(
           Memory m, RuntimeCallKind k)
         { manager->report_unsafe_allocation_in_unbounded_pool(this, m, k); }
-      void record_acquired_instance(InstanceManager *manager, bool created);
+      void record_acquired_instance(InstanceManager *manager);
       void release_acquired_instance(InstanceManager *manager);
       bool perform_acquires(
           const std::vector<MappingInstance> &instances,
