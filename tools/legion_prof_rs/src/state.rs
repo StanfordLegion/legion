@@ -3951,7 +3951,7 @@ impl State {
             }
         }
         // put copies into channels
-        for (fevent, copy) in copies.into_iter() {
+        for (fevent, copy) in copies {
             if !copy.copy_inst_infos.is_empty() {
                 let split = copy.split_by_channel(
                     &mut self.prof_uid_allocator,
@@ -3972,7 +3972,7 @@ impl State {
         }
         // for each prof task find it's creator and fill in the appropriate
         // creation and ready times
-        for (prof_uid, (creator_uid, completion)) in profs.into_iter() {
+        for (prof_uid, (creator_uid, completion)) in profs {
             let (create, ready) = self.find_prof_task_times(creator_uid, completion);
             let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
             let proc = self.procs.get_mut(&proc_id).unwrap();
