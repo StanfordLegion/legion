@@ -1412,6 +1412,11 @@ namespace Legion {
           // Only leaf tasks should map their reduction regions to instances
           if (chosen.is_leaf)
           {
+	    // check task layout constraints are valid before trying to
+	    // create instances for this region req
+	    check_valid_task_layout_constraints(task,ctx,
+		layout_constraints,target_proc, target_memory,
+		task.regions[idx], idx);
             size_t footprint;
             if (!default_create_custom_instances(ctx, target_proc,
                     target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1464,6 +1469,11 @@ namespace Legion {
           if (missing_fields[idx].empty())
             continue;
         }
+	// check task layout constraints are valid before trying to
+	// create instances for this region req
+	check_valid_task_layout_constraints(task,ctx,
+		    layout_constraints,target_proc, target_memory,
+		    task.regions[idx], idx);
         // Otherwise make normal instances for the given region
         size_t footprint;
         if (!default_create_custom_instances(ctx, target_proc,
@@ -2012,6 +2022,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::check_valid_task_layout_constraints(const Task &task,
+				    MapperContext ctx,
+				    const TaskLayoutConstraintSet &layout_constraints,
+				    const Processor target_proc, const Memory target_memory,
+				    const RegionRequirement &req, const unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // if we have reduce privileges on region requirements - check if the
+      // req.redop is same as that in 'specialized constraints'
+      if (req.privilege == LEGION_REDUCE)
+	{
+	  for (auto lay_it =
+	   layout_constraints.layouts.lower_bound(index); lay_it !=
+	   layout_constraints.layouts.upper_bound(index); lay_it++)
+	    {
+	      // Get the layout constraints from the task layout set
+	      const LayoutConstraintSet &index_constraints =
+		runtime->find_layout_constraints(ctx, lay_it->second);
+	      std::vector<FieldID> overlapping_fields;
+	      const std::vector<FieldID> &constraint_fields =
+		index_constraints.field_constraint.get_field_set();
+	      // check if there are any field constraints in the current task layout constraint
+	      if (!constraint_fields.empty()) {
+
+		for (FieldID fid: constraint_fields)
+		  {
+		    // check if the field is included in the privilege fields
+		    auto finder =  req.privilege_fields.find(fid);
+		    if (finder != req.privilege_fields.end()) {
+		      // check specialized constraint
+                      const SpecializedConstraint constraint(
+                          LEGION_AFFINE_REDUCTION_SPECIALIZE, req.redop); 
+                      if (index_constraints.specialized_constraint.conflicts(constraint))
+			{
+			  log_mapper.error("Default mapper failed allocation for "
+			   "region requirement %d of task %s (UID %lld) in memory "
+			   IDFMT " (%s) for processor " IDFMT " (%s). Mismatch between "
+			   "reduction type in task layout constraint "
+			   "and region requirement for FieldID (%u)",
+			   index,
+			   task.get_task_name(), task.get_unique_id(),
+			   target_memory.id, Utilities::to_string(target_memory.kind()),
+			   target_proc.id, Utilities::to_string(target_proc.kind()), fid);
+			  assert(false);
+			}
+		    }
+		  }
+	      }
+	    }
+	}
+    }
+
+    //--------------------------------------------------------------------------
     bool DefaultMapper::default_create_custom_instances(MapperContext ctx,
                           Processor target_proc, Memory target_memory,
                           const RegionRequirement &req, unsigned index,
@@ -2022,36 +2085,13 @@ namespace Legion {
                           size_t *footprint /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Special case for reduction instances, no point in checking
-      // for existing ones and we also know that currently we can only
-      // make a single instance for each field of a reduction
-      if (req.privilege == LEGION_REDUCE)
-      {
-        // Iterate over the fields one by one for now, once Realm figures
-        // out how to deal with reduction instances that contain
-        bool force_new_instances = true; // always have to force new instances
-        LayoutConstraintID our_layout_id =
-         default_policy_select_layout_constraints(ctx, target_memory, req,
-               TASK_MAPPING, needs_field_constraint_check, force_new_instances);
-        LayoutConstraintSet our_constraints =
-                      runtime->find_layout_constraints(ctx, our_layout_id);
-        instances.resize(instances.size() + req.privilege_fields.size());
-        unsigned idx = 0;
-        for (auto it =
-              req.privilege_fields.begin(); it !=
-              req.privilege_fields.end(); it++, idx++)
-        {
-          our_constraints.field_constraint.field_set.clear();
-          our_constraints.field_constraint.field_set.push_back(*it);
-          if (!default_make_instance(ctx, target_memory, our_constraints,
-                       instances[idx], TASK_MAPPING, force_new_instances,
-                       true/*meets*/, req, footprint))
-            return false;
-        }
-        return true;
-      }
-
       bool force_new_instances = false;
+      // include all the fields in the region req for reduce privileges
+      if (req.privilege == LEGION_REDUCE) {
+	force_new_instances = default_policy_select_reduction_instance_reuse(ctx) ? false: true;
+	needed_fields.clear();
+	needed_fields.insert(req.privilege_fields.begin(), req.privilege_fields.end());
+      }
       // preprocess all the task constraint sets
       // partition them into field/non-field constraint sets + fields
       std::vector<std::vector<FieldID> > field_arrays, leftover_fields;
@@ -2083,8 +2123,11 @@ namespace Legion {
       // case 2 - non-field constraints + needed fields not empty
       if((!non_field_layout_ids.empty()) && (!needed_fields.empty()))
       {
+	// all_fields_opt ->  creates an instance with all fields
+	// in a region requirement is not valid for region req with reduce privileges.
+	bool all_fields_opt = ((needed_fields.size() == needed_fields_size)
+			       && (req.privilege != LEGION_REDUCE)) ? true: false;
 	// we will process all the needed_fields and use one non-field layout set
-	bool all_fields_opt = (needed_fields.size() == needed_fields_size) ? true: false;
 	needed_fields.clear();
 	bool ok = create_instances_from_partitioned_task_layout_constraint_set(
 			   ctx,
@@ -2113,7 +2156,8 @@ namespace Legion {
 	runtime->find_layout_constraints(ctx, our_layout_id);
       LayoutConstraintSet creation_constraints = our_constraints;
       std::vector<FieldID> creation_fields;
-      if (needed_fields.size() != needed_fields_size)
+      // for reduce privileges disable adding all fields in the field space
+      if ((needed_fields.size() != needed_fields_size) || (req.privilege == LEGION_REDUCE))
 	default_policy_select_instance_fields(ctx, req, needed_fields,
 					      creation_fields);
       else
@@ -2256,12 +2300,17 @@ namespace Legion {
                                     bool &force_new_instances)
     //--------------------------------------------------------------------------
     {
-      // Do something special for reductions and
-      // it is not an explicit region-to-region copy
+      // We always set force_new_instances to false since we are
+      // deciding to optimize for minimizing memory usage instead
+      // of avoiding Write-After-Read (WAR) dependences
+      // for reduc privileges - we use the default policy
+      if (req.privilege == LEGION_REDUCE)
+	force_new_instances =
+	  default_policy_select_reduction_instance_reuse(ctx) ? false: true;
+      else
+	force_new_instances = false;
       if ((req.privilege == LEGION_REDUCE) && (mapping_kind != COPY_MAPPING))
       {
-        // Always make new reduction instances
-        force_new_instances = true;
         std::pair<Memory::Kind,ReductionOpID> constraint_key(
             target_memory.kind(), req.redop);
         std::map<std::pair<Memory::Kind,ReductionOpID>,LayoutConstraintID>::
@@ -2279,10 +2328,6 @@ namespace Legion {
         reduction_constraint_cache[constraint_key] = result;
         return result;
       }
-      // We always set force_new_instances to false since we are
-      // deciding to optimize for minimizing memory usage instead
-      // of avoiding Write-After-Read (WAR) dependences
-      force_new_instances = false;
       // See if we've already made a constraint set for this layout
       std::pair<Memory::Kind,FieldSpace> constraint_key(target_memory.kind(),
                                                req.region.get_field_space());
@@ -2433,8 +2478,7 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new ||
-          ((req.privilege == LEGION_REDUCE) && (kind != COPY_MAPPING))) {
+      if (force_new){
         if (!runtime->create_physical_instance(ctx, target_memory,
               constraints, target_regions, result, true/*acquire*/,
               0/*priority*/, tight_region_bounds, footprint))
@@ -2978,6 +3022,14 @@ namespace Legion {
     bool DefaultMapper::default_policy_select_close_virtual(
                           const MapperContext ctx,
                           const Close&        close)
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DefaultMapper::default_policy_select_reduction_instance_reuse(
+					       const MapperContext ctx)
     //--------------------------------------------------------------------------
     {
       return true;

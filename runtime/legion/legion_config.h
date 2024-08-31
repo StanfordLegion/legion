@@ -1420,6 +1420,7 @@ typedef enum legion_error_t {
   LEGION_FATAL_GARBAGE_COLLECTION_RACE = 2017,
   LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP = 2018,
   LEGION_FATAL_MORTON_TILING_FAILURE = 2019,
+  LEGION_FATAL_NO_CRITICAL_PATH_DYNAMIC_COLLECTIVES = 2020,
   
 }  legion_error_t;
 
@@ -1517,6 +1518,8 @@ typedef enum legion_region_flags_t {
   LEGION_COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
   // for indicating created output region requirements
   LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG = 0x00000020,
+  // Suppress warnings on this region requirement
+  LEGION_SUPPRESS_WARNINGS_FLAG = 0x00000040,
   // for backwards compatibility
   LEGION_DEPRECATED_ENUM(NO_FLAG)
   LEGION_DEPRECATED_ENUM(VERIFIED_FLAG)
@@ -2128,6 +2131,18 @@ typedef enum legion_domain_max_rect_dim_t {
 
 #undef LEGION_DEPRECATED_ENUM
 #undef LEGION_DEPRECATED_ENUM_FROM
+
+typedef enum legion_unbound_pool_scope_t {
+  // Bounded pool so other allocations always permitted in parallel
+  LEGION_BOUNDED_POOL,
+  // Nothing else is allowed to allocate in parallel
+  LEGION_STRICT_UNBOUNDED_POOL,
+  // Only tasks in the same index space task launch
+  // are allowed to allocate in parallel
+  LEGION_INDEX_TASK_UNBOUNDED_POOL,
+  // Anything else is allowed to allocate in parallel 
+  LEGION_PERMISSIVE_UNBOUNDED_POOL,
+} legion_unbounded_pool_scope_t;
 
 //==========================================================================
 //                                Types

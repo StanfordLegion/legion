@@ -1,6 +1,6 @@
 [package]
 name = "legion_prof"
-version = "0.2403.0"
+version = "0.2406.0"
 authors = ["Elliott Slaughter <slaughter@cs.stanford.edu>"]
 description = "Legion Prof: a profiler for Legion"
 documentation = "https://legion.stanford.edu/profiling"
@@ -15,28 +15,29 @@ edition = "2021"
 rust-version = "1.74"
 
 [features]
-default = []
+default = ["archiver", "client", "server", "viewer"]
 archiver = ["dep:legion_prof_viewer"]
-client = ["dep:legion_prof_viewer", "dep:url", "legion_prof_viewer?/client"]
+client = ["dep:legion_prof_viewer", "legion_prof_viewer?/client"]
 server = ["dep:legion_prof_viewer", "legion_prof_viewer?/server"]
 viewer = ["dep:legion_prof_viewer"]
 
 [dependencies]
 clap = { version = "4", features = ["cargo", "derive"] }
 csv = "1.1"
-derive_more = { version = "0.99", default_features = false, features = ["add", "display", "from"] }
+derive_more = { version = "0.99", default-features = false, features = ["add", "display", "from"] }
 flate2 = "1"
 nom = "7"
 num_enum = "0.7"
 rayon = "1.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-legion_prof_viewer = { version = "0.2.1", optional = true }
-url = { version = "2", optional = true }
+legion_prof_viewer = { version = "0.3.0", optional = true }
+url = { version = "2" }
 slice-group-by = "0.3" # because &[]::group_by is unstable
 log = "0.4"
 env_logger = "0.10"
 nonmax = { version = "0.5.5", features = ["serde"] }
+petgraph = "0.6.5"
 
 [profile.dev]
 opt-level = 2

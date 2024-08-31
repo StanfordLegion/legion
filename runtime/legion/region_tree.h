@@ -743,16 +743,11 @@ namespace Legion {
       RegionNode*     get_node(LogicalRegion handle, 
                                bool need_check = true, bool first = true);
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
-      RegionNode*     get_tree(RegionTreeID tid, bool first = true);
+      RegionNode*     get_tree(RegionTreeID tid, bool can_fail = false,
+                               bool first = true);
       // Request but don't block
       RtEvent find_or_request_node(IndexSpace space, AddressSpaceID target);
     public:
-      bool has_node(IndexSpace space);
-      bool has_node(IndexPartition part);
-      bool has_node(FieldSpace space);
-      bool has_node(LogicalRegion handle);
-      bool has_node(LogicalPartition handle);
-      bool has_tree(RegionTreeID tid);
       bool has_field(FieldSpace space, FieldID fid);
     public:
       void remove_node(IndexSpace space);
@@ -4476,7 +4471,6 @@ namespace Legion {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
-                                      const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
       void invalidate_logical_refinement(ContextID ctx, 

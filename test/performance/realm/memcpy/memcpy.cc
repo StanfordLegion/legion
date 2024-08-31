@@ -25,6 +25,7 @@
 using namespace Realm;
 
 const size_t MAX_DIM = 1;
+typedef size_t ElementType;
 
 typedef Realm::IndexSpace<MAX_DIM, int> CopyIndexSpace;
 
@@ -227,10 +228,9 @@ public:
   {
     graph.clear();
     Realm::Point<MAX_DIM> start_pnt(0);
-    Realm::Point<MAX_DIM> end_pnt(0);
-    end_pnt.x = size - 1;
+    Realm::Point<MAX_DIM> end_pnt(size - 1);
     CopyIndexSpace is(Realm::Rect<MAX_DIM>(start_pnt, end_pnt));
-    std::vector<size_t> fields(1, sizeof(size_t));
+    std::vector<size_t> fields(1, sizeof(ElementType));
 
     std::vector<Realm::RegionInstance> instances(memories_to_test.size());
     for (size_t i = 0; i < memories_to_test.size(); i++) {
@@ -244,7 +244,7 @@ public:
       for (size_t j = 0; j < memories_to_test.size(); j++) {
         std::vector<Realm::CopySrcDstField> srcs(1), dsts(1);
         if (i == j) {
-          srcs[0].set_fill<size_t>(0xABAB0000ULL + i);
+          srcs[0].set_fill<ElementType>(0);
         } else {
           srcs[0].set_field(instances[i], 0, fields[0]);
         }
@@ -275,10 +275,9 @@ public:
   {
     graph.clear();
     Realm::Point<MAX_DIM> start_pnt(0);
-    Realm::Point<MAX_DIM> end_pnt(0);
-    end_pnt.x = size - 1;
+    Realm::Point<MAX_DIM> end_pnt(size - 1);
     CopyIndexSpace is(Realm::Rect<MAX_DIM>(start_pnt, end_pnt));
-    std::vector<size_t> fields(1, sizeof(size_t));
+    std::vector<size_t> fields(1, sizeof(ElementType));
 
     std::vector<Realm::RegionInstance> instances;
 
@@ -295,11 +294,11 @@ public:
         instances.push_back(dst_inst);
         std::vector<Realm::CopySrcDstField> srcs(1), dsts(1);
         if (i == j) {
-          srcs[0].set_fill<size_t>(0xABAB0000ULL + i);
+          srcs[0].set_fill<ElementType>(0);
         } else {
-          srcs[0].set_field(instances[i], 0, fields[0]);
+          srcs[0].set_field(src_inst, 0, fields[0]);
         }
-        dsts[0].set_field(instances[j], 0, fields[0]);
+        dsts[0].set_field(dst_inst, 0, fields[0]);
         graph.emplace_back(is, dsts, srcs, memories_to_test[i]);
       }
     }
@@ -323,8 +322,8 @@ static void display_node_data(std::vector<CopyOperation> &graph)
       src = dst;
     }
     std::vector<Realm::Machine::MemoryMemoryAffinity> affinity;
-    if (Realm::Machine::get_machine().get_mem_mem_affinity(affinity, src,
-                                                           dst) == 0) {
+    if(Realm::Machine::get_machine().get_mem_mem_affinity(affinity, src, dst, false) ==
+       0) {
       Realm::Machine::MemoryMemoryAffinity fake_aff;
       fake_aff.m1 = src;
       fake_aff.m2 = dst;
@@ -540,8 +539,11 @@ static void bench_timing_task(const void *args, size_t arglen,
   }
   log_app.print("===================");
 
-  mq = mq.has_capacity(TestConfig::size * sizeof(size_t));
+  mq = mq.has_capacity(pow(TestConfig::size, MAX_DIM) * sizeof(ElementType));
   memories.assign(mq.begin(), mq.end());
+  if(memories.size() == 0) {
+    abort();
+  }
 
   TestGraphFactory *test_factory = nullptr;
   if (TestConfig::graph_type == 0) {

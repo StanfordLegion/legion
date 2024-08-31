@@ -116,6 +116,99 @@ namespace Realm {
                                const InstanceLayoutPieceBase *&nonaffine) = 0;
   };
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorBase<N,T>
+  //
+
+  template <int N, typename T>
+  class TransferIteratorBase : public TransferIterator {
+  protected:
+    TransferIteratorBase(void); // used by deserializer
+  public:
+    TransferIteratorBase(RegionInstanceImpl *_inst_impl, const int _dim_order[N]);
+
+    virtual Event request_metadata(void);
+
+    virtual void reset(void);
+    virtual bool done(void);
+    virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
+                        bool tentative = false);
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
+                               bool tentative = false);
+
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+    virtual size_t get_base_offset(void) const;
+
+    virtual bool get_addresses(AddressList &addrlist,
+                               const InstanceLayoutPieceBase *&nonaffine);
+
+  protected:
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize) = 0;
+
+    bool have_rect, is_done;
+    Rect<N, T> cur_rect;
+    FieldID cur_field_id;
+    size_t cur_field_offset, cur_field_size;
+    Point<N, T> cur_point, next_point;
+    bool carry;
+
+    RegionInstanceImpl *inst_impl;
+    // InstanceLayout<N, T> *inst_layout;
+    size_t inst_offset;
+    bool tentative_valid;
+    int dim_order[N];
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorIndexSpace<N,T>
+  //
+
+  template <int N, typename T>
+  class TransferIteratorIndexSpace : public TransferIteratorBase<N, T> {
+  protected:
+    TransferIteratorIndexSpace(void); // used by deserializer
+  public:
+    TransferIteratorIndexSpace(const IndexSpace<N, T> &_is,
+                               RegionInstanceImpl *_inst_impl, const int _dim_order[N],
+                               const std::vector<FieldID> &_fields,
+                               const std::vector<size_t> &_fld_offsets,
+                               const std::vector<size_t> &_fld_sizes,
+                               size_t _extra_elems);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S &deserializer);
+
+    virtual ~TransferIteratorIndexSpace(void);
+
+    virtual Event request_metadata(void);
+
+    virtual void reset(void);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator,
+                                                    TransferIteratorIndexSpace<N, T>>
+        serdez_subclass;
+
+    template <typename S>
+    bool serialize(S &serializer) const;
+
+  protected:
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize);
+
+    IndexSpace<N, T> is;
+    IndexSpaceIterator<N, T> iter;
+    bool iter_init_deferred;
+    std::vector<FieldID> fields;
+    std::vector<size_t> fld_offsets, fld_sizes;
+    size_t field_idx;
+    size_t extra_elems;
+  };
+
   class TransferDomain {
   protected:
     TransferDomain(void);
@@ -306,16 +399,14 @@ namespace Realm {
     virtual ~IndirectionInfo(void) {}
     virtual Event request_metadata(void) = 0;
 
-    virtual void generate_gather_paths(Memory dst_mem,
-				       TransferGraph::XDTemplate::IO dst_edge,
-				       unsigned indirect_idx,
-				       unsigned src_fld_start,
-				       unsigned src_fld_count,
-				       size_t bytes_per_element,
-				       CustomSerdezID serdez_id,
-				       std::vector<TransferGraph::XDTemplate>& xd_nodes,
-				       std::vector<TransferGraph::IBInfo>& ib_edges,
-				       std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+    virtual void
+    generate_gather_paths(const Node *node_info, Memory dst_mem,
+                          TransferGraph::XDTemplate::IO dst_edge, unsigned indirect_idx,
+                          unsigned src_fld_start, unsigned src_fld_count,
+                          size_t bytes_per_element, CustomSerdezID serdez_id,
+                          std::vector<TransferGraph::XDTemplate> &xd_nodes,
+                          std::vector<TransferGraph::IBInfo> &ib_edges,
+                          std::vector<TransferDesc::FieldInfo> &src_fields) = 0;
 
     virtual void generate_scatter_paths(Memory src_mem,
 					TransferGraph::XDTemplate::IO src_edge,
@@ -346,6 +437,96 @@ namespace Realm {
 
   std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
 
+  class IndirectionInfoBase : public IndirectionInfo {
+  public:
+    IndirectionInfoBase(bool _structured, FieldID _field_id, RegionInstance _inst,
+                        bool _is_ranges, bool _oor_possible, bool _aliasing_possible,
+                        size_t _subfield_offset, const std::vector<RegionInstance> _insts,
+                        Channel *_addrsplit_channel);
+
+  protected:
+    // most of the logic to generate unstructured gather/scatter paths is
+    // dimension-agnostic and we can define it in a base class to save
+    // compile time/code size ...
+    virtual void generate_gather_paths(const Node *nodes_info, Memory dst_mem,
+                                       TransferGraph::XDTemplate::IO dst_edge,
+                                       unsigned indirect_idx, unsigned src_fld_start,
+                                       unsigned src_fld_count, size_t bytes_per_element,
+                                       CustomSerdezID serdez_id,
+                                       std::vector<TransferGraph::XDTemplate> &xd_nodes,
+                                       std::vector<TransferGraph::IBInfo> &ib_edges,
+                                       std::vector<TransferDesc::FieldInfo> &src_fields);
+
+    virtual void generate_scatter_paths(Memory src_mem,
+                                        TransferGraph::XDTemplate::IO src_edge,
+                                        unsigned indirect_idx, unsigned dst_fld_start,
+                                        unsigned dst_fld_count, size_t bytes_per_element,
+                                        CustomSerdezID serdez_id,
+                                        std::vector<TransferGraph::XDTemplate> &xd_nodes,
+                                        std::vector<TransferGraph::IBInfo> &ib_edges,
+                                        std::vector<TransferDesc::FieldInfo> &src_fields);
+
+    // ... but we need three helpers that will be defined in the typed versions
+    virtual size_t num_spaces() const = 0;
+    virtual void populate_copy_info(ChannelCopyInfo &info) const = 0;
+    virtual size_t domain_size() const = 0;
+    virtual size_t address_size() const = 0;
+
+    virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const = 0;
+
+    bool structured;
+    FieldID field_id;
+    RegionInstance inst;
+    bool is_ranges;
+    bool oor_possible;
+    bool aliasing_possible;
+    size_t subfield_offset;
+    std::vector<RegionInstance> insts;
+    Channel *addrsplit_channel;
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IndirectionInfoTyped<N,T,N2,T2>
+  //
+
+  template <int N, typename T, int N2, typename T2>
+  class IndirectionInfoTyped : public IndirectionInfoBase {
+  public:
+    IndirectionInfoTyped(
+        const IndexSpace<N, T> &is,
+        const typename CopyIndirection<N, T>::template Unstructured<N2, T2> &ind,
+        Channel *_addr_split_channel);
+
+    virtual Event request_metadata(void);
+
+    virtual RegionInstance get_pointer_instance(void) const;
+
+    virtual const std::vector<RegionInstance> *get_instances(void) const;
+
+    virtual FieldID get_field(void) const;
+
+    virtual TransferIterator *create_address_iterator(RegionInstance peer) const;
+
+    virtual TransferIterator *create_indirect_iterator(
+        Memory addrs_mem, RegionInstance inst, const std::vector<FieldID> &fields,
+        const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
+        Channel *channel = nullptr) const;
+
+    virtual void print(std::ostream &os) const;
+
+  protected:
+    virtual size_t num_spaces() const;
+    virtual void populate_copy_info(ChannelCopyInfo &info) const;
+    virtual size_t domain_size() const;
+    virtual size_t address_size() const;
+
+    virtual XferDesFactory *create_addrsplit_factory(size_t bytes_per_element) const;
+
+    IndexSpace<N, T> domain;
+    std::vector<IndexSpace<N2, T2>> spaces;
+    Channel *addr_split_channel;
+  };
 
   // a TransferOperation is an application-requested copy/fill/reduce
   class TransferOperation : public Operation {

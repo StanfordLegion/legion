@@ -21,7 +21,7 @@ use nom::{
 use serde::Serialize;
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MapperID,
+    BacktraceID, EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, MapperCallKindID, MapperID,
     MemID, NodeID, OpID, ProcID, ProvenanceID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID,
     VariantID,
 };
@@ -29,6 +29,7 @@ use crate::state::{
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ValueFormat {
     Array,
+    BacktraceID,
     Bool,
     DepPartOpKind,
     IDType,
@@ -115,36 +116,48 @@ pub enum Record {
     IndexPartitionDesc { parent_id: ISpaceID, unique_id: IPartID, disjoint: bool, point0: u64 },
     IndexSpaceSizeDesc { ispace_id: ISpaceID, dense_size: u64, sparse_size: u64, is_sparse: bool },
     LogicalRegionDesc { ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID, name: String },
-    PhysicalInstRegionDesc { inst_uid: InstUID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
-    PhysicalInstLayoutDesc { inst_uid: InstUID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
-    PhysicalInstDimOrderDesc { inst_uid: InstUID, dim: u32, dim_kind: u32 },
-    PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
+    PhysicalInstRegionDesc { fevent: EventID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
+    PhysicalInstLayoutDesc { fevent: EventID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
+    PhysicalInstDimOrderDesc { fevent: EventID, dim: u32, dim_kind: u32 },
+    PhysicalInstanceUsage { fevent: EventID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
     OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: Option<ProvenanceID> },
     MultiTask { op_id: OpID, task_id: TaskID },
     SliceOwner { parent_id: UniqueID, op_id: OpID },
-    TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
-    MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp },
-    TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
-    GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, fevent: EventID },
-    MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
-    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID, collective: u32 },
-    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_hops: u32, indirect: bool },
-    FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID },
-    FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
-    InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
-    PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID },
+    TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
+    MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
+    TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID  },
+    ImplicitTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID  },
+    GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
+    MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
+    MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
+    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID, collective: u32 },
+    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: EventID, dst_inst: EventID, fevent: EventID, num_hops: u32, indirect: bool },
+    FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
+    FillInstInfo { dst: MemID, fid: FieldID, dst_inst: EventID, fevent: EventID },
+    InstTimelineInfo { fevent: EventID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
+    PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
     MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
     ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
-    ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID  },
+    ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID, completion: bool },
     CalibrationErr { calibration_err: i64 },
+    BacktraceDesc { backtrace_id: BacktraceID , backtrace: String },
+    EventWaitInfo { proc_id: ProcID, fevent: EventID, event: EventID, backtrace_id: BacktraceID },
+    EventMergerInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: EventID, pre1: EventID, pre2: EventID, pre3: EventID },
+    EventTriggerInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp },
+    EventPoisonInfo { result: EventID, fevent: EventID, performed: Timestamp },
+    BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp },
+    ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp, reservation: u64 },
+    CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: EventID, pre1: EventID, pre2: EventID, pre3: EventID },
+    InstanceReadyInfo { result: EventID, precondition: EventID, fevent: EventID, performed: Timestamp },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
     match name.as_str() {
         "array" => Some(ValueFormat::Array),
+        "BacktraceID" => Some(ValueFormat::BacktraceID),
         "bool" => Some(ValueFormat::Bool),
         "DepPartOpKind" => Some(ValueFormat::DepPartOpKind),
         "IDType" => Some(ValueFormat::IDType),
@@ -304,9 +317,6 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
     map(le_u64, EventID)(input)
 }
-fn parse_inst_uid(input: &[u8]) -> IResult<&[u8], InstUID> {
-    map(le_u64, InstUID)(input)
-}
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
     map(le_u64, InstID)(input)
 }
@@ -360,6 +370,9 @@ fn parse_timestamp(input: &[u8]) -> IResult<&[u8], Timestamp> {
 }
 fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
     map(le_u32, VariantID)(input)
+}
+fn parse_backtrace_id(input: &[u8]) -> IResult<&[u8], BacktraceID> {
+    map(le_u64, BacktraceID)(input)
 }
 
 ///
@@ -618,14 +631,14 @@ fn parse_logical_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Reco
     ))
 }
 fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, ispace_id) = parse_ispace_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, tree_id) = parse_tree_id(input)?;
     Ok((
         input,
         Record::PhysicalInstRegionDesc {
-            inst_uid,
+            fevent,
             ispace_id,
             fspace_id,
             tree_id,
@@ -633,7 +646,7 @@ fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     ))
 }
 fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, field_id) = parse_field_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, has_align) = parse_bool(input)?;
@@ -642,7 +655,7 @@ fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     Ok((
         input,
         Record::PhysicalInstLayoutDesc {
-            inst_uid,
+            fevent,
             field_id,
             fspace_id,
             has_align,
@@ -652,27 +665,27 @@ fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     ))
 }
 fn parse_physical_inst_layout_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, dim) = le_u32(input)?;
     let (input, dim_kind) = le_u32(input)?;
     Ok((
         input,
         Record::PhysicalInstDimOrderDesc {
-            inst_uid,
+            fevent,
             dim,
             dim_kind,
         },
     ))
 }
 fn parse_physical_inst_usage(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
     let (input, index_id) = le_u32(input)?;
     let (input, field_id) = parse_field_id(input)?;
     Ok((
         input,
         Record::PhysicalInstanceUsage {
-            inst_uid,
+            fevent,
             op_id,
             index_id,
             field_id,
@@ -737,6 +750,7 @@ fn parse_task_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, wait_start) = parse_timestamp(input)?;
     let (input, wait_ready) = parse_timestamp(input)?;
     let (input, wait_end) = parse_timestamp(input)?;
+    let (input, wait_event) = parse_event_id(input)?;
     Ok((
         input,
         Record::TaskWaitInfo {
@@ -746,6 +760,7 @@ fn parse_task_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             wait_start,
             wait_ready,
             wait_end,
+            wait_event,
         },
     ))
 }
@@ -755,6 +770,7 @@ fn parse_meta_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, wait_start) = parse_timestamp(input)?;
     let (input, wait_ready) = parse_timestamp(input)?;
     let (input, wait_end) = parse_timestamp(input)?;
+    let (input, wait_event) = parse_event_id(input)?;
     Ok((
         input,
         Record::MetaWaitInfo {
@@ -763,6 +779,7 @@ fn parse_meta_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             wait_start,
             wait_ready,
             wait_end,
+            wait_event,
         },
     ))
 }
@@ -776,6 +793,7 @@ fn parse_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -789,6 +807,36 @@ fn parse_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             start,
             stop,
             creator,
+            critical,
+            fevent,
+        },
+    ))
+}
+fn parse_implicit_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, op_id) = parse_op_id(input)?;
+    let (input, task_id) = parse_task_id(input)?;
+    let (input, variant_id) = parse_variant_id(input)?;
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, create) = parse_timestamp(input)?;
+    let (input, ready) = parse_timestamp(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::ImplicitTaskInfo {
+            op_id,
+            task_id,
+            variant_id,
+            proc_id,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            critical,
             fevent,
         },
     ))
@@ -805,6 +853,7 @@ fn parse_gpu_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, gpu_start) = parse_timestamp(input)?;
     let (input, gpu_stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -820,6 +869,7 @@ fn parse_gpu_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             gpu_start,
             gpu_stop,
             creator,
+            critical,
             fevent,
         },
     ))
@@ -833,6 +883,7 @@ fn parse_meta_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -845,6 +896,36 @@ fn parse_meta_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             start,
             stop,
             creator,
+            critical,
+            fevent,
+        },
+    ))
+}
+fn parse_message_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, op_id) = parse_op_id(input)?;
+    let (input, lg_id) = parse_variant_id(input)?;
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, spawn) = parse_timestamp(input)?;
+    let (input, create) = parse_timestamp(input)?;
+    let (input, ready) = parse_timestamp(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::MessageInfo {
+            op_id,
+            lg_id,
+            proc_id,
+            spawn,
+            create,
+            ready,
+            start,
+            stop,
+            creator,
+            critical,
             fevent,
         },
     ))
@@ -857,6 +938,7 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, collective) = le_u32(input)?;
     Ok((
@@ -869,6 +951,7 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             start,
             stop,
             creator,
+            critical,
             fevent,
             collective,
         },
@@ -879,8 +962,8 @@ fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, dst) = parse_mem_id(input)?;
     let (input, src_fid) = parse_field_id(input)?;
     let (input, dst_fid) = parse_field_id(input)?;
-    let (input, src_inst) = parse_inst_uid(input)?;
-    let (input, dst_inst) = parse_inst_uid(input)?;
+    let (input, src_inst) = parse_event_id(input)?;
+    let (input, dst_inst) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, num_hops) = le_u32(input)?;
     let (input, indirect) = parse_bool(input)?;
@@ -907,6 +990,7 @@ fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -918,6 +1002,7 @@ fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             start,
             stop,
             creator,
+            critical,
             fevent,
         },
     ))
@@ -925,7 +1010,7 @@ fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 fn parse_fill_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, dst) = parse_mem_id(input)?;
     let (input, fid) = parse_field_id(input)?;
-    let (input, dst_inst) = parse_inst_uid(input)?;
+    let (input, dst_inst) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -938,7 +1023,7 @@ fn parse_fill_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     ))
 }
 fn parse_inst_timeline(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     let (input, inst_id) = parse_inst_id(input)?;
     let (input, mem_id) = parse_mem_id(input)?;
     let (input, size) = le_u64(input)?;
@@ -950,7 +1035,7 @@ fn parse_inst_timeline(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     Ok((
         input,
         Record::InstTimelineInfo {
-            inst_uid,
+            fevent,
             inst_id,
             mem_id,
             size,
@@ -970,6 +1055,8 @@ fn parse_partition_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
+    let (input, critical) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
         Record::PartitionInfo {
@@ -980,6 +1067,8 @@ fn parse_partition_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             start,
             stop,
             creator,
+            critical,
+            fevent,
         },
     ))
 }
@@ -1060,6 +1149,7 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, stop) = parse_timestamp(input)?;
     let (input, creator) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
+    let (input, completion) = parse_bool(input)?;
     Ok((
         input,
         Record::ProfTaskInfo {
@@ -1069,6 +1159,150 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
             stop,
             creator,
             fevent,
+            completion,
+        },
+    ))
+}
+fn parse_backtrace_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, backtrace_id) = parse_backtrace_id(input)?;
+    let (input, backtrace) = parse_string(input)?;
+    Ok((
+        input,
+        Record::BacktraceDesc {
+            backtrace_id,
+            backtrace,
+        },
+    ))
+}
+fn parse_event_wait_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, proc_id) = parse_proc_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, event) = parse_event_id(input)?;
+    let (input, backtrace_id) = parse_backtrace_id(input)?;
+    Ok((
+        input,
+        Record::EventWaitInfo {
+            proc_id,
+            fevent,
+            event,
+            backtrace_id,
+        },
+    ))
+}
+fn parse_event_merger_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    let (input, pre0) = parse_event_id(input)?;
+    let (input, pre1) = parse_event_id(input)?;
+    let (input, pre2) = parse_event_id(input)?;
+    let (input, pre3) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::EventMergerInfo {
+            result,
+            fevent,
+            performed,
+            pre0,
+            pre1,
+            pre2,
+            pre3,
+        },
+    ))
+}
+fn parse_event_trigger_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, precondition) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    Ok((
+        input,
+        Record::EventTriggerInfo {
+            result,
+            fevent,
+            precondition,
+            performed,
+        },
+    ))
+}
+fn parse_event_poison_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    Ok((
+        input,
+        Record::EventPoisonInfo {
+            result,
+            fevent,
+            performed,
+        },
+    ))
+}
+fn parse_barrier_arrival_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, precondition) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    Ok((
+        input,
+        Record::BarrierArrivalInfo {
+            result,
+            fevent,
+            precondition,
+            performed,
+        },
+    ))
+}
+fn parse_reservation_acquire_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, precondition) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    let (input, reservation) = le_u64(input)?;
+    Ok((
+        input,
+        Record::ReservationAcquireInfo {
+            result,
+            fevent,
+            precondition,
+            performed,
+            reservation,
+        },
+    ))
+}
+fn parse_instance_ready_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, precondition) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    Ok((
+        input,
+        Record::InstanceReadyInfo {
+            result,
+            precondition,
+            fevent,
+            performed,
+        },
+    ))
+}
+fn parse_completion_queue_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    let (input, pre0) = parse_event_id(input)?;
+    let (input, pre1) = parse_event_id(input)?;
+    let (input, pre2) = parse_event_id(input)?;
+    let (input, pre3) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::CompletionQueueInfo {
+            result,
+            fevent,
+            performed,
+            pre0,
+            pre1,
+            pre2,
+            pre3,
         },
     ))
 }
@@ -1101,10 +1335,16 @@ fn filter_record<'a>(
         Record::TaskInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
+        Record::ImplicitTaskInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
         Record::GPUTaskInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
         Record::MetaInfo { proc_id, .. } => {
+            State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+        }
+        Record::MessageInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }
         Record::CopyInfo { .. } => true,
@@ -1205,7 +1445,9 @@ fn parse<'a>(
     parsers.insert(ids["MetaWaitInfo"], parse_meta_wait_info);
     parsers.insert(ids["TaskInfo"], parse_task_info);
     parsers.insert(ids["GPUTaskInfo"], parse_gpu_task_info);
+    parsers.insert(ids["ImplicitTaskInfo"], parse_implicit_info);
     parsers.insert(ids["MetaInfo"], parse_meta_info);
+    parsers.insert(ids["MessageInfo"], parse_message_info);
     parsers.insert(ids["CopyInfo"], parse_copy_info);
     parsers.insert(ids["CopyInstInfo"], parse_copy_inst_info);
     parsers.insert(ids["FillInfo"], parse_fill_info);
@@ -1216,6 +1458,18 @@ fn parse<'a>(
     parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
     parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
     parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
+    parsers.insert(ids["BacktraceDesc"], parse_backtrace_desc);
+    parsers.insert(ids["EventWaitInfo"], parse_event_wait_info);
+    parsers.insert(ids["EventMergerInfo"], parse_event_merger_info);
+    parsers.insert(ids["EventTriggerInfo"], parse_event_trigger_info);
+    parsers.insert(ids["EventPoisonInfo"], parse_event_poison_info);
+    parsers.insert(ids["BarrierArrivalInfo"], parse_barrier_arrival_info);
+    parsers.insert(
+        ids["ReservationAcquireInfo"],
+        parse_reservation_acquire_info,
+    );
+    parsers.insert(ids["InstanceReadyInfo"], parse_instance_ready_info);
+    parsers.insert(ids["CompletionQueueInfo"], parse_completion_queue_info);
 
     let mut input = input;
     let mut max_dim = -1;

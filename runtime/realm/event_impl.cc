@@ -2219,57 +2219,61 @@ static void *bytedup(const void *data, size_t datalen)
     // used to adjust a barrier's arrival count either up or down
     // if delta > 0, timestamp is current time (on requesting node)
     // if delta < 0, timestamp says which positive adjustment this arrival must wait for
-    void BarrierImpl::adjust_arrival(gen_t barrier_gen, int delta, 
-				     Barrier::timestamp_t timestamp, Event wait_on,
-				     NodeID sender, bool forwarded,
-				     const void *reduce_value, size_t reduce_value_size,
-				     TimeLimit work_until)
+    void BarrierImpl::adjust_arrival(gen_t barrier_gen, int delta,
+                                     Barrier::timestamp_t timestamp, Event wait_on,
+                                     NodeID sender, bool forwarded,
+                                     const void *reduce_value, size_t reduce_value_size,
+                                     TimeLimit work_until)
     {
       Barrier b = make_barrier(barrier_gen, timestamp);
       if(!wait_on.has_triggered()) {
-	// deferred arrival
+        // deferred arrival
 
-	// only forward deferred arrivals if the precondition is not one that looks like it'll
-	//  trigger here first
+        // only forward deferred arrivals if the precondition is not one that looks like
+        // it'll
+        //  trigger here first
         if(owner != Network::my_node_id) {
-	  ID wait_id(wait_on);
-	  int wait_node;
-	  if(wait_id.is_event())
-	    wait_node = wait_id.event_creator_node();
-	  else
-	    wait_node = wait_id.barrier_creator_node();
-	  if(wait_node != (int)Network::my_node_id) {
-	    // let deferral happen on owner node (saves latency if wait_on event
-	    //   gets triggered there)
-	    //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
-	    //       owner, e.id, e.gen, wait_on.id, wait_on.gen);
-	    log_barrier.info() << "forwarding deferred barrier arrival: delta=" << delta
-			       << " in=" << wait_on << " out=" << b << " (" << timestamp << ")";
-	    BarrierAdjustMessage::send_request(owner, b, delta, wait_on,
-					       sender, (sender != Network::my_node_id),
-					       reduce_value, reduce_value_size);
-	    return;
-	  }
-	}
+          ID wait_id(wait_on);
+          int wait_node;
+          if(wait_id.is_event())
+            wait_node = wait_id.event_creator_node();
+          else
+            wait_node = wait_id.barrier_creator_node();
+          if(wait_node != (int)Network::my_node_id) {
+            // let deferral happen on owner node (saves latency if wait_on event
+            //   gets triggered there)
+            // printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
+            //       owner, e.id, e.gen, wait_on.id, wait_on.gen);
+            log_barrier.info() << "forwarding deferred barrier arrival: delta=" << delta
+                               << " in=" << wait_on << " out=" << b << " (" << timestamp
+                               << ")";
+            BarrierAdjustMessage::send_request(owner, b, delta, wait_on, sender,
+                                               (sender != Network::my_node_id),
+                                               reduce_value, reduce_value_size);
+            return;
+          }
+        }
 
-	log_barrier.info() << "deferring barrier arrival: delta=" << delta << " in=" << wait_on
-			   << " out=" << b << " (" << timestamp << ")";
-	EventImpl::add_waiter(wait_on, new DeferredBarrierArrival(b, delta, 
-								  sender, forwarded,
-								  reduce_value, reduce_value_size));
-	return;
+        log_barrier.info() << "deferring barrier arrival: delta=" << delta
+                           << " in=" << wait_on << " out=" << b << " (" << timestamp
+                           << ")";
+        EventImpl::add_waiter(wait_on, new DeferredBarrierArrival(b, delta, sender,
+                                                                  forwarded, reduce_value,
+                                                                  reduce_value_size));
+        return;
       }
 
-      log_barrier.info() << "barrier adjustment: event=" << b
-			 << " delta=" << delta << " ts=" << timestamp;
+      log_barrier.info() << "barrier adjustment: event=" << b << " delta=" << delta
+                         << " ts=" << timestamp;
 
 #ifdef DEBUG_BARRIER_REDUCTIONS
       if(reduce_value_size) {
         char buffer[129];
-	for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
-	  snprintf(buffer+2*i, sizeof buffer - 2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
-	log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s",
-	                 me.id(), barrier_gen, reduce_value_size, buffer);
+        for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
+          snprintf(buffer + 2 * i, sizeof buffer - 2 * i, "%02x",
+                   ((const unsigned char *)reduce_value)[i]);
+        log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s",
+                         me.id(), barrier_gen, reduce_value_size, buffer);
       }
 #endif
 
@@ -2280,247 +2284,262 @@ static void *bytedup(const void *data, size_t datalen)
       std::vector<RemoteNotification> remote_notifications;
       gen_t oldest_previous = 0;
       void *final_values_copy = 0;
-      NodeID migration_target = (NodeID) -1;
-      NodeID forward_to_node = (NodeID) -1;
-      NodeID inform_migration = (NodeID) -1;
+      NodeID migration_target = (NodeID)-1;
+      NodeID forward_to_node = (NodeID)-1;
+      NodeID inform_migration = (NodeID)-1;
 
       do { // so we can use 'break' from the middle
-	AutoLock<> a(mutex);
+        AutoLock<> a(mutex);
 
-	bool generation_updated = false;
+        bool generation_updated = false;
 
-	// ownership can change, so check it inside the lock
-	if(owner != Network::my_node_id) {
-	  forward_to_node = owner;
-	  break;
-	} else {
-	  // if this message had to be forwarded to get here, tell the original sender we are the
-	  //  new owner
-	  if(forwarded && (sender != Network::my_node_id))
-	    inform_migration = sender;
-	}
+        // ownership can change, so check it inside the lock
+        if(owner != Network::my_node_id) {
+          forward_to_node = owner;
+          break;
+        } else {
+          // if this message had to be forwarded to get here, tell the original sender we
+          // are the
+          //  new owner
+          if(forwarded && (sender != Network::my_node_id))
+            inform_migration = sender;
+        }
 
-	// sanity checks - is this a valid barrier?
-	//assert(generation < free_generation);
-	assert(base_arrival_count > 0);
+        // sanity checks - is this a valid barrier?
+        // assert(generation < free_generation);
+        assert(base_arrival_count > 0);
 
-	// update whatever generation we're told to
-	{
-	  assert(barrier_gen > generation.load());
-	  Generation *g;
-	  std::map<gen_t, Generation *>::iterator it = generations.find(barrier_gen);
-	  if(it != generations.end()) {
-	    g = it->second;
-	  } else {
-	    g = new Generation;
-	    generations[barrier_gen] = g;
-	    log_barrier.info() << "added tracker for barrier " << me << ", generation " << barrier_gen;
-	  }
+        // update whatever generation we're told to
+        {
+          assert(barrier_gen > generation.load());
+          Generation *g;
+          std::map<gen_t, Generation *>::iterator it = generations.find(barrier_gen);
+          if(it != generations.end()) {
+            g = it->second;
+          } else {
+            g = new Generation;
+            generations[barrier_gen] = g;
+            log_barrier.info() << "added tracker for barrier " << me << ", generation "
+                               << barrier_gen;
+          }
 
-	  g->handle_adjustment(timestamp, delta);
-	}
+          g->handle_adjustment(timestamp, delta);
+        }
 
-	// if the update was to the next generation, it may cause one or more generations
-	//  to trigger
-	if(barrier_gen == (generation.load() + 1)) {
-	  std::map<gen_t, Generation *>::iterator it = generations.begin();
-	  while((it != generations.end()) &&
-		(it->first == (generation.load() + 1)) &&
-		((base_arrival_count + it->second->unguarded_delta) == 0)) {
-	    // keep the list of local waiters to wake up once we release the lock
-	    local_notifications.absorb_append(it->second->local_waiters);
-	    trigger_gen = it->first;
+        // if the update was to the next generation, it may cause one or more generations
+        //  to trigger
+        if(barrier_gen == (generation.load() + 1)) {
+          std::map<gen_t, Generation *>::iterator it = generations.begin();
+          while((it != generations.end()) && (it->first == (generation.load() + 1)) &&
+                ((base_arrival_count + it->second->unguarded_delta) == 0)) {
+            // keep the list of local waiters to wake up once we release the lock
+            local_notifications.absorb_append(it->second->local_waiters);
+            trigger_gen = it->first;
             generation.store_release(it->first);
-	    generation_updated = true;
+            generation_updated = true;
 
-	    delete it->second;
-	    generations.erase(it);
-	    it = generations.begin();
-	  }
+            delete it->second;
+            generations.erase(it);
+            it = generations.begin();
+          }
 
-	  // if any triggers occurred, figure out
+          // if any triggers occurred, figure out
           //  which remote nodes need notifications (i.e. any who subscribed)
-	  if(trigger_gen >= barrier_gen) {
-	    std::map<unsigned, gen_t>::iterator it = remote_subscribe_gens.begin();
-	    while(it != remote_subscribe_gens.end()) {
-	      RemoteNotification rn;
-	      rn.node = it->first;
-	      if(it->second <= trigger_gen) {
-		// we have fulfilled the entire subscription
-		rn.trigger_gen = it->second;
-		std::map<unsigned, gen_t>::iterator to_nuke = it++;
-		remote_subscribe_gens.erase(to_nuke);
-	      } else {
-		// subscription remains valid
-		rn.trigger_gen = trigger_gen;
-		++it;
-	      }
-	      // also figure out what the previous generation this node knew about was
-	      {
-		std::map<unsigned, gen_t>::iterator it2 = remote_trigger_gens.find(rn.node);
-		if(it2 != remote_trigger_gens.end()) {
-		  rn.previous_gen = it2->second;
-		  it2->second = rn.trigger_gen;
-		} else {
-		  rn.previous_gen = first_generation;
-		  remote_trigger_gens[rn.node] = rn.trigger_gen;
-		}
-	      }
-	      if(remote_notifications.empty() || (rn.previous_gen < oldest_previous))
-		oldest_previous = rn.previous_gen;
-	      remote_notifications.push_back(rn);
-	    }
-	  }
+          if(trigger_gen >= barrier_gen) {
+            std::map<unsigned, gen_t>::iterator it = remote_subscribe_gens.begin();
+            while(it != remote_subscribe_gens.end()) {
+              RemoteNotification rn;
+              rn.node = it->first;
+              if(it->second <= trigger_gen) {
+                // we have fulfilled the entire subscription
+                rn.trigger_gen = it->second;
+                std::map<unsigned, gen_t>::iterator to_nuke = it++;
+                remote_subscribe_gens.erase(to_nuke);
+              } else {
+                // subscription remains valid
+                rn.trigger_gen = trigger_gen;
+                ++it;
+              }
+              // also figure out what the previous generation this node knew about was
+              {
+                std::map<unsigned, gen_t>::iterator it2 =
+                    remote_trigger_gens.find(rn.node);
+                if(it2 != remote_trigger_gens.end()) {
+                  rn.previous_gen = it2->second;
+                  it2->second = rn.trigger_gen;
+                } else {
+                  rn.previous_gen = first_generation;
+                  remote_trigger_gens[rn.node] = rn.trigger_gen;
+                }
+              }
+              if(remote_notifications.empty() || (rn.previous_gen < oldest_previous))
+                oldest_previous = rn.previous_gen;
+              remote_notifications.push_back(rn);
+            }
+          }
 
 #ifndef DISABLE_BARRIER_MIGRATION
-	  // if there were zero local waiters and a single remote waiter, this barrier is an obvious
-	  //  candidate for migration
-          // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
-	  // also, do not migrate a barrier if we have any local involvement in future generations
-	  //  (either arrivals or waiters or a subscription that will become a waiter)
-	  // finally (hah!), do not migrate barriers using reduction ops
-	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
-	     generations.empty() && (gen_subscribed.load() <= generation.load()) &&
-	     (redop == 0) &&
+          // if there were zero local waiters and a single remote waiter, this barrier is
+          // an obvious
+          //  candidate for migration
+          // don't migrate a barrier more than once though (i.e. only if it's on the
+          // creator node still) also, do not migrate a barrier if we have any local
+          // involvement in future generations
+          //  (either arrivals or waiters or a subscription that will become a waiter)
+          // finally (hah!), do not migrate barriers using reduction ops
+          if(local_notifications.empty() && (remote_notifications.size() == 1) &&
+             generations.empty() && (gen_subscribed.load() <= generation.load()) &&
+             (redop == 0) &&
              (NodeID(ID(me).barrier_creator_node()) == Network::my_node_id)) {
-	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
-	    migration_target = remote_notifications[0].node;
-	    owner = migration_target;
-            // remember that we had up to date information up to this generation so that we don't try to
+            log_barrier.info() << "barrier migration: " << me << " -> "
+                               << remote_notifications[0].node;
+            migration_target = remote_notifications[0].node;
+            owner = migration_target;
+            // remember that we had up to date information up to this generation so that
+            // we don't try to
             //   subscribe to things we already know about
             gen_subscribed.store(generation.load());
-	  }
+          }
 #endif
-	}
+        }
 
-	// do we have reduction data to apply?  we can do this even if the actual adjustment is
-	//  being held - no need to have lots of reduce values lying around
-	if(reduce_value_size > 0) {
-	  assert(redop != 0);
-	  assert(redop->sizeof_rhs == reduce_value_size);
+        // do we have reduction data to apply?  we can do this even if the actual
+        // adjustment is
+        //  being held - no need to have lots of reduce values lying around
+        if(reduce_value_size > 0) {
+          assert(redop != 0);
+          assert(redop->sizeof_rhs == reduce_value_size);
 
-	  // do we have space for this reduction result yet?
-	  int rel_gen = barrier_gen - first_generation;
-	  assert(rel_gen > 0);
+          // do we have space for this reduction result yet?
+          int rel_gen = barrier_gen - first_generation;
+          assert(rel_gen > 0);
 
-	  if((size_t)rel_gen > value_capacity) {
-	    size_t new_capacity = rel_gen;
-	    final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
-	    while(value_capacity < new_capacity) {
-	      memcpy(final_values + (value_capacity * redop->sizeof_lhs), initial_value, redop->sizeof_lhs);
-	      value_capacity += 1;
-	    }
-	  }
+          if((size_t)rel_gen > value_capacity) {
+            size_t new_capacity = rel_gen;
+            final_values =
+                (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
+            while(value_capacity < new_capacity) {
+              memcpy(final_values + (value_capacity * redop->sizeof_lhs), initial_value,
+                     redop->sizeof_lhs);
+              value_capacity += 1;
+            }
+          }
 
-	  (redop->cpu_apply_excl_fn)(final_values + ((rel_gen - 1) * redop->sizeof_lhs), 0, reduce_value, 0, 1, redop->userdata);
-	}
+          (redop->cpu_apply_excl_fn)(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
+                                     0, reduce_value, 0, 1, redop->userdata);
+        }
 
-	// do this AFTER we actually update the reduction value above :)
-	// if any remote notifications are going to occur and we have reduction values, make a copy so
-	//  we have something stable after we let go of the lock
-	if(trigger_gen && redop) {
-	  int rel_gen = oldest_previous + 1 - first_generation;
-	  assert(rel_gen > 0);
-	  int count = trigger_gen - oldest_previous;
-	  final_values_copy = bytedup(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
-				      count * redop->sizeof_lhs);
-	}
+        // do this AFTER we actually update the reduction value above :)
+        // if any remote notifications are going to occur and we have reduction values,
+        // make a copy so
+        //  we have something stable after we let go of the lock
+        if(trigger_gen && redop) {
+          int rel_gen = oldest_previous + 1 - first_generation;
+          assert(rel_gen > 0);
+          int count = trigger_gen - oldest_previous;
+          final_values_copy = bytedup(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
+                                      count * redop->sizeof_lhs);
+        }
 
-	// external waiters need to be signalled inside the lock
-	if(generation_updated && has_external_waiters) {
-	  has_external_waiters = false;
+        // external waiters need to be signalled inside the lock
+        if(generation_updated && has_external_waiters) {
+          has_external_waiters = false;
           // also need external waiter mutex
           AutoLock<KernelMutex> al2(external_waiter_mutex);
-	  external_waiter_condvar.broadcast();
-	}
+          external_waiter_condvar.broadcast();
+        }
       } while(0);
 
-      if(forward_to_node != (NodeID) -1) {
-	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
-					   sender, (sender != Network::my_node_id),
-					   reduce_value, reduce_value_size);
-	return;
+      if(forward_to_node != (NodeID)-1) {
+        Barrier b = make_barrier(barrier_gen, timestamp);
+        BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
+                                           sender, (sender != Network::my_node_id),
+                                           reduce_value, reduce_value_size);
+        return;
       }
 
-      if(inform_migration != (NodeID) -1) {
-	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierMigrationMessage::send_request(inform_migration, b, Network::my_node_id);
+      if(inform_migration != (NodeID)-1) {
+        Barrier b = make_barrier(barrier_gen, timestamp);
+        BarrierMigrationMessage::send_request(inform_migration, b, Network::my_node_id);
       }
 
       if(trigger_gen != 0) {
-	log_barrier.info() << "barrier trigger: event=" << me << "/" << trigger_gen;
+        log_barrier.info() << "barrier trigger: event=" << me << "/" << trigger_gen;
 
-	// notify local waiters first
-	if(!local_notifications.empty())
-	  get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
-							       POISON_FIXME,
-							       work_until);
+        // notify local waiters first
+        if(!local_notifications.empty())
+          get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
+                                                               POISON_FIXME, work_until);
 
-	// now do remote notifications
-	for(std::vector<RemoteNotification>::const_iterator it = remote_notifications.begin();
-	    it != remote_notifications.end();
-	    it++) {
-	  // normally we'll just send a remote waiter data up to the
-	  //  generation they asked for - the exception is the target of a
-	  //  migration, who must get up to date data
-	  gen_t tgt_trigger_gen = (*it).trigger_gen;
-	  if((*it).node == migration_target)
-	    tgt_trigger_gen = trigger_gen;
-	  log_barrier.info() << "sending remote trigger notification: " << me << "/"
-			     << (*it).previous_gen << " -> " << tgt_trigger_gen << ", dest=" << (*it).node;
-	  void *data = 0;
-	  size_t datalen = 0;
-	  if(final_values_copy) {
-	    data = (char *)final_values_copy + (((*it).previous_gen - oldest_previous) * redop->sizeof_lhs);
-	    datalen = (tgt_trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
-	  }
-	  BarrierTriggerMessage::send_request((*it).node, me.id, tgt_trigger_gen, (*it).previous_gen,
-					      first_generation, redop_id, migration_target, base_arrival_count,
-					      data, datalen);
-	}
+        // now do remote notifications
+        for(std::vector<RemoteNotification>::const_iterator it =
+                remote_notifications.begin();
+            it != remote_notifications.end(); it++) {
+          // normally we'll just send a remote waiter data up to the
+          //  generation they asked for - the exception is the target of a
+          //  migration, who must get up to date data
+          gen_t tgt_trigger_gen = (*it).trigger_gen;
+          if((*it).node == migration_target)
+            tgt_trigger_gen = trigger_gen;
+          log_barrier.info() << "sending remote trigger notification: " << me << "/"
+                             << (*it).previous_gen << " -> " << tgt_trigger_gen
+                             << ", dest=" << (*it).node;
+          void *data = 0;
+          size_t datalen = 0;
+          if(final_values_copy) {
+            data = (char *)final_values_copy +
+                   (((*it).previous_gen - oldest_previous) * redop->sizeof_lhs);
+            datalen = (tgt_trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
+          }
+          BarrierTriggerMessage::send_request(
+              (*it).node, me.id, tgt_trigger_gen, (*it).previous_gen, first_generation,
+              redop_id, migration_target, base_arrival_count, data, datalen);
+        }
       }
 
       // free our copy of the final values, if we had one
       if(final_values_copy)
-	free(final_values_copy);
+        free(final_values_copy);
     }
 
-    bool BarrierImpl::has_triggered(gen_t needed_gen, bool& poisoned)
+    bool BarrierImpl::has_triggered(gen_t needed_gen, bool &poisoned)
     {
       poisoned = POISON_FIXME;
 
       // no need to take lock to check current generation
-      if(needed_gen <= generation.load_acquire()) return true;
+      if(needed_gen <= generation.load_acquire())
+        return true;
 
 #ifdef BARRIER_HAS_TRIGGERED_DOES_SUBSCRIBE
       // update the subscription (even on the local node), but do a
       //  quick test first to avoid taking a lock if the subscription is
       //  clearly already done
       if(needed_gen > gen_subscribed.load()) {
-	// looks like it needs an update - take lock to avoid duplicate
-	//  subscriptions
-	gen_t previous_subscription;
-	bool send_subscription_request = false;
-        NodeID cur_owner = (NodeID) -1;
-	{
-	  AutoLock<> a(mutex);
-	  previous_subscription = gen_subscribed.load();
-	  if(needed_gen > previous_subscription) {
-	    gen_subscribed.store(needed_gen);
-	    // test ownership while holding the mutex
-	    if(owner != Network::my_node_id) {
-	      send_subscription_request = true;
+        // looks like it needs an update - take lock to avoid duplicate
+        //  subscriptions
+        gen_t previous_subscription;
+        bool send_subscription_request = false;
+        NodeID cur_owner = (NodeID)-1;
+        {
+          AutoLock<> a(mutex);
+          previous_subscription = gen_subscribed.load();
+          if(needed_gen > previous_subscription) {
+            gen_subscribed.store(needed_gen);
+            // test ownership while holding the mutex
+            if(owner != Network::my_node_id) {
+              send_subscription_request = true;
               cur_owner = owner;
             }
-	  }
-	}
+          }
+        }
 
-	// if we're not the owner, send subscription if we haven't already
-	if(send_subscription_request) {
-	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
-	  BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen, Network::my_node_id, false/*!forwarded*/);
-	}
+        // if we're not the owner, send subscription if we haven't already
+        if(send_subscription_request) {
+          log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen)
+                             << " (prev=" << previous_subscription << ")";
+          BarrierSubscribeMessage::send_request(
+              cur_owner, me.id, needed_gen, Network::my_node_id, false /*!forwarded*/);
+        }
       }
 #endif
 
@@ -2534,32 +2553,34 @@ static void *bytedup(const void *data, size_t datalen)
       //  quick test first to avoid taking a lock if the subscription is
       //  clearly already done
       if(subscribe_gen > gen_subscribed.load()) {
-	// looks like it needs an update - take lock to avoid duplicate
-	//  subscriptions
-	gen_t previous_subscription;
-	bool send_subscription_request = false;
-        NodeID cur_owner = (NodeID) -1;
-	{
-	  AutoLock<> a(mutex);
-	  previous_subscription = gen_subscribed.load();
-	  if(previous_subscription < subscribe_gen) {
-	    gen_subscribed.store(subscribe_gen);
-	    // test ownership while holding the mutex
-	    if(owner != Network::my_node_id) {
-	      send_subscription_request = true;
+        // looks like it needs an update - take lock to avoid duplicate
+        //  subscriptions
+        gen_t previous_subscription;
+        bool send_subscription_request = false;
+        NodeID cur_owner = (NodeID)-1;
+        {
+          AutoLock<> a(mutex);
+          previous_subscription = gen_subscribed.load();
+          if(previous_subscription < subscribe_gen) {
+            gen_subscribed.store(subscribe_gen);
+            // test ownership while holding the mutex
+            if(owner != Network::my_node_id) {
+              send_subscription_request = true;
               cur_owner = owner;
             }
-	  }
-	}
+          }
+        }
 
-	// if we're not the owner, send subscription if we haven't already
-	if(send_subscription_request) {
-	  log_barrier.info() << "subscribing to barrier " << make_barrier(subscribe_gen) << " (prev=" << previous_subscription << ")";
-	  BarrierSubscribeMessage::send_request(cur_owner, me.id, subscribe_gen, Network::my_node_id, false/*!forwarded*/);
-	}
+        // if we're not the owner, send subscription if we haven't already
+        if(send_subscription_request) {
+          log_barrier.info() << "subscribing to barrier " << make_barrier(subscribe_gen)
+                             << " (prev=" << previous_subscription << ")";
+          BarrierSubscribeMessage::send_request(
+              cur_owner, me.id, subscribe_gen, Network::my_node_id, false /*!forwarded*/);
+        }
       }
     }
-  
+
     void BarrierImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
       poisoned = POISON_FIXME;
@@ -2888,20 +2909,23 @@ static void *bytedup(const void *data, size_t datalen)
 	    // no need to initialize new entries - we'll overwrite them now or when data does show up
 	    impl->value_capacity = new_capacity;
 	  }
-	  assert(datalen == (impl->redop->sizeof_lhs * (trigger_gen - args.previous_gen)));
-	  assert(args.previous_gen >= impl->first_generation);
-	  memcpy(impl->final_values + ((args.previous_gen -
-					impl->first_generation) * impl->redop->sizeof_lhs),
-		 data, datalen);
-	}
+          assert(args.trigger_gen <= trigger_gen);
+          // trigger_gen might have changed so make sure you use args.trigger_gen here
+          assert(datalen ==
+                 (impl->redop->sizeof_lhs * (args.trigger_gen - args.previous_gen)));
+          assert(args.previous_gen >= impl->first_generation);
+          memcpy(impl->final_values + ((args.previous_gen - impl->first_generation) *
+                                       impl->redop->sizeof_lhs),
+                 data, datalen);
+        }
 
-	// external waiters need to be signalled inside the lock
-	if(generation_updated && impl->has_external_waiters) {
-	  impl->has_external_waiters = false;
+        // external waiters need to be signalled inside the lock
+        if(generation_updated && impl->has_external_waiters) {
+          impl->has_external_waiters = false;
           // also need external waiter mutex
           AutoLock<KernelMutex> al2(impl->external_waiter_mutex);
 	  impl->external_waiter_condvar.broadcast();
-	}
+        }
       }
 
       // with lock released, perform any local notifications

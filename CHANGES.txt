@@ -1,6 +1,54 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 24.09.0 (September ??, 2024)
+  * Tools
+    - Legion Prof now uses subcommands (e.g., `legion_prof view`) to clarify
+       which options apply to which actions
+    - Legion Prof now tracks backtraces at the points where blocking wait
+       calls are performed by the application
+    - Legion Prof reports more detailed timing information for tasks
+    - Legion Prof calculates clock skew between nodes and reports it when
+       relevant
+    - Commonly used features of Legion Prof are now enabled by default
+    - The old Python Legion Prof implementation is no longer supported
+  * Realm
+    - `Point` fields `x`, `y`, `z` and `w` have been replaced by methods
+
+Version 24.06.0 (June 28, 2024)
+  * Build
+    - Minimum required C++ standard is now 17
+    - Embedded GASNet build in CMake now automatically enables GPU memory kinds
+  * Legion
+    - Support for nonidempotent traces (where the postconditions do
+       not imply the preconditions of the trace)
+    - Deletions are now committed in program order, making it easier for
+       users to reason about when their effects take place
+    - All tasks (and other operations) are now committed in order (a
+       prerequisite for anticipated, but not yet implemented, precise
+       exception support)
+    - Improvements to Legion's internal algorithm for virtual
+       instances, fixing various correctness bugs in the implementation
+    - Improvements to the `DefaultMapper` handling of task layout constraints
+  * Regent
+    - Improvements to make compiler more deterministic
+    - Improvements to auto-detect CUDA
+    - Support for complex numbers in `std/format`
+    - Static control replication (SCR) and RDIR have been completely
+       removed. All SCR and RDIR related flags (`-fflow-*`) have been
+       removed, except for `-fflow 0` which is permitted (but no
+       longer does anything, and now issues a warning)
+  * Tools
+    - Restore profiler's ability to render dependent partitioning channels
+    - Render mapper information on mapper calls in the profiler
+    - Render user-provided profiling information in the profiler
+  * Realm
+    - UVM support for the HIP module
+    - Error code support for command line parser
+    - Support for querying MIG devices from NVML
+    - Add indirection channel query
+    - Additional unit tests and bug fixes
+
 Version 24.03.0 (March 27, 2024)
   * Build
     - ROCm 6.0 is now supported, and support for ROCm 4.x has been removed
