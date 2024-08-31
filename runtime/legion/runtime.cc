@@ -13424,6 +13424,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
+                                               TaskLocalInstanceAllocator &&rhs)
+      : ready(rhs.ready), unique_event(rhs.unique_event), success(rhs.success)
+    //--------------------------------------------------------------------------
+    {
+      rhs.ready = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     bool MemoryManager::TaskLocalInstanceAllocator::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length,

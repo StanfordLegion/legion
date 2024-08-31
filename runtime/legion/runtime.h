@@ -1621,10 +1621,16 @@ namespace Legion {
     public:
       class TaskLocalInstanceAllocator : public ProfilingResponseHandler {
       public:
-        TaskLocalInstanceAllocator(void) { }
+        TaskLocalInstanceAllocator(void) = default;
         TaskLocalInstanceAllocator(LgEvent unique_event);
-        TaskLocalInstanceAllocator(TaskLocalInstanceAllocator&&) = default;
+        TaskLocalInstanceAllocator(const TaskLocalInstanceAllocator&) = delete;
+        TaskLocalInstanceAllocator(TaskLocalInstanceAllocator && rhs);
         virtual ~TaskLocalInstanceAllocator(void) { ready.wait(); }
+      public:
+        TaskLocalInstanceAllocator& operator=(
+            const TaskLocalInstanceAllocator&) = delete;
+        TaskLocalInstanceAllocator& operator=(
+            TaskLocalInstanceAllocator&&) = delete;
       public:
         virtual bool handle_profiling_response(
             const Realm::ProfilingResponse &response, const void *orig,
@@ -1635,8 +1641,8 @@ namespace Legion {
           return success;
         }
       private:
-        const RtUserEvent ready;
-        const LgEvent unique_event;
+        RtUserEvent ready;
+        LgEvent unique_event;
         bool success;
       };
 #ifdef LEGION_MALLOC_INSTANCES

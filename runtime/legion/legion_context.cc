@@ -861,8 +861,8 @@ namespace Legion {
       }
       std::vector<Realm::ProfilingRequestSet> requests(num_results);
 #ifdef DEBUG_LEGION
-      std::vector<MemoryManager::TaskLocalInstanceAllocator>
-        allocators(num_results);
+      std::vector<MemoryManager::TaskLocalInstanceAllocator> allocators;
+      allocators.reserve(num_results);
       std::vector<ProfilingResponseBase> bases;
       bases.reserve(num_results);
 #endif
@@ -880,8 +880,10 @@ namespace Legion {
                               get_unique_id(), unique_events[idx]);
         }
 #ifdef DEBUG_LEGION
+        allocators.emplace_back(
+            MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
         bases.emplace_back(
-            ProfilingResponseBase(&allocators[idx], get_unique_id()));
+            ProfilingResponseBase(&allocators[idx], get_unique_id(), false));
         Realm::ProfilingRequest &req = requests[idx].add_request(
             runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
             &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
