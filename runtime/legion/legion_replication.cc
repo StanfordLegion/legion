@@ -6583,6 +6583,9 @@ namespace Legion {
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       if (collective_instances)
         create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
+      else // Only need the versioning rendezvous in this case
+        ReplCollectiveVersioning<
+          CollectiveViewCreator<AttachOp> >::create_collective_rendezvous(0);
     }
 
     //--------------------------------------------------------------------------
@@ -6947,6 +6950,9 @@ namespace Legion {
           create_collective_rendezvous(requirement.parent.get_tree_id(),
               0/*requirement index*/, 1/*analysis index*/);
       }
+      else // Only need the versioning rendezvous in this case
+        ReplCollectiveVersioning<
+          CollectiveViewCreator<DetachOp> >::create_collective_rendezvous(0);
     }
 
     //--------------------------------------------------------------------------
