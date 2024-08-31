@@ -1063,7 +1063,7 @@ impl Container for Proc {
 
 pub type MemEntry = Inst;
 
-pub type MemPoint = TimePoint<InstUID, Timestamp>;
+pub type MemPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
 pub struct MemID(pub u64);
@@ -1085,7 +1085,7 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<InstUID, Inst>,
+    pub insts: BTreeMap<ProfUID, Inst>,
     time_points: Vec<MemPoint>,
     time_points_stacked: Vec<Vec<MemPoint>>,
     util_time_points: Vec<MemPoint>,
@@ -1109,7 +1109,7 @@ impl Mem {
     }
 
     fn add_inst(&mut self, inst: Inst) {
-        self.insts.insert(inst.inst_uid, inst);
+        self.insts.insert(inst.base.prof_uid, inst);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1193,7 +1193,7 @@ impl Mem {
 }
 
 impl Container for Mem {
-    type E = InstUID;
+    type E = ProfUID;
     type S = Timestamp;
     type Entry = Inst;
 
@@ -1224,12 +1224,12 @@ impl Container for Mem {
         &self.util_time_points
     }
 
-    fn entry(&self, inst_uid: InstUID) -> &Inst {
-        self.insts.get(&inst_uid).unwrap()
+    fn entry(&self, prof_uid: ProfUID) -> &Inst {
+        self.insts.get(&prof_uid).unwrap()
     }
 
-    fn entry_mut(&mut self, inst_uid: InstUID) -> &mut Inst {
-        self.insts.get_mut(&inst_uid).unwrap()
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut Inst {
+        self.insts.get_mut(&prof_uid).unwrap()
     }
 }
 
@@ -1832,7 +1832,6 @@ pub struct Dim(pub u32);
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
-    pub inst_uid: InstUID,
     pub inst_id: Option<InstID>,
     pub op_id: Option<OpID>,
     mem_id: Option<MemID>,
@@ -1848,10 +1847,9 @@ pub struct Inst {
 }
 
 impl Inst {
-    fn new(base: Base, inst_uid: InstUID) -> Self {
+    fn new(base: Base) -> Self {
         Inst {
             base,
-            inst_uid,
             inst_id: None,
             op_id: None,
             mem_id: None,
@@ -2413,13 +2411,13 @@ impl OpKind {
 
 #[derive(Debug)]
 pub struct OperationInstInfo {
-    pub inst_uid: InstUID,
+    pub inst_uid: ProfUID,
     _index: u32,
     _field_id: FieldID,
 }
 
 impl OperationInstInfo {
-    fn new(inst_uid: InstUID, index: u32, field_id: FieldID) -> Self {
+    fn new(inst_uid: ProfUID, index: u32, field_id: FieldID) -> Self {
         OperationInstInfo {
             inst_uid,
             _index: index,
@@ -2484,9 +2482,6 @@ impl EventID {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct InstUID(pub u64);
-
 impl From<spy::serialize::EventID> for EventID {
     fn from(e: spy::serialize::EventID) -> Self {
         EventID(e.0 .0)
@@ -2514,8 +2509,8 @@ pub struct CopyInstInfo {
     dst: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
-    pub src_inst_uid: InstUID,
-    pub dst_inst_uid: InstUID,
+    pub src_inst_uid: Option<ProfUID>,
+    pub dst_inst_uid: Option<ProfUID>,
     pub num_hops: u32,
     pub indirect: bool,
 }
@@ -2526,8 +2521,8 @@ impl CopyInstInfo {
         dst: Option<MemID>,
         src_fid: FieldID,
         dst_fid: FieldID,
-        src_inst_uid: InstUID,
-        dst_inst_uid: InstUID,
+        src_inst_uid: Option<ProfUID>,
+        dst_inst_uid: Option<ProfUID>,
         num_hops: u32,
         indirect: bool,
     ) -> Self {
@@ -2653,11 +2648,11 @@ impl Copy {
 pub struct FillInstInfo {
     _dst: MemID,
     pub fid: FieldID,
-    pub dst_inst_uid: InstUID,
+    pub dst_inst_uid: ProfUID,
 }
 
 impl FillInstInfo {
-    fn new(dst: MemID, fid: FieldID, dst_inst_uid: InstUID) -> Self {
+    fn new(dst: MemID, fid: FieldID, dst_inst_uid: ProfUID) -> Self {
         FillInstInfo {
             _dst: dst,
             fid,
@@ -2966,7 +2961,7 @@ pub struct State {
     pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<InstUID, MemID>,
+    pub insts: BTreeMap<ProfUID, MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
@@ -3301,16 +3296,16 @@ impl State {
 
     fn create_inst<'a>(
         &'a mut self,
-        inst_uid: InstUID,
-        insts: &'a mut BTreeMap<InstUID, Inst>,
+        fevent: EventID,
+        insts: &'a mut BTreeMap<ProfUID, Inst>,
     ) -> &'a mut Inst {
-        let alloc = &mut self.prof_uid_allocator;
+        let prof_uid = self.prof_uid_allocator.create_reference(fevent).unwrap();
         insts
-            .entry(inst_uid)
-            .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
+            .entry(prof_uid)
+            .or_insert_with(|| Inst::new(Base::from_fevent(&mut self.prof_uid_allocator, fevent)))
     }
 
-    pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
+    pub fn find_inst(&self, inst_uid: ProfUID) -> Option<&Inst> {
         let mem_id = self.insts.get(&inst_uid)?;
         let mem = self.mems.get(mem_id)?;
         mem.insts.get(&inst_uid)
@@ -3514,12 +3509,12 @@ impl State {
             for (nodes, skew) in skew_nodes.iter() {
                 // Compute the average skew
                 println!(
-                    "Node {} appears to be {} us behind node {} for {} messages with standard deviation {} us.",
+                    "Node {} appears to be {:.3} us behind node {} for {} messages with standard deviation {:.3} us.",
                     nodes.0 .0,
                     skew.1 / 1000.0, // convert to us
                     nodes.1 .0,
                     skew.0,
-                    skew.2.sqrt() / 1000.0 // convert variance to standard deviation and then to us
+                    (skew.2 / skew.0 as f64).sqrt() / 1000.0 // convert variance to standard deviation and then to us
                 );
                 // Skew is hopefully only going in one direction, if not warn ourselves
                 let alt = (nodes.1, nodes.0);
@@ -4132,7 +4127,7 @@ fn process_record(
     record: &Record,
     state: &mut State,
     node: &mut Option<NodeID>,
-    insts: &mut BTreeMap<InstUID, Inst>,
+    insts: &mut BTreeMap<ProfUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
     call_threshold: Timestamp,
@@ -4342,36 +4337,38 @@ fn process_record(
                 .or_insert_with(|| Region::new(*ispace_id, fspace_id, *tree_id, name));
         }
         Record::PhysicalInstRegionDesc {
-            inst_uid,
+            fevent,
             ispace_id,
             fspace_id,
             tree_id,
         } => {
+            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
         }
         Record::PhysicalInstLayoutDesc {
-            inst_uid,
+            fevent,
             field_id,
             fspace_id,
             has_align,
             eqk,
             align_desc,
         } => {
+            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
         Record::PhysicalInstDimOrderDesc {
-            inst_uid,
+            fevent,
             dim,
             dim_kind,
         } => {
@@ -4380,18 +4377,21 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => unreachable!("bad dim kind"),
             };
+            assert!(fevent.exists());
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .add_dim_order(dim, dim_kind);
         }
         Record::PhysicalInstanceUsage {
-            inst_uid,
+            fevent,
             op_id,
             index_id,
             field_id,
         } => {
+            assert!(fevent.exists());
             state.create_op(*op_id);
-            let operation_inst_info = OperationInstInfo::new(*inst_uid, *index_id, *field_id);
+            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            let operation_inst_info = OperationInstInfo::new(inst_uid, *index_id, *field_id);
             state
                 .find_op_mut(*op_id)
                 .unwrap()
@@ -4626,8 +4626,10 @@ fn process_record(
             if *dst != MemID(0) {
                 dst_mem = Some(*dst);
             }
+            let src_uid = state.create_fevent_reference(*src_inst);
+            let dst_uid = state.create_fevent_reference(*dst_inst);
             let copy_inst_info = CopyInstInfo::new(
-                src_mem, dst_mem, *src_fid, *dst_fid, *src_inst, *dst_inst, *num_hops, *indirect,
+                src_mem, dst_mem, *src_fid, *dst_fid, src_uid, dst_uid, *num_hops, *indirect,
             );
             copy.add_copy_inst_info(copy_inst_info);
         }
@@ -4652,12 +4654,13 @@ fn process_record(
             dst_inst,
             fevent,
         } => {
-            let fill_inst_info = FillInstInfo::new(*dst, *fid, *dst_inst);
+            let dst_uid = state.create_fevent_reference(*dst_inst).unwrap();
+            let fill_inst_info = FillInstInfo::new(*dst, *fid, dst_uid);
             let fill = fills.get_mut(fevent).unwrap();
             fill.add_fill_inst_info(fill_inst_info);
         }
         Record::InstTimelineInfo {
-            inst_uid,
+            fevent,
             inst_id,
             mem_id,
             size,
@@ -4667,11 +4670,13 @@ fn process_record(
             destroy,
             creator,
         } => {
+            assert!(fevent.exists());
             state.create_op(*op_id);
             let creator_uid = state.create_fevent_reference(*creator);
-            state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
+            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            state.insts.entry(inst_uid).or_insert_with(|| *mem_id);
             state
-                .create_inst(*inst_uid, insts)
+                .create_inst(*fevent, insts)
                 .set_inst_id(*inst_id)
                 .set_op_id(*op_id)
                 .set_start_stop(*create, *ready, *destroy)

@@ -409,6 +409,7 @@ namespace Legion {
       LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
+      LG_DEFER_MAPPER_COLLECTION_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
@@ -518,6 +519,7 @@ namespace Legion {
         "Defer Index Partition Find Shard Rects",                 \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
+        "Deferred Mapper Instance Collective",                    \
         "Remote View Creation",                                   \
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
@@ -974,6 +976,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
       SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
       SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
+      SEND_EQUIVALENCE_SET_FILTER_INVALIDATIONS,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_CREATE_REQUEST,
@@ -1303,6 +1306,7 @@ namespace Legion {
         "Send Equivalence Set Remote Overwrites",                     \
         "Send Equivalence Set Remote Filters",                        \
         "Send Equivalence Set Remote Instances",                      \
+        "Send Equivalence Set Filter Invalidations",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Create Request",                               \
@@ -1659,7 +1663,7 @@ namespace Legion {
     };
 
 #define RUNTIME_CALL_DESCRIPTIONS(name)                               \
-    const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+    const char *name[Internal::LAST_RUNTIME_CALL_KIND] = {            \
       "MapperRuntime::send_message",                                  \
       "MapperRuntime::broadcast",                                     \
       "MapperRuntime::unpack_physical_instance",                      \
@@ -2341,6 +2345,8 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
     extern thread_local TaskContext *implicit_context;
+    // Mapper context if we're inside of a mapper call
+    extern thread_local MappingCallInfo *implicit_mapper_call;
     // Same thing for the runtime
     extern thread_local Runtime *implicit_runtime;
     // Implicit thread-local profiler
@@ -2396,6 +2402,7 @@ namespace Legion {
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
+    friend class Legion::Mapping::MapperRuntime;            \
     friend class Internal::Runtime;                         \
     friend class Internal::FutureImpl;                      \
     friend class Internal::FutureMapImpl;                   \
@@ -2515,6 +2522,7 @@ namespace Legion {
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \
     friend class Internal::MustEpochMappingBroadcast;       \
+    friend class Internal::MappingCallInfo;                 \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
@@ -3244,10 +3252,6 @@ namespace Legion {
     {
       if (!exists())
         return;
-      // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3266,6 +3270,15 @@ namespace Legion {
         bt.capture_backtrace();
         record_event_wait(local_profiler, bt);
       }
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      Internal::implicit_context = NULL;
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      Internal::implicit_mapper_call = NULL;
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      Internal::implicit_provenance = 0;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3305,6 +3318,8 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the mapper call back
+      Internal::implicit_mapper_call = local_call;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler
@@ -3328,10 +3343,9 @@ namespace Legion {
     {
       if (!exists())
         return;
-      // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
+      if (has_triggered_faultaware(poisoned))
+        return;
+      
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3350,6 +3364,15 @@ namespace Legion {
         bt.capture_backtrace();
         record_event_wait(local_profiler, bt);
       }
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      Internal::implicit_context = NULL;
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      Internal::implicit_mapper_call = NULL;
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      Internal::implicit_provenance = 0;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3389,6 +3412,8 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the mapper call back
+      Internal::implicit_mapper_call = local_call;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler

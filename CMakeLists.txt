@@ -80,6 +80,8 @@ endif()
 
 project(Legion VERSION ${Legion_VERSION})
 
+include(CMakeDependentOption)
+
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
 #------------------------------------------------------------------------------#
@@ -259,6 +261,28 @@ endif()
 include(CheckFunctionExists)
 
 #------------------------------------------------------------------------------#
+# Documentation options
+#------------------------------------------------------------------------------#
+option(Legion_BUILD_DOCS "Build documentation" OFF)
+cmake_dependent_option(Legion_BUILD_INTERNAL_DOCS "Build documentation" OFF
+                       "Legion_BUILD_DOCS" OFF)
+if (Legion_BUILD_DOCS)
+  find_package(Doxygen REQUIRED)
+  set(DOXYGEN_GENERATE_HTML YES)
+  set(DOXYGEN_EXTRACT_ALL YES)
+  set(DOXYGEN_SEARCH_INCLUDES YES)
+  set(DOXYGEN_ENABLE_PREPROCESSING YES)
+  set(DOXYGEN_RECURSIVE YES)
+  set(DOXYGEN_HTML_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/header.html)
+  set(DOXYGEN_HTML_FOOTER ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/footer.html)
+  set(DOXYGEN_HTML_EXTRA_STYLESHEET ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/customdoxygen.css)
+  if (Legion_BUILD_INTERNAL_DOCS)
+    set(DOXYGEN_INTERNAL_DOCS ${Legion_BUILD_INTERNAL_DOCS})
+    set(DOXYGEN_ENABLED_SECTIONS INTERNAL)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#
 set(Legion_OUTPUT_LEVEL "DEBUG" CACHE STRING "Compile time logging level")
@@ -405,6 +429,11 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
   # define variable for realm_defines.h
   if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
     set(REALM_USE_GASNETEX ON)
+    # wether to build gasnetex wrapper as a standalone library
+    option(Legion_USE_GASNETEX_WRAPPER "Enable gasnetex wrapper" OFF)
+    if (Legion_USE_GASNETEX_WRAPPER)
+      set(REALM_USE_GASNETEX_WRAPPER ON)
+    endif()
   else()
     set(REALM_USE_GASNET1 ON)
   endif()

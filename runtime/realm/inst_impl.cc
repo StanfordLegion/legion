@@ -63,7 +63,47 @@ namespace Realm {
     return Event::NO_EVENT;
   }
 
-  
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RegionInstanceImpl::DeferredRedistrict
+  //
+
+  void RegionInstanceImpl::DeferredRedistrict::defer(
+      RegionInstanceImpl *_inst, std::vector<RegionInstanceImpl *> &_new_insts,
+      Event _after, Event wait_on)
+  {
+    inst = _inst;
+    new_insts.swap(_new_insts);
+    after = _after;
+    EventImpl::add_waiter(wait_on, this);
+  }
+
+  void RegionInstanceImpl::DeferredRedistrict::event_triggered(bool poisoned,
+                                                               TimeLimit work_until)
+  {
+    if(poisoned) {
+      for(RegionInstanceImpl *new_inst : new_insts) {
+        new_inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
+                                    0 /*offset*/, TimeLimit::responsive());
+      }
+      GenEventImpl::trigger(after, true /*poisoned*/, work_until);
+    } else {
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(inst->memory);
+      m_impl->reuse_allocated_range(inst, new_insts);
+      GenEventImpl::trigger(after, false /*poisoned*/, work_until);
+    }
+  }
+
+  void RegionInstanceImpl::DeferredRedistrict::print(std::ostream &os) const
+  {
+    os << "deferred instance redistrict";
+  }
+
+  Event RegionInstanceImpl::DeferredRedistrict::get_finish_event(void) const
+  {
+    return after;
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class RegionInstanceImpl::DeferredDestroy
@@ -797,44 +837,15 @@ namespace Realm {
 							 Event wait_on)
     {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
-      RegionInstanceImpl *impl = m_impl->new_instance();
+      RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
       if(!impl) {
-	inst = RegionInstance::NO_INST;
-	// import the profiling requests to see if anybody is paying attention to
-	//  failure
-	ProfilingMeasurementCollection pmc;
-	pmc.import_requests(prs);
-	bool reported = false;
-	if(pmc.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
-	  ProfilingMeasurements::InstanceStatus stat;
-	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
-	  stat.error_code = 0;
-	  pmc.add_measurement(stat);
-	  reported = true;
-	}
-	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
-	  ProfilingMeasurements::InstanceAbnormalStatus stat;
-	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
-	  stat.error_code = 0;
-	  pmc.add_measurement(stat);
-	  reported = true;
-	}
-	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
-	  ProfilingMeasurements::InstanceAllocResult result;
-	  result.success = false;
-	  pmc.add_measurement(result);
-	}
-	if(!reported) {
-	  // fatal error
-	  log_inst.fatal() << "FATAL: instance count exceeded for memory " << memory;
-	  assert(0);
-	}
-	// generate a poisoned event for completion
-	GenEventImpl *ev = GenEventImpl::create_genevent();
-	Event ready_event = ev->current_event();
-	GenEventImpl::trigger(ready_event, true /*poisoned*/);
-	return ready_event;
+        inst = RegionInstance::NO_INST;
+        // generate a poisoned event for completion
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        Event ready_event = ev->current_event();
+        GenEventImpl::trigger(ready_event, true /*poisoned*/);
+        return ready_event;
       }
 
       // set this handle before we do anything that can result in a
@@ -968,24 +979,21 @@ namespace Realm {
       assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
 
       for(size_t i = 0; i < num_layouts; i++) {
-        insts[i] = m_impl->new_instance();
-        insts[i]->metadata.layout = layouts[i]->clone();
-      }
+        insts[i] = m_impl->new_instance(prs[i]);
+        // Check tof the case where we ran out of instance IDs
+        if(!insts[i]) {
+          for(unsigned idx = 0; idx < i; idx++)
+            insts[idx]->recycle_instance();
+          for(unsigned idx = 0; idx < num_layouts; idx++)
+            instances[idx] = RegionInstance::NO_INST;
 
-      // Attempt to reuse allocated range of existing instance
-      MemoryImpl::AllocationResult alloc_status =
-          m_impl->reuse_allocated_range(this, insts);
-      if(alloc_status != MemoryImpl::ALLOC_INSTANT_SUCCESS) {
-        // On failure, just recycle back the instance ids
-        for(size_t i = 0; i < num_layouts; i++) {
-          insts[i]->recycle_instance();
+          // Generate a poisoned event for completion
+          Event after = GenEventImpl::create_genevent()->current_event();
+          GenEventImpl::trigger(after, true /*poisoned*/, TimeLimit::responsive());
+          return after;
         }
-        Event event = GenEventImpl::create_genevent()->current_event();
-        GenEventImpl::trigger(event, /*poisoned=*/true);
-        return event;
-      }
-
-      for(size_t i = 0; i < num_layouts; i++) {
+        instances[i] = insts[i]->me;
+        insts[i]->metadata.layout = layouts[i]->clone();
         if(!prs[i].empty()) {
           insts[i]->requests = prs[i];
           insts[i]->measurements.import_requests(insts[i]->requests);
@@ -994,40 +1002,36 @@ namespace Realm {
                  .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
             insts[i]->timeline.record_create_time();
           }
+          insts[i]->metadata.need_alloc_result =
+              insts[i]
+                  ->measurements
+                  .wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
+        } else {
+          insts[i]->metadata.need_alloc_result = false;
         }
-      }
-
-      // We managed to reuse the allocated instance, now set metadata.
-      size_t offset = 0;
-      for(size_t i = 0; i < num_layouts; i++) {
-        assert(insts[i]);
-        instances[i] = insts[i]->me;
+        insts[i]->metadata.need_notify_dealloc = false;
         insts[i]->metadata.layout->compile_lookup_program(
             insts[i]->metadata.lookup_program);
-        insts[i]->metadata.inst_offset = metadata.inst_offset + offset;
-        NodeSet early_reqs;
-        insts[i]->metadata.mark_valid(early_reqs);
-
-        insts[i]->metadata.need_alloc_result = false;
-
-        if(!early_reqs.empty()) {
-          send_metadata(early_reqs);
-        }
-        offset += layouts[i]->bytes_used;
       }
 
-      for(size_t i = 0; i < num_layouts; i++) {
-        if(insts[i]
-               ->measurements
-               .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
-          insts[i]->timeline.record_ready_time();
-        }
+      bool poisoned = false;
+      bool triggered = wait_on.has_triggered_faultaware(poisoned);
+
+      if(!triggered) {
+        Event after = GenEventImpl::create_genevent()->current_event();
+        deferred_redistrict.defer(this, insts, after, wait_on);
+        return after;
+      } else if(poisoned) {
+        for(RegionInstanceImpl *inst : insts)
+          inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
+                                  0 /*offset*/, TimeLimit::responsive());
+        Event after = GenEventImpl::create_genevent()->current_event();
+        GenEventImpl::trigger(after, true /*poisoned*/, TimeLimit::responsive());
+        return after;
+      } else {
+        m_impl->reuse_allocated_range(this, insts);
+        return Event::NO_EVENT;
       }
-
-      // TODO(apryakhin@): Consider deleting this instance
-      // notify_deallocation();
-
-      return Event::NO_EVENT;
     }
 
     void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)

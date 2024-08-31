@@ -37,7 +37,6 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     /*static*/ constexpr std::string_view Provenance::no_provenance;
-    /*static*/ constexpr char Provenance::delimeter;
 
     //--------------------------------------------------------------------------
     Provenance::Provenance(ProvenanceID p, const char *prov)
@@ -70,18 +69,99 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!full.empty());
 #endif
-      const char *prov = full.c_str();
-      unsigned split = 0;
-      while (split < full.size())
+      if (!parse_provenance_parts())
       {
-        if (prov[split] == delimeter)
-          break;
-        split++;
+        // If we have a bracket assume this whole this is a JSON string
+        // and therefore we're going to assume the whole thing is JSON
+        // Otherwise if things don't parse then everything is the just
+        // the human readable string.
+        if (full[0] == '{')
+          machine = std::string_view(full.c_str());
+        else
+          human = std::string_view(full.c_str());
       }
-      if (split > 0)
-        human = std::string_view(prov, split);
-      if ((split+1) < full.size())
-        machine = std::string_view(prov+split+1);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Provenance::parse_provenance_parts(void)
+    //--------------------------------------------------------------------------
+    {
+      {
+        size_t len = full.length();
+
+        // shortest valid input: ["",{}]
+        if (len < 7)
+          return false;
+
+        // must start with: ["
+        if (full[0] != '[' || full[1] != '"')
+          return false;
+
+        // must end with: }]
+        if (full[len-2] != '}' || full[len-1] != ']')
+          return false;
+      }
+
+      unsigned human_size = 0;
+      bool human_closed = false;
+      std::string::iterator it = full.begin()+2;
+      for (; it != full.end(); it++) {
+        if (*it == '\\') {
+          // Remove the escape character
+          it = full.erase(it);
+          if (it == full.end())
+            return false;
+          switch (*it) {
+            case '"':
+            case '\\':
+            case '/':
+              break;
+            case 'b':
+              *it = '\b';
+              break;
+            case 'f':
+              *it = '\f';
+              break;
+            case 'n':
+              *it = '\n';
+              break;
+            case 'r':
+              *it = '\r';
+              break;
+            case 't':
+              *it = '\t';
+              break;
+            case 'u':
+              return false; // Unicode is unsupported
+            default:
+              return false; // Bad escape
+          }
+          human_size++;
+        } else if (*it == '"') {
+          human_closed = true;
+          break;
+        } else
+          human_size++;
+      }
+
+      if (!human_closed)
+        return false;
+
+      human = std::string_view(full.c_str()+2, human_size);
+
+      for (; it != full.end(); it++) {
+        if (*it == '{') {
+          size_t offset = std::distance(full.begin(), it);
+          // Start from our current offset and go to the
+          // end but don't include the closing ']'
+          machine = std::string_view(full.c_str()+offset,
+              full.length() - (offset+1));
+          return true;
+        }
+      }
+
+      // machine part never opened
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1728,7 +1808,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
-                                 LogicalRegion handle, const RegionUsage usage, 
                                  const char *field_string, RtUserEvent reported)
     //--------------------------------------------------------------------------
     {
@@ -1743,8 +1822,9 @@ namespace Legion {
         prov_ss << ", provenance: " << provenance->human_str();
         prov_str = prov_ss.str();
       }
+      const RegionRequirement &req = get_requirement(index); 
       // Read-only or reduction usage of uninitialized data is always an error
-      if (IS_READ_ONLY(usage))
+      if (IS_READ_ONLY(req))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
@@ -1752,10 +1832,10 @@ namespace Legion {
                       "read-only privileges", index, get_logging_name(), 
                       get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      field_string, handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), 
-                      handle.get_tree_id())
-      else if (IS_REDUCE(usage))
+                      field_string, req.region.get_index_space().get_id(),
+                      req.region.get_field_space().get_id(), 
+                      req.region.get_tree_id())
+      else if (IS_REDUCE(req))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
@@ -1763,19 +1843,20 @@ namespace Legion {
                       "reduction privileges", index, get_logging_name(), 
                       get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      field_string, handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), 
-                      handle.get_tree_id())
-      else // Read-write usage is just a warning
+                      field_string, req.region.get_index_space().get_id(),
+                      req.region.get_field_space().get_id(), 
+                      req.region.get_tree_id())
+      // Read-write usage is just a warning
+      else if ((req.flags & LEGION_SUPPRESS_WARNINGS_FLAG) == 0)
         REPORT_LEGION_WARNING(LEGION_WARNING_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d)", index, 
                       get_logging_name(), get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      field_string, handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), 
-                      handle.get_tree_id())
+                      field_string, req.region.get_index_space().get_id(),
+                      req.region.get_field_space().get_id(), 
+                      req.region.get_tree_id())
       Runtime::trigger_event(reported);
     }
 
@@ -22767,8 +22848,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteOp::report_uninitialized_usage(const unsigned index,
-                                              LogicalRegion handle,
-                                              const RegionUsage usage,
                                               const char *field_string,
                                               RtUserEvent reported)
     //--------------------------------------------------------------------------
@@ -22776,8 +22855,7 @@ namespace Legion {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->report_uninitialized_usage(index, handle, usage,
-                                               field_string, reported);
+        remote_ptr->report_uninitialized_usage(index, field_string, reported);
         return;
       }
       // Ship this back to the owner node to report it there 
@@ -22787,8 +22865,6 @@ namespace Legion {
         rez.serialize(remote_ptr);
         rez.serialize(reported);
         rez.serialize(index);
-        rez.serialize(handle);
-        rez.serialize(usage);
         // Include the null terminator character
         const size_t length = strlen(field_string) + 1;
         rez.serialize<size_t>(length);
@@ -22998,16 +23074,11 @@ namespace Legion {
       derez.deserialize(reported);
       unsigned index;
       derez.deserialize(index);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      RegionUsage usage;
-      derez.deserialize(usage);
       size_t length;
       derez.deserialize(length);
       const char *field_string = (const char*)derez.get_current_pointer();
       derez.advance_pointer(length);
-      op->report_uninitialized_usage(index, handle, usage, 
-                                     field_string, reported);
+      op->report_uninitialized_usage(index, field_string, reported);
     }
 
     //--------------------------------------------------------------------------

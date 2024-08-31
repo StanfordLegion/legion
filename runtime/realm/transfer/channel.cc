@@ -1029,30 +1029,6 @@ namespace Realm {
         }
       }
 
-#if 0
-      static inline off_t calc_mem_loc_ib(off_t alloc_offset,
-                                          off_t field_start,
-                                          int field_size,
-                                          size_t elmt_size,
-                                          size_t block_size,
-                                          size_t buf_size,
-                                          size_t domain_size,
-                                          off_t index)
-      {
-        off_t idx2 = domain_size / block_size * block_size;
-        off_t offset;
-        if (index < idx2) {
-          offset = Realm::calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
-        } else {
-          offset = (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
-        }
-	// the final step is to wrap the offset around within the buf_size
-	//  (i.e. offset %= buf_size), but that is done by the caller after
-	//  checking flow control limits
-        return offset;
-      }
-#endif
-
 #define MAX_GEN_REQS 3
 
       bool support_2d_xfers(XferDesKind kind)
@@ -1401,1239 +1377,997 @@ namespace Realm {
     }
   }
 
-    long XferDes::default_get_requests(Request** reqs, long nr,
-				       unsigned flags)
-      {
-        long idx = 0;
-	
-	while((idx < nr) && request_available()) {
-	  // TODO: we really shouldn't even be trying if the iteration
-	  //   is already done
-	  if(iteration_completed.load()) break;
+  long XferDes::default_get_requests(Request **reqs, long nr, unsigned flags)
+  {
+    long idx = 0;
 
-	  // pull control information if we need it
-	  if(input_control.remaining_count == 0) {
-	    XferPort& icp = input_ports[input_control.control_port_idx];
-	    size_t avail = icp.seq_remote.span_exists(icp.local_bytes_total,
-						      4 * sizeof(unsigned));
-            size_t old_lbt = icp.local_bytes_total;
+    while((idx < nr) && request_available()) {
+      // TODO: we really shouldn't even be trying if the iteration
+      //   is already done
+      if(iteration_completed.load())
+        break;
 
-            // may take a few chunks of data to get a control packet
-            bool got_packet = false;
-            do {
-              if(avail < sizeof(unsigned))
-                break;  // no data right now
+      // pull control information if we need it
+      if(input_control.remaining_count == 0) {
+        XferPort &icp = input_ports[input_control.control_port_idx];
+        size_t avail =
+            icp.seq_remote.span_exists(icp.local_bytes_total, 4 * sizeof(unsigned));
+        size_t old_lbt = icp.local_bytes_total;
 
-              TransferIterator::AddressInfo c_info;
-              size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0,
+        // may take a few chunks of data to get a control packet
+        bool got_packet = false;
+        do {
+          if(avail < sizeof(unsigned))
+            break; // no data right now
+
+          TransferIterator::AddressInfo c_info;
+          size_t amt = icp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
+          assert(amt == sizeof(unsigned));
+          const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
+          assert(srcptr != 0);
+          unsigned cword;
+          memcpy(&cword, srcptr, sizeof(unsigned));
+
+          icp.local_bytes_total += sizeof(unsigned);
+          avail -= sizeof(unsigned);
+
+          got_packet = input_control.decoder.decode(cword, input_control.remaining_count,
+                                                    input_control.current_io_port,
+                                                    input_control.eos_received);
+        } while(!got_packet);
+
+        // can't make further progress if we didn't get a full packet
+        if(!got_packet)
+          break;
+
+        update_bytes_read(input_control.control_port_idx, old_lbt,
+                          icp.local_bytes_total - old_lbt);
+
+        log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
+                      << " port=" << input_control.current_io_port
+                      << " count=" << input_control.remaining_count
+                      << " done=" << input_control.eos_received;
+        // if count is still zero, we're done
+        if(input_control.remaining_count == 0) {
+          assert(input_control.eos_received);
+          begin_completion();
+          break;
+        }
+      }
+      if(output_control.remaining_count == 0) {
+        // this looks wrong, but the port that controls the output is
+        //  an input port! vvv
+        XferPort &ocp = input_ports[output_control.control_port_idx];
+        size_t avail =
+            ocp.seq_remote.span_exists(ocp.local_bytes_total, 4 * sizeof(unsigned));
+        size_t old_lbt = ocp.local_bytes_total;
+
+        // may take a few chunks of data to get a control packet
+        bool got_packet = false;
+        do {
+          if(avail < sizeof(unsigned))
+            break; // no data right now
+
+          TransferIterator::AddressInfo c_info;
+          size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
+          assert(amt == sizeof(unsigned));
+          const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
+          assert(srcptr != 0);
+          unsigned cword;
+          memcpy(&cword, srcptr, sizeof(unsigned));
+
+          ocp.local_bytes_total += sizeof(unsigned);
+          avail -= sizeof(unsigned);
+
+          got_packet = output_control.decoder.decode(
+              cword, output_control.remaining_count, output_control.current_io_port,
+              output_control.eos_received);
+        } while(!got_packet);
+
+        // can't make further progress if we didn't get a full packet
+        if(!got_packet)
+          break;
+
+        update_bytes_read(output_control.control_port_idx, old_lbt,
+                          ocp.local_bytes_total - old_lbt);
+
+        log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
+                      << " port=" << output_control.current_io_port
+                      << " count=" << output_control.remaining_count
+                      << " done=" << output_control.eos_received;
+        // if count is still zero, we're done
+        if(output_control.remaining_count == 0) {
+          assert(output_control.eos_received);
+          begin_completion();
+          break;
+        }
+      }
+
+      XferPort *in_port = ((input_control.current_io_port >= 0)
+                               ? &input_ports[input_control.current_io_port]
+                               : 0);
+      XferPort *out_port = ((output_control.current_io_port >= 0)
+                                ? &output_ports[output_control.current_io_port]
+                                : 0);
+
+      // special cases for OOR scatter/gather
+      if(!in_port) {
+        if(!out_port) {
+          // no input or output?  just skip the count?
+          assert(0);
+        } else {
+          // no valid input, so no write to the destination -
+          //  just step the output transfer iterator if it's a real target
+          //  but barf if it's an IB
+          assert((out_port->peer_guid == XferDes::XFERDES_NO_GUID) &&
+                 !out_port->serdez_op);
+          TransferIterator::AddressInfo dummy;
+          size_t skip_bytes = out_port->iter->step(
+              std::min(input_control.remaining_count, output_control.remaining_count),
+              dummy, flags & TransferIterator::DST_FLAGMASK, false /*!tentative*/);
+          log_xd.debug() << "skipping " << skip_bytes << " bytes of output";
+          assert(skip_bytes > 0);
+          input_control.remaining_count -= skip_bytes;
+          output_control.remaining_count -= skip_bytes;
+          // TODO: pull this code out to a common place?
+          if(((input_control.remaining_count == 0) && input_control.eos_received) ||
+             ((output_control.remaining_count == 0) && output_control.eos_received)) {
+            log_xd.info() << "iteration completed via control port: xd=" << std::hex
+                          << guid << std::dec;
+            begin_completion();
+            break;
+          }
+          continue; // try again
+        }
+      } else if(!out_port) {
+        // valid input that we need to throw away
+        assert(!in_port->serdez_op);
+        TransferIterator::AddressInfo dummy;
+        // although we're not reading the IB input data ourselves, we need
+        //  to wait until it's ready before not-reading it to avoid WAW
+        //  races on the producer side
+        size_t skip_bytes =
+            std::min(input_control.remaining_count, output_control.remaining_count);
+        if(in_port->peer_guid != XferDes::XFERDES_NO_GUID) {
+          skip_bytes =
+              in_port->seq_remote.span_exists(in_port->local_bytes_total, skip_bytes);
+          if(skip_bytes == 0)
+            break;
+        }
+        skip_bytes =
+            in_port->iter->step(skip_bytes, dummy, flags & TransferIterator::SRC_FLAGMASK,
+                                false /*!tentative*/);
+        log_xd.debug() << "skipping " << skip_bytes << " bytes of input";
+        assert(skip_bytes > 0);
+        update_bytes_read(input_control.current_io_port, in_port->local_bytes_total,
+                          skip_bytes);
+        in_port->local_bytes_total += skip_bytes;
+        input_control.remaining_count -= skip_bytes;
+        output_control.remaining_count -= skip_bytes;
+        // TODO: pull this code out to a common place?
+        if(((input_control.remaining_count == 0) && input_control.eos_received) ||
+           ((output_control.remaining_count == 0) && output_control.eos_received)) {
+          log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid
+                        << std::dec;
+          begin_completion();
+          break;
+        }
+        continue; // try again
+      }
+
+      // there are several variables that can change asynchronously to
+      //  the logic here:
+      //   pre_bytes_total - the max bytes we'll ever see from the input IB
+      //   read_bytes_cons - conservative estimate of bytes we've read
+      //   write_bytes_cons - conservative estimate of bytes we've written
+      //
+      // to avoid all sorts of weird race conditions, sample all three here
+      //  and only use them in the code below (exception: atomic increments
+      //  of rbc or wbc, for which we adjust the snapshot by the same)
+      size_t pbt_snapshot = in_port->remote_bytes_total.load_acquire();
+      size_t rbc_snapshot = in_port->local_bytes_cons.load_acquire();
+      size_t wbc_snapshot = out_port->local_bytes_cons.load_acquire();
+
+      // normally we detect the end of a transfer after initiating a
+      //  request, but empty iterators and filtered streams can cause us
+      //  to not realize the transfer is done until we are asking for
+      //  the next request (i.e. now)
+      if((in_port->peer_guid == XFERDES_NO_GUID)
+             ? in_port->iter->done()
+             : (in_port->local_bytes_total == pbt_snapshot)) {
+        if(in_port->local_bytes_total == 0)
+          log_request.info() << "empty xferdes: " << guid;
+        // TODO: figure out how to eliminate false positives from these
+        //  checks with indirection and/or multiple remote inputs
+        begin_completion();
+        break;
+      }
+
+      TransferIterator::AddressInfo src_info, dst_info;
+      size_t read_bytes, write_bytes, read_seq, write_seq;
+      size_t write_pad_bytes = 0;
+      size_t read_pad_bytes = 0;
+
+      // handle serialization-only and deserialization-only cases
+      //  specially, because they have uncertainty in how much data
+      //  they write or read
+      if(in_port->serdez_op && !out_port->serdez_op) {
+        // serialization only - must be into an IB
+        assert(in_port->peer_guid == XFERDES_NO_GUID);
+        assert(out_port->peer_guid != XFERDES_NO_GUID);
+
+        // when serializing, we don't know how much output space we're
+        //  going to consume, so do not step the dst_iter here
+        // instead, see what we can get from the source and conservatively
+        //  check flow control on the destination and let the stepping
+        //  of dst_iter happen in the actual execution of the request
+
+        // if we don't have space to write a single worst-case
+        //  element, try again later
+        if(out_port->seq_remote.span_exists(wbc_snapshot,
+                                            in_port->serdez_op->max_serialized_size) <
+           in_port->serdez_op->max_serialized_size)
+          break;
+
+        size_t max_bytes = max_req_size;
+
+        size_t src_bytes = in_port->iter->step(max_bytes, src_info,
+                                               flags & TransferIterator::SRC_FLAGMASK,
+                                               true /*tentative*/);
+
+        size_t num_elems = src_bytes / in_port->serdez_op->sizeof_field_type;
+        // no input data?  try again later
+        if(num_elems == 0)
+          break;
+        assert((num_elems * in_port->serdez_op->sizeof_field_type) == src_bytes);
+        size_t max_dst_bytes = num_elems * in_port->serdez_op->max_serialized_size;
+
+        // if we have an output control, restrict the max number of
+        //  elements
+        if(output_control.control_port_idx >= 0) {
+          if(num_elems > output_control.remaining_count) {
+            log_xd.info() << "scatter/serialize clamp: " << num_elems << " -> "
+                          << output_control.remaining_count;
+            num_elems = output_control.remaining_count;
+          }
+        }
+
+        size_t clamp_dst_bytes = num_elems * in_port->serdez_op->max_serialized_size;
+        // test for space using our conserative bytes written count
+        size_t dst_bytes_avail =
+            out_port->seq_remote.span_exists(wbc_snapshot, clamp_dst_bytes);
+
+        if(dst_bytes_avail == max_dst_bytes) {
+          // enough space - confirm the source step
+          in_port->iter->confirm_step();
+        } else {
+          // not enough space - figure out how many elements we can
+          //  actually take and adjust the source step
+          size_t act_elems = dst_bytes_avail / in_port->serdez_op->max_serialized_size;
+          // if there was a remainder in the division, get rid of it
+          dst_bytes_avail = act_elems * in_port->serdez_op->max_serialized_size;
+          size_t new_src_bytes = act_elems * in_port->serdez_op->sizeof_field_type;
+          in_port->iter->cancel_step();
+          src_bytes = in_port->iter->step(new_src_bytes, src_info,
+                                          flags & TransferIterator::SRC_FLAGMASK,
                                           false /*!tentative*/);
-              assert(amt == sizeof(unsigned));
-              const void *srcptr = icp.mem->get_direct_ptr(c_info.base_offset, amt);
-              assert(srcptr != 0);
-              unsigned cword;
-              memcpy(&cword, srcptr, sizeof(unsigned));
-
-              icp.local_bytes_total += sizeof(unsigned);
-              avail -= sizeof(unsigned);
-
-              got_packet = input_control.decoder.decode(cword,
-                                                        input_control.remaining_count,
-                                                        input_control.current_io_port,
-                                                        input_control.eos_received);
-            } while(!got_packet);
-
-            // can't make further progress if we didn't get a full packet
-            if(!got_packet)
+          // this can come up shorter than we expect if the source
+          //  iterator is 2-D or 3-D - if that happens, re-adjust the
+          //  dest bytes again
+          if(src_bytes < new_src_bytes) {
+            if(src_bytes == 0)
               break;
 
-            update_bytes_read(input_control.control_port_idx,
-                              old_lbt, icp.local_bytes_total - old_lbt);
+            num_elems = src_bytes / in_port->serdez_op->sizeof_field_type;
+            assert((num_elems * in_port->serdez_op->sizeof_field_type) == src_bytes);
 
-	    log_xd.info() << "input control: xd=" << std::hex << guid << std::dec
-			  << " port=" << input_control.current_io_port
-			  << " count=" << input_control.remaining_count
-			  << " done=" << input_control.eos_received;
-	    // if count is still zero, we're done
-	    if(input_control.remaining_count == 0) {
-	      assert(input_control.eos_received);
-	      begin_completion();
-	      break;
-	    }
-	  }
-	  if(output_control.remaining_count == 0) {
-	    // this looks wrong, but the port that controls the output is
-	    //  an input port! vvv
-	    XferPort& ocp = input_ports[output_control.control_port_idx];
-	    size_t avail = ocp.seq_remote.span_exists(ocp.local_bytes_total,
-						      4 * sizeof(unsigned));
-            size_t old_lbt = ocp.local_bytes_total;
+            // no need to recheck seq_next_read
+            dst_bytes_avail = num_elems * in_port->serdez_op->max_serialized_size;
+          }
+        }
 
-            // may take a few chunks of data to get a control packet
-            bool got_packet = false;
-            do {
-              if(avail < sizeof(unsigned))
-                break;  // no data right now
+        // since the dst_iter will be stepped later, the dst_info is a
+        //  don't care, so copy the source so that lines/planes/etc match
+        //  up
+        dst_info = src_info;
 
-              TransferIterator::AddressInfo c_info;
-              size_t amt = ocp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
-              assert(amt == sizeof(unsigned));
-              const void *srcptr = ocp.mem->get_direct_ptr(c_info.base_offset, amt);
-              assert(srcptr != 0);
-              unsigned cword;
-              memcpy(&cword, srcptr, sizeof(unsigned));
+        read_seq = in_port->local_bytes_total;
+        read_bytes = src_bytes;
+        in_port->local_bytes_total += src_bytes;
 
-              ocp.local_bytes_total += sizeof(unsigned);
-              avail -= sizeof(unsigned);
+        write_seq = 0; // filled in later
+        write_bytes = dst_bytes_avail;
+        out_port->local_bytes_cons.fetch_add(dst_bytes_avail);
+        wbc_snapshot += dst_bytes_avail;
+      } else if(!in_port->serdez_op && out_port->serdez_op) {
+        // deserialization only - must be from an IB
+        assert(in_port->peer_guid != XFERDES_NO_GUID);
+        assert(out_port->peer_guid == XFERDES_NO_GUID);
 
-              got_packet = output_control.decoder.decode(cword,
-                                                         output_control.remaining_count,
-                                                         output_control.current_io_port,
-                                                         output_control.eos_received);
-            } while(!got_packet);
+        // when deserializing, we don't know how much input data we need
+        //  for each element, so do not step the src_iter here
+        //  instead, see what the destination wants
+        // if the transfer is still in progress (i.e. pre_bytes_total
+        //  hasn't been set), we have to be conservative about how many
+        //  elements we can get from partial data
 
-            // can't make further progress if we didn't get a full packet
-            if(!got_packet)
+        // input data is done only if we know the limit AND we have all
+        //  the remaining bytes (if any) up to that limit
+        bool input_data_done = ((pbt_snapshot != size_t(-1)) &&
+                                ((rbc_snapshot >= pbt_snapshot) ||
+                                 (in_port->seq_remote.span_exists(
+                                      rbc_snapshot, pbt_snapshot - rbc_snapshot) ==
+                                  (pbt_snapshot - rbc_snapshot))));
+        // if we're using an input control and it's not at the end of the
+        //  stream, the above checks may not be precise
+        if((input_control.control_port_idx >= 0) && !input_control.eos_received)
+          input_data_done = false;
+
+        // this done-ness overrides many checks based on the conservative
+        //  out_port->serdez_op->max_serialized_size
+        if(!input_data_done) {
+          // if we don't have enough input data for a single worst-case
+          //  element, try again later
+          if((in_port->seq_remote.span_exists(rbc_snapshot,
+                                              out_port->serdez_op->max_serialized_size) <
+              out_port->serdez_op->max_serialized_size)) {
+            break;
+          }
+        }
+
+        size_t max_bytes = max_req_size;
+
+        size_t dst_bytes = out_port->iter->step(max_bytes, dst_info,
+                                                flags & TransferIterator::DST_FLAGMASK,
+                                                !input_data_done);
+
+        size_t num_elems = dst_bytes / out_port->serdez_op->sizeof_field_type;
+        if(num_elems == 0)
+          break;
+        assert((num_elems * out_port->serdez_op->sizeof_field_type) == dst_bytes);
+        size_t max_src_bytes = num_elems * out_port->serdez_op->max_serialized_size;
+        // if we have an input control, restrict the max number of
+        //  elements
+        if(input_control.control_port_idx >= 0) {
+          if(num_elems > input_control.remaining_count) {
+            log_xd.info() << "gather/deserialize clamp: " << num_elems << " -> "
+                          << input_control.remaining_count;
+            num_elems = input_control.remaining_count;
+          }
+        }
+
+        size_t clamp_src_bytes = num_elems * out_port->serdez_op->max_serialized_size;
+        size_t src_bytes_avail;
+        if(input_data_done) {
+          // we're certainty to have all the remaining data, so keep
+          //  the limit at max_src_bytes - we won't actually overshoot
+          //  (unless the serialized data is corrupted)
+          src_bytes_avail = max_src_bytes;
+        } else {
+          // test for space using our conserative bytes read count
+          src_bytes_avail =
+              in_port->seq_remote.span_exists(rbc_snapshot, clamp_src_bytes);
+
+          if(src_bytes_avail == max_src_bytes) {
+            // enough space - confirm the dest step
+            out_port->iter->confirm_step();
+          } else {
+            log_request.info() << "pred limits deserialize: " << max_src_bytes << " -> "
+                               << src_bytes_avail;
+            // not enough space - figure out how many elements we can
+            //  actually read and adjust the dest step
+            size_t act_elems = src_bytes_avail / out_port->serdez_op->max_serialized_size;
+            // if there was a remainder in the division, get rid of it
+            src_bytes_avail = act_elems * out_port->serdez_op->max_serialized_size;
+            size_t new_dst_bytes = act_elems * out_port->serdez_op->sizeof_field_type;
+            out_port->iter->cancel_step();
+            dst_bytes = out_port->iter->step(new_dst_bytes, dst_info,
+                                             flags & TransferIterator::SRC_FLAGMASK,
+                                             false /*!tentative*/);
+            // this can come up shorter than we expect if the destination
+            //  iterator is 2-D or 3-D - if that happens, re-adjust the
+            //  source bytes again
+            if(dst_bytes < new_dst_bytes) {
+              if(dst_bytes == 0)
+                break;
+
+              num_elems = dst_bytes / out_port->serdez_op->sizeof_field_type;
+              assert((num_elems * out_port->serdez_op->sizeof_field_type) == dst_bytes);
+
+              // no need to recheck seq_pre_write
+              src_bytes_avail = num_elems * out_port->serdez_op->max_serialized_size;
+            }
+          }
+        }
+
+        // since the src_iter will be stepped later, the src_info is a
+        //  don't care, so copy the source so that lines/planes/etc match
+        //  up
+        src_info = dst_info;
+
+        read_seq = 0; // filled in later
+        read_bytes = src_bytes_avail;
+        in_port->local_bytes_cons.fetch_add(src_bytes_avail);
+        rbc_snapshot += src_bytes_avail;
+
+        write_seq = out_port->local_bytes_total;
+        write_bytes = dst_bytes;
+        out_port->local_bytes_total += dst_bytes;
+        out_port->local_bytes_cons.store(
+            out_port->local_bytes_total); // completion detection uses this
+      } else {
+        // either no serialization or simultaneous serdez
+
+        // limit transfer based on the max request size, or the largest
+        //  amount of data allowed by the control port(s)
+        size_t max_bytes =
+            std::min(size_t(max_req_size), std::min(input_control.remaining_count,
+                                                    output_control.remaining_count));
+
+        // if we're not the first in the chain, and we know the total bytes
+        //  written by the predecessor, don't exceed that
+        if(in_port->peer_guid != XFERDES_NO_GUID) {
+          size_t pre_max = pbt_snapshot - in_port->local_bytes_total;
+          if(pre_max == 0) {
+            // should not happen with snapshots
+            assert(0);
+            // due to unsynchronized updates to pre_bytes_total, this path
+            //  can happen for an empty transfer reading from an intermediate
+            //  buffer - handle it by looping around and letting the check
+            //  at the top of the loop notice it the second time around
+            if(in_port->local_bytes_total == 0)
+              continue;
+            // otherwise, this shouldn't happen - we should detect this case
+            //  on the the transfer of those last bytes
+            assert(0);
+            begin_completion();
+            break;
+          }
+          if(pre_max < max_bytes) {
+            log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
+            max_bytes = pre_max;
+          }
+
+          // further limit by bytes we've actually received
+          max_bytes =
+              in_port->seq_remote.span_exists(in_port->local_bytes_total, max_bytes);
+          if(max_bytes == 0) {
+            // TODO: put this XD to sleep until we do have data
+            break;
+          }
+        }
+
+        if(out_port->peer_guid != XFERDES_NO_GUID) {
+          // if we're writing to an intermediate buffer, make sure to not
+          //  overwrite previously written data that has not been read yet
+          max_bytes =
+              out_port->seq_remote.span_exists(out_port->local_bytes_total, max_bytes);
+          if(max_bytes == 0) {
+            // TODO: put this XD to sleep until we do have data
+            break;
+          }
+        }
+
+        // tentatively get as much as we can from the source iterator
+        size_t src_bytes = in_port->iter->step(max_bytes, src_info,
+                                               flags & TransferIterator::SRC_FLAGMASK,
+                                               true /*tentative*/);
+        if(src_bytes == 0) {
+          // not enough space for even one element
+          // TODO: put this XD to sleep until we do have data
+          break;
+        }
+
+        // destination step must be tentative for an non-IB source or
+        //  target that might collapse dimensions differently
+        bool dimension_mismatch_possible = (((in_port->peer_guid == XFERDES_NO_GUID) ||
+                                             (out_port->peer_guid == XFERDES_NO_GUID)) &&
+                                            ((flags & TransferIterator::LINES_OK) != 0));
+
+        size_t dst_bytes = out_port->iter->step(src_bytes, dst_info,
+                                                flags & TransferIterator::DST_FLAGMASK,
+                                                dimension_mismatch_possible);
+        if(dst_bytes == 0) {
+          // not enough space for even one element
+
+          // if this happens when the input is an IB, the output is not,
+          //  and the input doesn't seem to be limited by max_bytes, this
+          //  is (probably?) the case that requires padding on the input
+          //  side
+          if((in_port->peer_guid != XFERDES_NO_GUID) &&
+             (out_port->peer_guid == XFERDES_NO_GUID) && (src_bytes < max_bytes)) {
+            log_xd.info() << "padding input buffer by " << src_bytes << " bytes";
+            src_info.bytes_per_chunk = 0;
+            src_info.num_lines = 1;
+            src_info.num_planes = 1;
+            dst_info.bytes_per_chunk = 0;
+            dst_info.num_lines = 1;
+            dst_info.num_planes = 1;
+            read_pad_bytes = src_bytes;
+            src_bytes = 0;
+            dimension_mismatch_possible = false;
+            // src iterator will be confirmed below
+            // in_port->iter->confirm_step();
+            // dst didn't actually take a step, so we don't need to cancel it
+          } else {
+            in_port->iter->cancel_step();
+            // TODO: put this XD to sleep until we do have data
+            break;
+          }
+        }
+
+        // does source now need to be shrunk?
+        if(dst_bytes < src_bytes) {
+          // cancel the src step and try to just step by dst_bytes
+          in_port->iter->cancel_step();
+          // this step must still be tentative if a dimension mismatch is
+          //  posisble
+          src_bytes = in_port->iter->step(dst_bytes, src_info,
+                                          flags & TransferIterator::SRC_FLAGMASK,
+                                          dimension_mismatch_possible);
+          if(src_bytes == 0) {
+            // corner case that should occur only with a destination
+            //  intermediate buffer - no transfer, but pad to boundary
+            //  destination wants as long as we're not being limited by
+            //  max_bytes
+            assert((in_port->peer_guid == XFERDES_NO_GUID) &&
+                   (out_port->peer_guid != XFERDES_NO_GUID));
+            if(dst_bytes < max_bytes) {
+              log_xd.info() << "padding output buffer by " << dst_bytes << " bytes";
+              src_info.bytes_per_chunk = 0;
+              src_info.num_lines = 1;
+              src_info.num_planes = 1;
+              dst_info.bytes_per_chunk = 0;
+              dst_info.num_lines = 1;
+              dst_info.num_planes = 1;
+              write_pad_bytes = dst_bytes;
+              dst_bytes = 0;
+              dimension_mismatch_possible = false;
+              // src didn't actually take a step, so we don't need to cancel it
+              out_port->iter->confirm_step();
+            } else {
+              // retry later
+              // src didn't actually take a step, so we don't need to cancel it
+              out_port->iter->cancel_step();
               break;
+            }
+          }
+          // a mismatch is still possible if the source is 2+D and the
+          //  destination wants to stop mid-span
+          if(src_bytes < dst_bytes) {
+            assert(dimension_mismatch_possible);
+            out_port->iter->cancel_step();
+            dst_bytes = out_port->iter->step(src_bytes, dst_info,
+                                             flags & TransferIterator::DST_FLAGMASK,
+                                             true /*tentative*/);
+          }
+          // byte counts now must match
+          assert(src_bytes == dst_bytes);
+        } else {
+          // in the absense of dimension mismatches, it's safe now to confirm
+          //  the source step
+          if(!dimension_mismatch_possible)
+            in_port->iter->confirm_step();
+        }
 
-	    update_bytes_read(output_control.control_port_idx,
-                              old_lbt, ocp.local_bytes_total - old_lbt);
+        // when 2D transfers are allowed, it is possible that the
+        // bytes_per_chunk don't match, and we need to add an extra
+        //  dimension to one side or the other
+        // NOTE: this transformation can cause the dimensionality of the
+        //  transfer to grow.  Allow this to happen and detect it at the
+        //  end.
+        if(!dimension_mismatch_possible) {
+          assert(src_info.bytes_per_chunk == dst_info.bytes_per_chunk);
+          assert(src_info.num_lines == 1);
+          assert(src_info.num_planes == 1);
+          assert(dst_info.num_lines == 1);
+          assert(dst_info.num_planes == 1);
+        } else {
+          // track how much of src and/or dst is "lost" into a 4th
+          //  dimension
+          size_t src_4d_factor = 1;
+          size_t dst_4d_factor = 1;
+          if(src_info.bytes_per_chunk < dst_info.bytes_per_chunk) {
+            size_t ratio = dst_info.bytes_per_chunk / src_info.bytes_per_chunk;
+            assert((src_info.bytes_per_chunk * ratio) == dst_info.bytes_per_chunk);
+            dst_4d_factor *= dst_info.num_planes; // existing planes lost
+            dst_info.num_planes = dst_info.num_lines;
+            dst_info.plane_stride = dst_info.line_stride;
+            dst_info.num_lines = ratio;
+            dst_info.line_stride = src_info.bytes_per_chunk;
+            dst_info.bytes_per_chunk = src_info.bytes_per_chunk;
+          }
+          if(dst_info.bytes_per_chunk < src_info.bytes_per_chunk) {
+            size_t ratio = src_info.bytes_per_chunk / dst_info.bytes_per_chunk;
+            assert((dst_info.bytes_per_chunk * ratio) == src_info.bytes_per_chunk);
+            src_4d_factor *= src_info.num_planes; // existing planes lost
+            src_info.num_planes = src_info.num_lines;
+            src_info.plane_stride = src_info.line_stride;
+            src_info.num_lines = ratio;
+            src_info.line_stride = dst_info.bytes_per_chunk;
+            src_info.bytes_per_chunk = dst_info.bytes_per_chunk;
+          }
 
-	    log_xd.info() << "output control: xd=" << std::hex << guid << std::dec
-			  << " port=" << output_control.current_io_port
-			  << " count=" << output_control.remaining_count
-			  << " done=" << output_control.eos_received;
-	    // if count is still zero, we're done
-	    if(output_control.remaining_count == 0) {
-	      assert(output_control.eos_received);
-	      begin_completion();
-	      break;
-	    }
-	  }
+          // similarly, if the number of lines doesn't match, we need to promote
+          //  one of the requests from 2D to 3D
+          if(src_info.num_lines < dst_info.num_lines) {
+            size_t ratio = dst_info.num_lines / src_info.num_lines;
+            assert((src_info.num_lines * ratio) == dst_info.num_lines);
+            dst_4d_factor *= dst_info.num_planes; // existing planes lost
+            dst_info.num_planes = ratio;
+            dst_info.plane_stride = dst_info.line_stride * src_info.num_lines;
+            dst_info.num_lines = src_info.num_lines;
+          }
+          if(dst_info.num_lines < src_info.num_lines) {
+            size_t ratio = src_info.num_lines / dst_info.num_lines;
+            assert((dst_info.num_lines * ratio) == src_info.num_lines);
+            src_4d_factor *= src_info.num_planes; // existing planes lost
+            src_info.num_planes = ratio;
+            src_info.plane_stride = src_info.line_stride * dst_info.num_lines;
+            src_info.num_lines = dst_info.num_lines;
+          }
 
-	  XferPort *in_port = ((input_control.current_io_port >= 0) ?
-			         &input_ports[input_control.current_io_port] :
-			         0);
-	  XferPort *out_port = ((output_control.current_io_port >= 0) ?
-				  &output_ports[output_control.current_io_port] :
-				  0);
+          // sanity-checks: src/dst should match on lines/planes and we
+          //  shouldn't have multiple planes if we don't have multiple lines
+          assert(src_info.num_lines == dst_info.num_lines);
+          assert((src_info.num_planes * src_4d_factor) ==
+                 (dst_info.num_planes * dst_4d_factor));
+          assert((src_info.num_lines > 1) || (src_info.num_planes == 1));
+          assert((dst_info.num_lines > 1) || (dst_info.num_planes == 1));
 
-	  // special cases for OOR scatter/gather
-	  if(!in_port) {
-	    if(!out_port) {
-	      // no input or output?  just skip the count?
-	      assert(0);
-	    } else {
-	      // no valid input, so no write to the destination -
-	      //  just step the output transfer iterator if it's a real target
-	      //  but barf if it's an IB
-	      assert((out_port->peer_guid == XferDes::XFERDES_NO_GUID) &&
-		     !out_port->serdez_op);
-	      TransferIterator::AddressInfo dummy;
-	      size_t skip_bytes = out_port->iter->step(std::min(input_control.remaining_count,
-								output_control.remaining_count),
-						       dummy,
-						       flags & TransferIterator::DST_FLAGMASK,
-						       false /*!tentative*/);
-	      log_xd.debug() << "skipping " << skip_bytes << " bytes of output";
-	      assert(skip_bytes > 0);
-	      input_control.remaining_count -= skip_bytes;
-	      output_control.remaining_count -= skip_bytes;
-	      // TODO: pull this code out to a common place?
-	      if(((input_control.remaining_count == 0) && input_control.eos_received) ||
-		 ((output_control.remaining_count == 0) && output_control.eos_received)) {
-		log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-		begin_completion();
-		break;
-	      }
-	      continue;  // try again
-	    }
-	  } else if(!out_port) {
-	    // valid input that we need to throw away
-	    assert(!in_port->serdez_op);
-	    TransferIterator::AddressInfo dummy;
-	    // although we're not reading the IB input data ourselves, we need
-	    //  to wait until it's ready before not-reading it to avoid WAW
-	    //  races on the producer side
-	    size_t skip_bytes = std::min(input_control.remaining_count,
-					 output_control.remaining_count);
-	    if(in_port->peer_guid != XferDes::XFERDES_NO_GUID) {
-	      skip_bytes = in_port->seq_remote.span_exists(in_port->local_bytes_total,
-							   skip_bytes);
-	      if(skip_bytes == 0) break;
-	    }
-	    skip_bytes = in_port->iter->step(skip_bytes,
-					     dummy,
-					     flags & TransferIterator::SRC_FLAGMASK,
-					     false /*!tentative*/);
-	    log_xd.debug() << "skipping " << skip_bytes << " bytes of input";
-	    assert(skip_bytes > 0);
-	    update_bytes_read(input_control.current_io_port,
-			      in_port->local_bytes_total,
-			      skip_bytes);
-	    in_port->local_bytes_total += skip_bytes;
-	    input_control.remaining_count -= skip_bytes;
-	    output_control.remaining_count -= skip_bytes;
-	    // TODO: pull this code out to a common place?
-	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
-	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
-	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      begin_completion();
-	      break;
-	    }
-	    continue;  // try again
-	  }
-	  
-	  // there are several variables that can change asynchronously to
-	  //  the logic here:
-	  //   pre_bytes_total - the max bytes we'll ever see from the input IB
-	  //   read_bytes_cons - conservative estimate of bytes we've read
-	  //   write_bytes_cons - conservative estimate of bytes we've written
-	  //
-	  // to avoid all sorts of weird race conditions, sample all three here
-	  //  and only use them in the code below (exception: atomic increments
-	  //  of rbc or wbc, for which we adjust the snapshot by the same)
-	  size_t pbt_snapshot = in_port->remote_bytes_total.load_acquire();
-	  size_t rbc_snapshot = in_port->local_bytes_cons.load_acquire();
-	  size_t wbc_snapshot = out_port->local_bytes_cons.load_acquire();
+          // only do as many planes as both src and dst can manage
+          if(src_info.num_planes > dst_info.num_planes)
+            src_info.num_planes = dst_info.num_planes;
+          else
+            dst_info.num_planes = src_info.num_planes;
 
-	  // normally we detect the end of a transfer after initiating a
-	  //  request, but empty iterators and filtered streams can cause us
-	  //  to not realize the transfer is done until we are asking for
-	  //  the next request (i.e. now)
-	  if((in_port->peer_guid == XFERDES_NO_GUID) ?
-	       in_port->iter->done() :
-	       (in_port->local_bytes_total == pbt_snapshot)) {
-	    if(in_port->local_bytes_total == 0)
-	      log_request.info() << "empty xferdes: " << guid;
-	    // TODO: figure out how to eliminate false positives from these
-	    //  checks with indirection and/or multiple remote inputs
-#if 0
-	    assert((out_port->peer_guid != XFERDES_NO_GUID) ||
-		   out_port->iter->done());
-#endif
+          // if 3D isn't allowed, set num_planes back to 1
+          if((flags & TransferIterator::PLANES_OK) == 0) {
+            src_info.num_planes = 1;
+            dst_info.num_planes = 1;
+          }
 
-	    begin_completion();
-	    break;
-	  }
-	  
-	  TransferIterator::AddressInfo src_info, dst_info;
-	  size_t read_bytes, write_bytes, read_seq, write_seq;
-	  size_t write_pad_bytes = 0;
-	  size_t read_pad_bytes = 0;
+          // now figure out how many bytes we're actually able to move and
+          //  if it's less than what we got from the iterators, try again
+          size_t act_bytes =
+              (src_info.bytes_per_chunk * src_info.num_lines * src_info.num_planes);
+          if(act_bytes == src_bytes) {
+            // things match up - confirm the steps
+            in_port->iter->confirm_step();
+            out_port->iter->confirm_step();
+          } else {
+            // log_request.info() << "dimension mismatch! " << act_bytes << " < " <<
+            // src_bytes << " (" << bytes_total << ")";
+            TransferIterator::AddressInfo dummy_info;
+            in_port->iter->cancel_step();
+            src_bytes = in_port->iter->step(act_bytes, dummy_info,
+                                            flags & TransferIterator::SRC_FLAGMASK,
+                                            false /*!tentative*/);
+            assert(src_bytes == act_bytes);
+            out_port->iter->cancel_step();
+            dst_bytes = out_port->iter->step(act_bytes, dummy_info,
+                                             flags & TransferIterator::DST_FLAGMASK,
+                                             false /*!tentative*/);
+            assert(dst_bytes == act_bytes);
+          }
+        }
 
-	  // handle serialization-only and deserialization-only cases 
-	  //  specially, because they have uncertainty in how much data
-	  //  they write or read
-	  if(in_port->serdez_op && !out_port->serdez_op) {
-	    // serialization only - must be into an IB
-	    assert(in_port->peer_guid == XFERDES_NO_GUID);
-	    assert(out_port->peer_guid != XFERDES_NO_GUID);
+        size_t act_bytes =
+            (src_info.bytes_per_chunk * src_info.num_lines * src_info.num_planes);
+        read_seq = in_port->local_bytes_total;
+        read_bytes = act_bytes + read_pad_bytes;
 
-	    // when serializing, we don't know how much output space we're
-	    //  going to consume, so do not step the dst_iter here
-	    // instead, see what we can get from the source and conservatively
-	    //  check flow control on the destination and let the stepping
-	    //  of dst_iter happen in the actual execution of the request
+        // update bytes read unless we're using indirection
+        if(in_port->indirect_port_idx < 0)
+          in_port->local_bytes_total += read_bytes;
 
-	    // if we don't have space to write a single worst-case
-	    //  element, try again later
-	    if(out_port->seq_remote.span_exists(wbc_snapshot,
-						in_port->serdez_op->max_serialized_size) <
-	       in_port->serdez_op->max_serialized_size)
-	      break;
+        write_seq = out_port->local_bytes_total;
+        write_bytes = act_bytes + write_pad_bytes;
+        out_port->local_bytes_total += write_bytes;
+        out_port->local_bytes_cons.store(
+            out_port->local_bytes_total); // completion detection uses this
+      }
 
-	    size_t max_bytes = max_req_size;
+      Request *new_req = dequeue_request();
+      new_req->src_port_idx = input_control.current_io_port;
+      new_req->dst_port_idx = output_control.current_io_port;
+      new_req->read_seq_pos = read_seq;
+      new_req->read_seq_count = read_bytes;
+      new_req->write_seq_pos = write_seq;
+      new_req->write_seq_count = write_bytes;
+      new_req->dim =
+          ((src_info.num_planes == 1)
+               ? ((src_info.num_lines == 1) ? Request::DIM_1D : Request::DIM_2D)
+               : Request::DIM_3D);
+      new_req->src_off = src_info.base_offset;
+      new_req->dst_off = dst_info.base_offset;
+      new_req->nbytes = src_info.bytes_per_chunk;
+      new_req->nlines = src_info.num_lines;
+      new_req->src_str = src_info.line_stride;
+      new_req->dst_str = dst_info.line_stride;
+      new_req->nplanes = src_info.num_planes;
+      new_req->src_pstr = src_info.plane_stride;
+      new_req->dst_pstr = dst_info.plane_stride;
 
-	    size_t src_bytes = in_port->iter->step(max_bytes, src_info,
-						   flags & TransferIterator::SRC_FLAGMASK,
-						   true /*tentative*/);
+      // we can actually hit the end of an intermediate buffer input
+      //  even if our initial pbt_snapshot was (size_t)-1 because
+      //  we use the asynchronously-updated seq_pre_write, so if
+      //  we think we might be done, go ahead and resample here if
+      //  we still have -1
+      if((in_port->peer_guid != XFERDES_NO_GUID) && (pbt_snapshot == (size_t)-1))
+        pbt_snapshot = in_port->remote_bytes_total.load_acquire();
 
-	    size_t num_elems = src_bytes / in_port->serdez_op->sizeof_field_type;
-	    // no input data?  try again later
-	    if(num_elems == 0)
-	      break;
-	    assert((num_elems * in_port->serdez_op->sizeof_field_type) == src_bytes);
-	    size_t max_dst_bytes = num_elems * in_port->serdez_op->max_serialized_size;
+      // if we have control ports, they tell us when we're done
+      if((input_control.control_port_idx >= 0) ||
+         (output_control.control_port_idx >= 0)) {
+        // update control port counts, which may also flag a completed iteration
+        size_t input_count = read_bytes - read_pad_bytes;
+        size_t output_count = write_bytes - write_pad_bytes;
+        // if we're serializing or deserializing, we count in elements,
+        //  not bytes
+        if(in_port->serdez_op != 0) {
+          // serializing impacts output size
+          assert((output_count % in_port->serdez_op->max_serialized_size) == 0);
+          output_count /= in_port->serdez_op->max_serialized_size;
+        }
+        if(out_port->serdez_op != 0) {
+          // and deserializing impacts input size
+          assert((input_count % out_port->serdez_op->max_serialized_size) == 0);
+          input_count /= out_port->serdez_op->max_serialized_size;
+        }
+        assert(input_control.remaining_count >= input_count);
+        assert(output_control.remaining_count >= output_count);
+        input_control.remaining_count -= input_count;
+        output_control.remaining_count -= output_count;
+        if(((input_control.remaining_count == 0) && input_control.eos_received) ||
+           ((output_control.remaining_count == 0) && output_control.eos_received)) {
+          log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid
+                        << std::dec;
+          begin_completion();
+        }
+      } else {
+        // otherwise, we go by our iterators
+        if(in_port->iter->done() || out_port->iter->done() ||
+           (in_port->local_bytes_total == pbt_snapshot)) {
+          assert(!iteration_completed.load());
+          begin_completion();
 
-	    // if we have an output control, restrict the max number of
-	    //  elements
-	    if(output_control.control_port_idx >= 0) {
-	      if(num_elems > output_control.remaining_count) {
-		log_xd.info() << "scatter/serialize clamp: " << num_elems << " -> " << output_control.remaining_count;
-		num_elems = output_control.remaining_count;
-	      }
-	    }
-
-	    size_t clamp_dst_bytes = num_elems * in_port->serdez_op->max_serialized_size;
-	    // test for space using our conserative bytes written count
-	    size_t dst_bytes_avail = out_port->seq_remote.span_exists(wbc_snapshot,
-								      clamp_dst_bytes);
-
-	    if(dst_bytes_avail == max_dst_bytes) {
-	      // enough space - confirm the source step
-	      in_port->iter->confirm_step();
-	    } else {
-	      // not enough space - figure out how many elements we can
-	      //  actually take and adjust the source step
-	      size_t act_elems = dst_bytes_avail / in_port->serdez_op->max_serialized_size;
-	      // if there was a remainder in the division, get rid of it
-	      dst_bytes_avail = act_elems * in_port->serdez_op->max_serialized_size;
-	      size_t new_src_bytes = act_elems * in_port->serdez_op->sizeof_field_type;
-	      in_port->iter->cancel_step();
-	      src_bytes = in_port->iter->step(new_src_bytes, src_info,
-					      flags & TransferIterator::SRC_FLAGMASK,
-					 false /*!tentative*/);
-	      // this can come up shorter than we expect if the source
-	      //  iterator is 2-D or 3-D - if that happens, re-adjust the
-	      //  dest bytes again
-	      if(src_bytes < new_src_bytes) {
-		if(src_bytes == 0) break;
-
-		num_elems = src_bytes / in_port->serdez_op->sizeof_field_type;
-		assert((num_elems * in_port->serdez_op->sizeof_field_type) == src_bytes);
-
-		// no need to recheck seq_next_read
-		dst_bytes_avail = num_elems * in_port->serdez_op->max_serialized_size;
-	      }
-	    }
-
-	    // since the dst_iter will be stepped later, the dst_info is a 
-	    //  don't care, so copy the source so that lines/planes/etc match
-	    //  up
-	    dst_info = src_info;
-
-	    read_seq = in_port->local_bytes_total;
-	    read_bytes = src_bytes;
-	    in_port->local_bytes_total += src_bytes;
-
-	    write_seq = 0; // filled in later
-	    write_bytes = dst_bytes_avail;
-	    out_port->local_bytes_cons.fetch_add(dst_bytes_avail);
-	    wbc_snapshot += dst_bytes_avail;
-	  } else
-	  if(!in_port->serdez_op && out_port->serdez_op) {
-	    // deserialization only - must be from an IB
-	    assert(in_port->peer_guid != XFERDES_NO_GUID);
-	    assert(out_port->peer_guid == XFERDES_NO_GUID);
-
-	    // when deserializing, we don't know how much input data we need
-	    //  for each element, so do not step the src_iter here
-	    //  instead, see what the destination wants
-	    // if the transfer is still in progress (i.e. pre_bytes_total
-	    //  hasn't been set), we have to be conservative about how many
-	    //  elements we can get from partial data
-
-	    // input data is done only if we know the limit AND we have all
-	    //  the remaining bytes (if any) up to that limit
-	    bool input_data_done = ((pbt_snapshot != size_t(-1)) &&
-				    ((rbc_snapshot >= pbt_snapshot) ||
-				     (in_port->seq_remote.span_exists(rbc_snapshot,
-								      pbt_snapshot - rbc_snapshot) ==
-				      (pbt_snapshot - rbc_snapshot))));
-	    // if we're using an input control and it's not at the end of the
-	    //  stream, the above checks may not be precise
-	    if((input_control.control_port_idx >= 0) &&
-	       !input_control.eos_received)
-	      input_data_done = false;
-
-	    // this done-ness overrides many checks based on the conservative
-	    //  out_port->serdez_op->max_serialized_size
-	    if(!input_data_done) {
-	      // if we don't have enough input data for a single worst-case
-	      //  element, try again later
-	      if((in_port->seq_remote.span_exists(rbc_snapshot,
-						  out_port->serdez_op->max_serialized_size) <
-		  out_port->serdez_op->max_serialized_size)) {
-		break;
-	      }
-	    }
-
-	    size_t max_bytes = max_req_size;
-
-	    size_t dst_bytes = out_port->iter->step(max_bytes, dst_info,
-						    flags & TransferIterator::DST_FLAGMASK,
-						    !input_data_done);
-
-	    size_t num_elems = dst_bytes / out_port->serdez_op->sizeof_field_type;
-	    if(num_elems == 0) break;
-	    assert((num_elems * out_port->serdez_op->sizeof_field_type) == dst_bytes);
-	    size_t max_src_bytes = num_elems * out_port->serdez_op->max_serialized_size;
-	    // if we have an input control, restrict the max number of
-	    //  elements
-	    if(input_control.control_port_idx >= 0) {
-	      if(num_elems > input_control.remaining_count) {
-		log_xd.info() << "gather/deserialize clamp: " << num_elems << " -> " << input_control.remaining_count;
-		num_elems = input_control.remaining_count;
-	      }
-	    }
-
-	    size_t clamp_src_bytes = num_elems * out_port->serdez_op->max_serialized_size;
-	    size_t src_bytes_avail;
-	    if(input_data_done) {
-	      // we're certainty to have all the remaining data, so keep
-	      //  the limit at max_src_bytes - we won't actually overshoot
-	      //  (unless the serialized data is corrupted)
-	      src_bytes_avail = max_src_bytes;
-	    } else {
-	      // test for space using our conserative bytes read count
-	      src_bytes_avail = in_port->seq_remote.span_exists(rbc_snapshot,
-								clamp_src_bytes);
-
-	      if(src_bytes_avail == max_src_bytes) {
-		// enough space - confirm the dest step
-		out_port->iter->confirm_step();
-	      } else {
-		log_request.info() << "pred limits deserialize: " << max_src_bytes << " -> " << src_bytes_avail;
-		// not enough space - figure out how many elements we can
-		//  actually read and adjust the dest step
-		size_t act_elems = src_bytes_avail / out_port->serdez_op->max_serialized_size;
-		// if there was a remainder in the division, get rid of it
-		src_bytes_avail = act_elems * out_port->serdez_op->max_serialized_size;
-		size_t new_dst_bytes = act_elems * out_port->serdez_op->sizeof_field_type;
-		out_port->iter->cancel_step();
-		dst_bytes = out_port->iter->step(new_dst_bytes, dst_info,
-						 flags & TransferIterator::SRC_FLAGMASK,
-						 false /*!tentative*/);
-		// this can come up shorter than we expect if the destination
-		//  iterator is 2-D or 3-D - if that happens, re-adjust the
-		//  source bytes again
-		if(dst_bytes < new_dst_bytes) {
-		  if(dst_bytes == 0) break;
-
-		  num_elems = dst_bytes / out_port->serdez_op->sizeof_field_type;
-		  assert((num_elems * out_port->serdez_op->sizeof_field_type) == dst_bytes);
-
-		  // no need to recheck seq_pre_write
-		  src_bytes_avail = num_elems * out_port->serdez_op->max_serialized_size;
-		}
-	      }
-	    }
-
-	    // since the src_iter will be stepped later, the src_info is a 
-	    //  don't care, so copy the source so that lines/planes/etc match
-	    //  up
-	    src_info = dst_info;
-
-	    read_seq = 0; // filled in later
-	    read_bytes = src_bytes_avail;
-	    in_port->local_bytes_cons.fetch_add(src_bytes_avail);
-	    rbc_snapshot += src_bytes_avail;
-
-	    write_seq = out_port->local_bytes_total;
-	    write_bytes = dst_bytes;
-	    out_port->local_bytes_total += dst_bytes;
-	    out_port->local_bytes_cons.store(out_port->local_bytes_total); // completion detection uses this
-	  } else {
-	    // either no serialization or simultaneous serdez
-
-	    // limit transfer based on the max request size, or the largest
-	    //  amount of data allowed by the control port(s)
-	    size_t max_bytes = std::min(size_t(max_req_size),
-					std::min(input_control.remaining_count,
-						 output_control.remaining_count));
-
-	    // if we're not the first in the chain, and we know the total bytes
-	    //  written by the predecessor, don't exceed that
-	    if(in_port->peer_guid != XFERDES_NO_GUID) {
-	      size_t pre_max = pbt_snapshot - in_port->local_bytes_total;
-	      if(pre_max == 0) {
-		// should not happen with snapshots
-		assert(0);
-		// due to unsynchronized updates to pre_bytes_total, this path
-		//  can happen for an empty transfer reading from an intermediate
-		//  buffer - handle it by looping around and letting the check
-		//  at the top of the loop notice it the second time around
-		if(in_port->local_bytes_total == 0)
-		  continue;
-		// otherwise, this shouldn't happen - we should detect this case
-		//  on the the transfer of those last bytes
-		assert(0);
-		begin_completion();
-		break;
-	      }
-	      if(pre_max < max_bytes) {
-		log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
-		max_bytes = pre_max;
-	      }
-
-	      // further limit by bytes we've actually received
-	      max_bytes = in_port->seq_remote.span_exists(in_port->local_bytes_total, max_bytes);
-	      if(max_bytes == 0) {
-		// TODO: put this XD to sleep until we do have data
-		break;
-	      }
-	    }
-
-	    if(out_port->peer_guid != XFERDES_NO_GUID) {
-	      // if we're writing to an intermediate buffer, make sure to not
-	      //  overwrite previously written data that has not been read yet
-	      max_bytes = out_port->seq_remote.span_exists(out_port->local_bytes_total, max_bytes);
-	      if(max_bytes == 0) {
-		// TODO: put this XD to sleep until we do have data
-		break;
-	      }
-	    }
-
-	    // tentatively get as much as we can from the source iterator
-	    size_t src_bytes = in_port->iter->step(max_bytes, src_info,
-						   flags & TransferIterator::SRC_FLAGMASK,
-						   true /*tentative*/);
-	    if(src_bytes == 0) {
-	      // not enough space for even one element
-	      // TODO: put this XD to sleep until we do have data
-	      break;
-	    }
-
-	    // destination step must be tentative for an non-IB source or
-	    //  target that might collapse dimensions differently
-	    bool dimension_mismatch_possible = (((in_port->peer_guid == XFERDES_NO_GUID) ||
-						 (out_port->peer_guid == XFERDES_NO_GUID)) &&
-						((flags & TransferIterator::LINES_OK) != 0));
-
-	    size_t dst_bytes = out_port->iter->step(src_bytes, dst_info,
-						    flags & TransferIterator::DST_FLAGMASK,
-						    dimension_mismatch_possible);
-	    if(dst_bytes == 0) {
-	      // not enough space for even one element
-
-	      // if this happens when the input is an IB, the output is not,
-	      //  and the input doesn't seem to be limited by max_bytes, this
-	      //  is (probably?) the case that requires padding on the input
-	      //  side
-	      if((in_port->peer_guid != XFERDES_NO_GUID) &&
-		 (out_port->peer_guid == XFERDES_NO_GUID) &&
-		 (src_bytes < max_bytes)) {
-		log_xd.info() << "padding input buffer by " << src_bytes << " bytes";
-		src_info.bytes_per_chunk = 0;
-		src_info.num_lines = 1;
-		src_info.num_planes = 1;
-		dst_info.bytes_per_chunk = 0;
-		dst_info.num_lines = 1;
-		dst_info.num_planes = 1;
-		read_pad_bytes = src_bytes;
-		src_bytes = 0;
-		dimension_mismatch_possible = false;
-		// src iterator will be confirmed below
-		//in_port->iter->confirm_step();
-		// dst didn't actually take a step, so we don't need to cancel it
-	      } else {
-		in_port->iter->cancel_step();
-		// TODO: put this XD to sleep until we do have data
-		break;
-	      }
-	    }
-
-	    // does source now need to be shrunk?
-	    if(dst_bytes < src_bytes) {
-	      // cancel the src step and try to just step by dst_bytes
-	      in_port->iter->cancel_step();
-	      // this step must still be tentative if a dimension mismatch is
-	      //  posisble
-	      src_bytes = in_port->iter->step(dst_bytes, src_info,
-					      flags & TransferIterator::SRC_FLAGMASK,
-					      dimension_mismatch_possible);
-	      if(src_bytes == 0) {
-		// corner case that should occur only with a destination 
-		//  intermediate buffer - no transfer, but pad to boundary
-		//  destination wants as long as we're not being limited by
-		//  max_bytes
-		assert((in_port->peer_guid == XFERDES_NO_GUID) &&
-		       (out_port->peer_guid != XFERDES_NO_GUID));
-		if(dst_bytes < max_bytes) {
-		  log_xd.info() << "padding output buffer by " << dst_bytes << " bytes";
-		  src_info.bytes_per_chunk = 0;
-		  src_info.num_lines = 1;
-		  src_info.num_planes = 1;
-		  dst_info.bytes_per_chunk = 0;
-		  dst_info.num_lines = 1;
-		  dst_info.num_planes = 1;
-		  write_pad_bytes = dst_bytes;
-		  dst_bytes = 0;
-		  dimension_mismatch_possible = false;
-		  // src didn't actually take a step, so we don't need to cancel it
-		  out_port->iter->confirm_step();
-		} else {
-		  // retry later
-		  // src didn't actually take a step, so we don't need to cancel it
-		  out_port->iter->cancel_step();
-		  break;
-		}
-	      }
-	      // a mismatch is still possible if the source is 2+D and the
-	      //  destination wants to stop mid-span
-	      if(src_bytes < dst_bytes) {
-		assert(dimension_mismatch_possible);
-		out_port->iter->cancel_step();
-		dst_bytes = out_port->iter->step(src_bytes, dst_info,
-						 flags & TransferIterator::DST_FLAGMASK,
-						 true /*tentative*/);
-	      }
-	      // byte counts now must match
-	      assert(src_bytes == dst_bytes);
-	    } else {
-	      // in the absense of dimension mismatches, it's safe now to confirm
-	      //  the source step
-	      if(!dimension_mismatch_possible)
-		in_port->iter->confirm_step();
-	    }
-
-	    // when 2D transfers are allowed, it is possible that the
-	    // bytes_per_chunk don't match, and we need to add an extra
-	    //  dimension to one side or the other
-	    // NOTE: this transformation can cause the dimensionality of the
-	    //  transfer to grow.  Allow this to happen and detect it at the
-	    //  end.
-	    if(!dimension_mismatch_possible) {
-	      assert(src_info.bytes_per_chunk == dst_info.bytes_per_chunk);
-	      assert(src_info.num_lines == 1);
-	      assert(src_info.num_planes == 1);
-	      assert(dst_info.num_lines == 1);
-	      assert(dst_info.num_planes == 1);
-	    } else {
-	      // track how much of src and/or dst is "lost" into a 4th
-	      //  dimension
-	      size_t src_4d_factor = 1;
-	      size_t dst_4d_factor = 1;
-	      if(src_info.bytes_per_chunk < dst_info.bytes_per_chunk) {
-		size_t ratio = dst_info.bytes_per_chunk / src_info.bytes_per_chunk;
-		assert((src_info.bytes_per_chunk * ratio) == dst_info.bytes_per_chunk);
-		dst_4d_factor *= dst_info.num_planes; // existing planes lost
-		dst_info.num_planes = dst_info.num_lines;
-		dst_info.plane_stride = dst_info.line_stride;
-		dst_info.num_lines = ratio;
-		dst_info.line_stride = src_info.bytes_per_chunk;
-		dst_info.bytes_per_chunk = src_info.bytes_per_chunk;
-	      }
-	      if(dst_info.bytes_per_chunk < src_info.bytes_per_chunk) {
-		size_t ratio = src_info.bytes_per_chunk / dst_info.bytes_per_chunk;
-		assert((dst_info.bytes_per_chunk * ratio) == src_info.bytes_per_chunk);
-		src_4d_factor *= src_info.num_planes; // existing planes lost
-		src_info.num_planes = src_info.num_lines;
-		src_info.plane_stride = src_info.line_stride;
-		src_info.num_lines = ratio;
-		src_info.line_stride = dst_info.bytes_per_chunk;
-		src_info.bytes_per_chunk = dst_info.bytes_per_chunk;
-	      }
-	  
-	      // similarly, if the number of lines doesn't match, we need to promote
-	      //  one of the requests from 2D to 3D
-	      if(src_info.num_lines < dst_info.num_lines) {
-		size_t ratio = dst_info.num_lines / src_info.num_lines;
-		assert((src_info.num_lines * ratio) == dst_info.num_lines);
-		dst_4d_factor *= dst_info.num_planes; // existing planes lost
-		dst_info.num_planes = ratio;
-		dst_info.plane_stride = dst_info.line_stride * src_info.num_lines;
-		dst_info.num_lines = src_info.num_lines;
-	      }
-	      if(dst_info.num_lines < src_info.num_lines) {
-		size_t ratio = src_info.num_lines / dst_info.num_lines;
-		assert((dst_info.num_lines * ratio) == src_info.num_lines);
-		src_4d_factor *= src_info.num_planes; // existing planes lost
-		src_info.num_planes = ratio;
-		src_info.plane_stride = src_info.line_stride * dst_info.num_lines;
-		src_info.num_lines = dst_info.num_lines;
-	      }
-
-	      // sanity-checks: src/dst should match on lines/planes and we
-	      //  shouldn't have multiple planes if we don't have multiple lines
-	      assert(src_info.num_lines == dst_info.num_lines);
-	      assert((src_info.num_planes * src_4d_factor) == 
-		     (dst_info.num_planes * dst_4d_factor));
-	      assert((src_info.num_lines > 1) || (src_info.num_planes == 1));
-	      assert((dst_info.num_lines > 1) || (dst_info.num_planes == 1));
-
-	      // only do as many planes as both src and dst can manage
-	      if(src_info.num_planes > dst_info.num_planes)
-		src_info.num_planes = dst_info.num_planes;
-	      else
-		dst_info.num_planes = src_info.num_planes;
-
-	      // if 3D isn't allowed, set num_planes back to 1
-	      if((flags & TransferIterator::PLANES_OK) == 0) {
-		src_info.num_planes = 1;
-		dst_info.num_planes = 1;
-	      }
-
-	      // now figure out how many bytes we're actually able to move and
-	      //  if it's less than what we got from the iterators, try again
-	      size_t act_bytes = (src_info.bytes_per_chunk *
-				  src_info.num_lines *
-				  src_info.num_planes);
-	      if(act_bytes == src_bytes) {
-		// things match up - confirm the steps
-		in_port->iter->confirm_step();
-		out_port->iter->confirm_step();
-	      } else {
-		//log_request.info() << "dimension mismatch! " << act_bytes << " < " << src_bytes << " (" << bytes_total << ")";
-		TransferIterator::AddressInfo dummy_info;
-		in_port->iter->cancel_step();
-		src_bytes = in_port->iter->step(act_bytes, dummy_info,
-						flags & TransferIterator::SRC_FLAGMASK,
-						false /*!tentative*/);
-		assert(src_bytes == act_bytes);
-		out_port->iter->cancel_step();
-		dst_bytes = out_port->iter->step(act_bytes, dummy_info,
-						 flags & TransferIterator::DST_FLAGMASK,
-						 false /*!tentative*/);
-		assert(dst_bytes == act_bytes);
-	      }
-	    }
-
-	    size_t act_bytes = (src_info.bytes_per_chunk *
-				src_info.num_lines *
-				src_info.num_planes);
-	    read_seq = in_port->local_bytes_total;
-	    read_bytes = act_bytes + read_pad_bytes;
-
-	    // update bytes read unless we're using indirection
-	    if(in_port->indirect_port_idx < 0) 
-	      in_port->local_bytes_total += read_bytes;
-
-	    write_seq = out_port->local_bytes_total;
-	    write_bytes = act_bytes + write_pad_bytes;
-	    out_port->local_bytes_total += write_bytes;
-	    out_port->local_bytes_cons.store(out_port->local_bytes_total); // completion detection uses this
-	  }
-
-	  Request* new_req = dequeue_request();
-	  new_req->src_port_idx = input_control.current_io_port;
-	  new_req->dst_port_idx = output_control.current_io_port;
-	  new_req->read_seq_pos = read_seq;
-	  new_req->read_seq_count = read_bytes;
-	  new_req->write_seq_pos = write_seq;
-	  new_req->write_seq_count = write_bytes;
-	  new_req->dim = ((src_info.num_planes == 1) ?
-			  ((src_info.num_lines == 1) ? Request::DIM_1D :
-			                               Request::DIM_2D) :
-			                              Request::DIM_3D);
-	  new_req->src_off = src_info.base_offset;
-	  new_req->dst_off = dst_info.base_offset;
-	  new_req->nbytes = src_info.bytes_per_chunk;
-	  new_req->nlines = src_info.num_lines;
-	  new_req->src_str = src_info.line_stride;
-	  new_req->dst_str = dst_info.line_stride;
-	  new_req->nplanes = src_info.num_planes;
-	  new_req->src_pstr = src_info.plane_stride;
-	  new_req->dst_pstr = dst_info.plane_stride;
-
-	  // we can actually hit the end of an intermediate buffer input
-	  //  even if our initial pbt_snapshot was (size_t)-1 because
-	  //  we use the asynchronously-updated seq_pre_write, so if
-	  //  we think we might be done, go ahead and resample here if
-	  //  we still have -1
-	  if((in_port->peer_guid != XFERDES_NO_GUID) &&
-	     (pbt_snapshot == (size_t)-1))
-	    pbt_snapshot = in_port->remote_bytes_total.load_acquire();
-
-	  // if we have control ports, they tell us when we're done
-	  if((input_control.control_port_idx >= 0) ||
-	     (output_control.control_port_idx >= 0)) {
-	    // update control port counts, which may also flag a completed iteration
-	    size_t input_count = read_bytes - read_pad_bytes;
-	    size_t output_count = write_bytes - write_pad_bytes;
-	    // if we're serializing or deserializing, we count in elements,
-	    //  not bytes
-	    if(in_port->serdez_op != 0) {
-	      // serializing impacts output size
-	      assert((output_count % in_port->serdez_op->max_serialized_size) == 0);
-	      output_count /= in_port->serdez_op->max_serialized_size;
-	    }
-	    if(out_port->serdez_op != 0) {
-	      // and deserializing impacts input size
-	      assert((input_count % out_port->serdez_op->max_serialized_size) == 0);
-	      input_count /= out_port->serdez_op->max_serialized_size;
-	    }
-	    assert(input_control.remaining_count >= input_count);
-	    assert(output_control.remaining_count >= output_count);
-	    input_control.remaining_count -= input_count;
-	    output_control.remaining_count -= output_count;
-	    if(((input_control.remaining_count == 0) && input_control.eos_received) ||
-	       ((output_control.remaining_count == 0) && output_control.eos_received)) {
-	      log_xd.info() << "iteration completed via control port: xd=" << std::hex << guid << std::dec;
-	      begin_completion();
-
-#if 0
-	      // non-ib iterators should end at the same time?
-	      for(size_t i = 0; i < input_ports.size(); i++)
-		assert((input_ports[i].peer_guid != XFERDES_NO_GUID) ||
-		       input_ports[i].iter->done());
-	      for(size_t i = 0; i < output_ports.size(); i++)
-		assert((output_ports[i].peer_guid != XFERDES_NO_GUID) ||
-		       output_ports[i].iter->done());
-#endif
-	    }
-	  } else {
-	    // otherwise, we go by our iterators
-	    if(in_port->iter->done() || out_port->iter->done() ||
-	       (in_port->local_bytes_total == pbt_snapshot)) {
-	      assert(!iteration_completed.load());
-	      begin_completion();
-	    
-	      // TODO: figure out how to eliminate false positives from these
-	      //  checks with indirection and/or multiple remote inputs
+          // TODO: figure out how to eliminate false positives from these
+          //  checks with indirection and/or multiple remote inputs
 #if 0
 	      // non-ib iterators should end at the same time
 	      assert((in_port->peer_guid != XFERDES_NO_GUID) || in_port->iter->done());
 	      assert((out_port->peer_guid != XFERDES_NO_GUID) || out_port->iter->done());
 #endif
 
-	      if(!in_port->serdez_op && out_port->serdez_op) {
-		// ok to be over, due to the conservative nature of
-		//  deserialization reads
-		assert((rbc_snapshot >= pbt_snapshot) ||
-		       (pbt_snapshot == size_t(-1)));
-	      } else {
-		// TODO: this check is now too aggressive because the previous
-		//  xd doesn't necessarily know when it's emitting its last
-		//  data, which means the update of local_bytes_total might
-		//  be delayed
+          if(!in_port->serdez_op && out_port->serdez_op) {
+            // ok to be over, due to the conservative nature of
+            //  deserialization reads
+            assert((rbc_snapshot >= pbt_snapshot) || (pbt_snapshot == size_t(-1)));
+          } else {
+            // TODO: this check is now too aggressive because the previous
+            //  xd doesn't necessarily know when it's emitting its last
+            //  data, which means the update of local_bytes_total might
+            //  be delayed
 #if 0
 		assert((in_port->peer_guid == XFERDES_NO_GUID) ||
 		       (pbt_snapshot == in_port->local_bytes_total));
 #endif
-	      }
-	    }
-	  }
-
-	  switch(new_req->dim) {
-	  case Request::DIM_1D:
-	    {
-	      log_request.info() << "request: guid=" << std::hex << guid << std::dec
-				 << " ofs=" << new_req->src_off << "->" << new_req->dst_off
-				 << " len=" << new_req->nbytes;
-	      break;
-	    }
-	  case Request::DIM_2D:
-	    {
-	      log_request.info() << "request: guid=" << std::hex << guid << std::dec
-				 << " ofs=" << new_req->src_off << "->" << new_req->dst_off
-				 << " len=" << new_req->nbytes
-				 << " lines=" << new_req->nlines << "(" << new_req->src_str << "," << new_req->dst_str << ")";
-	      break;
-	    }
-	  case Request::DIM_3D:
-	    {
-	      log_request.info() << "request: guid=" << std::hex << guid << std::dec
-				 << " ofs=" << new_req->src_off << "->" << new_req->dst_off
-				 << " len=" << new_req->nbytes
-				 << " lines=" << new_req->nlines << "(" << new_req->src_str << "," << new_req->dst_str << ")"
-				 << " planes=" << new_req->nplanes << "(" << new_req->src_pstr << "," << new_req->dst_pstr << ")";
-	      break;
-	    }
-	  }
-	  reqs[idx++] = new_req;
-	}
-#if 0
-        coord_t src_idx, dst_idx, todo, src_str, dst_str;
-        size_t nitems, nlines;
-        while (idx + MAX_GEN_REQS <= nr && offset_idx < oas_vec.size()
-        && MAX_GEN_REQS <= available_reqs.size()) {
-          if (DIM == 0) {
-            todo = std::min((coord_t)(max_req_size / oas_vec[offset_idx].size),
-                       me->continuous_steps(src_idx, dst_idx));
-            nitems = src_str = dst_str = todo;
-            nlines = 1;
           }
-          else
-            todo = std::min((coord_t)(max_req_size / oas_vec[offset_idx].size),
-                       li->continuous_steps(src_idx, dst_idx,
-                                            src_str, dst_str,
-                                            nitems, nlines));
-          coord_t src_in_block = src_buf.block_size
-                               - src_idx % src_buf.block_size;
-          coord_t dst_in_block = dst_buf.block_size
-                               - dst_idx % dst_buf.block_size;
-          todo = std::min(todo, std::min(src_in_block, dst_in_block));
-          if (todo == 0)
-            break;
-          coord_t src_start, dst_start;
-          if (src_buf.is_ib) {
-            src_start = calc_mem_loc_ib(0,
-                                        oas_vec[offset_idx].src_offset,
-                                        oas_vec[offset_idx].size,
-                                        src_buf.elmt_size,
-                                        src_buf.block_size,
-                                        src_buf.buf_size,
-                                        domain.get_volume(), src_idx);
-            todo = std::min(todo, std::max((coord_t)0,
-					   (coord_t)(pre_bytes_write - src_start))
-                                    / oas_vec[offset_idx].size);
-	    // wrap src_start around within src_buf if needed
-	    src_start %= src_buf.buf_size;
-          } else {
-            src_start = Realm::calc_mem_loc(0,
-                                     oas_vec[offset_idx].src_offset,
-                                     oas_vec[offset_idx].size,
-                                     src_buf.elmt_size,
-                                     src_buf.block_size, src_idx);
-          }
-          if (dst_buf.is_ib) {
-            dst_start = calc_mem_loc_ib(0,
-                                        oas_vec[offset_idx].dst_offset,
-                                        oas_vec[offset_idx].size,
-                                        dst_buf.elmt_size,
-                                        dst_buf.block_size,
-                                        dst_buf.buf_size,
-                                        domain.get_volume(), dst_idx);
-            todo = std::min(todo, std::max((coord_t)0,
-					   (coord_t)(next_bytes_read + dst_buf.buf_size - dst_start))
-                                    / oas_vec[offset_idx].size);
-	    // wrap dst_start around within dst_buf if needed
-	    dst_start %= dst_buf.buf_size;
-          } else {
-            dst_start = Realm::calc_mem_loc(0,
-                                     oas_vec[offset_idx].dst_offset,
-                                     oas_vec[offset_idx].size,
-                                     dst_buf.elmt_size,
-                                     dst_buf.block_size, dst_idx);
-          }
-          if (todo == 0)
-            break;
-          bool cross_src_ib = false, cross_dst_ib = false;
-          if (src_buf.is_ib)
-            cross_src_ib = cross_ib(src_start,
-                                    todo * oas_vec[offset_idx].size,
-                                    src_buf.buf_size);
-          if (dst_buf.is_ib)
-            cross_dst_ib = cross_ib(dst_start,
-                                    todo * oas_vec[offset_idx].size,
-                                    dst_buf.buf_size);
-          // We are crossing ib, fallback to 1d case
-          // We don't support 2D, fallback to 1d case
-          if (cross_src_ib || cross_dst_ib || !support_2d_xfers(kind))
-            todo = std::min(todo, (coord_t)nitems);
-          if ((size_t)todo <= nitems) {
-            // fallback to 1d case
-            nitems = (size_t)todo;
-            nlines = 1;
-          } else {
-            nlines = todo / nitems;
-            todo = nlines * nitems;
-          }
-          if (nlines == 1) {
-            // 1D case
-            size_t nbytes = todo * oas_vec[offset_idx].size;
-            while (nbytes > 0) {
-              size_t req_size = nbytes;
-              Request* new_req = dequeue_request();
-              new_req->dim = Request::DIM_1D;
-              if (src_buf.is_ib) {
-                src_start = src_start % src_buf.buf_size;
-                req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
-              }
-              if (dst_buf.is_ib) {
-                dst_start = dst_start % dst_buf.buf_size;
-                req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
-              }
-              new_req->src_off = src_start;
-              new_req->dst_off = dst_start;
-              new_req->nbytes = req_size;
-              new_req->nlines = 1;
-              log_request.info("[1D] guid(%llx) src_off(%lld) dst_off(%lld)"
-                               " nbytes(%zu) offset_idx(%u)",
-                               guid, src_start, dst_start, req_size, offset_idx);
-              reqs[idx++] = new_req;
-              nbytes -= req_size;
-              src_start += req_size;
-              dst_start += req_size;
-            }
-          } else {
-            // 2D case
-            Request* new_req = dequeue_request();
-            new_req->dim = Request::DIM_2D;
-            new_req->src_off = src_start;
-            new_req->dst_off = dst_start;
-            new_req->src_str = src_str * oas_vec[offset_idx].size;
-            new_req->dst_str = dst_str * oas_vec[offset_idx].size;
-            new_req->nbytes = nitems * oas_vec[offset_idx].size;
-            new_req->nlines = nlines;
-            reqs[idx++] = new_req;
-          }
-          if (DIM == 0) {
-            me->move(todo);
-            if (!me->any_left()) {
-              me->reset();
-              offset_idx ++;
-            }
-          } else {
-            li->move(todo);
-            if (!li->any_left()) {
-              li->reset();
-              offset_idx ++;
-            }
-          }
-        } // while
-#endif
-        return idx;
-      }
-
-    void XferDes::begin_completion()
-    {
-#ifdef DEBUG_REALM
-      // shouldn't be called more than once
-      assert(!iteration_completed.load());
-#endif
-      iteration_completed.store_release(true);
-
-      // give all output channels a chance to indicate completion and determine
-      //  the total number of bytes we've written
-      size_t total_bytes_written = 0;
-      for(size_t i = 0; i < output_ports.size(); i++) {
-        total_bytes_written += output_ports[i].local_bytes_cons.load();
-        update_bytes_write(i, output_ports[i].local_bytes_total, 0);
-
-        // see if we still need to send the total bytes
-        if(output_ports[i].needs_pbt_update.load() &&
-           (output_ports[i].local_bytes_total == output_ports[i].local_bytes_cons.load())) {
- #ifdef DEBUG_REALM
-          assert(output_ports[i].peer_guid != XFERDES_NO_GUID);
-#endif
-          // exchange sets the flag to false and tells us previous value
-          if(output_ports[i].needs_pbt_update.exchange(false))
-            xferDes_queue->update_pre_bytes_total(output_ports[i].peer_guid,
-                                                  output_ports[i].peer_port_idx,
-                                                  output_ports[i].local_bytes_total);
         }
       }
 
-      // bytes pending is total minus however many writes have already
-      //  finished - if that's all of them, we can mark full transfer completion
-      int64_t prev = bytes_write_pending.fetch_add(total_bytes_written);
-      int64_t pending = prev + total_bytes_written;
-      log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
-                    << " total_bytes=" << total_bytes_written << " pending=" << pending;
-      assert(pending >= 0);
-      if(pending == 0)
-        transfer_completed.store_release(true);
+      switch(new_req->dim) {
+      case Request::DIM_1D:
+      {
+        log_request.info() << "request: guid=" << std::hex << guid << std::dec
+                           << " ofs=" << new_req->src_off << "->" << new_req->dst_off
+                           << " len=" << new_req->nbytes;
+        break;
+      }
+      case Request::DIM_2D:
+      {
+        log_request.info() << "request: guid=" << std::hex << guid << std::dec
+                           << " ofs=" << new_req->src_off << "->" << new_req->dst_off
+                           << " len=" << new_req->nbytes << " lines=" << new_req->nlines
+                           << "(" << new_req->src_str << "," << new_req->dst_str << ")";
+        break;
+      }
+      case Request::DIM_3D:
+      {
+        log_request.info() << "request: guid=" << std::hex << guid << std::dec
+                           << " ofs=" << new_req->src_off << "->" << new_req->dst_off
+                           << " len=" << new_req->nbytes << " lines=" << new_req->nlines
+                           << "(" << new_req->src_str << "," << new_req->dst_str << ")"
+                           << " planes=" << new_req->nplanes << "(" << new_req->src_pstr
+                           << "," << new_req->dst_pstr << ")";
+        break;
+      }
+      }
+      reqs[idx++] = new_req;
+    }
+    return idx;
+  }
+
+  void XferDes::begin_completion()
+  {
+#ifdef DEBUG_REALM
+    // shouldn't be called more than once
+    assert(!iteration_completed.load());
+#endif
+    iteration_completed.store_release(true);
+
+    // give all output channels a chance to indicate completion and determine
+    //  the total number of bytes we've written
+    size_t total_bytes_written = 0;
+    for(size_t i = 0; i < output_ports.size(); i++) {
+      total_bytes_written += output_ports[i].local_bytes_cons.load();
+      update_bytes_write(i, output_ports[i].local_bytes_total, 0);
+
+      // see if we still need to send the total bytes
+      if(output_ports[i].needs_pbt_update.load() &&
+         (output_ports[i].local_bytes_total == output_ports[i].local_bytes_cons.load())) {
+#ifdef DEBUG_REALM
+        assert(output_ports[i].peer_guid != XFERDES_NO_GUID);
+#endif
+        // exchange sets the flag to false and tells us previous value
+        if(output_ports[i].needs_pbt_update.exchange(false))
+          xferDes_queue->update_pre_bytes_total(output_ports[i].peer_guid,
+                                                output_ports[i].peer_port_idx,
+                                                output_ports[i].local_bytes_total);
+      }
     }
 
-      void XferDes::update_bytes_read(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *in_port = &input_ports[port_idx];
-	size_t inc_amt = in_port->seq_local.add_span(offset, size);
-	log_xd.info() << "bytes_read: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	if(in_port->peer_guid != XFERDES_NO_GUID) {
-	  if(inc_amt > 0) {
-	    // we're actually telling the previous XD which offsets are ok to
-	    //  overwrite, so adjust our offset by our (circular) IB size
-            xferDes_queue->update_next_bytes_read(in_port->peer_guid,
-						  in_port->peer_port_idx,
-						  offset + in_port->ib_size,
-						  inc_amt);
-	  } else {
-	    // TODO: mode to send non-contiguous updates?
-	  }
-	}
+    // bytes pending is total minus however many writes have already
+    //  finished - if that's all of them, we can mark full transfer completion
+    int64_t prev = bytes_write_pending.fetch_add(total_bytes_written);
+    int64_t pending = prev + total_bytes_written;
+    log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                  << " total_bytes=" << total_bytes_written << " pending=" << pending;
+    assert(pending >= 0);
+    if(pending == 0)
+      transfer_completed.store_release(true);
+  }
+
+  void XferDes::update_bytes_read(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *in_port = &input_ports[port_idx];
+    size_t inc_amt = in_port->seq_local.add_span(offset, size);
+    log_xd.info() << "bytes_read: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt;
+    if(in_port->peer_guid != XFERDES_NO_GUID) {
+      if(inc_amt > 0) {
+        // we're actually telling the previous XD which offsets are ok to
+        //  overwrite, so adjust our offset by our (circular) IB size
+        xferDes_queue->update_next_bytes_read(in_port->peer_guid, in_port->peer_port_idx,
+                                              offset + in_port->ib_size, inc_amt);
+      } else {
+        // TODO: mode to send non-contiguous updates?
       }
+    }
+  }
 
-#if 0
-      inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
-        //printf("update_read[%lx]: offset = %ld, size = %lu, pre = %lx, next = %lx\n", guid, offset, size, pre_xd_guid, next_xd_guid);
-        if (pre_xd_guid != XFERDES_NO_GUID) {
-          bool update = false;
-          if ((int64_t)(bytes_read % src_buf.buf_size) == offset) {
-            bytes_read += size;
-            update = true;
-          }
-          else {
-            //printf("[%lx] insert: key = %ld, value = %lu\n", guid, offset, size);
-            segments_read[offset] = size;
-          }
-          std::map<int64_t, uint64_t>::iterator it;
-          while (true) {
-            it = segments_read.find(bytes_read % src_buf.buf_size);
-            if (it == segments_read.end())
-              break;
-            bytes_read += it->second;
-            update = true;
-            //printf("[%lx] erase: key = %ld, value = %lu\n", guid, it->first, it->second);
-            segments_read.erase(it);
-          }
-          if (update) {
-            xferDes_queue->update_next_bytes_read(pre_xd_guid, bytes_read);
-          }
-        }
-        else {
-          bytes_read += size;
-        }
+  void XferDes::update_bytes_write(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *out_port = &output_ports[port_idx];
+    size_t inc_amt = out_port->seq_local.add_span(offset, size);
+    log_xd.info() << "bytes_write: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt;
+
+    if(out_port->peer_guid != XFERDES_NO_GUID) {
+      // update bytes total if needed (and available)
+      if(out_port->needs_pbt_update.load() && iteration_completed.load_acquire() &&
+         (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
+        // exchange sets the flag to false and tells us previous value
+        if(out_port->needs_pbt_update.exchange(false))
+          xferDes_queue->update_pre_bytes_total(
+              out_port->peer_guid, out_port->peer_port_idx, out_port->local_bytes_total);
       }
-#endif
-
-      void XferDes::update_bytes_write(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *out_port = &output_ports[port_idx];
-	size_t inc_amt = out_port->seq_local.add_span(offset, size);
-	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-
-	if(out_port->peer_guid != XFERDES_NO_GUID) {
-	  // update bytes total if needed (and available)
-	  if(out_port->needs_pbt_update.load() &&
-	     iteration_completed.load_acquire() &&
-             (out_port->local_bytes_total == out_port->local_bytes_cons.load())) {
-	    // exchange sets the flag to false and tells us previous value
-	    if(out_port->needs_pbt_update.exchange(false))
-	      xferDes_queue->update_pre_bytes_total(out_port->peer_guid,
-						    out_port->peer_port_idx,
-						    out_port->local_bytes_total);
-	  }
-	  // we can skip an update if this was empty
-	  if(inc_amt > 0) {
-            xferDes_queue->update_pre_bytes_write(out_port->peer_guid,
-						  out_port->peer_port_idx,
-						  offset,
-						  inc_amt);
-	  } else {
-	    // TODO: mode to send non-contiguous updates?
-	  }
-	}
-
-        // subtract bytes written from the pending count - if that causes it to
-        //  go to zero, we can mark the transfer completed and update progress
-        //  in case the xd is just waiting for that
-        // NOTE: as soon as we set `transfer_completed`, the other references
-        //  to this xd may be removed, so do this last, and hold a reference of
-        //  our own long enough to call update_progress
-        if(inc_amt > 0) {
-          int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
-          if(prev > 0)
-            log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
-                          << " remaining=" << (prev - inc_amt);
-          if(inc_amt == static_cast<size_t>(prev)) {
-            add_reference();
-            transfer_completed.store_release(true);
-            update_progress();
-            remove_reference();
-          }
-        }
+      // we can skip an update if this was empty
+      if(inc_amt > 0) {
+        xferDes_queue->update_pre_bytes_write(out_port->peer_guid,
+                                              out_port->peer_port_idx, offset, inc_amt);
+      } else {
+        // TODO: mode to send non-contiguous updates?
       }
+    }
 
-#if 0
-      inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
-      {
-        log_request.info(
-            "update_write: guid(%llx) off(%zd) size(%zu) pre(%llx) next(%llx)",
-            guid, (ssize_t)offset, (size_t)size, pre_xd_guid, next_xd_guid);
-
-	
-        if (next_xd_guid != XFERDES_NO_GUID) {
-          bool update = false;
-          if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
-            bytes_write += size;
-            update = true;
-          } else {
-            segments_write[offset] = size;
-          }
-          std::map<int64_t, uint64_t>::iterator it;
-          while (true) {
-            it = segments_write.find(bytes_write % dst_buf.buf_size);
-            if (it == segments_write.end())
-              break;
-            bytes_write += it->second;
-            update = true;
-            segments_write.erase(it);
-          }
-          if (update) {
-            xferDes_queue->update_pre_bytes_write(next_xd_guid, bytes_write);
-          }
-        }
-        else {
-          bytes_write += size;
-        }
-        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", Network::my_node_id, offset, size, guid, bytes_write);
+    // subtract bytes written from the pending count - if that causes it to
+    //  go to zero, we can mark the transfer completed and update progress
+    //  in case the xd is just waiting for that
+    // NOTE: as soon as we set `transfer_completed`, the other references
+    //  to this xd may be removed, so do this last, and hold a reference of
+    //  our own long enough to call update_progress
+    if(inc_amt > 0) {
+      int64_t prev = bytes_write_pending.fetch_sub(inc_amt);
+      if(prev > 0)
+        log_xd.info() << "completion: xd=" << std::hex << guid << std::dec
+                      << " remaining=" << (prev - inc_amt);
+      if(inc_amt == static_cast<size_t>(prev)) {
+        add_reference();
+        transfer_completed.store_release(true);
+        update_progress();
+        remove_reference();
       }
-#endif
+    }
+  }
 
-      void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *in_port = &input_ports[port_idx];
+  void XferDes::update_pre_bytes_write(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *in_port = &input_ports[port_idx];
 
-	size_t inc_amt = in_port->seq_remote.add_span(offset, size);
-	log_xd.info() << "pre_write: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt << " (" << in_port->remote_bytes_total.load() << ")";
-	// if we got new data at the current pointer OR if we now know the
-	//  total incoming bytes, update progress
-	if(inc_amt > 0) update_progress();
-      }
+    size_t inc_amt = in_port->seq_remote.add_span(offset, size);
+    log_xd.info() << "pre_write: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt << " ("
+                  << in_port->remote_bytes_total.load() << ")";
+    // if we got new data at the current pointer OR if we now know the
+    //  total incoming bytes, update progress
+    if(inc_amt > 0)
+      update_progress();
+  }
 
-      void XferDes::update_pre_bytes_total(int port_idx, size_t pre_bytes_total)
-      {
-	XferPort *in_port = &input_ports[port_idx];
+  void XferDes::update_pre_bytes_total(int port_idx, size_t pre_bytes_total)
+  {
+    XferPort *in_port = &input_ports[port_idx];
 
-	// should always be exchanging -1 -> (not -1)
+    // should always be exchanging -1 -> (not -1)
 #ifdef DEBUG_REALM
-	size_t oldval =
+    size_t oldval =
 #endif
-	  in_port->remote_bytes_total.exchange(pre_bytes_total);
+        in_port->remote_bytes_total.exchange(pre_bytes_total);
 #ifdef DEBUG_REALM
-	assert((oldval == size_t(-1)) && (pre_bytes_total != size_t(-1)));
+    assert((oldval == size_t(-1)) && (pre_bytes_total != size_t(-1)));
 #endif
-	log_xd.info() << "pre_total: " << std::hex << guid << std::dec
-		      << "(" << port_idx << ") = " << pre_bytes_total;
-	// this may unblock an xd that has consumed all input but didn't
-	//  realize there was no more
-	update_progress();
-      }
+    log_xd.info() << "pre_total: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") = " << pre_bytes_total;
+    // this may unblock an xd that has consumed all input but didn't
+    //  realize there was no more
+    update_progress();
+  }
 
-      void XferDes::update_next_bytes_read(int port_idx, size_t offset, size_t size)
-      {
-	XferPort *out_port = &output_ports[port_idx];
+  void XferDes::update_next_bytes_read(int port_idx, size_t offset, size_t size)
+  {
+    XferPort *out_port = &output_ports[port_idx];
 
-	size_t inc_amt = out_port->seq_remote.add_span(offset, size);
-	log_xd.info() << "next_read: "  << std::hex << guid << std::dec
-		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
-	// if we got new room at the current pointer (and we're still
-        //  iterating), update progress
-	if((inc_amt > 0) && !iteration_completed.load()) update_progress();
-      }
+    size_t inc_amt = out_port->seq_remote.add_span(offset, size);
+    log_xd.info() << "next_read: " << std::hex << guid << std::dec << "(" << port_idx
+                  << ") " << offset << "+" << size << " -> " << inc_amt;
+    // if we got new room at the current pointer (and we're still
+    //  iterating), update progress
+    if((inc_amt > 0) && !iteration_completed.load())
+      update_progress();
+  }
 
-      void XferDes::notify_request_read_done(Request* req)
-      {
-        default_notify_request_read_done(req);
-      }
+  void XferDes::notify_request_read_done(Request *req)
+  {
+    default_notify_request_read_done(req);
+  }
 
-      void XferDes::notify_request_write_done(Request* req)
-      {
-        default_notify_request_write_done(req);
-      }
+  void XferDes::notify_request_write_done(Request *req)
+  {
+    default_notify_request_write_done(req);
+  }
 
-      void XferDes::flush()
-      {
-      }
+  void XferDes::flush() {}
 
-      void XferDes::default_notify_request_read_done(Request* req)
-      {  
-        req->is_read_done = true;
-	update_bytes_read(req->src_port_idx,
-			  req->read_seq_pos, req->read_seq_count);
-#if 0
-        if (req->dim == Request::DIM_1D)
-          simple_update_bytes_read(req->src_off, req->nbytes);
-        else
-          simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
-#endif
-      }
+  void XferDes::default_notify_request_read_done(Request *req)
+  {
+    req->is_read_done = true;
+    update_bytes_read(req->src_port_idx, req->read_seq_pos, req->read_seq_count);
+  }
 
-      void XferDes::default_notify_request_write_done(Request* req)
-      {
-        req->is_write_done = true;
-	// calling update_bytes_write can cause the transfer descriptor to
-	//  be destroyed, so enqueue the request first, and cache the values
-	//  we need
-	int dst_port_idx = req->dst_port_idx;
-	size_t write_seq_pos = req->write_seq_pos;
-	size_t write_seq_count = req->write_seq_count;
-	update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
-#if 0
-        if (req->dim == Request::DIM_1D)
-          simple_update_bytes_write(req->dst_off, req->nbytes);
-        else
-          simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
-#endif
-        enqueue_request(req);
-      }
-
+  void XferDes::default_notify_request_write_done(Request *req)
+  {
+    req->is_write_done = true;
+    // calling update_bytes_write can cause the transfer descriptor to
+    //  be destroyed, so enqueue the request first, and cache the values
+    //  we need
+    int dst_port_idx = req->dst_port_idx;
+    size_t write_seq_pos = req->write_seq_pos;
+    size_t write_seq_count = req->write_seq_count;
+    update_bytes_write(dst_port_idx, write_seq_pos, write_seq_count);
+    enqueue_request(req);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -3496,45 +3230,35 @@ namespace Realm {
       {
       }
 
-      RemoteWriteXferDes::RemoteWriteXferDes(uintptr_t _dma_op, Channel *_channel,
-					     NodeID _launch_node, XferDesID _guid,
-					     const std::vector<XferDesPortInfo>& inputs_info,
-					     const std::vector<XferDesPortInfo>& outputs_info,
-					     int _priority)
-	: XferDes(_dma_op, _channel, _launch_node, _guid,
-		  inputs_info, outputs_info,
-		  _priority, 0, 0)
+      RemoteWriteXferDes::RemoteWriteXferDes(
+          uintptr_t _dma_op, Channel *_channel, NodeID _launch_node, XferDesID _guid,
+          const std::vector<XferDesPortInfo> &inputs_info,
+          const std::vector<XferDesPortInfo> &outputs_info, int _priority)
+        : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
+                  _priority, 0, 0)
       {
-	kind = XFER_REMOTE_WRITE;
-	requests = 0;
-#if 0
-        requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
-        for (int i = 0; i < max_nr; i++) {
-          requests[i].xd = this;
-          //requests[i].dst_node = dst_node;
-          available_reqs.push(&requests[i]);
-        }
-#endif
+        kind = XFER_REMOTE_WRITE;
+        requests = 0;
       }
 
-      long RemoteWriteXferDes::get_requests(Request** requests, long nr)
+      long RemoteWriteXferDes::get_requests(Request **requests, long nr)
       {
-	xd_lock.lock();
-        RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
-	// remote writes allow 2D on source, but not destination
-	unsigned flags = TransferIterator::SRC_LINES_OK;
+        xd_lock.lock();
+        RemoteWriteRequest **reqs = (RemoteWriteRequest **)requests;
+        // remote writes allow 2D on source, but not destination
+        unsigned flags = TransferIterator::SRC_LINES_OK;
         long new_nr = default_get_requests(requests, nr, flags);
-        for (long i = 0; i < new_nr; i++)
-        {
-          //reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
-	  reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
-										     reqs[i]->nbytes);
-	  assert(reqs[i]->src_base != 0);
-	  //RemoteMemory *remote = checked_cast<RemoteMemory *>(output_ports[reqs[i]->dst_port_idx].mem);
-	  //reqs[i]->dst_base = static_cast<char *>(remote->get_remote_addr(reqs[i]->dst_off));
-	  //assert(reqs[i]->dst_base != 0);
+        for(long i = 0; i < new_nr; i++) {
+          // reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
+          reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(
+              reqs[i]->src_off, reqs[i]->nbytes);
+          assert(reqs[i]->src_base != 0);
+          // RemoteMemory *remote = checked_cast<RemoteMemory
+          // *>(output_ports[reqs[i]->dst_port_idx].mem); reqs[i]->dst_base =
+          // static_cast<char *>(remote->get_remote_addr(reqs[i]->dst_off));
+          // assert(reqs[i]->dst_base != 0);
         }
-	xd_lock.unlock();
+        xd_lock.unlock();
         return new_nr;
       }
 
@@ -3577,96 +3301,79 @@ namespace Realm {
       };
 
       bool RemoteWriteXferDes::progress_xd(RemoteWriteChannel *channel,
-					   TimeLimit work_until)
+                                           TimeLimit work_until)
       {
-#if 0
-	Request *rq;
-	bool did_work = false;
-	do {
-	  long count = get_requests(&rq, 1);
-	  if(count > 0) {
-	    channel->submit(&rq, count);
-	    did_work = true;
-	  } else
-	    break;
-	} while(!work_until.is_expired());
+        bool did_work = false;
+        // immediate acks for reads happen when we assemble or skip input,
+        //  while immediate acks for writes happen only if we skip output
+        ReadSequenceCache rseqcache(this);
+        WriteSequenceCache wseqcache(this);
 
-	return did_work;
-#else
-	bool did_work = false;
-	// immediate acks for reads happen when we assemble or skip input,
-	//  while immediate acks for writes happen only if we skip output
-	ReadSequenceCache rseqcache(this);
-	WriteSequenceCache wseqcache(this);
+        const size_t MAX_ASSEMBLY_SIZE = 4096;
+        while(true) {
+          size_t min_xfer_size = 4096; // TODO: make controllable
+          size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+          if(max_bytes == 0)
+            break;
 
-	const size_t MAX_ASSEMBLY_SIZE = 4096;
-	while(true) {
-	  size_t min_xfer_size = 4096;  // TODO: make controllable
-	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
-	  if(max_bytes == 0)
-	    break;
+          XferPort *in_port = 0, *out_port = 0;
+          size_t in_span_start = 0, out_span_start = 0;
+          if(input_control.current_io_port >= 0) {
+            in_port = &input_ports[input_control.current_io_port];
+            in_span_start = in_port->local_bytes_total;
+          }
+          if(output_control.current_io_port >= 0) {
+            out_port = &output_ports[output_control.current_io_port];
+            out_span_start = out_port->local_bytes_total;
+          }
 
-	  XferPort *in_port = 0, *out_port = 0;
-	  size_t in_span_start = 0, out_span_start = 0;
-	  if(input_control.current_io_port >= 0) {
-	    in_port = &input_ports[input_control.current_io_port];
-	    in_span_start = in_port->local_bytes_total;
-	  }
-	  if(output_control.current_io_port >= 0) {
-	    out_port = &output_ports[output_control.current_io_port];
-	    out_span_start = out_port->local_bytes_total;
-	  }
+          size_t total_bytes = 0;
+          if(in_port != 0) {
+            if(out_port != 0) {
+              // input and output both exist - transfer what we can
+              log_xd.info() << "remote write chunk: min=" << min_xfer_size
+                            << " max=" << max_bytes;
 
-	  size_t total_bytes = 0;
-	  if(in_port != 0) {
-	    if(out_port != 0) {
-	      // input and output both exist - transfer what we can
-	      log_xd.info() << "remote write chunk: min=" << min_xfer_size
-			    << " max=" << max_bytes;
+              while(total_bytes < max_bytes) {
+                AddressListCursor &in_alc = in_port->addrcursor;
+                AddressListCursor &out_alc = out_port->addrcursor;
+                int in_dim = in_alc.get_dim();
+                int out_dim = out_alc.get_dim();
+                size_t icount = in_alc.remaining(0);
+                size_t ocount = out_alc.remaining(0);
 
-	      while(total_bytes < max_bytes) {
-		AddressListCursor& in_alc = in_port->addrcursor;
-		AddressListCursor& out_alc = out_port->addrcursor;
-		int in_dim = in_alc.get_dim();
-		int out_dim = out_alc.get_dim();
-		size_t icount = in_alc.remaining(0);
-		size_t ocount = out_alc.remaining(0);
+                size_t bytes = 0;
+                size_t bytes_left = max_bytes - total_bytes;
 
-		size_t bytes = 0;
-		size_t bytes_left = max_bytes - total_bytes;
+                // look at the output first, because that controls the message
+                //  size
+                size_t dst_1d_maxbytes =
+                    ((out_dim > 0) ? std::min(bytes_left, ocount) : 0);
+                size_t dst_2d_maxbytes =
+                    (((out_dim > 1) && (ocount <= (MAX_ASSEMBLY_SIZE / 2)))
+                         ? (ocount *
+                            std::min(MAX_ASSEMBLY_SIZE / ocount, out_alc.remaining(1)))
+                         : 0);
+                // would have to scan forward through the dst address list to
+                //  get the exact number of bytes that we can fit into
+                //  MAX_ASSEMBLY_SIZE after considering address info overhead,
+                //  but this is a last resort anyway, so just use a probably-
+                //  pessimistic estimate;
+                size_t dst_sc_maxbytes = std::min(bytes_left, MAX_ASSEMBLY_SIZE / 4);
+                // TODO: actually implement 2d and sc
+                dst_2d_maxbytes = 0;
+                dst_sc_maxbytes = 0;
 
-		// look at the output first, because that controls the message
-		//  size
-		size_t dst_1d_maxbytes = ((out_dim > 0) ?
-					    std::min(bytes_left, ocount) :
-					    0);
-		size_t dst_2d_maxbytes = (((out_dim > 1) &&
-					   (ocount <= (MAX_ASSEMBLY_SIZE / 2))) ?
-					    (ocount * std::min(MAX_ASSEMBLY_SIZE / ocount,
-							       out_alc.remaining(1))) :
-					    0);
-		// would have to scan forward through the dst address list to
-		//  get the exact number of bytes that we can fit into
-		//  MAX_ASSEMBLY_SIZE after considering address info overhead,
-		//  but this is a last resort anyway, so just use a probably-
-		//  pessimistic estimate;
-		size_t dst_sc_maxbytes = std::min(bytes_left,
-						  MAX_ASSEMBLY_SIZE / 4);
-		// TODO: actually implement 2d and sc
-		dst_2d_maxbytes = 0;
-		dst_sc_maxbytes = 0;
+                // favor 1d >> 2d >> sc
+                if((dst_1d_maxbytes >= dst_2d_maxbytes) &&
+                   (dst_1d_maxbytes >= dst_sc_maxbytes)) {
+                  // 1D target
+                  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
+                  RemoteAddress dst_buf;
+                  bool ok = out_port->mem->get_remote_addr(out_alc.get_offset(), dst_buf);
+                  assert(ok);
 
-		// favor 1d >> 2d >> sc
-		if((dst_1d_maxbytes >= dst_2d_maxbytes) &&
-		   (dst_1d_maxbytes >= dst_sc_maxbytes)) {
-		  // 1D target
-		  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-		  RemoteAddress dst_buf;
-		  bool ok = out_port->mem->get_remote_addr(out_alc.get_offset(),
-							   dst_buf);
-		  assert(ok);
-
-		  // now look at the input
+                  // now look at the input
                   LocalAddress src_buf;
                   ok = in_port->mem->get_local_addr(in_alc.get_offset(), src_buf);
                   assert(ok);
@@ -3682,252 +3389,234 @@ namespace Realm {
                   size_t src_2d_maxbytes = 0;
                   // TODO: permit if source memory is cpu-accessible?
 #ifdef ALLOW_RDMA_SOURCE_2D
-		  if(in_dim > 1) {
-		    size_t lines = in_alc.remaining(1);
-		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
-											      src_buf, icount,
-											      lines,
-											      in_alc.get_stride(1),
-											      dst_buf,
-											      true /*w/ congestion*/);
-		    // round the recommendation down to a multiple of the line size
-		    rec_bytes -= (rec_bytes % icount);
-		    src_2d_maxbytes = std::min({ dst_1d_maxbytes,
-			                         icount * lines,
-			                         rec_bytes });
-		  }
+                  if(in_dim > 1) {
+                    size_t lines = in_alc.remaining(1);
+                    size_t rec_bytes =
+                        ActiveMessage<Write1DMessage>::recommended_max_payload(
+                            dst_node, src_buf, icount, lines, in_alc.get_stride(1),
+                            dst_buf, true /*w/ congestion*/);
+                    // round the recommendation down to a multiple of the line size
+                    rec_bytes -= (rec_bytes % icount);
+                    src_2d_maxbytes =
+                        std::min({dst_1d_maxbytes, icount * lines, rec_bytes});
+                  }
 #endif
-		  size_t src_ga_maxbytes = 0;
+                  size_t src_ga_maxbytes = 0;
                   // TODO: permit if source memory is cpu-accessible?
 #ifdef ALLOW_RDMA_GATHER
-		  {
-		    // a gather will assemble into a buffer provided by the network
-		    size_t rec_bytes = ActiveMessage<Write1DMessage>::recommended_max_payload(dst_node,
-											      dst_buf,
-											      true /*w/ congestion*/);
-		    src_ga_maxbytes = std::min({ dst_1d_maxbytes,
-					         bytes_left,
-					         rec_bytes });
-		  }
+                  {
+                    // a gather will assemble into a buffer provided by the network
+                    size_t rec_bytes =
+                        ActiveMessage<Write1DMessage>::recommended_max_payload(
+                            dst_node, dst_buf, true /*w/ congestion*/);
+                    src_ga_maxbytes = std::min({dst_1d_maxbytes, bytes_left, rec_bytes});
+                  }
 #endif
 
-		  // source also favors 1d >> 2d >> gather
-		  if((src_1d_maxbytes >= src_2d_maxbytes) &&
-		     (src_1d_maxbytes >= src_ga_maxbytes)) {
+                  // source also favors 1d >> 2d >> gather
+                  if((src_1d_maxbytes >= src_2d_maxbytes) &&
+                     (src_1d_maxbytes >= src_ga_maxbytes)) {
                     // TODO: if congestion is telling us not to send anything
                     //  at all, it'd be better to sleep until the network
                     //  says it's reasonable to try again - this approach
                     //  will effectively spinwait (but at least guarantees to
                     //  intersperse it with calls to the network progress
                     //  work item)
-                    if(src_1d_maxbytes == 0) break;
+                    if(src_1d_maxbytes == 0)
+                      break;
 
-		    // 1D source
-		    bytes = src_1d_maxbytes;
-		    //log_xd.info() << "remote write 1d: guid=" << guid
-		    //              << " src=" << src_buf << " dst=" << dst_buf
-		    //              << " bytes=" << bytes;
-		    ActiveMessage<Write1DMessage> amsg(dst_node,
-						       src_buf, bytes,
-						       dst_buf);
-		    amsg->next_xd_guid = out_port->peer_guid;
-		    amsg->next_port_idx = out_port->peer_port_idx;
-		    amsg->span_start = out_span_start;
+                    // 1D source
+                    bytes = src_1d_maxbytes;
+                    // log_xd.info() << "remote write 1d: guid=" << guid
+                    //              << " src=" << src_buf << " dst=" << dst_buf
+                    //              << " bytes=" << bytes;
+                    ActiveMessage<Write1DMessage> amsg(dst_node, src_buf, bytes, dst_buf);
+                    amsg->next_xd_guid = out_port->peer_guid;
+                    amsg->next_port_idx = out_port->peer_port_idx;
+                    amsg->span_start = out_span_start;
 
-		    // reads aren't consumed until local completion, but
-		    //  only ask if we have a previous xd that's going to
-		    //  care
-		    if(in_port->peer_guid != XFERDES_NO_GUID) {
-		      // a ReadBytesUpdater holds a reference to the xd
-		      add_reference();
-		      amsg.add_local_completion(ReadBytesUpdater(this,
-								 input_control.current_io_port,
-								 in_span_start,
-								 bytes));
-		    }
-		    in_span_start += bytes;
-		    // the write isn't complete until it's ack'd by the target
-		    amsg.add_remote_completion(WriteBytesUpdater(this,
-								 output_control.current_io_port,
-								 out_span_start,
-								 bytes));
-		    out_span_start += bytes;
+                    // reads aren't consumed until local completion, but
+                    //  only ask if we have a previous xd that's going to
+                    //  care
+                    if(in_port->peer_guid != XFERDES_NO_GUID) {
+                      // a ReadBytesUpdater holds a reference to the xd
+                      add_reference();
+                      amsg.add_local_completion(ReadBytesUpdater(
+                          this, input_control.current_io_port, in_span_start, bytes));
+                    }
+                    in_span_start += bytes;
+                    // the write isn't complete until it's ack'd by the target
+                    amsg.add_remote_completion(WriteBytesUpdater(
+                        this, output_control.current_io_port, out_span_start, bytes));
+                    out_span_start += bytes;
 
-		    amsg.commit();
-		    in_alc.advance(0, bytes);
-		    out_alc.advance(0, bytes);
-		  }
-		  else if(src_2d_maxbytes >= src_ga_maxbytes) {
-		    // 2D source
-		    size_t bytes_per_line = icount;
-		    size_t lines = src_2d_maxbytes / icount;
-		    bytes = bytes_per_line * lines;
-		    assert(bytes == src_2d_maxbytes);
-		    size_t src_stride = in_alc.get_stride(1);
-		    //log_xd.info() << "remote write 2d: guid=" << guid
-		    //              << " src=" << src_buf << " dst=" << dst_buf
-		    //              << " bytes=" << bytes << " lines=" << lines
-		    //              << " stride=" << src_stride;
-		    ActiveMessage<Write1DMessage> amsg(dst_node,
-						       src_buf, bytes_per_line,
-						       lines, src_stride,
-						       dst_buf);
-		    amsg->next_xd_guid = out_port->peer_guid;
-		    amsg->next_port_idx = out_port->peer_port_idx;
-		    amsg->span_start = out_span_start;
+                    amsg.commit();
+                    in_alc.advance(0, bytes);
+                    out_alc.advance(0, bytes);
+                  } else if(src_2d_maxbytes >= src_ga_maxbytes) {
+                    // 2D source
+                    size_t bytes_per_line = icount;
+                    size_t lines = src_2d_maxbytes / icount;
+                    bytes = bytes_per_line * lines;
+                    assert(bytes == src_2d_maxbytes);
+                    size_t src_stride = in_alc.get_stride(1);
+                    // log_xd.info() << "remote write 2d: guid=" << guid
+                    //              << " src=" << src_buf << " dst=" << dst_buf
+                    //              << " bytes=" << bytes << " lines=" << lines
+                    //              << " stride=" << src_stride;
+                    ActiveMessage<Write1DMessage> amsg(dst_node, src_buf, bytes_per_line,
+                                                       lines, src_stride, dst_buf);
+                    amsg->next_xd_guid = out_port->peer_guid;
+                    amsg->next_port_idx = out_port->peer_port_idx;
+                    amsg->span_start = out_span_start;
 
-		    // reads aren't consumed until local completion, but
-		    //  only ask if we have a previous xd that's going to
-		    //  care
-		    if(in_port->peer_guid != XFERDES_NO_GUID) {
-		      // a ReadBytesUpdater holds a reference to the xd
-		      add_reference();
-		      amsg.add_local_completion(ReadBytesUpdater(this,
-								 input_control.current_io_port,
-								 in_span_start,
-								 bytes));
-		    }
-		    in_span_start += bytes;
-		    // the write isn't complete until it's ack'd by the target
-		    amsg.add_remote_completion(WriteBytesUpdater(this,
-								 output_control.current_io_port,
-								 out_span_start,
-								 bytes));
-		    out_span_start += bytes;
+                    // reads aren't consumed until local completion, but
+                    //  only ask if we have a previous xd that's going to
+                    //  care
+                    if(in_port->peer_guid != XFERDES_NO_GUID) {
+                      // a ReadBytesUpdater holds a reference to the xd
+                      add_reference();
+                      amsg.add_local_completion(ReadBytesUpdater(
+                          this, input_control.current_io_port, in_span_start, bytes));
+                    }
+                    in_span_start += bytes;
+                    // the write isn't complete until it's ack'd by the target
+                    amsg.add_remote_completion(WriteBytesUpdater(
+                        this, output_control.current_io_port, out_span_start, bytes));
+                    out_span_start += bytes;
 
-		    amsg.commit();
-		    in_alc.advance(1, lines);
-		    out_alc.advance(0, bytes);
-		  } else {
-		    // gather: assemble data
-		    bytes = src_ga_maxbytes;
-		    ActiveMessage<Write1DMessage> amsg(dst_node,
-						       bytes,
-						       dst_buf);
-		    amsg->next_xd_guid = out_port->peer_guid;
-		    amsg->next_port_idx = out_port->peer_port_idx;
-		    amsg->span_start = out_span_start;
+                    amsg.commit();
+                    in_alc.advance(1, lines);
+                    out_alc.advance(0, bytes);
+                  } else {
+                    // gather: assemble data
+                    bytes = src_ga_maxbytes;
+                    ActiveMessage<Write1DMessage> amsg(dst_node, bytes, dst_buf);
+                    amsg->next_xd_guid = out_port->peer_guid;
+                    amsg->next_port_idx = out_port->peer_port_idx;
+                    amsg->span_start = out_span_start;
 
-		    size_t todo = bytes;
-		    while(true) {
-		      if(in_dim > 0) {
-			if((icount >= todo/2) || (in_dim == 1)) {
-			  size_t chunk = std::min(todo, icount);
-			  uintptr_t src = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(in_alc.get_offset(), chunk));
-			  uintptr_t dst = reinterpret_cast<uintptr_t>(amsg.payload_ptr(chunk));
-			  memcpy_1d(dst, src, chunk);
-			  in_alc.advance(0, chunk);
-			  todo -= chunk;
-			} else {
-			  size_t lines = std::min(todo / icount,
-						  in_alc.remaining(1));
+                    size_t todo = bytes;
+                    while(true) {
+                      if(in_dim > 0) {
+                        if((icount >= todo / 2) || (in_dim == 1)) {
+                          size_t chunk = std::min(todo, icount);
+                          uintptr_t src = reinterpret_cast<uintptr_t>(
+                              in_port->mem->get_direct_ptr(in_alc.get_offset(), chunk));
+                          uintptr_t dst =
+                              reinterpret_cast<uintptr_t>(amsg.payload_ptr(chunk));
+                          memcpy_1d(dst, src, chunk);
+                          in_alc.advance(0, chunk);
+                          todo -= chunk;
+                        } else {
+                          size_t lines = std::min(todo / icount, in_alc.remaining(1));
 
-			  if(((icount * lines) >= todo/2) || (in_dim == 2)) {
-			    uintptr_t src = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(in_alc.get_offset(), icount));
-			    uintptr_t dst = reinterpret_cast<uintptr_t>(amsg.payload_ptr(icount * lines));
-			    memcpy_2d(dst, icount /*lstride*/,
-				      src, in_alc.get_stride(1),
-				      icount, lines);
-			    in_alc.advance(1, lines);
-			    todo -= icount * lines;
-			  } else {
-			    size_t planes = std::min(todo / (icount * lines),
-						     in_alc.remaining(2));
-			    uintptr_t src = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(in_alc.get_offset(), icount));
-			    uintptr_t dst = reinterpret_cast<uintptr_t>(amsg.payload_ptr(icount * lines * planes));
-			    memcpy_3d(dst,
-				      icount /*lstride*/,
-				      (icount * lines) /*pstride*/,
-				      src,
-				      in_alc.get_stride(1),
-				      in_alc.get_stride(2),
-				      icount, lines, planes);
-			    in_alc.advance(2, planes);
-			    todo -= icount * lines * planes;
-			  }
-			}
-		      } else {
-			assert(0);
-		      }
+                          if(((icount * lines) >= todo / 2) || (in_dim == 2)) {
+                            uintptr_t src =
+                                reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(
+                                    in_alc.get_offset(), icount));
+                            uintptr_t dst = reinterpret_cast<uintptr_t>(
+                                amsg.payload_ptr(icount * lines));
+                            memcpy_2d(dst, icount /*lstride*/, src, in_alc.get_stride(1),
+                                      icount, lines);
+                            in_alc.advance(1, lines);
+                            todo -= icount * lines;
+                          } else {
+                            size_t planes =
+                                std::min(todo / (icount * lines), in_alc.remaining(2));
+                            uintptr_t src =
+                                reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(
+                                    in_alc.get_offset(), icount));
+                            uintptr_t dst = reinterpret_cast<uintptr_t>(
+                                amsg.payload_ptr(icount * lines * planes));
+                            memcpy_3d(dst, icount /*lstride*/,
+                                      (icount * lines) /*pstride*/, src,
+                                      in_alc.get_stride(1), in_alc.get_stride(2), icount,
+                                      lines, planes);
+                            in_alc.advance(2, planes);
+                            todo -= icount * lines * planes;
+                          }
+                        }
+                      } else {
+                        assert(0);
+                      }
 
-		      if(todo == 0) break;
+                      if(todo == 0)
+                        break;
 
-		      // read next entry
-		      in_dim = in_alc.get_dim();
-		      icount = in_alc.remaining(0);
-		    }
+                      // read next entry
+                      in_dim = in_alc.get_dim();
+                      icount = in_alc.remaining(0);
+                    }
 
-		    // the write isn't complete until it's ack'd by the target
-		    amsg.add_remote_completion(WriteBytesUpdater(this,
-								 output_control.current_io_port,
-								 out_span_start,
-								 bytes));
-		    out_span_start += bytes;
+                    // the write isn't complete until it's ack'd by the target
+                    amsg.add_remote_completion(WriteBytesUpdater(
+                        this, output_control.current_io_port, out_span_start, bytes));
+                    out_span_start += bytes;
 
-		    // assembly complete - send message
-		    amsg.commit();
+                    // assembly complete - send message
+                    amsg.commit();
 
-		    // we made a copy of input data, so "read" is complete
-		    rseqcache.add_span(input_control.current_io_port,
-				       in_span_start, bytes);
-		    in_span_start += bytes;
+                    // we made a copy of input data, so "read" is complete
+                    rseqcache.add_span(input_control.current_io_port, in_span_start,
+                                       bytes);
+                    in_span_start += bytes;
 
-		    out_alc.advance(0, bytes);
-		  }
-		}
-		else if(dst_2d_maxbytes >= dst_sc_maxbytes) {
-		  // 2D target
-		  assert(0);
-		} else {
-		  // scatter target
-		  assert(0);
-		}
+                    out_alc.advance(0, bytes);
+                  }
+                } else if(dst_2d_maxbytes >= dst_sc_maxbytes) {
+                  // 2D target
+                  assert(0);
+                } else {
+                  // scatter target
+                  assert(0);
+                }
 
 #ifdef DEBUG_REALM
-		assert((bytes > 0) && (bytes <= bytes_left));
+                assert((bytes > 0) && (bytes <= bytes_left));
 #endif
-		total_bytes += bytes;
+                total_bytes += bytes;
 
-		// stop if it's been too long, but make sure we do at least the
-		//  minimum number of bytes
-		if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
-	      }
-	    } else {
-	      // input but no output, so skip input bytes
-	      total_bytes = max_bytes;
-	      in_port->addrcursor.skip_bytes(total_bytes);
-	      rseqcache.add_span(input_control.current_io_port,
-				 in_span_start, total_bytes);
-	      in_span_start += total_bytes;
-	    }
-	  } else {
-	    if(out_port != 0) {
-	      // output but no input, so skip output bytes
-	      total_bytes = max_bytes;
-	      out_port->addrcursor.skip_bytes(total_bytes);
-	      wseqcache.add_span(output_control.current_io_port,
-				 out_span_start, total_bytes);
-	      out_span_start += total_bytes;
-	    } else {
-	      // skipping both input and output is possible for simultaneous
-	      //  gather+scatter
-	      total_bytes = max_bytes;
-	    }
-	  }
+                // stop if it's been too long, but make sure we do at least the
+                //  minimum number of bytes
+                if((total_bytes >= min_xfer_size) && work_until.is_expired())
+                  break;
+              }
+            } else {
+              // input but no output, so skip input bytes
+              total_bytes = max_bytes;
+              in_port->addrcursor.skip_bytes(total_bytes);
+              rseqcache.add_span(input_control.current_io_port, in_span_start,
+                                 total_bytes);
+              in_span_start += total_bytes;
+            }
+          } else {
+            if(out_port != 0) {
+              // output but no input, so skip output bytes
+              total_bytes = max_bytes;
+              out_port->addrcursor.skip_bytes(total_bytes);
+              wseqcache.add_span(output_control.current_io_port, out_span_start,
+                                 total_bytes);
+              out_span_start += total_bytes;
+            } else {
+              // skipping both input and output is possible for simultaneous
+              //  gather+scatter
+              total_bytes = max_bytes;
+            }
+          }
 
-	  bool done = record_address_consumption(total_bytes, total_bytes);
+          bool done = record_address_consumption(total_bytes, total_bytes);
 
-	  did_work = true;
+          did_work = true;
 
-	  if(done || work_until.is_expired())
-	    break;
-	}
+          if(done || work_until.is_expired())
+            break;
+        }
 
-	rseqcache.flush();
-	wseqcache.flush();
+        rseqcache.flush();
+        wseqcache.flush();
 
-	return did_work;
-#endif
+        return did_work;
       }
 
       void RemoteWriteXferDes::notify_request_read_done(Request* req)
@@ -4457,7 +4146,7 @@ namespace Realm {
         return false;
       }
 
-      Memory Channel::suggest_ib_memories(Memory memory) const
+      static Memory find_sysmem_ib_memory(NodeID node)
       {
         Node &n = get_runtime()->nodes[node];
         for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
@@ -4475,6 +4164,13 @@ namespace Realm {
         log_new_dma.fatal() << "no sysmem ib memory on node:" << node;
         abort();
         return Memory::NO_MEMORY;
+      }
+
+      Memory Channel::suggest_ib_memories() const { return find_sysmem_ib_memory(node); }
+
+      Memory Channel::suggest_ib_memories_for_node(NodeID node_id) const
+      {
+        return find_sysmem_ib_memory(node_id);
       }
 
       // sometimes we need to return a reference to a SupportedPath that won't
@@ -5883,115 +5579,8 @@ namespace Realm {
       {
         // should not be reached
         assert(0);
-#if 0 // TODO: DELETE
-        for (long i = 0; i < nr; i ++) {
-          RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-	  XferDes::XferPort *in_port = &req->xd->input_ports[req->src_port_idx];
-	  XferDes::XferPort *out_port = &req->xd->output_ports[req->dst_port_idx];
-	  // no serdez support
-	  assert((in_port->serdez_op == 0) && (out_port->serdez_op == 0));
-	  NodeID dst_node = ID(out_port->mem->me).memory_owner_node();
-	  size_t write_bytes_total = (size_t)-1;
-	  if(out_port->needs_pbt_update.load() &&
-	     req->xd->iteration_completed.load_acquire()) {
-	    // this can result in sending the pbt twice, but this code path
-	    //  is "mostly dead" and should be nuked soon
-	    out_port->needs_pbt_update.store(false);
-	    write_bytes_total = out_port->local_bytes_total;
-	  }
-	  RemoteAddress dst_buf;
-	  bool ok = out_port->mem->get_remote_addr(req->dst_off, dst_buf);
-	  assert(ok);
-	  // send a request if there's data or if there's a next XD to update
-	  if((req->nbytes > 0) ||
-	     (out_port->peer_guid != XferDes::XFERDES_NO_GUID)) {
-	    if (req->dim == Request::DIM_1D) {
-	      XferDesRemoteWriteMessage::send_request(
-                dst_node, dst_buf, req->src_base, req->nbytes, req,
-		out_port->peer_guid, out_port->peer_port_idx,
-		req->write_seq_pos, req->write_seq_count, 
-		write_bytes_total);
-	    } else {
-	      assert(req->dim == Request::DIM_2D);
-	      // dest MUST be continuous
-	      assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
-	      XferDesRemoteWriteMessage::send_request(
-                dst_node, dst_buf, req->src_base, req->nbytes,
-                req->src_str, req->nlines, req,
-		out_port->peer_guid, out_port->peer_port_idx,
-		req->write_seq_pos, req->write_seq_count, 
-		write_bytes_total);
-	    }
-	  }
-	  // for an empty transfer, we do the local completion ourselves
-	  //   instead of waiting for an ack from the other node
-	  if(req->nbytes == 0) {
-	    req->xd->notify_request_read_done(req);
-	    req->xd->notify_request_write_done(req);
-	  }
-        /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-          req->complete_event = GenEventImpl::create_genevent()->current_event();
-          Realm::RemoteWriteMessage::RequestArgs args;
-          args.mem = req->dst_mem;
-          args.offset = req->dst_offset;
-          args.event = req->complete_event;
-          args.sender = Network::my_node_id;
-          args.sequence_id = 0;
-
-          Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
-                                                      req->src_buf, req->nbytes,
-                                                      PAYLOAD_KEEPREG,
-                                                      req->dst_buf);*/
-        }
-#endif
         return nr;
       }
-
-#if 0 // TODO: DELETE
-      /*static*/
-      void XferDesRemoteWriteMessage::handle_message(NodeID sender,
-						     const XferDesRemoteWriteMessage &args,
-						     const void *data,
-						     size_t datalen)
-      {
-        // assert data copy is in right position
-        //assert(data == args.dst_buf);
-
-	log_xd.info() << "remote write recieved: next="
-		      << std::hex << args.next_xd_guid << std::dec
-		      << " start=" << args.span_start
-		      << " size=" << args.span_size
-		      << " pbt=" << args.pre_bytes_total;
-
-	// if requested, notify (probably-local) next XD
-	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID) {
-	  XferDesQueue *xdq = XferDesQueue::get_singleton();
-	  if(args.pre_bytes_total != size_t(-1))
-	    xdq->update_pre_bytes_total(args.next_xd_guid,
-					args.next_port_idx,
-					args.pre_bytes_total);
-	  xdq->update_pre_bytes_write(args.next_xd_guid,
-				      args.next_port_idx,
-				      args.span_start,
-				      args.span_size);
-	}
-
-	// don't ack empty requests
-	if(datalen > 0)
-	  XferDesRemoteWriteAckMessage::send_request(sender, args.req);
-      }
-
-      /*static*/
-      void XferDesRemoteWriteAckMessage::handle_message(NodeID sender,
-							const XferDesRemoteWriteAckMessage &args,
-							const void *data,
-							size_t datalen)
-      {
-        RemoteWriteRequest* req = args.req;
-        req->xd->notify_request_read_done(req);
-        req->xd->notify_request_write_done(req);
-      }
-#endif
 
       /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
 							    const XferDesDestroyMessage &args,
@@ -6460,10 +6049,6 @@ namespace Realm {
 
 ActiveMessageHandlerReg<SimpleXferDesCreateMessage> simple_xfer_des_create_message_handler;
 ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
-#if 0 // TODO: DELETE
-ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
-ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
-#endif
 ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
 ActiveMessageHandlerReg<UpdateBytesTotalMessage> update_bytes_total_message_handler;
 ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;

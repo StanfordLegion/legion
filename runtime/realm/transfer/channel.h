@@ -53,30 +53,47 @@ namespace Realm {
 
     typedef unsigned long long XferDesID;
 
+#define REALM_XFERDES_KINDS(__op__) \
+  __op__(XFER_NONE) \
+  __op__(XFER_DISK_READ) \
+  __op__(XFER_DISK_WRITE) \
+  __op__(XFER_SSD_READ) \
+  __op__(XFER_SSD_WRITE) \
+  __op__(XFER_GPU_TO_FB) \
+  __op__(XFER_GPU_FROM_FB) \
+  __op__(XFER_GPU_IN_FB) \
+  __op__(XFER_GPU_PEER_FB) \
+  __op__(XFER_MEM_CPY) \
+  __op__(XFER_GASNET_READ) \
+  __op__(XFER_GASNET_WRITE) \
+  __op__(XFER_REMOTE_WRITE) \
+  __op__(XFER_HDF5_READ) \
+  __op__(XFER_HDF5_WRITE) \
+  __op__(XFER_FILE_READ) \
+  __op__(XFER_FILE_WRITE) \
+  __op__(XFER_ADDR_SPLIT) \
+  __op__(XFER_MEM_FILL) \
+  __op__(XFER_GPU_SC_IN_FB) \
+  __op__(XFER_GPU_SC_PEER_FB)
+
     enum XferDesKind
     {
-      XFER_NONE,
-      XFER_DISK_READ,
-      XFER_DISK_WRITE,
-      XFER_SSD_READ,
-      XFER_SSD_WRITE,
-      XFER_GPU_TO_FB,
-      XFER_GPU_FROM_FB,
-      XFER_GPU_IN_FB,
-      XFER_GPU_PEER_FB,
-      XFER_MEM_CPY,
-      XFER_GASNET_READ,
-      XFER_GASNET_WRITE,
-      XFER_REMOTE_WRITE,
-      XFER_HDF5_READ,
-      XFER_HDF5_WRITE,
-      XFER_FILE_READ,
-      XFER_FILE_WRITE,
-      XFER_ADDR_SPLIT,
-      XFER_MEM_FILL,
-      XFER_GPU_SC_IN_FB,
-      XFER_GPU_SC_PEER_FB,
+#define C_ENUMS(name) name,
+      REALM_XFERDES_KINDS(C_ENUMS)
+#undef C_ENUMS
     };
+
+    inline std::ostream &operator<<(std::ostream &os, XferDesKind kind)
+    {
+#define STRING_KIND_CASE(kind)                                                           \
+  case XferDesKind::kind:                                                                \
+    return os << #kind;
+      switch(kind) {
+        REALM_XFERDES_KINDS(STRING_KIND_CASE)
+      }
+#undef STRING_KIND_CASE
+      return os << "UNKNOWN_KIND";
+    }
 
     class Request {
     public:
@@ -838,7 +855,8 @@ namespace Realm {
       /// @return True if the given \p mem can be used as an indirection buffer for a copy
       virtual bool supports_indirection_memory(Memory mem) const;
 
-      virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual Memory suggest_ib_memories() const;
+      virtual Memory suggest_ib_memories_for_node(NodeID node) const;
 
       virtual bool needs_wrapping_iterator() const { return false; }
 

@@ -21,23 +21,7 @@
 #include "legion/legion_instances.h"
 
 namespace Legion {
-  namespace Internal {
-
-    class MappingCallInfo {
-    public:
-      MappingCallInfo(MapperManager *man, MappingCallKind k, 
-                      Operation *op, bool prioritize = false);
-      ~MappingCallInfo(void);
-    public:
-      MapperManager*const               manager;
-      RtUserEvent                       resume;
-      const MappingCallKind             kind;
-      Operation*const                   operation;
-      std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
-      long long                         start_time;
-      long long                         pause_time;
-      bool                              reentrant_disabled;
-    };
+  namespace Internal { 
 
     /**
      * \class MapperManager
@@ -53,7 +37,7 @@ namespace Legion {
       public:
         std::set<PhysicalManager*> instances;
         std::vector<bool> results;
-      };
+      }; 
       struct DeferMessageArgs : public LgTaskArgs<DeferMessageArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAPPER_MESSAGE_TASK_ID;
@@ -70,6 +54,18 @@ namespace Legion {
         void *const message;
         const size_t size;
         const bool broadcast;
+      };
+      struct DeferInstanceCollectionArgs :
+        public LgTaskArgs<DeferInstanceCollectionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_COLLECTION_TASK_ID;
+      public:
+        DeferInstanceCollectionArgs(MapperManager *man, PhysicalManager *inst)
+          : LgTaskArgs<DeferInstanceCollectionArgs>(implicit_provenance),
+            manager(man), instance(inst) { }
+      public:
+        MapperManager *const manager;
+        PhysicalManager *const instance;
       };
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 
@@ -220,10 +216,8 @@ namespace Legion {
       void invoke_permit_steal_request(Mapper::StealRequestInput &input,
                                        Mapper::StealRequestOutput &output);
     public: // handling mapper calls
-      void invoke_handle_message(Mapper::MapperMessage *message,
-                                 bool check_defer = true);
+      void invoke_handle_message(Mapper::MapperMessage *message);
       void invoke_handle_task_result(Mapper::MapperTaskResult &result);
-      void invoke_handle_instance_collection(MappingInstance &instance);
     public:
       // Instance deletion subscriber methods
       virtual void notify_instance_deletion(PhysicalManager *manager);
@@ -247,6 +241,7 @@ namespace Legion {
       virtual void resume_mapper_call(MappingCallInfo *info,
                                       RuntimeCallKind kind) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
+#if 0
     public:
       void update_mappable_tag(MappingCallInfo *info,
                                const Mappable &mappable, MappingTagID tag);
@@ -551,11 +546,12 @@ namespace Legion {
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(
                          MappingCallInfo *ctx);
       int find_local_MPI_rank(void);
+#endif
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
-      void defer_message(Mapper::MapperMessage *message);
       static void handle_deferred_message(const void *args);
+      static void handle_deferred_collection(const void *args);
     public:
       // For stealing
       void process_advertisement(Processor advertiser); 
@@ -572,6 +568,7 @@ namespace Legion {
       const bool profile_mapper;
       const bool request_valid_instances;
       const bool is_default_mapper;
+      const bool initially_reentrant;
     protected:
       mutable LocalLock mapper_lock;
     protected: // Steal request information
@@ -679,6 +676,49 @@ namespace Legion {
       std::set<MappingCallInfo*> current_holders;
       std::deque<MappingCallInfo*> read_only_waiters;
       std::deque<MappingCallInfo*> exclusive_waiters;
+    };
+
+    class MappingCallInfo {
+    public:
+      MappingCallInfo(MapperManager *man, MappingCallKind k, 
+                      Operation *op, bool prioritize = false);
+      ~MappingCallInfo(void);
+    public:
+      inline void pause_mapper_call(void)
+        { manager->pause_mapper_call(this); }
+      inline void resume_mapper_call(RuntimeCallKind kind)
+        { manager->resume_mapper_call(this, kind); }
+      inline const char* get_mapper_name(void) const
+        { return manager->get_mapper_name(); }
+      inline const char* get_mapper_call_name(void) const
+        { return manager->get_mapper_call_name(kind); }
+      inline bool is_locked(void)
+        { return manager->is_locked(this); }
+      inline void lock_mapper(bool read_only)
+        { manager->lock_mapper(this, read_only); }
+      inline void unlock_mapper(void)
+        { manager->unlock_mapper(this); }
+      inline bool is_reentrant(void)
+        { return manager->is_reentrant(this); }
+      inline void enable_reentrant(void)
+        { manager->enable_reentrant(this); }
+      inline void disable_reentrant(void)
+        { manager->disable_reentrant(this); }
+      void record_acquired_instance(InstanceManager *manager, bool created);
+      void release_acquired_instance(InstanceManager *manager);
+      bool perform_acquires(
+          const std::vector<MappingInstance> &instances,
+          std::vector<unsigned> *to_erase = NULL, 
+          bool filter_acquired_instances = false);
+    public:
+      MapperManager*const               manager;
+      RtUserEvent                       resume;
+      const MappingCallKind             kind;
+      Operation*const                   operation;
+      std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
+      long long                         start_time;
+      long long                         pause_time;
+      bool                              reentrant;
     };
 
   };
