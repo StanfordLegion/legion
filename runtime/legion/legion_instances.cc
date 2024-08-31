@@ -3758,7 +3758,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
-      ProfilingResponseBase base(this);
+      ProfilingResponseBase base(this, creator_id, false/*completion*/);
 #ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
@@ -3779,18 +3779,23 @@ namespace Legion {
       }
       ApEvent ready;
       if (runtime->profiler != NULL)
+      {
         runtime->profiler->add_inst_request(requests, creator_id, unique_event);
+        current_unique_event = unique_event;
+      }
 #ifndef LEGION_MALLOC_INSTANCES
       ready = ApEvent(PhysicalInstance::create_instance(instance,
             memory_manager->memory, inst_layout, requests, precondition));
+      if (ready.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(ready, unique_event);
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout, 
-                                                      requests, instance));
+      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
+            requests, instance, unique_event));
       if (!instance.exists())
       {
         if (unsat_kind != NULL)
@@ -3907,10 +3912,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceBuilder::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+    bool InstanceBuilder::handle_profiling_response(
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3940,6 +3944,8 @@ namespace Legion {
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
+      fevent = current_unique_event;
+      return true;
     }
 
     //--------------------------------------------------------------------------

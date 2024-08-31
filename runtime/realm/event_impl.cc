@@ -2909,20 +2909,23 @@ static void *bytedup(const void *data, size_t datalen)
 	    // no need to initialize new entries - we'll overwrite them now or when data does show up
 	    impl->value_capacity = new_capacity;
 	  }
-	  assert(datalen == (impl->redop->sizeof_lhs * (trigger_gen - args.previous_gen)));
-	  assert(args.previous_gen >= impl->first_generation);
-	  memcpy(impl->final_values + ((args.previous_gen -
-					impl->first_generation) * impl->redop->sizeof_lhs),
-		 data, datalen);
-	}
+          assert(args.trigger_gen <= trigger_gen);
+          // trigger_gen might have changed so make sure you use args.trigger_gen here
+          assert(datalen ==
+                 (impl->redop->sizeof_lhs * (args.trigger_gen - args.previous_gen)));
+          assert(args.previous_gen >= impl->first_generation);
+          memcpy(impl->final_values + ((args.previous_gen - impl->first_generation) *
+                                       impl->redop->sizeof_lhs),
+                 data, datalen);
+        }
 
-	// external waiters need to be signalled inside the lock
-	if(generation_updated && impl->has_external_waiters) {
-	  impl->has_external_waiters = false;
+        // external waiters need to be signalled inside the lock
+        if(generation_updated && impl->has_external_waiters) {
+          impl->has_external_waiters = false;
           // also need external waiter mutex
           AutoLock<KernelMutex> al2(impl->external_waiter_mutex);
 	  impl->external_waiter_condvar.broadcast();
-	}
+        }
       }
 
       // with lock released, perform any local notifications

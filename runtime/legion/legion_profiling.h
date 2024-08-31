@@ -57,7 +57,59 @@ namespace Legion {
     typedef ::realm_id_t InstID;
     typedef ::realm_id_t IDType;
 
+    // This class helps us profile barriers by allowing us to 
+    // find the latest barrier arrival to trigger
+    struct ArrivalInfo {
+    public:
+      ArrivalInfo(void);
+      ArrivalInfo(const ArrivalInfo &rhs);
+      ArrivalInfo(LgEvent precondition);
+      ArrivalInfo(timestamp_t arrival, timestamp_t trigger,
+                  LgEvent precondition, LgEvent fevent);
+    public:
+      timestamp_t arrival_time;
+      std::atomic<timestamp_t> trigger_time;
+      LgEvent arrival_precondition;
+      LgEvent fevent;
+    };
+
+    // This reduction is used for profiling the arrival of barriers
+    class BarrierArrivalReduction {
+    public:
+      typedef ArrivalInfo RHS;
+      typedef ArrivalInfo LHS;
+      static const ArrivalInfo identity;
+      static constexpr ReductionOpID REDOP = 
+        LEGION_MAX_APPLICATION_REDOP_ID;
+      static constexpr timestamp_t SENTINEL =
+        std::numeric_limits<timestamp_t>::max();
+
+      template<bool EXCLUSIVE> static void apply(LHS &lhs, const RHS &rhs);
+      template<bool EXCLUSIVE> static void fold(RHS &rhs1, const RHS &rhs2);
+    };
+
     class LegionProfSerializer; // forward declaration
+    // A small interface class for handling profiling responses
+    class ProfilingResponseHandler {
+    public:
+      // Return true if we should profile this profiling response
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent) = 0;
+    };
+
+    struct ProfilingResponseBase {
+    public:
+      ProfilingResponseBase(ProfilingResponseHandler *h, UniqueID op,
+                            bool complete = true)
+        : handler(h), op_id(op), completion(complete) { }
+    public:
+      ProfilingResponseHandler *const handler;
+      const UniqueID op_id;
+      // Whether this profiling response happens at the completion
+      // of the operation or at the initiation
+      const bool completion;
+    };
 
     /*
      * This class provides an interface for mapping physical instance names
@@ -242,6 +294,7 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
         LgEvent creator;
+        LgEvent critical;
         LgEvent finish_event;
       };
       struct GPUTaskInfo {
@@ -254,6 +307,7 @@ namespace Legion {
         timestamp_t gpu_start, gpu_stop;
         std::deque<WaitInfo> wait_intervals;
         LgEvent creator;
+        LgEvent critical;
         LgEvent finish_event;
       };
       struct IndexSpacePointDesc {
@@ -357,6 +411,7 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
         LgEvent creator;
+        LgEvent critical;
         LgEvent finish_event;
       };
       struct MessageInfo : public MetaInfo {
@@ -382,6 +437,7 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
         LgEvent creator;
+        LgEvent critical;
         CollectiveKind collective;
         std::vector<CopyInstInfo> inst_infos;
       };
@@ -398,6 +454,7 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
         LgEvent creator;
+        LgEvent critical;
         CollectiveKind collective;
         std::vector<FillInstInfo> inst_infos;
       };
@@ -416,7 +473,9 @@ namespace Legion {
         UniqueID op_id;
         DepPartOpKind part_op;
         unsigned long long create, ready, start, stop;
+        LgEvent fevent;
         LgEvent creator;
+        LgEvent critical;
       };
       struct MapperCallInfo {
       public:
@@ -455,10 +514,60 @@ namespace Legion {
         timestamp_t start, stop;
         LgEvent creator;
         LgEvent finish_event;
+        bool completion;
+      };
+      struct EventMergerInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        timestamp_t performed;
+        std::vector<LgEvent> preconditions; 
+      };
+      struct EventTriggerInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        LgEvent precondition;
+        timestamp_t performed;
+      };
+      struct EventPoisonInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        timestamp_t performed;
+      };
+      struct BarrierArrivalInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        LgEvent precondition;
+        timestamp_t performed;
+      };
+      struct ReservationAcquireInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        LgEvent precondition;
+        timestamp_t performed;
+        Reservation reservation;
+      };
+      struct InstanceReadyInfo {
+      public:
+        LgEvent result;
+        LgEvent precondition;
+        LgEvent unique;
+        timestamp_t performed;
+      };
+      struct CompletionQueueInfo {
+      public:
+        LgEvent result;
+        LgEvent fevent;
+        timestamp_t performed;
+        std::vector<LgEvent> preconditions; 
       };
       struct ProfilingInfo : public ProfilingResponseBase {
       public:
-        ProfilingInfo(ProfilingResponseHandler *h);
+        ProfilingInfo(ProfilingResponseHandler *h, UniqueID uid);
       public:
         size_t id; 
         union {
@@ -466,8 +575,8 @@ namespace Legion {
           InstanceNameClosure *closure;
           long long spawn_time;
         } extra;
-        UniqueID op_id;
         LgEvent creator;
+        LgEvent critical;
       };
     public:
       LegionProfInstance(LegionProfiler *owner);
@@ -525,6 +634,19 @@ namespace Legion {
                                      sparse_size,
                                      bool is_sparse);
     public:
+      void record_event_merger(LgEvent result, 
+          const LgEvent *preconditions, size_t count);
+      void record_event_trigger(LgEvent result, LgEvent precondition);
+      void record_event_poison(LgEvent result);
+      void record_barrier_arrival(LgEvent barrier, LgEvent precondition);
+      void record_barrier_arrival(LgEvent barrier, UniqueID uid);
+      void record_reservation_acquire(Reservation r, LgEvent result,
+          LgEvent precondition);
+      void record_instance_ready(LgEvent result, LgEvent unique_event,
+                                 LgEvent precondition = LgEvent::NO_LG_EVENT);
+      void record_completion_queue_event(LgEvent result, LgEvent fevent,
+          timestamp_t timestamp, const LgEvent *preconditions, size_t count);
+    public:
       void process_task(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage);
@@ -546,6 +668,8 @@ namespace Legion {
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
+      void process_arrival(const ProfilingInfo *info,
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline);
       void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
           long long start, long long stop, std::deque<WaitInfo> &waits,
           LgEvent finish_event);
@@ -553,6 +677,8 @@ namespace Legion {
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
       void process_proc_mem_aff_desc(const Processor &p);
+      void process_event_trigger(Deserializer &derez);
+      void process_event_poison(Deserializer &derez);
     public:
       void record_mapper_call(MapperID mapper, Processor mapper_proc,
        MappingCallKind kind, UniqueID uid, timestamp_t start, timestamp_t stop);
@@ -563,7 +689,8 @@ namespace Legion {
       void record_event_wait(LgEvent event, Realm::Backtrace &bt);
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
-          timestamp_t stop, LgEvent creator, LgEvent finish_event);
+          timestamp_t stop, LgEvent creator, LgEvent finish_event, 
+          bool creator_complete);
     public:
       void dump_state(LegionProfSerializer *serializer);
       size_t dump_inter(LegionProfSerializer *serializer, const double over);
@@ -574,6 +701,7 @@ namespace Legion {
       std::deque<SliceOwner>        slice_owners;
     private:
       std::deque<TaskInfo> task_infos;
+      std::deque<TaskInfo> implicit_infos;
       std::deque<GPUTaskInfo> gpu_task_infos;
       std::deque<IndexSpaceRectDesc> ispace_rect_desc;
       std::deque<IndexSpacePointDesc> ispace_point_desc;
@@ -600,6 +728,13 @@ namespace Legion {
       std::deque<RuntimeCallInfo> runtime_call_infos;
       std::deque<ApplicationCallInfo> application_call_infos;
       std::deque<EventWaitInfo> event_wait_infos;
+      std::deque<EventMergerInfo> event_merger_infos;
+      std::deque<EventTriggerInfo> event_trigger_infos;
+      std::deque<EventPoisonInfo> event_poison_infos;
+      std::deque<BarrierArrivalInfo> barrier_arrival_infos;
+      std::deque<ReservationAcquireInfo> reservation_acquire_infos;
+      std::deque<InstanceReadyInfo> instance_ready_infos;
+      std::deque<CompletionQueueInfo> completion_queue_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;
@@ -617,12 +752,15 @@ namespace Legion {
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
         LEGION_PROF_PARTITION,
+        LEGION_PROF_ARRIVAL,
+        LEGION_PROF_BARRIER,
         LEGION_PROF_LAST,
       };
       struct ProfilingInfo : public LegionProfInstance::ProfilingInfo {
       public:
-        ProfilingInfo(LegionProfiler *p, ProfilingKind k)
-          : LegionProfInstance::ProfilingInfo(p), kind(k) { }
+        ProfilingInfo(LegionProfiler *p, ProfilingKind k, UniqueID uid)
+          : LegionProfInstance::ProfilingInfo(p, uid), kind(k) { }
+        ProfilingInfo(LegionProfiler *p, ProfilingKind k, Operation *op);
       public:
         ProfilingKind kind;
       };
@@ -643,7 +781,9 @@ namespace Legion {
                      const size_t target_latency,
                      const size_t minimum_call_threshold,
                      const bool slow_config_ok,
-                     const bool self_profile);
+                     const bool self_profile,
+                     const bool no_critical,
+                     const bool all_arrivals);
       LegionProfiler(const LegionProfiler &rhs) = delete;
       virtual ~LegionProfiler(void);
     public:
@@ -660,49 +800,62 @@ namespace Legion {
       void record_affinities(std::vector<Memory> &memories_to_log);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
-                            VariantID vid, UniqueID task_uid, Processor p);
+                            VariantID vid, UniqueID task_uid, Processor p, 
+                            LgEvent critical);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
-                            LgTaskID tid, Operation *op);
+                            LgTaskID tid, Operation *op, LgEvent critical);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            InstanceNameClosure *closure,
-                            Operation *op, unsigned count = 1, 
+                            InstanceNameClosure *closure, Operation *op,
+                            LgEvent critical, unsigned count = 1, 
                             CollectiveKind collective = COLLECTIVE_NONE);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             InstanceNameClosure *closure, Operation *op,
+                            LgEvent critical,
                             CollectiveKind collective = COLLECTIVE_NONE);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op, LgEvent unique_event);
       void handle_failed_instance_allocation(void);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
-                                 Operation *op, DepPartOpKind part_op);
+                                 Operation *op, DepPartOpKind part_op,
+                                 LgEvent critical);
       // Adding a message profiling request is a static method
       // because we might not have a profiler on the local node
       static void add_message_request(Realm::ProfilingRequestSet &requests,
-                                      MessageKind kind,Processor remote_target);
+                                      MessageKind kind,Processor remote_target,
+                                      LgEvent critical);
     public:
       // Alternate versions of the one above with op ids
-      void add_task_request(Realm::ProfilingRequestSet &requests, 
-                            TaskID tid, VariantID vid, UniqueID uid);
+      void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid,
+                            VariantID vid, UniqueID uid, LgEvent critical);
       void add_gpu_task_request(Realm::ProfilingRequestSet &requests,
-                            TaskID tid, VariantID vid, UniqueID uid);
+                            TaskID tid, VariantID vid, UniqueID uid,
+                            LgEvent critical);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
-                            LgTaskID tid, UniqueID uid);
+                            LgTaskID tid, UniqueID uid, LgEvent critical);
       void add_copy_request(Realm::ProfilingRequestSet &requests,
-                            InstanceNameClosure *closure,
-                            UniqueID uid, unsigned count = 1,
+                            InstanceNameClosure *closure, UniqueID uid,
+                            LgEvent critical, unsigned count = 1,
                             CollectiveKind collective = COLLECTIVE_NONE);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             InstanceNameClosure *closure, UniqueID uid,
+                            LgEvent critical,
                             CollectiveKind collective = COLLECTIVE_NONE);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             UniqueID uid, LgEvent unique_event);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
-                                 UniqueID uid, DepPartOpKind part_op);
+                                 UniqueID uid, DepPartOpKind part_op,
+                                 LgEvent critical);
+    public:
+      void profile_barrier_arrival(Realm::Barrier bar, size_t count,
+          LgEvent precondition, Realm::Event protected_precondition);
+      void profile_barrier_trigger(Realm::Barrier bar, UniqueID uid);
+      bool update_previous_recorded_barrier(Realm::Barrier bar,
+                                            Realm::Barrier &previous);
     public:
       // Process low-level runtime profiling results
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
     public:
       // Dump all the results
       void finalize(void);
@@ -715,6 +868,9 @@ namespace Legion {
                                      unsigned int num_runtime_call_kinds);
       void record_provenance(ProvenanceID pid, 
                              const char *provenance, size_t size);
+    public:
+      void increment_outstanding_message_request(void);
+      LgEvent find_message_fevent(LgEvent original_fevent);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
@@ -745,6 +901,11 @@ namespace Legion {
       const Processor target_proc;
       // Whether we are self-profiling
       const bool self_profile;
+      // Whether we are profiling for critical path
+      const bool no_critical_paths;
+      // Whether we are recording all the critical barrier arrivals
+      // or we are doing a reduction with the barrier to compute it
+      const bool all_critical_arrivals;
     private:
       LegionProfSerializer* serializer;
       mutable LocalLock profiler_lock;
@@ -754,6 +915,8 @@ namespace Legion {
       unsigned long long next_backtrace_id;
       std::vector<Memory> recorded_memories;
       std::vector<Processor> recorded_processors;
+      std::map<LgEvent,LgEvent> message_fevents;
+      std::map<std::pair<unsigned,unsigned>,unsigned> recorded_barriers;
 #ifdef DEBUG_LEGION
       unsigned total_outstanding_requests[LEGION_PROF_LAST];
 #else

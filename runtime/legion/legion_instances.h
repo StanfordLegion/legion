@@ -642,9 +642,9 @@ namespace Legion {
                         unsigned *unsat_index, size_t *footprint = NULL,
                         RtEvent collection_done = RtEvent::NO_RT_EVENT);
     public:
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &response,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig, 
+          size_t orig_length, LgEvent &fevent);
     protected:
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:
@@ -673,6 +673,7 @@ namespace Legion {
       void *piece_list;
       size_t piece_list_size;
     public:
+      LgEvent current_unique_event;
       bool valid;
     };
 

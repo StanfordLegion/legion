@@ -85,7 +85,7 @@ namespace Legion {
                              const LegionProfInstance::GPUTaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::WaitInfo,
                              const LegionProfInstance::MetaInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::TaskInfo&, bool) = 0;
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInfo&) = 0;
@@ -105,6 +105,13 @@ namespace Legion {
       virtual void serialize(const LegionProfDesc::ProcMemDesc&) = 0;
       virtual void serialize(const LegionProfDesc::Backtrace&) = 0;
       virtual void serialize(const LegionProfInstance::EventWaitInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::EventMergerInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::EventTriggerInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::EventPoisonInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::BarrierArrivalInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::ReservationAcquireInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::InstanceReadyInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::CompletionQueueInfo&) = 0;
       virtual void serialize(const LegionProfInstance::ProfTaskInfo&) = 0;
     };
 
@@ -155,7 +162,7 @@ namespace Legion {
                      const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
-      void serialize(const LegionProfInstance::TaskInfo&);
+      void serialize(const LegionProfInstance::TaskInfo&, bool);
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
@@ -175,6 +182,13 @@ namespace Legion {
       void serialize(const LegionProfDesc::ProcMemDesc&);
       void serialize(const LegionProfDesc::Backtrace&);
       void serialize(const LegionProfInstance::EventWaitInfo&);
+      void serialize(const LegionProfInstance::EventMergerInfo&);
+      void serialize(const LegionProfInstance::EventTriggerInfo&);
+      void serialize(const LegionProfInstance::EventPoisonInfo&);
+      void serialize(const LegionProfInstance::BarrierArrivalInfo&);
+      void serialize(const LegionProfInstance::ReservationAcquireInfo&);
+      void serialize(const LegionProfInstance::InstanceReadyInfo&);
+      void serialize(const LegionProfInstance::CompletionQueueInfo&);
       void serialize(const LegionProfInstance::ProfTaskInfo&);
     private:
 #ifdef LEGION_USE_ZLIB
@@ -211,6 +225,7 @@ namespace Legion {
         MAPPER_CALL_INFO_ID,
         RUNTIME_CALL_INFO_ID,
         APPLICATION_CALL_INFO_ID,
+        IMPLICIT_TASK_INFO_ID,
         GPU_TASK_INFO_ID,
         PROC_MEM_DESC_ID,
         INDEX_SPACE_POINT_ID,
@@ -233,6 +248,13 @@ namespace Legion {
         FILL_INST_INFO_ID,
         BACKTRACE_DESC_ID,
         EVENT_WAIT_INFO_ID,
+        EVENT_MERGER_INFO_ID,
+        EVENT_TRIGGER_INFO_ID,
+        EVENT_POISON_INFO_ID,
+        BARRIER_ARRIVAL_INFO_ID,
+        RESERVATION_ACQUIRE_INFO_ID,
+        INSTANCE_READY_INFO_ID,
+        COMPLETION_QUEUE_INFO_ID,
         PROFTASK_INFO_ID,
         ZERO_TIME_ID,
         CALIBRATION_ERR_ID,
@@ -285,7 +307,7 @@ namespace Legion {
                      const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
-      void serialize(const LegionProfInstance::TaskInfo&);
+      void serialize(const LegionProfInstance::TaskInfo&, bool);
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
@@ -305,6 +327,13 @@ namespace Legion {
       void serialize(const LegionProfDesc::ProcMemDesc&);
       void serialize(const LegionProfDesc::Backtrace&);
       void serialize(const LegionProfInstance::EventWaitInfo&);
+      void serialize(const LegionProfInstance::EventMergerInfo&);
+      void serialize(const LegionProfInstance::EventTriggerInfo&);
+      void serialize(const LegionProfInstance::EventPoisonInfo&);
+      void serialize(const LegionProfInstance::BarrierArrivalInfo&);
+      void serialize(const LegionProfInstance::ReservationAcquireInfo&);
+      void serialize(const LegionProfInstance::InstanceReadyInfo&);
+      void serialize(const LegionProfInstance::CompletionQueueInfo&);
       void serialize(const LegionProfInstance::ProfTaskInfo&);
     };
   }; // namespace Internal
