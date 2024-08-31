@@ -1669,7 +1669,7 @@ namespace Legion {
     };
 
 #define RUNTIME_CALL_DESCRIPTIONS(name)                               \
-    const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+    const char *name[Internal::LAST_RUNTIME_CALL_KIND] = {            \
       "MapperRuntime::send_message",                                  \
       "MapperRuntime::broadcast",                                     \
       "MapperRuntime::unpack_physical_instance",                      \
@@ -2397,6 +2397,7 @@ namespace Legion {
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
+    friend class Legion::Mapping::MapperRuntime;            \
     friend class Internal::Runtime;                         \
     friend class Internal::FutureImpl;                      \
     friend class Internal::FutureMapImpl;                   \
@@ -2516,6 +2517,7 @@ namespace Legion {
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \
     friend class Internal::MustEpochMappingBroadcast;       \
+    friend class Internal::MappingCallInfo;                 \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
