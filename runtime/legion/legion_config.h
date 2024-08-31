@@ -1510,6 +1510,8 @@ typedef enum legion_region_flags_t {
   LEGION_COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
   // for indicating created output region requirements
   LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG = 0x00000020,
+  // Suppress warnings on this region requirement
+  LEGION_SUPPRESS_WARNINGS_FLAG = 0x00000040,
   // for backwards compatibility
   LEGION_DEPRECATED_ENUM(NO_FLAG)
   LEGION_DEPRECATED_ENUM(VERIFIED_FLAG)

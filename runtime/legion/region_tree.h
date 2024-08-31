@@ -4476,7 +4476,6 @@ namespace Legion {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
-                                      const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
       void invalidate_logical_refinement(ContextID ctx, 
