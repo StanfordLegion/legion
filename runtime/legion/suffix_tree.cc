@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion_defines.h"
 #include "legion/suffix_tree.h"
 
 namespace Legion {
