@@ -19,6 +19,7 @@
 #include "legion/region_tree.h"
 #include "legion/legion_spy.h"
 #include "legion/legion_trace.h"
+#include "legion/legion_auto_trace.h"
 #include "legion/legion_context.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
@@ -1664,6 +1665,50 @@ namespace Legion {
     {
       assert(false);
       return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      log_auto_trace.debug() << "Encountered untraceable operation: "
+        << get_string_rep(get_operation_kind());
+      recognizer.record_operation_untraceable(opidx);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::hash_requirement(Murmur3Hasher &hasher,
+                                                   const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      if (req.region.exists()) {
+        hasher.hash<bool>(true); // is_reg
+        hasher.hash(req.region.get_index_space().get_id());
+        hasher.hash(req.region.get_field_space().get_id());
+        hasher.hash(req.region.get_tree_id());
+      } else {
+        hasher.hash<bool>(false); // is_reg
+        hasher.hash(req.partition.get_index_partition().get_id());
+        hasher.hash(req.partition.get_field_space().get_id());
+        hasher.hash(req.partition.get_tree_id());
+      }
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+           it != req.privilege_fields.end(); it++)
+        hasher.hash(*it);
+      for (std::vector<FieldID>::const_iterator it = 
+            req.instance_fields.begin(); it != req.instance_fields.end(); it++)
+        hasher.hash(*it);
+      hasher.hash(req.privilege);
+      hasher.hash(req.prop);
+      hasher.hash(req.parent.get_index_space().get_id());
+      hasher.hash(req.parent.get_field_space().get_id());
+      hasher.hash(req.parent.get_tree_id());
+      hasher.hash(req.redop);
+      // Excluding the fields: tag and flags.
+      hasher.hash(req.handle_type);
+      hasher.hash(req.projection);
     }
 
     //--------------------------------------------------------------------------
@@ -7256,6 +7301,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool CopyOp::record_trace_hash(TraceRecognizer &recognizer, uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            src_requirements.begin(); it != src_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      for (std::vector<RegionRequirement>::const_iterator it =
+            dst_requirements.begin(); it != dst_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      for (std::vector<RegionRequirement>::const_iterator it =
+            src_indirect_requirements.begin(); it != 
+            src_indirect_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            dst_indirect_requirements.begin(); it != 
+            dst_indirect_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      // Not including the fields grants, wait_barriers, arrive_barriers.
+      hasher.hash<bool>(is_index_space);
+      if (is_index_space)
+        hasher.hash(index_domain);
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::finalize_copy_profiling(void)
     //--------------------------------------------------------------------------
     {
@@ -9719,6 +9792,17 @@ namespace Legion {
       if (result.impl != NULL)
         result.impl->set_result(complete);
       complete_operation(complete);
+    }
+
+    //--------------------------------------------------------------------------
+    bool FenceOp::record_trace_hash(TraceRecognizer &recognizer, uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(fence_kind);
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -12237,6 +12321,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool AcquireOp::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(logical_region);
+      hasher.hash(parent_region);
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        hasher.hash(*it);
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     unsigned AcquireOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -13059,6 +13159,22 @@ namespace Legion {
       }
       // Don't commit this operation until the profiling is done
       commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReleaseOp::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(logical_region);
+      hasher.hash(parent_region);
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        hasher.hash(*it);
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -18359,6 +18475,24 @@ namespace Legion {
       }
       complete_operation(complete);
     }
+
+    //--------------------------------------------------------------------------
+    bool FillOp::record_trace_hash(TraceRecognizer &recognizer, uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hash_requirement(hasher, requirement);
+      hasher.hash<bool>(is_index_space);
+      if (is_index_space)
+        hasher.hash(index_domain);
+      if (future.exists())
+        hasher.hash(future.impl->did);
+      else
+        hasher.hash(value, value_size);
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
+    }
     
     //--------------------------------------------------------------------------
     unsigned FillOp::find_parent_index(unsigned idx)
@@ -19632,6 +19766,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DiscardOp::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      recognizer.record_operation_noop(this);
+      return true;
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -22361,6 +22504,17 @@ namespace Legion {
 #endif
       tpl->get_allreduce_mapping(this, target_memories, future_result_size);
       perform_allreduce();
+    }
+
+    //--------------------------------------------------------------------------
+    bool AllReduceOp::record_trace_hash(TraceRecognizer &recognizer,
+                                        uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
     }
 
     //--------------------------------------------------------------------------

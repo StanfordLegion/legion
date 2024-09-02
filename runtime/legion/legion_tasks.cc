@@ -3554,31 +3554,102 @@ namespace Legion {
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
-      InnerContext *inner_ctx;
-      if (this->runtime->enable_automatic_tracing) {
-        log_auto_trace.info() << "Initializing AutomaticTracingContext<InnerContext>.";
-        inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
-          get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
-          0/*did*/, false/*inline*/, true/*implicit*/);
-      } else {
-        inner_ctx = new InnerContext(runtime, this,
-          get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
-          0/*did*/, false/*inline*/, true/*implicit*/);
+      Mapper::ContextConfigOutput configuration;
+      configure_execution_context(configuration);
+
+      InnerContext *inner_ctx = NULL;
+      if (configuration.auto_tracing_enabled)
+      {
+        log_auto_trace.info("Initializing auto tracing for %s (UID %lld)",
+                            get_task_name(), get_unique_id());
+        inner_ctx = new AutoTracing<InnerContext>(configuration, runtime,
+            this, get_depth(), false/*is inner*/, regions, output_regions,
+            parent_req_indexes, virtual_mapped, task_priority,
+            ApEvent::NO_AP_EVENT, 0/*did*/, false/*inline*/, true/*implicit*/);
       }
+      else
+        inner_ctx = new InnerContext(configuration, runtime, this,
+            get_depth(), false/*is inner*/, regions, output_regions,
+            parent_req_indexes, virtual_mapped, task_priority,
+            ApEvent::NO_AP_EVENT, 0/*did*/, false/*inline*/, true/*implicit*/);
       execution_context = inner_ctx;
       execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::configure_execution_context(InnerContext *inner_ctx)
+    void SingleTask::configure_execution_context(
+                             Mapper::ContextConfigOutput &context_configuration)
     //--------------------------------------------------------------------------
     {
+      context_configuration.max_window_size = 
+        runtime->initial_task_window_size;
+      context_configuration.hysteresis_percentage = 
+        runtime->initial_task_window_hysteresis;
+      context_configuration.max_outstanding_frames = 0;
+      context_configuration.min_tasks_to_schedule = 
+        runtime->initial_tasks_to_schedule;
+      context_configuration.min_frames_to_schedule = 0;
+      context_configuration.meta_task_vector_width = 
+        runtime->initial_meta_task_vector_width;
+      context_configuration.max_templates_per_trace =
+        LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
+      context_configuration.mutable_priority = false;
+      context_configuration.auto_tracing_enabled = true;
+      context_configuration.auto_tracing_batchsize = 100;
+      context_configuration.auto_tracing_multi_scale_factor = 100;
+      context_configuration.auto_tracing_min_trace_length = 5;
+      context_configuration.auto_tracing_max_trace_length = UINT_MAX;
+      context_configuration.auto_tracing_visit_threshold = 10;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
-      inner_ctx->configure_context(mapper, task_priority);
+      mapper->invoke_configure_context(this, context_configuration);
+      // Do a little bit of checking on the output.  Make
+      // sure that we only set one of the two cases so we
+      // are counting by frames or by outstanding tasks.
+      if ((context_configuration.min_tasks_to_schedule == 0) && 
+          (context_configuration.min_frames_to_schedule == 0))
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure_context' "
+                      "on mapper %s. One of 'min_tasks_to_schedule' and "
+                      "'min_frames_to_schedule' must be non-zero for task "
+                      "%s (ID %lld)", mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      // Hysteresis percentage is an unsigned so can't be less than 0
+      if (context_configuration.hysteresis_percentage > 100)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure_context' "
+                      "on mapper %s. The 'hysteresis_percentage' %d is not "
+                      "a value between 0 and 100 for task %s (ID %lld)",
+                      mapper->get_mapper_name(), 
+                      context_configuration.hysteresis_percentage,
+                      get_task_name(), get_unique_id())
+      if (context_configuration.meta_task_vector_width == 0)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure context' "
+                      "on mapper %s for task %s (ID %lld). The "
+                      "'meta_task_vector_width' must be a non-zero value.",
+                      mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      if (context_configuration.max_templates_per_trace == 0)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure context' "
+                      "on mapper %s for task %s (ID %lld). The "
+                      "'max_templates_per_trace' must be a non-zero value.",
+                      mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id())
+      if (context_configuration.auto_tracing_enabled && runtime->no_tracing)
+      {
+        log_auto_trace.warning("Waring disabling automatic tracing requested "
+            "by mapper %s for task %s (UID %lld) because tracing was disabled "
+            " on the command line.", mapper->get_mapper_name(),
+            get_task_name(), get_unique_id());
+        context_configuration.auto_tracing_enabled = false;
+      }
+      // If we're counting by frames set min_tasks_to_schedule to zero
+      if (context_configuration.min_frames_to_schedule > 0)
+        context_configuration.min_tasks_to_schedule = 0;
+      // otherwise we know min_frames_to_schedule is zero
     }
 
     //--------------------------------------------------------------------------
@@ -4064,9 +4135,15 @@ namespace Legion {
           continue;
         local_shards.push_back(idx);
       }
+      Mapper::ContextConfigOutput configuration;
+      if (!var_impl->is_leaf())
+        // Compute a context configuration that all the shards will
+        // use for the control replicated context. We need to do this
+        // here so that all the shards get the same settings 
+        configure_execution_context(configuration); 
       shard_manager = new ShardManager(runtime, manager_did, mapping,
-          local_shards.size(), is_top_level_task(), isomorphic_points,
-          !var_impl->is_leaf(), output.shard_domain, 
+          local_shards.size(), configuration, is_top_level_task(),
+          isomorphic_points, !var_impl->is_leaf(), output.shard_domain, 
           std::move(output.shard_points), std::move(sorted_points),
           std::move(shard_lookup), this);
       shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
@@ -5134,22 +5211,25 @@ namespace Legion {
     {
       if (!leaf_task)
       {
-        InnerContext *inner_ctx;
-        // Use the automatic tracing context if it is enabled. Otherwise,
-        // use a normal inner context.
-        if (runtime->enable_automatic_tracing) {
-          log_auto_trace.info() << "Initializing AutomaticTracingContext<InnerContext>.";
-          inner_ctx = new AutomaticTracingContext<InnerContext>(runtime, this,
-            get_depth(), v->is_inner(), regions, output_regions,
-            parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/,
-            inline_task, concurrent_task || parent_ctx->is_concurrent_context());
-        } else {
-          inner_ctx = new InnerContext(runtime, this,
-            get_depth(), v->is_inner(), regions, output_regions,
-            parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/,
-            inline_task, concurrent_task || parent_ctx->is_concurrent_context());
+        Mapper::ContextConfigOutput configuration;
+        configure_execution_context(configuration);
+        InnerContext *inner_ctx = NULL;
+        if (configuration.auto_tracing_enabled)
+        {
+          log_auto_trace.info("Initializing auto tracing for %s (UID %lld)",
+              get_task_name(), get_unique_id());
+          inner_ctx = new AutoTracing<InnerContext>(configuration, runtime, 
+              this, get_depth(), v->is_inner(), regions, output_regions,
+              parent_req_indexes, virtual_mapped, task_priority,
+              execution_fence_event, 0/*did*/, inline_task,
+              concurrent_task || parent_ctx->is_concurrent_context());
         }
-        configure_execution_context(inner_ctx);
+        else
+          inner_ctx = new InnerContext(configuration, runtime, this, 
+              get_depth(), v->is_inner(), regions, output_regions, 
+              parent_req_indexes, virtual_mapped, task_priority,
+              execution_fence_event, 0/*did*/, inline_task,
+              concurrent_task || parent_ctx->is_concurrent_context());
         inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
         return inner_ctx;
       }
@@ -6209,6 +6289,33 @@ namespace Legion {
                     get_unique_id(), parent_ctx->get_task_name(),
                     parent_ctx->get_unique_id())
     } 
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::record_trace_hash(TraceRecognizer &recognizer,
+                                           uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      if (output_regions.size() > 0)
+      {
+        recognizer.record_operation_untraceable(opidx);
+        return false;
+      }
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(task_id);
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+        hash_requirement(hasher, *it);
+      hasher.hash<bool>(is_index_space);
+      if (is_index_space) 
+      {
+        hasher.hash<bool>(concurrent_task);
+        hasher.hash<bool>(must_epoch_task);
+        hasher.hash(index_domain);
+      }
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
+    }
 
     //--------------------------------------------------------------------------
     void IndividualTask::predicate_false(void)
@@ -8196,24 +8303,26 @@ namespace Legion {
       if (!leaf_task)
       {
         // If we have a control replication context then we do the special path.
-        // Also, see if we need to create an AutomaticTracingContext.
-        ReplicateContext* repl_ctx;
-        if (this->runtime->enable_automatic_tracing) {
-          log_auto_trace.info() << "Initializing AutomaticTracingContext<ReplicateContext>.";
-          repl_ctx = new AutomaticTracingContext<ReplicateContext>(runtime, this,
-            get_depth(), v->is_inner(), regions, output_regions,
-            parent_req_indexes, virtual_mapped, execution_fence_event,
-            shard_manager, inline_task, parent_ctx->is_concurrent_context());
-        } else {
-          repl_ctx = new ReplicateContext(runtime, this,
-            get_depth(), v->is_inner(), regions, output_regions,
-            parent_req_indexes, virtual_mapped, execution_fence_event,
-            shard_manager, inline_task, parent_ctx->is_concurrent_context());
+        const Mapper::ContextConfigOutput &configuration =
+          shard_manager->context_configuration;
+        ReplicateContext* repl_ctx = NULL;
+        if (configuration.auto_tracing_enabled)
+        {
+          log_auto_trace.info("Initializing auto tracing for %s (UID %lld)",
+                              get_task_name(), get_unique_id());
+          repl_ctx = new AutoTracing<ReplicateContext>(configuration, runtime,
+              this, get_depth(), v->is_inner(), regions, output_regions,
+              parent_req_indexes, virtual_mapped, task_priority,
+              execution_fence_event, shard_manager, inline_task,
+              parent_ctx->is_concurrent_context());
         }
+        else
+          repl_ctx = new ReplicateContext(configuration, runtime, this,
+              get_depth(), v->is_inner(), regions, output_regions,
+              parent_req_indexes, virtual_mapped, task_priority,
+              execution_fence_event, shard_manager, inline_task, 
+              parent_ctx->is_concurrent_context());
         repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
-        if (mapper == NULL)
-          mapper = runtime->find_mapper(current_proc, map_id);
-        repl_ctx->configure_context(mapper, task_priority);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
         // Make sure that none of the shards start until all the replicate
@@ -8234,19 +8343,25 @@ namespace Legion {
     InnerContext* ShardTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
-      ReplicateContext *repl_ctx;
-      if (this->runtime->enable_automatic_tracing) {
-        log_auto_trace.info() << "Initializing AutomaticTracingContext<ReplicateContext>.";
-        repl_ctx = new AutomaticTracingContext<ReplicateContext>(runtime, this,
-          get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, execution_fence_event,
-          shard_manager, false/*inline task*/, true/*implicit*/);
-      } else {
-        repl_ctx = new ReplicateContext(runtime, this,
-          get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, execution_fence_event,
-          shard_manager, false/*inline task*/, true/*implicit*/);
+      const Mapper::ContextConfigOutput &configuration =
+        shard_manager->context_configuration;
+      ReplicateContext *repl_ctx = NULL;
+      if (configuration.auto_tracing_enabled)
+      {
+        log_auto_trace.info("Initializing auto tracing for %s (UID %lld)",
+                            get_task_name(), get_unique_id());
+        repl_ctx = new AutoTracing<ReplicateContext>(configuration, runtime,
+            this, get_depth(), false/*is inner*/, regions, output_regions,
+            parent_req_indexes, virtual_mapped, task_priority,
+            execution_fence_event, shard_manager, false/*inline task*/, 
+            true/*implicit*/);
       }
+      else 
+        repl_ctx = new ReplicateContext(configuration, runtime, this,
+            get_depth(), false/*is inner*/, regions, output_regions,
+            parent_req_indexes, virtual_mapped, task_priority,
+            execution_fence_event, shard_manager, false/*inline task*/, 
+            true/*implicit*/);
       repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
@@ -9375,6 +9490,29 @@ namespace Legion {
       // slice tasks returning at the same time
       AutoLock o_lock(op_lock);
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexTask::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      if (output_regions.size() > 0)
+      {
+        recognizer.record_operation_untraceable(opidx);
+        return false;
+      }
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(task_id);
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+        hash_requirement(hasher, *it);
+      hasher.hash<bool>(concurrent_task);
+      hasher.hash<bool>(must_epoch_task);
+      hasher.hash(index_domain);
+      recognizer.record_operation_hash(this, hasher, opidx);
+      return true;
     }
 
     //--------------------------------------------------------------------------

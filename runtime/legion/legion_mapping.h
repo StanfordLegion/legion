@@ -1651,6 +1651,29 @@ namespace Legion {
        * field of the 'select_task_options' mapper call. If this is set 
        * to false then the child mappers cannot change the priority of
        * the parent task.
+       *
+       * The 'auto_tracing_enabled' parameter allows the mapper to direct
+       * Legion whether it should attempt to automatically identify traces in 
+       * the sequence of operations and sub-tasks launched by this task. This
+       * defaults to true and can be disabled by setting the flag to 'false'.
+       *
+       * The `auto_tracing_batchsize` parameter specifies the maximum size
+       * of the window for the Legion's automatic tracing functionality to
+       * consider when looking for traces. Note that this can be larger than
+       * the window size to look for traces that span more than one window.
+       *
+       * The 'auto_tracing_multi_scale_factor' specifies the ruler function
+       * that should be used for looking for traces that occur in a subset
+       * of the batchsize window of operations/tasks.
+       *
+       * The 'auto_tracing_min_trace_length' specifies the minimum length
+       * trace that can be found by automatic tracing.
+       *
+       * The 'auto_tracing_max_trace_length' specifies the maximum length
+       * trace that can be found by automatic tracing.
+       *
+       * The 'auto_tracing_visit_threshold' specifies how many times a trace
+       * needs to be observed before it becomes eligible for replay
        */
       struct ContextConfigOutput {
         unsigned                                max_window_size; // = 1024
@@ -1661,6 +1684,12 @@ namespace Legion {
         unsigned                                meta_task_vector_width; // = 16
         unsigned                                max_templates_per_trace; // = 16
         bool                                    mutable_priority; // = false
+        bool                                    auto_tracing_enabled; // = true
+        unsigned                                auto_tracing_batchsize; // = 100 
+        unsigned                                auto_tracing_multi_scale_factor; // = 100
+        unsigned                                auto_tracing_min_trace_length; // = 5
+        unsigned                                auto_tracing_max_trace_length; // = UINT_MAX
+        unsigned                                auto_tracing_visit_threshold; // = 10
       };
       //------------------------------------------------------------------------
       virtual void configure_context(MapperContext               ctx,

@@ -2503,7 +2503,7 @@ namespace Legion {
             auto_trace_commit_threshold(15),
             auto_trace_max_start_watch(10),
             auto_trace_min_trace_length(5),
-            auto_trace_max_trace_length(-1),
+            auto_trace_max_trace_length(std::numeric_limits<unsigned>::max()),
             auto_trace_multi_scale_factor(100),
             auto_trace_repeats_alg(NonOverlappingAlgorithm::SUFFIX_TREE_WALK),
             auto_trace_identifier_alg(0),
@@ -2797,8 +2797,7 @@ namespace Legion {
           bool deduplicate, size_t dedup_tag);
       void broadcast_startup_barrier(RtBarrier startup_barrier);
       void finalize_runtime(std::vector<RtEvent> &shutdown_events);
-      ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
-                                 TaskID tid,
+      ApEvent launch_mapper_task(Mapper *mapper, Processor proc, TaskID tid,
                                  const UntypedBuffer &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:

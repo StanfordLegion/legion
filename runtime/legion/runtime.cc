@@ -7244,11 +7244,13 @@ namespace Legion {
       Domain shard_domain;
       if (isomorphic_points)
         shard_domain = Domain(DomainPoint(0),DomainPoint(total_shards-1));
+      Mapper::ContextConfigOutput configuration;
+      implicit_top->configure_execution_context(configuration);
       // The shard manager will take ownership of this
       ShardManager *manager = new ShardManager(runtime, repl_context,
-          collective_mapping, shards_per_address_space, true/*top level*/,
-          isomorphic_points, true/*control replicated*/, shard_domain, 
-          std::move(points), std::move(sorted_points),
+          collective_mapping, shards_per_address_space, configuration,
+          true/*top level*/, isomorphic_points, true/*control replicated*/,
+          shard_domain, std::move(points), std::move(sorted_points),
           std::move(shard_lookup), implicit_top);
       shard_manager = manager;
       implicit_top->set_shard_manager(manager);
@@ -16969,7 +16971,8 @@ namespace Legion {
         auto_trace_repeats_alg(config.auto_trace_repeats_alg),
         auto_trace_identifier_alg(config.auto_trace_identifier_alg),
         no_tracing(config.no_tracing),
-        no_physical_tracing(config.no_physical_tracing),
+        no_physical_tracing(config.no_physical_tracing || no_tracing ||
+                            program_order_execution),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
         no_transitive_reduction(config.no_transitive_reduction),
@@ -30971,7 +30974,7 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = new TopLevelContext(this, proxy, 
+      TopLevelContext *top_context = new TopLevelContext(this, proxy,
           0/*id*/, get_unique_implicit_top_level_task_id(), 0/*did*/, mapping);
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
@@ -31108,8 +31111,6 @@ namespace Legion {
 #endif
       InnerContext *execution_context = local_task->create_implicit_context();
       execution_context->begin_task(proxy);
-      // We still need to configure the context here 
-      local_task->configure_execution_context(execution_context);
       return execution_context;
     }
 
@@ -32898,7 +32899,7 @@ namespace Legion {
           break; // nothing to do here
         case LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID:
           {
-            auto_trace_process_repeats(args);
+            TraceRecognizer::find_repeats(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

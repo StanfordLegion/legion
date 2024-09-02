@@ -574,7 +574,7 @@ namespace Legion {
         "Defer Must Epoch Return Resources",                      \
         "Defer Deletion Commit",                                  \
         "Yield",                                                  \
-        "Auto Trace Repeats Processing",                          \
+        "Auto Trace Find Repeats",                                \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
       };
@@ -2184,6 +2184,9 @@ namespace Legion {
     class ReleaseReplay;
     class BarrierArrival;
     class BarrierAdvance;
+
+    // legion_auto_trace.h
+    class TraceRecognizer;
 
     // region_tree.h
     class RegionTreeForest;

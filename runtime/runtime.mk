@@ -1095,12 +1095,12 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/logging_wrapper.cc
 
 LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
-		    $(LG_RT_DIR)/legion/legion_auto_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_c.cc \
 		    $(LG_RT_DIR)/legion/legion_ops.cc \
 		    $(LG_RT_DIR)/legion/legion_tasks.cc \
 		    $(LG_RT_DIR)/legion/legion_context.cc \
 		    $(LG_RT_DIR)/legion/legion_trace.cc \
+		    $(LG_RT_DIR)/legion/legion_auto_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_spy.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling_serializer.cc \

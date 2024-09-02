@@ -442,7 +442,7 @@ namespace Legion {
                                    const LayoutConstraintSet &constraints);
     public:
       virtual InnerContext* create_implicit_context(void);
-      void configure_execution_context(InnerContext *ctx);
+      void configure_execution_context(Mapper::ContextConfigOutput &config);
       void set_shard_manager(ShardManager *manager);
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
@@ -793,6 +793,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2); 
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
       // Virtual method for creating the future for this task so that
       // we can overload for control replication
       virtual Future create_future(void);
@@ -1224,6 +1225,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       virtual void trigger_ready(void);
       virtual void predicate_false(void);

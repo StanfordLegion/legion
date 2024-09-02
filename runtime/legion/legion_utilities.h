@@ -616,14 +616,17 @@ namespace Legion {
       struct Hash {
         uint64_t x = 0;
         uint64_t y = 0;
-        const bool operator!=(const Hash& rhs) const {
+        inline bool operator!=(const Hash& rhs) const {
           return std::tie(x, y) != std::tie(rhs.x, rhs.y);
         }
-        const bool operator==(const Hash& rhs) const {
+        inline bool operator==(const Hash& rhs) const {
           return std::tie(x, y) == std::tie(rhs.x, rhs.y);
         }
-        const bool operator<(const Hash& rhs) const {
+        inline bool operator<(const Hash& rhs) const {
           return std::tie(x, y) < std::tie(rhs.x, rhs.y);
+        }
+        inline bool operator!(void) const {
+          return (x == 0) && (y == 0);
         }
       };
       inline void finalize(Hash& hash);

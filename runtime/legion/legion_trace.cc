@@ -1171,6 +1171,14 @@ namespace Legion {
       TraceOp::trigger_mapping();
     }
 
+    //--------------------------------------------------------------------------
+    bool TraceCompleteOp::record_trace_hash(TraceRecognizer &recognizer, 
+                                            uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
 #if 0
     /////////////////////////////////////////////////////////////
     // TraceReplayOp
@@ -1467,6 +1475,14 @@ namespace Legion {
       return new PhysicalTemplate(physical, get_completion_event());
     }
 
+    //--------------------------------------------------------------------------
+    bool TraceBeginOp::record_trace_hash(TraceRecognizer &recognizer, 
+                                         uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
     /////////////////////////////////////////////////////////////
     // TraceRecurrentOp
     /////////////////////////////////////////////////////////////
@@ -1621,6 +1637,14 @@ namespace Legion {
       if (remove_trace_reference && previous->remove_reference())
         delete previous;
       TraceOp::trigger_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceRecurrentOp::record_trace_hash(TraceRecognizer &recognizer, 
+                                             uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return false;
     }
 
     //--------------------------------------------------------------------------
