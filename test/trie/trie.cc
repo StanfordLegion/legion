@@ -13,23 +13,24 @@
  * limitations under the License.
  */
 
-#include <legion/trie.h>
-
 #include <cstdlib>
+#include <cassert>
 #include <iostream>
 #include <set>
 #include <vector>
+
+#include <legion/trie.h>
 
 using namespace Legion;
 using namespace Legion::Internal;
 
 using namespace std;
 
-struct empty {};
+typedef struct empty_t {} empty_t;
 
 std::vector<char> random_string(size_t len) {
   std::vector<char> string(len);
-  for (int j = 0; j < len; j++) {
+  for (unsigned j = 0; j < len; j++) {
     string[j] = 'a' + (rand() % 26);
   }
   return string;
@@ -39,7 +40,7 @@ void random_test() {
   // Generate N random strings of a random length. Maintain
   // a map of these strings so that we don't double insert.
   std::set<std::vector<char>> strings;
-  Trie<char, empty> trie;
+  Trie<char, empty_t> trie;
   int N = 1000;
   int maxlen = 100;
   for (int i = 0; i < N; i++) {
@@ -47,7 +48,7 @@ void random_test() {
       int strlen = (rand() % maxlen) + 1;
       auto string = random_string(strlen);
       if (strings.find(string) == strings.end()) {
-        trie.insert(string.begin(), string.end(), empty{});
+        trie.insert(string.begin(), string.end(), empty_t{});
         strings.insert(string);
         break;
       }
@@ -87,14 +88,14 @@ void random_test() {
 }
 
 void test_superstring() {
-  Trie<char, empty> trie;
+  Trie<char, empty_t> trie;
   std::vector<std::vector<char>> strings = {
       {'a', 'b', 'c'},
       {'d', 'e'},
       {'f', 'g', 'h', 'i'}
   };
   for (auto& s : strings) {
-    trie.insert(s.begin(), s.end(), empty{});
+    trie.insert(s.begin(), s.end(), empty_t{});
   }
   std::vector<char> q1 = {'a', 'b', 'c', 'd', 'e'};
   assert(trie.query(q1.begin(), q1.end()).superstring &&
