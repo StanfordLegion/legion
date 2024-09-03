@@ -22730,7 +22730,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(DistributedID id, Runtime *rt,
                                  CollectiveMapping *mapping)
-      : InnerContext(Mapper::ContextConfigOutput(), rt, NULL/*owner*/, 
+      : InnerContext(configure_remote_context(rt), rt, NULL/*owner*/, 
                      -1/*depth*/, false/*full inner*/, remote_task.regions,
                      remote_task.output_regions, local_parent_req_indexes,
                      local_virtual_mapped, 0/*priority*/, ApEvent::NO_AP_EVENT,
@@ -22740,6 +22740,37 @@ namespace Legion {
         remote_uid(0), repl_id(0)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Mapper::ContextConfigOutput
+                       RemoteContext::configure_remote_context(Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Remote contexts are never going to have to act as a context in the
+      // normal sense, but we do still need them to help progress the mapping.
+      // Therefore we sill need to configure them to map outstanding tasks.
+      // We're going to ignore frames here for now and just use the default
+      // configuration for how far to map into the future.
+      Mapper::ContextConfigOutput configuration;
+      configuration.max_window_size = runtime->initial_task_window_size;
+      configuration.hysteresis_percentage = 
+        runtime->initial_task_window_hysteresis;
+      configuration.max_outstanding_frames = 0;
+      configuration.min_tasks_to_schedule = runtime->initial_tasks_to_schedule;
+      configuration.min_frames_to_schedule = 0;
+      configuration.meta_task_vector_width = 
+        runtime->initial_meta_task_vector_width;
+      configuration.max_templates_per_trace =
+        LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
+      configuration.mutable_priority = false;
+      configuration.auto_tracing_enabled = false;
+      configuration.auto_tracing_batchsize = 0;
+      configuration.auto_tracing_multi_scale_factor = 0;
+      configuration.auto_tracing_min_trace_length = 0;
+      configuration.auto_tracing_max_trace_length = 0;
+      configuration.auto_tracing_visit_threshold = 0;
+      return configuration;
     }
 
     //--------------------------------------------------------------------------

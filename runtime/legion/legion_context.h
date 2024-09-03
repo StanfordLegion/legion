@@ -3543,6 +3543,8 @@ namespace Legion {
     public:
       RemoteContext& operator=(const RemoteContext &rhs) = delete;
     public:
+      static Mapper::ContextConfigOutput configure_remote_context(Runtime *rt);
+    public:
       virtual Task* get_task(void);
       virtual UniqueID get_unique_id(void) const;
       virtual ShardID get_shard_id(void) const { return shard_id; }
