@@ -10058,7 +10058,8 @@ namespace Legion {
       if (from_application) 
       {
         AutoRuntimeCall call(this);
-        this->end_trace(tid, deprecated, provenance, false/*from_app*/);
+        InnerContext::end_trace(tid, deprecated, provenance, 
+                                false/*from_app*/);
         return;
       }
 #ifdef DEBUG_LEGION
