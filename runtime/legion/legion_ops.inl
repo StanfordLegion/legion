@@ -148,5 +148,23 @@ namespace Legion {
         Memoizable<OP>::trigger_ready();
     }
 
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool Predicated<OP>::record_trace_hash(TraceRecognizer &recognizer,
+                                           uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Right now we don't support tracing of predicated operations
+      // so we need to disable auto tracing of operations with predicates
+      // We can remove this function once tracing supports predicated ops
+      switch (this->predication_state)
+      {
+        case OP::PENDING_PREDICATE_STATE:
+        case OP::PREDICATED_FALSE_STATE:
+          return Operation::record_trace_hash(recognizer, opidx);
+      }
+      return OP::record_trace_hash(recognizer, opidx);
+    }
+
   }; // namespace Internal
 }; // namespace Legion 
