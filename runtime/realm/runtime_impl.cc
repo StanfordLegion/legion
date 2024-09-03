@@ -2202,58 +2202,56 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	local_cpu_kinds.insert(Processor::IO_PROC);
 	local_cpu_kinds.insert(Processor::PROC_SET);
 
-	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
-	    it != local_cpu_kinds.end();
-	    it++) {
-	  Processor::Kind k = *it;
+        for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
+            it != local_cpu_kinds.end(); it++) {
+          Processor::Kind k = *it;
 
-	  add_proc_mem_affinities(machine,
-				  procs_by_kind[k],
-				  mems_by_kind[Memory::SYSTEM_MEM],
-				  100, // "large" bandwidth
-				  5   // "small" latency
-				  );
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::SYSTEM_MEM],
+                                  100, // "large" bandwidth
+                                  5    // "small" latency
+          );
 
-	  add_proc_mem_affinities(machine,
-				  procs_by_kind[k],
-				  mems_by_kind[Memory::REGDMA_MEM],
-				  80,  // "large" bandwidth
-				  10   // "small" latency
-				  );
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::REGDMA_MEM],
+                                  80, // "large" bandwidth
+                                  10  // "small" latency
+          );
 
-	  add_proc_mem_affinities(machine,
-				  procs_by_kind[k],
-				  mems_by_kind[Memory::DISK_MEM],
-				  5,   // "low" bandwidth
-				  100 // "high" latency
-				  );
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::SOCKET_MEM],
+                                  100, // "large" bandwidth
+                                  5    // "small" latency
+          );
 
-	  add_proc_mem_affinities(machine,
-				  procs_by_kind[k],
-				  mems_by_kind[Memory::HDF_MEM],
-				  5,   // "low" bandwidth
-				  100 // "high" latency
-				  );
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::DISK_MEM],
+                                  5,  // "low" bandwidth
+                                  100 // "high" latency
+          );
 
-	  add_proc_mem_affinities(machine,
-                  procs_by_kind[k],
-                  mems_by_kind[Memory::FILE_MEM],
-                  5,    // low bandwidth
-                  100   // high latency)
-                  );
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::HDF_MEM],
+                                  5,  // "low" bandwidth
+                                  100 // "high" latency
+          );
 
-	  add_proc_mem_affinities(machine,
-				  procs_by_kind[k],
-				  mems_by_kind[Memory::GLOBAL_MEM],
-				  10,  // "lower" bandwidth
-				  50  // "higher" latency
-				  );
-	}
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::FILE_MEM],
+                                  5,  // low bandwidth
+                                  100 // high latency)
+          );
 
-	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
-	    it != local_cpu_kinds.end();
-	    it++) {
-	  Processor::Kind k = *it;
+          add_proc_mem_affinities(machine, procs_by_kind[k],
+                                  mems_by_kind[Memory::GLOBAL_MEM],
+                                  10, // "lower" bandwidth
+                                  50  // "higher" latency
+          );
+        }
+
+        for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
+            it != local_cpu_kinds.end(); it++) {
+          Processor::Kind k = *it;
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
@@ -2261,8 +2259,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 				  40,  // "large" bandwidth
 				  3   // "small" latency
 				  );
-	}
-
+        }
       }
 
       // retrieve process info

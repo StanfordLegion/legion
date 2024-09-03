@@ -31,12 +31,7 @@
 
 #include <vector>
 
-// we need intptr_t - make it if needed
-#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
-#else
-typedef ptrdiff_t intptr_t;
-#endif
 
 /**
  * \file instance.h

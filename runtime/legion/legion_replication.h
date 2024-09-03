@@ -3153,11 +3153,15 @@ namespace Legion {
       virtual FenceOp* get_begin_operation(void) { return this; }
       virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
       virtual bool allreduce_template_status(bool &valid, bool acquired);
+    protected:
+      void perform_template_creation_barrier(void);
     private:
       // If we do back-to-back executions of different traces
       // then we fuse the invalidation of the previous trace into the
       // begin operation of the next trace
       std::vector<CollectiveID> status_collective_ids;
+      SlowBarrier *slow_barrier;
+      CollectiveID slow_barrier_id;
     };
 
     /**
@@ -3223,11 +3227,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual bool record_trace_hash(TraceRecognizer &identifier, uint64_t idx);
     protected:
-      void perform_template_creation_barrier(void);
-    protected:
-      LogicalTrace *previous;
-      SlowBarrier *slow_barrier;
-      CollectiveID slow_barrier_id;
+      LogicalTrace *previous; 
       bool has_blocking_call;
       bool has_intermediate_fence;
       bool remove_trace_reference;

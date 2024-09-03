@@ -160,6 +160,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied) const;
     public:
       bool is_remote(void) const;
+      bool is_forward_progress_task(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicable(void) const { return replicate; }
@@ -252,7 +253,6 @@ namespace Legion {
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
       void complete_point_projection(void);
-      bool prepare_steal(void);
       void finalize_output_region_trees(void);
     public:
       void compute_parent_indexes(InnerContext *alt_context = NULL);
@@ -304,6 +304,9 @@ namespace Legion {
     private:
       mutable bool is_local;
       mutable bool local_cached;
+    private:
+      mutable bool is_forward_progress;
+      mutable bool forward_progress_cached;
     protected:
       bool children_commit;
     protected:
@@ -462,9 +465,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &respone,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       void finalize_single_task_profiling(void);
     public:
@@ -577,15 +580,8 @@ namespace Legion {
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
     protected:
-      // Profiling information
-      struct SingleProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>      task_profiling_requests;
       std::vector<ProfilingMeasurementID>      copy_profiling_requests;
-      std::vector<SingleProfilingInfo>                  profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
       int                                           copy_fill_priority;
@@ -1259,9 +1255,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &respone,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
     public:
       virtual void register_must_epoch(void);
@@ -1336,15 +1332,8 @@ namespace Legion {
     protected:
       std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     protected:
-      // Profiling information
-      struct IndexProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>      task_profiling_requests;
       std::vector<ProfilingMeasurementID>      copy_profiling_requests;
-      std::vector<IndexProfilingInfo>                   profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
       int                                           copy_fill_priority;

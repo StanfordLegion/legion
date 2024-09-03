@@ -41,6 +41,11 @@ namespace Realm {
 
     void init(ID _me, int _owner);
 
+    static ID make_id(const SubgraphImpl &dummy, int owner, ID::IDType index)
+    {
+      return ID::make_subgraph(owner, 0, index);
+    }
+
     // compile/analyze the subgraph
     bool compile(void);
 

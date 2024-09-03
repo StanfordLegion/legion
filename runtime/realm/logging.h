@@ -37,7 +37,12 @@ namespace Realm {
 #define REALM_LOGGING_MIN_LEVEL LEVEL_DEBUG
 #endif
 #endif
-  
+  namespace Config {
+    // output of logs, the default value is "stdout"
+    // it can be set to a filename, stdout or stderr
+    extern std::string logname;
+  }; // namespace Config
+
   class LoggerMessage;
   typedef int LoggerMessageID;
   static const LoggerMessageID RESERVED_LOGGER_MESSAGE_ID = 0;
