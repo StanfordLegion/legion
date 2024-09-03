@@ -1853,7 +1853,7 @@ namespace Legion {
       // lecture notes above once, as we have to do an O(nlog(n)) sort
       // first before we can transition to the radix sorts below.
       std::vector<Key> w(n);
-      int64_t v = 0;
+      size_t v = 0;
       {
         for (size_t i = 0; i < n; i++) {
           w[i] = Key {
@@ -1920,31 +1920,25 @@ namespace Legion {
         // the general idea of radix sort. First, clear the counts.
         std::fill(count.begin(), count.begin() + v + 2, 0);
         // Next, count the frequency of each occurence.
-        for (size_t i = 0; i < n; i++) {
+        for (size_t i = 0; i < n; i++)
           count[surrogate_sorter[i].next + 1]++;
-        }
         // Update count to contain actual positions.
-        for (size_t i = 1; i < v + 2; i++) {
+        for (size_t i = 1; i < v + 2; i++)
           count[i] += count[i - 1];
-        }
         // Construct output array based on second digit.
-        for (int64_t i = n - 1; i >= 0; i--) {
+        for (int64_t i = n - 1; i >= 0; i--)
           tmp[(count[surrogate_sorter[i].next + 1]--) - 1] = surrogate_sorter[i];
-        }
         // Clear count. Next, sort on first digit.
         std::fill(count.begin(), count.begin() + v + 2, 0);
         // The source is in tmp. Count freq. on first digit.
-        for (size_t i = 0; i < n; i++) {
+        for (size_t i = 0; i < n; i++)
           count[tmp[i].start + 1]++;
-        }
         // Update count to contain actual positions.
-        for (size_t i = 1; i < v + 2; i++) {
+        for (size_t i = 1; i < v + 2; i++)
           count[i] += count[i - 1];
-        }
         // Output to array w from tmp.
-        for (int64_t i = n - 1; i >= 0; i--) {
+        for (int64_t i = n - 1; i >= 0; i--)
           surrogate_sorter[(count[tmp[i].start + 1]--) - 1] = tmp[i];
-        }
 
         v = 0;
         // Construct surrogate array. We have to do an extra case here
@@ -1961,13 +1955,13 @@ namespace Legion {
         }
 
         // End if done.
-        if (v >= n-1) break;
+        if (v >= n-1)
+          break;
         shift *= 2;
       }
       // Reconstruct the suffix array.
-      for (size_t i = 0; i < n; i++) {
+      for (size_t i = 0; i < n; i++)
         sarray[i] = surrogate_sorter[i].idx;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1983,7 +1977,7 @@ namespace Legion {
       int k = 0;
       lcp.resize(n, 0);
       for(size_t i = 0; i < n; i++){
-        if(surrogate[i] == n - 1)
+        if(surrogate[i] == int(n - 1))
           k = 0;
         else{
           size_t j = sarray[surrogate[i] + 1];
@@ -2015,9 +2009,9 @@ namespace Legion {
       size_t m = 0;
       size_t pre_l = 0;
       for(size_t i = 0; i < le - 1; i++){
-        int l1 = lcp[i];
-        int s1 = sarray[i];
-        int s2 = sarray[i + 1];
+        size_t l1 = lcp[i];
+        size_t s1 = sarray[i];
+        size_t s2 = sarray[i + 1];
         if(s2 >= s1 + l1 || s2 <= s1 - l1){
           // Non-overlapping
           if(pre_l != l1)

@@ -131,7 +131,7 @@ namespace Legion {
       template<typename ITER>
       TrieQueryResult query(ITER start, ITER end) const {
         const TrieNode<T, V>* node = &this->root;
-        size_t matched_toks = 0;
+        int64_t matched_toks = 0;
         for (auto tokitr = start; tokitr != end; tokitr++) {
           auto token = *tokitr;
           auto it = node->children.find(token);

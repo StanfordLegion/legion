@@ -367,7 +367,7 @@ namespace Legion {
       // lecture notes above once, as we have to do an O(nlog(n)) sort
       // first before we can transition to the radix sorts below.
       std::vector<Key> w(n);
-      int64_t v = 0;
+      size_t v = 0;
       {
         for (size_t i = 0; i < n; i++) {
           w[i] = Key {
@@ -493,16 +493,16 @@ namespace Legion {
                                     const std::vector<size_t>& sarray,
                                     const std::vector<int64_t>& surrogate) {
       size_t n = str.size();
-      int k = 0;
+      size_t k = 0;
       std::vector<size_t> lcp(n, 0);
       for(size_t i = 0; i < n; i++){
-        if(surrogate[i] == n - 1)
+        if(surrogate[i] == int64_t(n - 1))
           k = 0;
         else{
           size_t j = sarray[surrogate[i] + 1];
           for(; i + k < n && j + k < n && str[i + k] == str[j + k]; k++);
           lcp[surrogate[i]] = k;
-          k = std::max(k - 1, 0);
+          k = std::max<size_t>(k - 1, 0);
         }
       }
       return lcp;

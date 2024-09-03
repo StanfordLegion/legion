@@ -62,7 +62,7 @@ namespace Legion {
         int s2 = sarray[i + 1];
         if(s2 >= s1 + l1 || s2 <= s1 - l1){
           // Non-overlapping
-          if(pre_l != l1)
+          if(int(pre_l) != l1)
             m += 1;
           a[k++] = std::make_tuple(le - l1, m, s1);
           a[k++] = std::make_tuple(le - l1, m, s2);
