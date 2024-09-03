@@ -1067,6 +1067,9 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op,
           const std::vector<StaticDependence>* dependences = NULL,
           bool unordered = false, bool outermost = true) override;
+      // If the application performs a blocking operation, we need to know
+      // about that, so override TaskContext::record_blocking_call().
+      virtual void record_blocking_call(uint64_t future_coordinate) override;
     private:
       TraceRecognizer recognizer;
       uint64_t opidx;

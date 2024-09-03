@@ -2134,6 +2134,27 @@ namespace Legion {
         return T::add_to_dependence_queue(op, dependences);
     }
 
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void AutoTracing<T>::record_blocking_call(uint64_t future_coordinate)
+    //--------------------------------------------------------------------------
+    {
+      if (future_coordinate != InnerContext::NO_FUTURE_COORDINATE)
+      {
+        // Handling waits from the application is very similar
+        // to the case in add_to_dependence_queue when we encounter an
+        // operation that is not traceable. We interrupt traces in
+        // the identifier, and flush the watcher and replayer. We identify
+        // whether a wait is coming from the application by seeing if the
+        // future being waited on has a valid coordinate.
+        // TODO (rohany): I think that this is a little busted right now for
+        //  inline mappings.
+        this->recognizer.record_operation_untraceable(this->opidx);
+      }
+      // Need to also do whatever the base context was going to do.
+      T::record_blocking_call(future_coordinate);
+    }
+
     template class AutoTracing<InnerContext>;
     template class AutoTracing<ReplicateContext>;  
 
