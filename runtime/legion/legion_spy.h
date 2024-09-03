@@ -1509,9 +1509,152 @@ namespace Legion {
                 unsigned next_region_idx,
                 unsigned dep_type)
       {
-        log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u %u %d",
-		      context, prev_ctx_idx, prev_point_idx, prev_region_idx,
-		      next_ctx_idx, next_point_idx, next_region_idx, dep_type);
+#if LEGION_MAX_DIM == 1
+        log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                      (long long)prev_point.point_data[0],
+                      (long long)next_point.point_data[0]);
+#elif LEGION_MAX_DIM == 2
+        log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld "
+            "%lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0);
+#elif LEGION_MAX_DIM == 3
+        log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld "
+            "%lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0);
+#elif LEGION_MAX_DIM == 4
+        log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld %lld "
+            "%lld %lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                  (prev_point.dim > 3) ? (long long)prev_point.point_data[3] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0,
+                  (next_point.dim > 3) ? (long long)next_point.point_data[3] : 0);
+#elif LEGION_MAX_DIM == 5
+      log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld %lld %lld "
+            "%lld %lld %lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                  (prev_point.dim > 3) ? (long long)prev_point.point_data[3] : 0,
+                  (prev_point.dim > 4) ? (long long)prev_point.point_data[4] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0,
+                  (next_point.dim > 3) ? (long long)next_point.point_data[3] : 0,
+                  (next_point.dim > 4) ? (long long)next_point.point_data[4] : 0);
+#elif LEGION_MAX_DIM == 6
+      log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld %lld %lld %lld "
+            "%lld %lld %lld %lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                  (prev_point.dim > 3) ? (long long)prev_point.point_data[3] : 0,
+                  (prev_point.dim > 4) ? (long long)prev_point.point_data[4] : 0,
+                  (prev_point.dim > 5) ? (long long)prev_point.point_data[5] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0,
+                  (next_point.dim > 3) ? (long long)next_point.point_data[3] : 0,
+                  (next_point.dim > 4) ? (long long)next_point.point_data[4] : 0,
+                  (next_point.dim > 5) ? (long long)next_point.point_data[5] : 0);
+#elif LEGION_MAX_DIM == 7
+      log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld %lld %lld %lld %lld "
+            "%lld %lld %lld %lld %lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                  (prev_point.dim > 3) ? (long long)prev_point.point_data[3] : 0,
+                  (prev_point.dim > 4) ? (long long)prev_point.point_data[4] : 0,
+                  (prev_point.dim > 5) ? (long long)prev_point.point_data[5] : 0,
+                  (prev_point.dim > 6) ? (long long)prev_point.point_data[6] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0,
+                  (next_point.dim > 3) ? (long long)next_point.point_data[3] : 0,
+                  (next_point.dim > 4) ? (long long)next_point.point_data[4] : 0,
+                  (next_point.dim > 5) ? (long long)next_point.point_data[5] : 0,
+                  (next_point.dim > 6) ? (long long)next_point.point_data[6] : 0);
+#elif LEGION_MAX_DIM == 8
+      log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld %lld %lld %lld %lld %lld "
+            "%lld %lld %lld %lld %lld %lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                  (prev_point.dim > 3) ? (long long)prev_point.point_data[3] : 0,
+                  (prev_point.dim > 4) ? (long long)prev_point.point_data[4] : 0,
+                  (prev_point.dim > 5) ? (long long)prev_point.point_data[5] : 0,
+                  (prev_point.dim > 6) ? (long long)prev_point.point_data[6] : 0,
+                  (prev_point.dim > 7) ? (long long)prev_point.point_data[7] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0,
+                  (next_point.dim > 3) ? (long long)next_point.point_data[3] : 0,
+                  (next_point.dim > 4) ? (long long)next_point.point_data[4] : 0,
+                  (next_point.dim > 5) ? (long long)next_point.point_data[5] : 0,
+                  (next_point.dim > 6) ? (long long)next_point.point_data[6] : 0,
+                  (next_point.dim > 7) ? (long long)next_point.point_data[7] : 0);
+#elif LEGION_MAX_DIM == 9
+      log_spy.print("Mapping Point-Wise Dependence %llu %u %u %u %u %u "
+            "%lld %lld %lld %lld %lld %lld %lld %lld %lld "
+            "%lld %lld %lld %lld %lld %lld %lld %lld %lld",
+            context, prev_ctx_idx, prev_region_idx,
+            next_ctx_idx, next_region_idx, dep_type,
+                                         (long long)prev_point.point_data[0],
+                  (prev_point.dim > 1) ? (long long)prev_point.point_data[1] : 0,
+                  (prev_point.dim > 2) ? (long long)prev_point.point_data[2] : 0,
+                  (prev_point.dim > 3) ? (long long)prev_point.point_data[3] : 0,
+                  (prev_point.dim > 4) ? (long long)prev_point.point_data[4] : 0,
+                  (prev_point.dim > 5) ? (long long)prev_point.point_data[5] : 0,
+                  (prev_point.dim > 6) ? (long long)prev_point.point_data[6] : 0,
+                  (prev_point.dim > 7) ? (long long)prev_point.point_data[7] : 0,
+                  (prev_point.dim > 8) ? (long long)prev_point.point_data[8] : 0,
+                                         (long long)next_point.point_data[0],
+                  (next_point.dim > 1) ? (long long)next_point.point_data[1] : 0,
+                  (next_point.dim > 2) ? (long long)next_point.point_data[2] : 0,
+                  (next_point.dim > 3) ? (long long)next_point.point_data[3] : 0,
+                  (next_point.dim > 4) ? (long long)next_point.point_data[4] : 0,
+                  (next_point.dim > 5) ? (long long)next_point.point_data[5] : 0,
+                  (next_point.dim > 6) ? (long long)next_point.point_data[6] : 0,
+                  (next_point.dim > 7) ? (long long)next_point.point_data[7] : 0,
+                  (next_point.dim > 8) ? (long long)next_point.point_data[8] : 0);
+#else
+#error "Illegal LEGION_MAX_DIM"
+#endif
       }
 #endif
 

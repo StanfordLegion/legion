@@ -12036,6 +12036,10 @@ index_launch_domain_pat = re.compile(
 mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
+mapping_point_wise_dep_pat = re.compile(
+    prefix+"Mapping Point-Wise Dependence (?P<ctx>[0-9]+) (?P<prev_ctx_idx>[0-9]+) "+
+            "(?P<prev_region_idx>[0-9]+) (?P<next_ctx_idx>[0-9]+) "+
+            "(?P<next_region_idx>[0-9]+) (?P<dep_type>[0-9]+) (?P<rem>.*)")
 future_create_pat       = re.compile(
     prefix+"Future Creation (?P<uid>[0-9]+) (?P<did>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
@@ -12398,6 +12402,10 @@ def parse_legion_spy_line(line, state):
         op1.add_outgoing(dep)
         # Record that we found a mapping dependence
         state.has_mapping_deps = True
+        return True
+    m = mapping_point_wise_dep_pat.match(line)
+    if m is not None:
+        print("YEAH!!")
         return True
     m = future_create_pat.match(line)
     if m is not None:

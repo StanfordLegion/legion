@@ -16631,9 +16631,6 @@ namespace Legion {
                       user.op->get_context()->get_unique_id(),
                       prev.uid, prev.idx, user.uid, user.idx, dtype);
 #endif
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-                  }
-#endif
 
                   if (prev.shard_proj != NULL)
                   {
@@ -16686,6 +16683,10 @@ namespace Legion {
                     if (!it->second)
                       to_delete.push_back(it->first);
                   }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+                  }
+#endif
                   break;
                 }
               default:
