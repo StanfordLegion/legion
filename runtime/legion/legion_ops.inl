@@ -159,6 +159,8 @@ namespace Legion {
       // We can remove this function once tracing supports predicated ops
       switch (this->predication_state)
       {
+        case OP::PREDICATED_TRUE_STATE:
+          break;
         case OP::PENDING_PREDICATE_STATE:
         case OP::PREDICATED_FALSE_STATE:
           return Operation::record_trace_hash(recognizer, opidx);

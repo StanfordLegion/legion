@@ -2139,7 +2139,7 @@ namespace Legion {
     void AutoTracing<T>::record_blocking_call(uint64_t future_coordinate)
     //--------------------------------------------------------------------------
     {
-      if (future_coordinate != InnerContext::NO_FUTURE_COORDINATE)
+      if (future_coordinate != InnerContext::NO_BLOCKING_INDEX)
       {
         // Handling waits from the application is very similar
         // to the case in add_to_dependence_queue when we encounter an
