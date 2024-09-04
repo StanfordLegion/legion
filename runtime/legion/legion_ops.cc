@@ -4549,7 +4549,8 @@ namespace Legion {
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
             get_mapped_event(), ready_event, term_event, true/*mapped*/, ctx,
             map_id, tag, false/*leaf*/, false/*virtual mapped*/,
-            true/*collective for replication*/, runtime));
+            true/*collective for replication*/, 
+            ctx->get_next_blocking_index(), runtime));
       termination_event = term_event;
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -4600,7 +4601,8 @@ namespace Legion {
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
-      termination_event = region.impl->remap_region(ready_event);
+      termination_event = 
+        region.impl->remap_region(ready_event, ctx->get_next_blocking_index());
       remap_region = true;
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
@@ -19673,7 +19675,8 @@ namespace Legion {
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
         get_mapped_event(), get_completion_event(),ApUserEvent::NO_AP_USER_EVENT,
         false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-        false/*virtual mapped*/, launcher.collective, runtime)); 
+        false/*virtual mapped*/, launcher.collective,
+        ctx->get_next_blocking_index(), runtime)); 
       // Restore privileges back to write-discard
       requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
@@ -20816,7 +20819,8 @@ namespace Legion {
             get_mapped_event(), get_completion_event(), 
             ApUserEvent::NO_AP_USER_EVENT,
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-            false/*virtual mapped*/, false/*collective*/, runtime)); 
+            false/*virtual mapped*/, false/*collective*/,
+            ctx->get_next_blocking_index(), runtime)); 
       // Restore privileges back to write-discard
       requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
