@@ -2136,10 +2136,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    void AutoTracing<T>::record_blocking_call(uint64_t future_coordinate)
+    void AutoTracing<T>::record_blocking_call(uint64_t blocking_index)
     //--------------------------------------------------------------------------
     {
-      if (future_coordinate != InnerContext::NO_BLOCKING_INDEX)
+      if (blocking_index != InnerContext::NO_BLOCKING_INDEX)
       {
         // Handling waits from the application is very similar
         // to the case in add_to_dependence_queue when we encounter an
@@ -2147,12 +2147,10 @@ namespace Legion {
         // the identifier, and flush the watcher and replayer. We identify
         // whether a wait is coming from the application by seeing if the
         // future being waited on has a valid coordinate.
-        // TODO (rohany): I think that this is a little busted right now for
-        //  inline mappings.
         this->recognizer.record_operation_untraceable(this->opidx);
       }
       // Need to also do whatever the base context was going to do.
-      T::record_blocking_call(future_coordinate);
+      T::record_blocking_call(blocking_index);
     }
 
     template class AutoTracing<InnerContext>;
