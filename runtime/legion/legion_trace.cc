@@ -2024,12 +2024,12 @@ namespace Legion {
         bool has_blocking_call, bool has_intermediate_fence)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(current_template != NULL);
-#endif
       PhysicalTemplate *non_idempotent_template = NULL;
       if (recording)
       {
+#ifdef DEBUG_LEGION
+        assert(current_template != NULL);
+#endif
         // Complete the recording. If we recorded a replayable template
         // and it is idempotent then we can replay it right away
         if (complete_recording(op, map_applied_conditions,
