@@ -100,11 +100,18 @@ namespace Realm {
       config_map.insert({"pin_memory", &cfg_pin_memory});
 
       resource_map.insert({"numa", &res_numa_available});
+      resource_map.insert({"numa_nodes", &res_numa_nodes});
     }
 
     bool NumaModuleConfig::discover_resource(void)
     {
       res_numa_available = numasysif_numa_available();
+      // we pick it instead of numasysif_get_cpu_info because it
+      // is 10x faster than the later one.
+      std::map<int, NumaNodeMemInfo> meminfo;
+      numasysif_get_mem_info(meminfo);
+      res_numa_nodes = meminfo.size();
+
       resource_discover_finished = true;
       return resource_discover_finished;
     }

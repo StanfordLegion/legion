@@ -167,6 +167,9 @@ void top_level_task(const void *args, size_t arglen,
       size_t numa_nocpu_mem_size = 0;
       int num_numa_cpus = 0;
       bool numa_pin_memory = false;
+      size_t numa_nodes = 0;
+      ret_value = numa_config->get_resource("numa_nodes", numa_nodes);
+      assert(ret_value == true);
       ret_value = numa_config->get_property("numamem", numa_mem_size);
       assert(ret_value == true);
       assert(numa_mem_size == TestConfig::numa_mem_size);
@@ -182,9 +185,10 @@ void top_level_task(const void *args, size_t arglen,
       // test wrong property
       ret_value = numa_config->get_property("get_error_numa", wrong_config);
       assert(ret_value == false);
-      log_app.print(
-          "numa numamem %zu, numa_nocpumem %zu, numacpsus %d, numa_pin_memory %d",
-          numa_mem_size, numa_nocpu_mem_size, num_numa_cpus, numa_pin_memory);
+      log_app.print("numa numamem %zu, numa_nocpumem %zu, numacpsus %d, numa_pin_memory "
+                    "%d, numa_nodes %zu",
+                    numa_mem_size, numa_nocpu_mem_size, num_numa_cpus, numa_pin_memory,
+                    numa_nodes);
     } else {
       log_app.warning("numa is not available");
     }
@@ -550,6 +554,10 @@ int main(int argc, char **argv)
       ret_value = numa_config->get_resource("numa", numa_avail);
       assert(ret_value == true);
       if(numa_avail) {
+        size_t numa_nodes = 0;
+        ret_value = numa_config->get_resource("numa_nodes", numa_nodes);
+        assert(numa_nodes >= 1);
+        assert(ret_value == true);
         ret_value =
             numa_config->set_property<size_t>("numamem", TestConfig::numa_mem_size);
         assert(ret_value == true);
