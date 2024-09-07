@@ -1981,10 +1981,11 @@ namespace Legion {
 #ifdef LEGION_SPY
         LegionSpy::log_mapping_point_wise_dependence(
             get_context()->get_unique_id(),
-            finder->second.ctx_index, previous_index_task_points[0].get_index(),
-            finder->second.region_idx,
-            context_index, point.get_index(),
-            region_idx,
+            LEGION_DISTRIBUTED_ID_FILTER(repl_ctx->shard_manager->did),
+            finder->second.ctx_index, previous_index_task_points[0],
+            finder->second.region_idx, prev_shard,
+            context_index, point,
+            region_idx, parent_ctx->get_shard_id(),
             finder->second.dep_type);
 #endif
 

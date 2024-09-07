@@ -9160,7 +9160,7 @@ class Task(object):
                             # of operations because of a crash
                             if idx >= len(shard.operations):
                                 continue
-                            op = shard.operations[idx]   
+                            op = shard.operations[idx]
                             if not op.fully_logged:
                                 print(('Warning: shard %s has operation %s which is '+
                                         'not fully logged and therefore being skipped. '+
@@ -12037,9 +12037,11 @@ mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 mapping_point_wise_dep_pat = re.compile(
-    prefix+"Mapping Point-Wise Dependence (?P<ctx>[0-9]+) (?P<prev_ctx_idx>[0-9]+) "+
-            "(?P<prev_region_idx>[0-9]+) (?P<next_ctx_idx>[0-9]+) "+
-            "(?P<next_region_idx>[0-9]+) (?P<dep_type>[0-9]+) (?P<rem>.*)")
+    prefix+"Mapping Point-Wise Dependence (?P<ctx>[0-9]+) (?P<repl_id>[0-9]+) (?P<max_dim>[0-9]+) "+
+            "(?P<prev_ctx_idx>[0-9]+) (?P<prev_region_idx>[0-9]+) (?P<prev_dim>[0-9]+) (?P<prev_shard>[0-9]+) "+
+            "(?P<next_ctx_idx>[0-9]+) "+
+            "(?P<next_region_idx>[0-9]+) (?P<next_dim>[0-9]+) (?P<next_shard>[0-9]+) (?P<dep_type>[0-9]+) "+
+            "(?P<rem>.*)")
 future_create_pat       = re.compile(
     prefix+"Future Creation (?P<uid>[0-9]+) (?P<did>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
@@ -12405,7 +12407,53 @@ def parse_legion_spy_line(line, state):
         return True
     m = mapping_point_wise_dep_pat.match(line)
     if m is not None:
-        print("YEAH!!")
+        ctx = int(m.group('ctx'))
+        repl_id = int(m.group('repl_id'))
+        #context = state.get_task(ctx)
+        max_dim = int(m.group('max_dim'))
+
+        prev_ctx_idx = int(m.group('prev_ctx_idx'))
+        #prev_op = context.operations[(prev_ctx_idx)]
+        prev_region_idx = int(m.group('prev_region_idx'))
+        prev_dim = int(m.group('prev_dim'))
+        prev_shard = int(m.group('prev_shard'))
+
+        next_ctx_idx = int(m.group('next_ctx_idx'))
+        #next_op = context.operations[(next_ctx_idx)]
+        next_region_idx = int(m.group('next_region_idx'))
+        next_dim = int(m.group('next_dim'))
+        next_shard = int(m.group('next_shard'))
+
+        dep_type = int(m.group('dep_type'))
+        values = decimal_pat.findall(m.group('rem'))
+
+        prev_point = Point(prev_dim)
+        next_point = Point(next_dim)
+
+        idx = 0
+        for index in xrange(prev_dim):
+            prev_point.vals[index] = int(values[idx])
+            idx += 1
+        idx = max_dim
+        for index in xrange(next_dim):
+            next_point.vals[index] = int(values[idx])
+            idx += 1
+
+        state.point_wise_deps.append((ctx, repl_id,
+            prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
+            next_ctx_idx, next_region_idx, next_point, next_shard,
+            dep_type))
+        #breakpoint()
+        #prev_point_task = prev_op.get_point_task(prev_point)
+        #next_point_task = next_op.get_point_task(next_point)
+
+        #dep = MappingDependence(prev_point_task.op, next_point_task.op,
+                #prev_region_idx, next_region_idx, dep_type)
+        # Record that we found a mapping dependence
+        #state.has_mapping_deps = True
+        print("ctx %d, repl_id %d, max_dim %d, prev_ctx_idx %d, prev_region_idx: %d, prev_dim:%d, prev_shard: %d, next_ctx_idx: %d, next_region_idx: %d, next_dim: %d, next_shard: %d, dep_type: %d values: %s" % (ctx, repl_id, max_dim, prev_ctx_idx, prev_region_idx, prev_dim, prev_shard, next_ctx_idx, next_region_idx, next_dim, next_shard, dep_type, values))
+        #print(prev_point.vals)
+        #print(next_point.vals)
         return True
     m = future_create_pat.match(line)
     if m is not None:
@@ -13144,6 +13192,7 @@ class State(object):
                  'trees', 'ops', 'unique_ops', 'tasks', 'task_names', 'variants', 
                  'projection_functions', 'has_mapping_deps', 'instances', 'events', 
                  'copies', 'fills', 'depparts', 'indirections', 'no_event', 'slice_index', 
+                 'point_wise_deps',
                  'slice_slice', 'point_slice', 'point_point', 'futures', 'next_generation', 
                  'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
                  'assert_on_error', 'assert_on_warning', 'bad_graph_on_error', 
@@ -13196,6 +13245,7 @@ class State(object):
         self.eq_sets = dict()
         # For parsing only
         self.slice_index = dict()
+        self.point_wise_deps = []
         self.slice_slice = dict()
         self.point_slice = dict()
         self.point_point = dict()
@@ -13368,6 +13418,32 @@ class State(object):
         # Update copy and fill fields
         for copy in itervalues(self.copies):
             copy.update_fields()
+
+        # create point wise deps
+        for dep_info in self.point_wise_deps:
+            (ctx, repl_id, prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
+                    next_ctx_idx, next_region_idx, next_point, next_shard, dep_type) = dep_info
+            breakpoint()
+            repl = self.get_repl(repl_id)
+            prev_ctx = repl.shards[prev_shard]
+            prev_op = prev_ctx.operations[(prev_ctx_idx)]
+            prev_point_task = prev_op.get_point_task(prev_point)
+
+            next_ctx = repl.shards[next_shard]
+            next_op = next_ctx.operations[(next_ctx_idx)]
+            next_point_task = next_op.get_point_task(next_point)
+
+            '''
+            prev_point_task = prev_op.get_point_task(prev_point)
+            next_point_task = next_op.get_point_task(next_point)
+
+            dep = MappingDependence(prev_point_task.op, next_point_task.op,
+                prev_region_idx, next_region_idx, dep_type)
+
+            prev_point_task.op.add_outgoing(dep)
+            next_point_task.op.add_incoming(dep)
+            '''
+
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
         self.slice_index = None
