@@ -10353,6 +10353,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
+      //printf("[%d] SET DEPTYPE ==== %u\n", parent_ctx->get_shard_id(), dep_type);
       prev_index_tasks.insert({
                               region_idx,
                               PointWisePreviousIndexTaskInfo(

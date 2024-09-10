@@ -4022,7 +4022,10 @@ class LogicalVerificationState(object):
                 # replication since all index operations are not mapped until
                 # all of their local points are
                 need_fence = False
-            if not logical_op.has_verification_mapping_dependence(
+            if op.has_point_wise_dependence(req.index):
+                if not op.has_mapping_dependence(req, prev_op, prev_req, dep_type, self.field):
+                    return dominates, False
+            elif not logical_op.has_verification_mapping_dependence(
                     logical_op.reqs[req.index], prev_logical, 
                     prev_logical.reqs[prev_req.index], dep_type, 
                     self.field, need_fence, previous_deps):
@@ -7482,7 +7485,6 @@ class Operation(object):
         # Look for the dependence transitively
         if self.has_transitive_mapping_dependence(prev_op):
             return True
-        breakpoint()
         # No need to look for it transitively since this analysis should exactly
         # match the analysis done by the runtime
         # Issue the error and return false
@@ -12464,17 +12466,7 @@ def parse_legion_spy_line(line, state):
             prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
             next_ctx_idx, next_region_idx, next_point, next_shard,
             dep_type))
-        #breakpoint()
-        #prev_point_task = prev_op.get_point_task(prev_point)
-        #next_point_task = next_op.get_point_task(next_point)
-
-        #dep = MappingDependence(prev_point_task.op, next_point_task.op,
-                #prev_region_idx, next_region_idx, dep_type)
-        # Record that we found a mapping dependence
-        #state.has_mapping_deps = True
-        print("ctx %d, repl_id %d, max_dim %d, prev_ctx_idx %d, prev_region_idx: %d, prev_dim:%d, prev_shard: %d, next_ctx_idx: %d, next_region_idx: %d, next_dim: %d, next_shard: %d, dep_type: %d values: %s" % (ctx, repl_id, max_dim, prev_ctx_idx, prev_region_idx, prev_dim, prev_shard, next_ctx_idx, next_region_idx, next_dim, next_shard, dep_type, values))
-        #print(prev_point.vals)
-        #print(next_point.vals)
+        #print("ctx %d, repl_id %d, max_dim %d, prev_ctx_idx %d, prev_region_idx: %d, prev_dim:%d, prev_shard: %d, next_ctx_idx: %d, next_region_idx: %d, next_dim: %d, next_shard: %d, dep_type: %d values: %s" % (ctx, repl_id, max_dim, prev_ctx_idx, prev_region_idx, prev_dim, prev_shard, next_ctx_idx, next_region_idx, next_dim, next_shard, dep_type, values))
         return True
     m = future_create_pat.match(line)
     if m is not None:
