@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::num::NonZeroU64;
 use std::path::Path;
 
@@ -1496,14 +1496,31 @@ fn parse<'a>(
     Ok((input, records))
 }
 
+fn decode_compressed_file(file: &mut File) -> io::Result<Vec<u8>> {
+    let mut gz = GzDecoder::new(file);
+    let mut s = Vec::new();
+    gz.read_to_end(&mut s)?;
+    Ok(s)
+}
+
+fn read_uncompressed_file(file: &mut File) -> io::Result<Vec<u8>> {
+    let mut s = Vec::new();
+    file.read_to_end(&mut s)?;
+    Ok(s)
+}
+
 pub fn deserialize<P: AsRef<Path>>(
     path: P,
     visible_nodes: &Vec<NodeID>,
     filter_input: bool,
 ) -> io::Result<Vec<Record>> {
-    let mut gz = GzDecoder::new(File::open(path)?);
-    let mut s = Vec::<u8>::new();
-    gz.read_to_end(&mut s)?;
+    let mut f = File::open(path)?;
+    let s = if let Ok(decoded) = decode_compressed_file(&mut f) {
+        decoded
+    } else {
+        f.rewind()?;
+        read_uncompressed_file(&mut f)?
+    };
     // throw error here if parse failed
     let (rest, records) = parse(&s, visible_nodes, filter_input).unwrap();
     assert_eq!(rest.len(), 0);
