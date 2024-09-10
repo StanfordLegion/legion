@@ -218,7 +218,7 @@ void top_level_task(const Task *task,
   const double alpha = 0.1;
   IndexLauncher daxpy_launcher(DAXPY_TASK_ID, color_is,
                 TaskArgument(&alpha, sizeof(alpha)), arg_map);
-  std::string daxpy_launcher_prov = "Daxpy IndexLauncher:" + std::to_string(__LINE__);
+  std::string daxpy_launcher_prov = "[\"Daxpy IndexLauncher:" + std::to_string(__LINE__) + "\", {\"task\": \"Daxpy\", \"launcher\": \"IndexLauncher\", \"line\": \"" + std::to_string(__LINE__) + "\"}]";
   daxpy_launcher.provenance = daxpy_launcher_prov;
   daxpy_launcher.add_region_requirement(
       RegionRequirement(input_lp, 0/*projection ID*/,
