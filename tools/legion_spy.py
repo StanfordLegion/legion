@@ -4011,7 +4011,8 @@ class LogicalVerificationState(object):
                 need_fence = False
             # Now determine whether we need to have a close operation along the
             # path between these two operations due to them being in different shards
-            elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_logical:
+            elif ((prev_op.owner_shard != op.owner_shard and prev_op is not prev_logical)
+                    and not op.has_point_wise_dependence(req.index)):
                 # Operations from two different shards with control
                 # replication always need a close operation between them
                 # to ensure cross-shard mapping dependences are obeyed
@@ -6220,7 +6221,7 @@ class Operation(object):
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance',
-                 'collective_rendezvous', 'equivalence_set_uses']
+                 'collective_rendezvous', 'equivalence_set_uses', 'point_wise_dependences']
                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -6300,6 +6301,8 @@ class Operation(object):
         self.collective_rendezvous = None
         # Any uses of equivalence sets
         self.equivalence_set_uses = None
+        # Flags to indicate existence of point-wise dependences
+        self.point_wise_dependences = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -6549,6 +6552,20 @@ class Operation(object):
         if index not in self.mappings:
             self.mappings[index] = dict()
         self.mappings[index][fid] = inst
+
+    def init_point_wise_dependences_flag(self, index):
+        if self.point_wise_dependences is None:
+            self.point_wise_dependences = dict()
+        assert index not in self.point_wise_dependences
+        self.point_wise_dependences[index] = False
+
+    def add_point_wise_dependences_flag(self, index):
+        assert index in self.point_wise_dependences
+        self.point_wise_dependences[index] = True
+
+    def has_point_wise_dependence(self, index):
+        assert index in self.point_wise_dependences
+        return self.point_wise_dependences[index]
 
     def set_predicate_result(self, result):
         self.predicate_result = result
@@ -7465,6 +7482,7 @@ class Operation(object):
         # Look for the dependence transitively
         if self.has_transitive_mapping_dependence(prev_op):
             return True
+        breakpoint()
         # No need to look for it transitively since this analysis should exactly
         # match the analysis done by the runtime
         # Issue the error and return false
@@ -7507,6 +7525,8 @@ class Operation(object):
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
                                             field, need_fence, previous_deps):
         tree_id = req.logical_node.tree_id
+        #if prev_op.uid == 24:
+        #    breakpoint()
         # Do a quick check to see if it is in the previous deps
         if prev_op in previous_deps:
             if need_fence:
@@ -12360,6 +12380,7 @@ def parse_legion_spy_line(line, state):
                 index_partition, field_space, tid, partition, 
                 priv, coher, redop, parent)
             op.add_requirement(requirement)
+        op.init_point_wise_dependences_flag(requirement.index)
         return True
     m = req_field_pat.match(line)
     if m is not None:
@@ -13423,7 +13444,7 @@ class State(object):
         for dep_info in self.point_wise_deps:
             (ctx, repl_id, prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
                     next_ctx_idx, next_region_idx, next_point, next_shard, dep_type) = dep_info
-            breakpoint()
+            #breakpoint()
             repl = self.get_repl(repl_id)
             prev_ctx = repl.shards[prev_shard]
             prev_op = prev_ctx.operations[(prev_ctx_idx)]
@@ -13433,16 +13454,12 @@ class State(object):
             next_op = next_ctx.operations[(next_ctx_idx)]
             next_point_task = next_op.get_point_task(next_point)
 
-            '''
-            prev_point_task = prev_op.get_point_task(prev_point)
-            next_point_task = next_op.get_point_task(next_point)
-
             dep = MappingDependence(prev_point_task.op, next_point_task.op,
                 prev_region_idx, next_region_idx, dep_type)
 
             prev_point_task.op.add_outgoing(dep)
             next_point_task.op.add_incoming(dep)
-            '''
+            next_point_task.op.add_point_wise_dependences_flag(next_region_idx)
 
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
