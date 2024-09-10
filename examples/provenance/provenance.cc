@@ -91,23 +91,39 @@ void top_level_task(const Task *task,
   // IndexSpace is = runtime->create_index_space(ctx, elem_rect, 0, "Element IndexSpace");
   Domain elem_domain = Domain(elem_rect);
   Future bound_future = Future::from_value<Domain>(elem_domain);
-  std::string is_prov = "Element IndexSpace:" + std::to_string(__LINE__);
+
+  // human part + empty machine part ["stuff", {}]
+  std::string is_prov = "[\"Element IndexSpace:" + std::to_string(__LINE__) + "\", {}]";
+  printf("PROV: %s\n", is_prov.c_str());
+
   IndexSpace is = runtime->create_index_space(ctx, 1, bound_future, 0, is_prov.c_str()); 
   runtime->attach_name(is, "is");
   Future field_size_future = Future::from_value<size_t>(sizeof(double));
   std::vector<Future> field_sizes{field_size_future, field_size_future};
   std::vector<FieldID> field_ids{FID_X, FID_Y};
-  std::string field_xy_prov = "Element FieldSpace XY:" + std::to_string(__LINE__);
+
+  // empty human part + machine part ["", {"key": "stuff"}]
+  std::string field_xy_prov = "[\"\", {\"key\": \"Element FieldSpace XY:" + std::to_string(__LINE__) + "\"}]";
+  printf("PROV: %s\n", field_xy_prov.c_str());
+
   FieldSpace fs = runtime->create_field_space(ctx, field_sizes, field_ids, 0, field_xy_prov.c_str());
   runtime->attach_name(fs, "fs");
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs);
+
+    // human part (string) only
     std::string field_z_prov = "Element FieldSpace Z:" + std::to_string(__LINE__);
+    printf("PROV: %s\n", field_z_prov.c_str());
+
     allocator.allocate_field(sizeof(double),FID_Z, 0, false, field_z_prov.c_str());
     runtime->attach_name(fs, FID_Z, "Z");
   }
-  std::string input_lr_prov = "Input LR:" + std::to_string(__LINE__);
+
+  // machine part (object) only
+  std::string input_lr_prov = "{\"key\": \"Input LR:" + std::to_string(__LINE__) + "\"}";
+  printf("PROV: %s\n", input_lr_prov.c_str());
+
   LogicalRegion input_lr = runtime->create_logical_region(ctx, is, fs, false, input_lr_prov.c_str());
   runtime->attach_name(input_lr, "input_lr");
   std::string output_lr_prov = "Output LR:" + std::to_string(__LINE__);
