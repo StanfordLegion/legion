@@ -1534,7 +1534,11 @@ impl StateDataSource {
                     if let serde_json::Value::Object(map) = machine {
                         let mut result = Vec::new();
                         for (k, v) in map {
-                            result.push(Field::String(format!("{}: {}", k, v)));
+                            if let serde_json::Value::String(s) = v {
+                                result.push(Field::String(format!("{}: {}", k, s)));
+                            } else {
+                                result.push(Field::String(format!("{}: {}", k, v)));
+                            }
                         }
                         return Field::Vec(result);
                     }
