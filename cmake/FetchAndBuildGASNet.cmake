@@ -27,14 +27,21 @@
 if (NOT GASNet_CONDUIT)
   message(FATAL_ERROR "GASNet_CONDUIT not specified, please set a select a conduit to build GASNet with")
 endif()
-
-set(GASNet_GITREPO "https://github.com/StanfordLegion/gasnet.git"
-  CACHE STRING "URL for cloing StanfordLegion/gasnet repository")
-set(GASNet_GITREF
-  "0fb5a0556e76d1988ea5b59df2789a25d4e1ad99" # master as of 2024-03-11
-  CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
-set(GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
-set(GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
+if (NOT GASNet_GITREPO)
+  set(GASNet_GITREPO "https://github.com/StanfordLegion/gasnet.git"
+    CACHE STRING "URL for cloing StanfordLegion/gasnet repository")
+endif()
+if (NOT GASNet_GITREF)
+  set(GASNet_GITREF
+    "0fb5a0556e76d1988ea5b59df2789a25d4e1ad99" # master as of 2024-03-11
+    CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
+endif()
+if (NOT GASNet_VERSION)
+  set(GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
+endif()
+if (NOT GASNet_CONFIGURE_ARGS)
+  set(GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
+endif()
 
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/embed-gasnet)
 set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/source)
@@ -51,7 +58,7 @@ else()
   set(GASNET_CXXFLAGS "")
 endif()
 
-set(GASNet_CONFIG_SETTINGS "LEGION_GASNET_CONDUIT=${GASNet_CONDUIT}" "LEGION_GASNET_SYSTEM=${GASNet_SYSTEM}" "GASNET_EXTRA_CONFIGURE_ARGS=${GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
+list(APPEND GASNet_CONFIG_SETTINGS "LEGION_GASNET_CONDUIT=${GASNet_CONDUIT}" "LEGION_GASNET_SYSTEM=${GASNet_SYSTEM}" "GASNET_EXTRA_CONFIGURE_ARGS=${GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
 if(GASNet_VERSION)
   # make the source directory version-specific
   set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${GASNet_VERSION})
@@ -97,15 +104,15 @@ if(GASNET_BUILD_NEEDED)
     message(STATUS "Downloading StanfordLegion/gasnet repo from: ${GASNet_GITREPO}")
     FetchContent_Populate(embed-gasnet)
     set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
-    execute_process(
-      COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
-      RESULT_VARIABLE GASNET_BUILD_STATUS
-      OUTPUT_FILE ${GASNet_BUILD_OUTPUT}
-      ERROR_FILE ${GASNet_BUILD_OUTPUT}
-    )
-    if(GASNET_BUILD_STATUS)
-      message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
-    endif()
-    set(GASNet_ROOT_DIR ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
   endif()
+  execute_process(
+    COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
+    RESULT_VARIABLE GASNET_BUILD_STATUS
+    OUTPUT_FILE ${GASNet_BUILD_OUTPUT}
+    ERROR_FILE ${GASNet_BUILD_OUTPUT}
+  )
+  if(GASNET_BUILD_STATUS)
+    message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
+  endif()
+  set(GASNet_ROOT_DIR ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
 endif()

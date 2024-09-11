@@ -1859,9 +1859,9 @@ namespace Legion {
                                Provenance *provenance, 
                                bool silence_warnings, bool inlining_enabled);
     public:
-      static constexpr uint64_t NO_FUTURE_COORDINATE =
+      static constexpr uint64_t NO_BLOCKING_INDEX =
         std::numeric_limits<uint64_t>::max();
-      uint64_t get_next_future_coordinate(void);
+      uint64_t get_next_blocking_index(void);
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1938,7 +1938,7 @@ namespace Legion {
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
       uint64_t total_children_count; // total number of sub-operations
-      uint64_t next_future_coordinate; 
+      uint64_t next_blocking_index;
       uint64_t total_tunable_count;
       std::deque<ReorderBufferEntry> reorder_buffer;
       // For tracking any operations that come from outside the
@@ -2001,7 +2001,7 @@ namespace Legion {
       LegionMap<TraceID,LogicalTrace*,TASK_TRACES_ALLOC> traces;
       LogicalTrace *current_trace;
       LogicalTrace *previous_trace;
-      uint64_t current_trace_future_coordinate;
+      uint64_t current_trace_blocking_index;
       // ID is either 0 for not replaying, 1 for replaying not idempotent, 
       // 2 for replaying idempotent or the event id for signaling that 
       // the status isn't ready 

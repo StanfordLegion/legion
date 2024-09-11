@@ -1504,7 +1504,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::InstanceManager *man = instance.impl;
-      if (man->is_virtual_manager())
+      if ((man == NULL) || man->is_virtual_manager())
         return;
       AutoMapperCall call(ctx, Internal::MAPPER_SET_GC_PRIORITY_CALL);
       Internal::PhysicalManager *manager = man->as_physical_manager();

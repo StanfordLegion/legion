@@ -1697,7 +1697,8 @@ typedef enum legion_redop_kind_t {
   LEGION_TYPE_##type
 #endif
 typedef enum legion_builtin_redop_t {
-  LEGION_REDOP_BASE           = LEGION_MAX_APPLICATION_REDOP_ID,
+  // LEGION_MAX_APPLICATION_REDOP_ID has been claimed by BarrierArrivalReduction
+  LEGION_REDOP_BASE           = LEGION_MAX_APPLICATION_REDOP_ID + 1,
   ////////////////////////////////////////
   // Sum reductions
   ////////////////////////////////////////

@@ -10720,7 +10720,7 @@ namespace Legion {
     {
       FutureMapImpl *result = new FutureMapImpl(ctx, this, this->launch_space,
           runtime, runtime->get_available_distributed_id(), get_provenance());
-      future_map_coordinate = result->future_coordinate;
+      future_map_coordinate = result->blocking_index;
       return FutureMap(result);
     }
 
