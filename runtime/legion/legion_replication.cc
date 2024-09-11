@@ -1979,7 +1979,6 @@ namespace Legion {
               finder->second.index_domain);
 
 #ifdef LEGION_SPY
-        //printf("[%d] FINDER DEPTYPE ==== %u\n", parent_ctx->get_shard_id(), finder->second.dep_type);
         LegionSpy::log_mapping_point_wise_dependence(
             get_context()->get_unique_id(),
             LEGION_DISTRIBUTED_ID_FILTER(repl_ctx->shard_manager->did),

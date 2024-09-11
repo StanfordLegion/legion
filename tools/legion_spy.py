@@ -13427,7 +13427,7 @@ class State(object):
             task.update_instance_uses()
         # Update the futures
         for future in itervalues(self.futures):
-            future.update_creator_and_users()     
+            future.update_creator_and_users()
         # Update copy and fill fields
         for copy in itervalues(self.copies):
             copy.update_fields()
@@ -13436,16 +13436,20 @@ class State(object):
         for dep_info in self.point_wise_deps:
             (ctx, repl_id, prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
                     next_ctx_idx, next_region_idx, next_point, next_shard, dep_type) = dep_info
-            #breakpoint()
             repl = self.get_repl(repl_id)
-            prev_ctx = repl.shards[prev_shard]
-            prev_op = prev_ctx.operations[(prev_ctx_idx)]
+            if repl.shards:
+                prev_ctx = repl.shards[prev_shard]
+                prev_op = prev_ctx.operations[(prev_ctx_idx)]
+
+                next_ctx = repl.shards[next_shard]
+                next_op = next_ctx.operations[(next_ctx_idx)]
+            else:
+                context = self.get_task(ctx)
+                prev_op = context.operations[prev_ctx_idx]
+                next_op = context.operations[next_ctx_idx]
+
             prev_point_task = prev_op.get_point_task(prev_point)
-
-            next_ctx = repl.shards[next_shard]
-            next_op = next_ctx.operations[(next_ctx_idx)]
             next_point_task = next_op.get_point_task(next_point)
-
             dep = MappingDependence(prev_point_task.op, next_point_task.op,
                 prev_region_idx, next_region_idx, dep_type)
 

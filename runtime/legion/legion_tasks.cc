@@ -10391,7 +10391,7 @@ namespace Legion {
       {
         runtime->forest->find_domain(shard_space, local_domain);
       }
-      else assert(0);
+      else return;
 
       for (RectInDomainIterator<1> itr(local_domain); itr(); itr++)
       {
@@ -10505,6 +10505,17 @@ namespace Legion {
           // throw _error
         }
         assert(!previous_index_task_points.empty());
+
+#ifdef LEGION_SPY
+        LegionSpy::log_mapping_point_wise_dependence(
+            get_context()->get_unique_id(),
+            LEGION_DISTRIBUTED_ID_FILTER(0),
+            finder->second.ctx_index, previous_index_task_points[0],
+            finder->second.region_idx, 0,
+            context_index, point,
+            region_idx, 0,
+            finder->second.dep_type);
+#endif
 
         return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
             previous_index_task_points[0]);
