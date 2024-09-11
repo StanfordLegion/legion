@@ -1455,7 +1455,8 @@ namespace Legion {
             GenerationID previous_index_task_generation, size_t ctx_index, unsigned dep_type,
             unsigned region_idx)
           : domain(domain), projection(projection), sharding(sharding), sharding_domain(sharding_domain),
-          previous_index_task(previous_index_task), index_domain(index_domain),
+          index_domain(index_domain),
+          previous_index_task(previous_index_task), //index_domain(index_domain),
           previous_index_task_generation(previous_index_task_generation),
           ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
       {}
