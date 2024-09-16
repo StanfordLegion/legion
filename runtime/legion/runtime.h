@@ -3210,6 +3210,8 @@ namespace Legion {
                                                  Serializer &rez);
       void send_slice_record_point_wise_dependence(Processor target,
                                                     Serializer &rez);
+      void send_slice_add_point_to_completed_list(Processor target,
+                                                    Serializer &rez);
 #endif
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
       void send_slice_remote_versioning_rendezvous(Processor target_proc,
@@ -3647,8 +3649,11 @@ namespace Legion {
       void handle_slice_concurrent_allreduce_response(Deserializer &derez);
       void handle_slice_find_intra_dependence(Deserializer &derez);
       void handle_slice_record_intra_dependence(Deserializer &derez);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
       void handle_slice_find_point_wise_dependence(Deserializer &derez);
       void handle_slice_record_point_wise_dependence(Deserializer &derez);
+      void handle_slice_add_point_to_completed_list(Deserializer &derez);
+#endif
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_remote_collective_versioning_rendezvous(
@@ -5916,10 +5921,14 @@ namespace Legion {
           break;
         case SLICE_RECORD_INTRA_DEP:
           break;
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
         case SLICE_FIND_POINT_WISE_DEP:
           break;
         case SLICE_RECORD_POINT_WISE_DEP:
           break;
+        case SLICE_ADD_POINT_TO_COMPLETED_LIST:
+          break;
+#endif
         case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
           break;
         case SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS:

@@ -1408,7 +1408,9 @@ namespace Legion {
           unsigned dtype, unsigned prev_region_idx);
       bool set_next_point_wise_user(const LogicalUser *next,
           GenerationID user_gen, unsigned region_idx);
-      bool add_point_to_completed_list(DomainPoint point);
+      void add_point_to_completed_list(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      static void process_slice_add_point_to_completed_list(Deserializer &derez);
       bool prev_point_wise_user_set(unsigned region_req_idx);
       void record_point_wise_dependence_completed_points_prev_task(
           ProjectionSummary *shard_proj, uint64_t context_index);
@@ -1555,6 +1557,8 @@ namespace Legion {
       virtual RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
           unsigned region_idx);
+      void add_point_to_completed_list(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
       bool need_forward_progress(void);
 #endif
     public:

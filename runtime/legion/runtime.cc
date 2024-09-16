@@ -12572,6 +12572,11 @@ namespace Legion {
               runtime->handle_slice_record_point_wise_dependence(derez);
               break;
             }
+          case SLICE_ADD_POINT_TO_COMPLETED_LIST:
+            {
+              runtime->handle_slice_add_point_to_completed_list(derez);
+              break;
+            }
 #endif
           case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
             {
@@ -22251,6 +22256,14 @@ namespace Legion {
       find_messenger(target)->send_message(SLICE_RECORD_POINT_WISE_DEP, rez,
                                                          true/*flush*/);
     }
+
+    void Runtime::send_slice_add_point_to_completed_list(Processor target,
+                                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SLICE_ADD_POINT_TO_COMPLETED_LIST,
+                                                        rez, true/*flush*/);
+    }
 #endif
 
     //--------------------------------------------------------------------------
@@ -24865,6 +24878,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexTask::process_slice_record_point_wise_dependence(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_add_point_to_completed_list(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask::process_slice_add_point_to_completed_list(derez);
     }
 #endif
 

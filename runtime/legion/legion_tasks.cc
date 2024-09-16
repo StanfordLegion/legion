@@ -7797,12 +7797,8 @@ namespace Legion {
       }
       else
       {
-        if(!slice_owner->index_owner->
-            add_point_to_completed_list(get_domain_point()))
-        {
-          slice_owner->record_point_wise_dependence(get_domain_point(), region_idx,
-              get_mapped_event());
-        }
+        slice_owner->add_point_to_completed_list(get_domain_point(), region_idx,
+            get_mapped_event());
       }
     }
 #endif
@@ -10328,15 +10324,18 @@ namespace Legion {
     }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-    bool IndexTask::add_point_to_completed_list(DomainPoint point)
+    void IndexTask::add_point_to_completed_list(DomainPoint point,
+        unsigned region_idx, RtEvent point_mapped)
     {
       AutoLock o_lock(op_lock);
       if (!should_connect_to_next_point())
       {
         completed_point_list.push_back(point);
-        return true;
       }
-      return false;
+      else
+      {
+        record_point_wise_dependence(point, region_idx, point_mapped);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11099,6 +11098,23 @@ namespace Legion {
     }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexTask::process_slice_add_point_to_completed_list(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *task;
+      derez.deserialize(task);
+      DomainPoint point;
+      derez.deserialize(point);
+      unsigned region_idx;
+      derez.deserialize(region_idx);
+      RtEvent mapped_event;
+      derez.deserialize(mapped_event);
+      task->add_point_to_completed_list(point, region_idx, mapped_event);
+    }
+
     //--------------------------------------------------------------------------
     /*static*/ void IndexTask::process_slice_find_point_wise_dependence(
                                                             Deserializer &derez)
@@ -13001,15 +13017,35 @@ namespace Legion {
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
+    void SliceTask::add_point_to_completed_list(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(index_owner);
+          rez.serialize(point);
+          rez.serialize(region_idx);
+          rez.serialize(point_mapped);
+        }
+        runtime->send_slice_add_point_to_completed_list(orig_proc, rez);
+      }
+      else
+        return index_owner->add_point_to_completed_list(point, region_idx,
+            point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::record_point_wise_dependence(DomainPoint point,
-                                                 //LogicalRegion lr,
                                                  unsigned region_idx,
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
       {
-        printf("====Remote Record Case=====\n");
         Serializer rez;
         {
           RezCheck z(rez);
