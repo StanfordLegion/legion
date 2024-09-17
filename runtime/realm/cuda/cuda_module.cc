@@ -5032,7 +5032,7 @@ namespace Realm {
                                            bool map_host /*= false*/)
     {
       CUresult res = CUDA_SUCCESS;
-      std::vector<CUmemAccessDesc> desc(1);
+      std::vector<CUmemAccessDesc> desc;
 
       this->gpu = gpu;
       this->size = size;
@@ -5054,12 +5054,14 @@ namespace Realm {
         goto Done;
       }
 
-      desc[0].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-      desc[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-      desc[0].location.id = gpu->info->index;
-      if(peer_enabled) {
-        size_t peer_offset = 1;
-        desc.resize(gpu->info->peers.size() + 1);
+      if(!peer_enabled) {
+        desc.resize(1);
+        desc[0].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+        desc[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        desc[0].location.id = gpu->info->index;
+      } else {
+        size_t peer_offset = 0;
+        desc.resize(gpu->info->peers.size());
         for(int peer_idx : gpu->info->peers) {
           desc[peer_offset].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
           desc[peer_offset].location.type = CU_MEM_LOCATION_TYPE_DEVICE;

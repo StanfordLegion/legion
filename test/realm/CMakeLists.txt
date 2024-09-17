@@ -126,6 +126,7 @@ if(REALM_LIMIT_SYMBOL_VISIBILITY)
 endif()
 
 # some tests need test-specific arguments
+set(TESTARGS_inst_chain_redistrict         -i 2)
 set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4 -timeout 120)

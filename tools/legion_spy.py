@@ -7120,6 +7120,12 @@ class Operation(object):
                 for req in itervalues(point_task.op.reqs):
                     all_reqs.append((req,point_task.op))
         else:
+            # Check to see if this is an indirection copy, if it is then we're
+            # just going to assume that things are non-interfering since there
+            # is no way to prove that it is non-interfering without knowing 
+            # what the data is in the indirection field(s)
+            if self.kind == COPY_OP_KIND and self.copy_kind > 0:
+                return False
             for point in itervalues(self.points):
                 for req in itervalues(point.reqs):
                     all_reqs.append((req,point))

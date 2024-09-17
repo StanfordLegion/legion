@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "2"]]
+-- [["-ll:cpu", "2", "-lg:prof_all_critical_arrivals"]]
 
 import "regent"
 

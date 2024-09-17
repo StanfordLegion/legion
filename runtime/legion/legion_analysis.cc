@@ -9325,7 +9325,7 @@ namespace Legion {
         assert(check_initialized);
         assert(uninitialized_reported.exists());
 #endif
-        region->report_uninitialized_usage(op, index, usage, uninitialized,
+        region->report_uninitialized_usage(op, index, uninitialized,
                                            uninitialized_reported);
       }
       if (!input_aggregators.empty())
@@ -10363,8 +10363,8 @@ namespace Legion {
         assert(uninitialized_reported.exists());
 #endif
         RegionNode *src_node = runtime->forest->get_node(src_region);
-        src_node->report_uninitialized_usage(op, src_index, src_usage, 
-                                uninitialized, uninitialized_reported);
+        src_node->report_uninitialized_usage(op, src_index, uninitialized,
+                                             uninitialized_reported);
       }
       if (across_aggregator != NULL)
       {
@@ -13882,6 +13882,14 @@ namespace Legion {
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, false/*record*/);
+      // Also invalidate the partial invalidations since we know we migrated
+      // them all to the new owner node
+      for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+            partial_invalidations.begin(); it !=
+            partial_invalidations.end(); it++)
+        if (it->first->remove_nested_expression_reference(did))
+          delete it->first;
+      partial_invalidations.clear();
 #endif // LEGION_DISABLE_EQUIVALENCE_SET MIGRATION
     }
 

@@ -22,8 +22,7 @@ use legion_prof::backend::server;
 use legion_prof::backend::viewer;
 use legion_prof::backend::{analyze, dump, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
-use legion_prof::spy;
-use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
+use legion_prof::state::{Config, NodeID, State, Timestamp};
 
 #[derive(Debug, Clone, Args)]
 struct ParserArgs {
@@ -260,28 +259,18 @@ fn main() -> io::Result<()> {
         filter_input = !args.no_filter_input;
     }
 
-    let records: Result<Vec<Records>, _> = args
+    let records: Result<Vec<_>, _> = args
         .filenames
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
-            deserialize(filename, &node_list, filter_input).map_or_else(
-                |_| spy::serialize::deserialize(filename).map(Records::Spy),
-                |r| Ok(Records::Prof(r)),
-            )
+            deserialize(filename, &node_list, filter_input)
         })
         .collect();
     match cli.command {
         Commands::Dump { .. } => {
             for record in records? {
-                match record {
-                    Records::Prof(r) => {
-                        dump::dump_record(&r)?;
-                    }
-                    Records::Spy(r) => {
-                        dump::dump_spy_record(&r)?;
-                    }
-                }
+                dump::dump_record(&record)?;
             }
             return Ok(());
         }
@@ -302,21 +291,12 @@ fn main() -> io::Result<()> {
     state.source_locator.extend(unique_paths.into_iter());
 
     state.visible_nodes = node_list;
-    let mut spy_state = SpyState::default();
     if filter_input {
         println!("Filtering profiles to nodes: {:?}", state.visible_nodes);
     }
     for record in records? {
-        match record {
-            Records::Prof(r) => {
-                println!("Matched {} objects", r.len());
-                state.process_records(&r, Timestamp::from_us(args.call_threshold));
-            }
-            Records::Spy(r) => {
-                println!("Matched {} objects", r.len());
-                spy_state.process_spy_records(&r);
-            }
-        }
+        println!("Matched {} objects", record.len());
+        state.process_records(&record, Timestamp::from_us(args.call_threshold));
     }
 
     if !state.complete_parse() {
@@ -340,13 +320,13 @@ fn main() -> io::Result<()> {
 
     Config::set_config(filter_input, args.verbose, have_alllogs);
 
-    spy_state.postprocess_spy_records(&state);
-
     state.trim_time_range(start_trim, stop_trim);
     println!("Sorting time ranges");
     state.sort_time_range();
     state.check_message_latencies(message_threshold, message_percentage);
     state.filter_output();
+    println!("Calculating critical paths");
+    state.compute_critical_paths();
 
     match cli.command {
         Commands::Archive {
@@ -372,7 +352,7 @@ fn main() -> io::Result<()> {
         }
         Commands::Legacy { out, .. } => {
             state.assign_colors();
-            visualize::emit_interactive_visualization(&state, &spy_state, out.output, out.force)?;
+            visualize::emit_interactive_visualization(&state, out.output, out.force)?;
         }
         Commands::View { .. } => {
             #[cfg(feature = "viewer")]

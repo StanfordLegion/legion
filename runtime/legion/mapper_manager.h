@@ -21,23 +21,7 @@
 #include "legion/legion_instances.h"
 
 namespace Legion {
-  namespace Internal {
-
-    class MappingCallInfo {
-    public:
-      MappingCallInfo(MapperManager *man, MappingCallKind k, 
-                      Operation *op, bool prioritize = false);
-      ~MappingCallInfo(void);
-    public:
-      MapperManager*const               manager;
-      RtUserEvent                       resume;
-      const MappingCallKind             kind;
-      Operation*const                   operation;
-      std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
-      long long                         start_time;
-      long long                         pause_time;
-      bool                              reentrant_disabled;
-    };
+  namespace Internal { 
 
     /**
      * \class MapperManager
@@ -53,7 +37,7 @@ namespace Legion {
       public:
         std::set<PhysicalManager*> instances;
         std::vector<bool> results;
-      };
+      }; 
       struct DeferMessageArgs : public LgTaskArgs<DeferMessageArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_MAPPER_MESSAGE_TASK_ID;
@@ -70,6 +54,18 @@ namespace Legion {
         void *const message;
         const size_t size;
         const bool broadcast;
+      };
+      struct DeferInstanceCollectionArgs :
+        public LgTaskArgs<DeferInstanceCollectionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_COLLECTION_TASK_ID;
+      public:
+        DeferInstanceCollectionArgs(MapperManager *man, PhysicalManager *inst)
+          : LgTaskArgs<DeferInstanceCollectionArgs>(implicit_provenance),
+            manager(man), instance(inst) { }
+      public:
+        MapperManager *const manager;
+        PhysicalManager *const instance;
       };
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 
@@ -220,10 +216,8 @@ namespace Legion {
       void invoke_permit_steal_request(Mapper::StealRequestInput &input,
                                        Mapper::StealRequestOutput &output);
     public: // handling mapper calls
-      void invoke_handle_message(Mapper::MapperMessage *message,
-                                 bool check_defer = true);
+      void invoke_handle_message(Mapper::MapperMessage *message);
       void invoke_handle_task_result(Mapper::MapperTaskResult &result);
-      void invoke_handle_instance_collection(MappingInstance &instance);
     public:
       // Instance deletion subscriber methods
       virtual void notify_instance_deletion(PhysicalManager *manager);
@@ -248,314 +242,10 @@ namespace Legion {
                                       RuntimeCallKind kind) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
-      void update_mappable_tag(MappingCallInfo *info,
-                               const Mappable &mappable, MappingTagID tag);
-      void update_mappable_data(MappingCallInfo *info, const Mappable &mappable,
-                                const void *mapper_data, size_t data_size);
-    public:
-      void send_message(MappingCallInfo *info, Processor target, 
-                        const void *message, size_t message_size, 
-                        unsigned message_kind);
-      void broadcast(MappingCallInfo *info, const void *message, 
-                     size_t message_size, unsigned message_kind, int radix);
-    public:
-      void pack_physical_instance(MappingCallInfo *info, Serializer &rez,
-                                  MappingInstance instance);
-      void unpack_physical_instance(MappingCallInfo *info, Deserializer &derez,
-                                    MappingInstance &instance);
-    public:
-      MapperEvent create_mapper_event(MappingCallInfo *ctx);
-      bool has_mapper_event_triggered(MappingCallInfo *ctx, MapperEvent event);
-      void trigger_mapper_event(MappingCallInfo *ctx, MapperEvent event);
-      void wait_on_mapper_event(MappingCallInfo *ctx, MapperEvent event);
-    public:
-      const ExecutionConstraintSet& 
-        find_execution_constraints(MappingCallInfo *ctx, 
-            TaskID task_id, VariantID vid);
-      const TaskLayoutConstraintSet&
-        find_task_layout_constraints(MappingCallInfo *ctx, 
-            TaskID task_id, VariantID vid);
-      const LayoutConstraintSet&
-        find_layout_constraints(MappingCallInfo *ctx, LayoutConstraintID id);
-      LayoutConstraintID register_layout(MappingCallInfo *ctx, 
-                                const LayoutConstraintSet &constraints,
-                                FieldSpace handle);
-      void release_layout(MappingCallInfo *ctx, LayoutConstraintID layout_id);
-      bool do_constraints_conflict(MappingCallInfo *ctx, 
-                    LayoutConstraintID set1, LayoutConstraintID set2,
-                    const LayoutConstraint **conflict_constraint);
-      bool do_constraints_entail(MappingCallInfo *ctx,
-                    LayoutConstraintID source, LayoutConstraintID target,
-                    const LayoutConstraint **failed_constraint);
-    public:
-      void find_valid_variants(MappingCallInfo *ctx, TaskID task_id,
-                               std::vector<VariantID> &valid_variants,
-                               Processor::Kind kind);
-      const char* find_task_variant_name(MappingCallInfo *ctx,
-                    TaskID task_id, VariantID vid);
-      bool is_leaf_variant(MappingCallInfo *ctx, TaskID task_id, 
-                           VariantID variant_id);
-      bool is_inner_variant(MappingCallInfo *ctx, TaskID task_id, 
-                            VariantID variant_id);
-      bool is_idempotent_variant(MappingCallInfo *ctx,
-                                 TaskID task_id, VariantID variant_id);
-      bool is_replicable_variant(MappingCallInfo *ctx,
-                                 TaskID task_id, VariantID variant_id);
-    public:
-      VariantID register_task_variant(MappingCallInfo *ctx,
-                                      const TaskVariantRegistrar &registrar,
-				      const CodeDescriptor &codedesc,
-				      const void *user_data,
-				      size_t user_len,
-                                      size_t return_type_size,
-                                      bool has_return_type);
-    public:
-      void filter_variants(MappingCallInfo *ctx, const Task &task,
-            const std::vector<std::vector<MappingInstance> > &chosen_instances,
-                           std::vector<VariantID> &variants);
-      void filter_instances(MappingCallInfo *ctx, const Task &task,
-                            VariantID chosen_variant,
-                  std::vector<std::vector<MappingInstance> > &chosen_instances,
-                  std::vector<std::set<FieldID> > &missing_fields);
-      void filter_instances(MappingCallInfo *ctx, const Task &task,
-                            unsigned index, VariantID chosen_variant,
-                            std::vector<MappingInstance> &instances,
-                            std::set<FieldID> &missing_fields);
-    public:
-      bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
-                                    const LayoutConstraintSet &constraints, 
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, GCPriority priority,
-                                    bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
-      bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
-                                    LayoutConstraintID layout_id,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result,
-                                    bool acquire, GCPriority priority,
-                                    bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
-      bool find_or_create_physical_instance(
-                                    MappingCallInfo *ctx, Memory target_memory,
-                                    const LayoutConstraintSet &constraints, 
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool &created, 
-                                    bool acquire, GCPriority priority,
-                                    bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
-      bool find_or_create_physical_instance(
-                                    MappingCallInfo *ctx, Memory target_memory,
-                                    LayoutConstraintID layout_id,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool &created, 
-                                    bool acquire, GCPriority priority,
-                                    bool tight_region_bounds, size_t *footprint,
-                                    const LayoutConstraint **unsat);
-      bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
-                                    const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds);
-      bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
-                                    LayoutConstraintID layout_id,
-                                    const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire,
-                                    bool tight_region_bounds);
-      void find_physical_instances( MappingCallInfo *ctx, Memory target_memory,
-                                    const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
-                                    std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds);
-      void find_physical_instances( MappingCallInfo *ctx, Memory target_memory,
-                                    LayoutConstraintID layout_id,
-                                    const std::vector<LogicalRegion> &regions,
-                                    std::vector<MappingInstance> &results, 
-                                    bool acquire, bool tight_region_bounds);
-      void set_garbage_collection_priority(MappingCallInfo *ctx, 
-                                    const MappingInstance &instance, 
-                                    GCPriority priority);
-      bool acquire_instance(        MappingCallInfo *ctx, 
-                                    const MappingInstance &instance);
-      bool acquire_instances(       MappingCallInfo *ctx,
-                                    const std::vector<MappingInstance> &insts);
-      bool acquire_and_filter_instances(MappingCallInfo *ctx,
-                                    std::vector<MappingInstance> &instances,
-                                    const bool filter_acquired_instances);
-      bool acquire_instances(       MappingCallInfo *ctx, const std::vector<
-                                    std::vector<MappingInstance> > &instances);
-      bool acquire_and_filter_instances(MappingCallInfo *ctx, std::vector<
-                                    std::vector<MappingInstance> > &instances,
-                                    const bool filter_acquired_instances);
-      void release_instance(        MappingCallInfo *ctx, 
-                                    const MappingInstance &instance);
-      void release_instances(       MappingCallInfo *ctx,
-                                    const std::vector<MappingInstance> &insts);
-      void release_instances(       MappingCallInfo *ctx, const std::vector<
-                                    std::vector<MappingInstance> > &instances);
-      bool subscribe(MappingCallInfo *ctx, const MappingInstance &instance);
-      void unsubscribe(MappingCallInfo *ctx, const MappingInstance &instance);
-      bool collect_instance(MappingCallInfo *ctx, const MappingInstance &inst);
-      void collect_instances(MappingCallInfo *ctx,
-                             const std::vector<MappingInstance> &instances,
-                             std::vector<bool> &collected);
-      bool acquire_future(MappingCallInfo *ctx, const Future &f, Memory memory);
-    public:
-      void record_acquired_instance(MappingCallInfo *info, 
-                                    InstanceManager *manager, bool created);
-      void release_acquired_instance(MappingCallInfo *info,
-                                     InstanceManager *manager);
-      void check_region_consistency(MappingCallInfo *info, const char *call,
-                                    const std::vector<LogicalRegion> &regions);
-      bool perform_acquires(MappingCallInfo *info,
-                            const std::vector<MappingInstance> &instances,
-                            std::vector<unsigned> *to_erase = NULL,
-                            const bool filter_acquired_instances = false);
-    public:
-      IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
-                                    TypeTag type_tag, const char *provenance);
-      IndexSpace union_index_spaces(MappingCallInfo *info, 
-                                    const std::vector<IndexSpace> &sources,
-                                    const char *provenance);
-      IndexSpace intersect_index_spaces(MappingCallInfo *info,
-                                        const std::vector<IndexSpace> &sources,
-                                        const char *provenance);
-      IndexSpace subtract_index_spaces(MappingCallInfo *info, IndexSpace left,
-                                       IndexSpace right,const char *provenance);
-      bool is_index_space_empty(MappingCallInfo *info, IndexSpace handle);
-      bool index_spaces_overlap(MappingCallInfo *info, 
-                                IndexSpace one, IndexSpace two);
-      bool index_space_dominates(MappingCallInfo *info,
-                                 IndexSpace left, IndexSpace right);
-      bool has_index_partition(MappingCallInfo *info,
-                               IndexSpace parent, Color color);
-      IndexPartition get_index_partition(MappingCallInfo *info,
-                                         IndexSpace parent, Color color);
-      IndexSpace get_index_subspace(MappingCallInfo *info,
-                                    IndexPartition p, Color c);
-      IndexSpace get_index_subspace(MappingCallInfo *info,
-                                    IndexPartition p, 
-                                    const DomainPoint &color);
-      bool has_multiple_domains(MappingCallInfo *info, IndexSpace handle);
-      Domain get_index_space_domain(MappingCallInfo *info, IndexSpace handle);
-      void get_index_space_domains(MappingCallInfo *info, IndexSpace handle,
-                                   std::vector<Domain> &domains);
-      Domain get_index_partition_color_space(MappingCallInfo *info,
-                                             IndexPartition p);
-      IndexSpace get_index_partition_color_space_name(MappingCallInfo *info,
-                                                      IndexPartition p);
-      void get_index_space_partition_colors(MappingCallInfo *info, 
-                                            IndexSpace sp, 
-                                            std::set<Color> &colors);
-      bool is_index_partition_disjoint(MappingCallInfo *info,
-                                       IndexPartition p);
-      bool is_index_partition_complete(MappingCallInfo *info,
-                                       IndexPartition p);
-      Color get_index_space_color(MappingCallInfo *info, IndexSpace handle);
-      DomainPoint get_index_space_color_point(MappingCallInfo *info,
-                                              IndexSpace handle);
-      Color get_index_partition_color(MappingCallInfo *info, 
-                                      IndexPartition handle);
-      IndexSpace get_parent_index_space(MappingCallInfo *info,
-                                        IndexPartition handle);
-      bool has_parent_index_partition(MappingCallInfo *info,
-                                      IndexSpace handle);
-      IndexPartition get_parent_index_partition(MappingCallInfo *info,
-                                                IndexSpace handle);
-      unsigned get_index_space_depth(MappingCallInfo *info, IndexSpace handle);
-      unsigned get_index_partition_depth(MappingCallInfo *info, 
-                                         IndexPartition handle);
-    public:
-      size_t get_field_size(MappingCallInfo *info, 
-                            FieldSpace handle, FieldID fid);
-      void get_field_space_fields(MappingCallInfo *info, FieldSpace handle, 
-                                  std::vector<FieldID> &fields);
-    public:
-      LogicalPartition get_logical_partition(MappingCallInfo *info,
-                                             LogicalRegion parent, 
-                                             IndexPartition handle);
-      LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
-                                                      LogicalRegion parent, 
-                                                      Color color);
-      LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
-                                                      LogicalRegion parent,
-                                                      const DomainPoint &color);
-      LogicalPartition get_logical_partition_by_tree(MappingCallInfo *info,
-                                                     IndexPartition handle, 
-                                           FieldSpace fspace, RegionTreeID tid);
-      LogicalRegion get_logical_subregion(MappingCallInfo *info,
-                                          LogicalPartition parent, 
-                                          IndexSpace handle);
-      LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
-                                                   LogicalPartition parent, 
-                                                   Color color);
-      LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
-                                                   LogicalPartition parent,
-                                                   const DomainPoint &color);
-      LogicalRegion get_logical_subregion_by_tree(MappingCallInfo *info,
-                                                  IndexSpace handle, 
-                                          FieldSpace fspace, RegionTreeID tid);
-      Color get_logical_region_color(MappingCallInfo *info, 
-                                     LogicalRegion handle);
-      DomainPoint get_logical_region_color_point(MappingCallInfo *info, 
-                                                 LogicalRegion handle);
-      Color get_logical_partition_color(MappingCallInfo *info,
-                                        LogicalPartition handle);
-      LogicalRegion get_parent_logical_region(MappingCallInfo *info,
-                                              LogicalPartition handle);
-      bool has_parent_logical_partition(MappingCallInfo *info, 
-                                        LogicalRegion handle);
-      LogicalPartition get_parent_logical_partition(MappingCallInfo *info,
-                                                    LogicalRegion handle);
-    public:
-      bool retrieve_semantic_information(MappingCallInfo *ctx, TaskID task_id,
-          SemanticTag tag, const void *&result, size_t &size, 
-          bool can_fail, bool wait_until_ready);
-      bool retrieve_semantic_information(MappingCallInfo *ctx,IndexSpace handle,
-          SemanticTag tag, const void *&result, size_t &size,
-          bool can_fail, bool wait_until_ready);
-      bool retrieve_semantic_information(MappingCallInfo *ctx, 
-          IndexPartition handle, SemanticTag tag, const void *&result,
-          size_t &size, bool can_fail, bool wait_until_ready);
-      bool retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
-          SemanticTag tag, const void *&result, size_t &size, 
-          bool can_fail, bool wait_until_ready);
-      bool retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
-          FieldID fid, SemanticTag tag, const void *&result, size_t &size,
-          bool can_fail, bool wait_until_ready);
-      bool retrieve_semantic_information(MappingCallInfo *ctx, 
-          LogicalRegion handle, SemanticTag tag, const void *&result, 
-          size_t &size, bool can_fail, bool wait_until_ready);
-      bool retrieve_semantic_information(MappingCallInfo *ctx,
-          LogicalPartition handle, SemanticTag tag, const void *&result,
-          size_t &size, bool can_fail, bool wait_until_ready);
-    public:
-      void retrieve_name(MappingCallInfo *ctx, TaskID task_id, 
-                         const char *&result);
-      void retrieve_name(MappingCallInfo *ctx, IndexSpace handle,
-                         const char *&result);
-      void retrieve_name(MappingCallInfo *ctx, IndexPartition handle,
-                         const char *&result);
-      void retrieve_name(MappingCallInfo *ctx, FieldSpace handle,
-                         const char *&result);
-      void retrieve_name(MappingCallInfo *ctx, FieldSpace handle, 
-                         FieldID fid, const char *&result);
-      void retrieve_name(MappingCallInfo *ctx, LogicalRegion handle,
-                         const char *&result);
-      void retrieve_name(MappingCallInfo *ctx, LogicalPartition handle,
-                         const char *&result);
-    public:
-      bool is_MPI_interop_configured(void);
-      const std::map<int,AddressSpace>& find_forward_MPI_mapping(
-                         MappingCallInfo *ctx);
-      const std::map<AddressSpace,int>& find_reverse_MPI_mapping(
-                         MappingCallInfo *ctx);
-      int find_local_MPI_rank(void);
-    public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
-      void defer_message(Mapper::MapperMessage *message);
       static void handle_deferred_message(const void *args);
+      static void handle_deferred_collection(const void *args);
     public:
       // For stealing
       void process_advertisement(Processor advertiser); 
@@ -572,6 +262,7 @@ namespace Legion {
       const bool profile_mapper;
       const bool request_valid_instances;
       const bool is_default_mapper;
+      const bool initially_reentrant;
     protected:
       mutable LocalLock mapper_lock;
     protected: // Steal request information
@@ -679,6 +370,49 @@ namespace Legion {
       std::set<MappingCallInfo*> current_holders;
       std::deque<MappingCallInfo*> read_only_waiters;
       std::deque<MappingCallInfo*> exclusive_waiters;
+    };
+
+    class MappingCallInfo {
+    public:
+      MappingCallInfo(MapperManager *man, MappingCallKind k, 
+                      Operation *op, bool prioritize = false);
+      ~MappingCallInfo(void);
+    public:
+      inline void pause_mapper_call(void)
+        { manager->pause_mapper_call(this); }
+      inline void resume_mapper_call(RuntimeCallKind kind)
+        { manager->resume_mapper_call(this, kind); }
+      inline const char* get_mapper_name(void) const
+        { return manager->get_mapper_name(); }
+      inline const char* get_mapper_call_name(void) const
+        { return manager->get_mapper_call_name(kind); }
+      inline bool is_locked(void)
+        { return manager->is_locked(this); }
+      inline void lock_mapper(bool read_only)
+        { manager->lock_mapper(this, read_only); }
+      inline void unlock_mapper(void)
+        { manager->unlock_mapper(this); }
+      inline bool is_reentrant(void)
+        { return manager->is_reentrant(this); }
+      inline void enable_reentrant(void)
+        { manager->enable_reentrant(this); }
+      inline void disable_reentrant(void)
+        { manager->disable_reentrant(this); }
+      void record_acquired_instance(InstanceManager *manager, bool created);
+      void release_acquired_instance(InstanceManager *manager);
+      bool perform_acquires(
+          const std::vector<MappingInstance> &instances,
+          std::vector<unsigned> *to_erase = NULL, 
+          bool filter_acquired_instances = false);
+    public:
+      MapperManager*const               manager;
+      RtUserEvent                       resume;
+      const MappingCallKind             kind;
+      Operation*const                   operation;
+      std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
+      long long                         start_time;
+      long long                         pause_time;
+      bool                              reentrant;
     };
 
   };
