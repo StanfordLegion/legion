@@ -3897,6 +3897,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert((refined_child != NULL) || (refined_projection != NULL));
 #endif
+      bool is_dominant = true;
       // Has to have the most returns
       for (std::unordered_map<PartitionNode*,
                               std::pair<double,uint64_t> >::iterator it =
@@ -3911,7 +3912,7 @@ namespace Legion {
             (total_traversals - it->second.second)) * it->second.first;
         it->second.second = total_traversals;
         if (score < it->second.first)
-          return false;
+          is_dominant = false;
       }
       for (std::unordered_map<ProjectionRegion*,
                               std::pair<double,uint64_t> >::iterator it =
@@ -3926,8 +3927,10 @@ namespace Legion {
             (total_traversals - it->second.second)) * it->second.first;
         it->second.second = total_traversals;
         if (score < it->second.first)
-          return false;
+          is_dominant = false;
       }
+      if (!is_dominant)
+        return false;
       // If we're the current refinement then just being the largest is enough
       // to indicate that we're the dominant candidate
       if (!is_current)
@@ -4448,6 +4451,7 @@ namespace Legion {
                                                           bool is_current)
     //--------------------------------------------------------------------------
     {
+      bool is_dominant = true;
       if (((uint64_t)partition->row_source->total_children) <=
           (children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION))
       {
@@ -4456,7 +4460,7 @@ namespace Legion {
             (total_traversals - children_last)) * children_score;
         children_last = total_traversals;
         if (score < children_score)
-          return false;
+          is_dominant = false;
       }
       for (std::unordered_map<ProjectionPartition*,
                               std::pair<double,uint64_t> >::iterator it =
@@ -4471,8 +4475,10 @@ namespace Legion {
             (total_traversals - it->second.second)) * it->second.first;
         it->second.second = total_traversals;
         if (score < it->second.first)
-          return false;
+          is_dominant = false;
       }
+      if (!is_dominant)
+        return false;
       if (!is_current)
       {
         if (refined_projection != NULL)
