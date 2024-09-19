@@ -44,6 +44,7 @@ namespace Realm {
       // resources
       bool resource_discovered = false;
       bool res_numa_available = false;
+      size_t res_numa_nodes = 0;
     };
 
     // our interface to the rest of the runtime

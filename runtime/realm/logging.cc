@@ -556,7 +556,7 @@ namespace Realm {
     // if we're not configured yet, delay the message
     if(!configured) {
       size_t bytes = sizeof(DelayedMessage) + msglen;
-      void *ptr = malloc(bytes);
+      void *ptr = ::operator new(bytes);
       assert(ptr != 0);
       DelayedMessage *d = new(ptr) DelayedMessage;
       d->next_msg = 0;
@@ -613,12 +613,9 @@ namespace Realm {
     while(delayed_message_head != 0) {
       DelayedMessage *next = delayed_message_head->next_msg;
       if(delayed_message_head->level >= log_level)
-	log_msg(delayed_message_head->level,
-		delayed_message_head->msgdata(),
-		delayed_message_head->msglen);
-      // was allocated with malloc, not new
-      delayed_message_head->~DelayedMessage();
-      free(delayed_message_head);
+        log_msg(delayed_message_head->level, delayed_message_head->msgdata(),
+                delayed_message_head->msglen);
+      delete delayed_message_head;
       delayed_message_head = next;
     }
   }

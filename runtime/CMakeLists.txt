@@ -152,6 +152,17 @@ if (Legion_USE_Python)
   )
 endif()
 
+if(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS)
+  if(Legion_USE_CUDA)
+    list(APPEND GASNet_CONFIG_SETTINGS "USE_CUDA=1")
+  endif()
+  if(Legion_USE_HIP)
+    list(APPEND GASNet_CONFIG_SETTINGS "USE_HIP=1")
+  endif()
+else()
+  list(APPEND GASNet_CONFIG_SETTINGS "GASNET_GPU_CONFIGURE_ARGS=")
+endif()
+
 if(REALM_USE_GASNET1)
   list(APPEND REALM_SRC
     realm/gasnet1/gasnet1_module.h
@@ -175,6 +186,7 @@ if(REALM_USE_GASNETEX)
     set(GEX_WRAPPER_BUILD_SHARED ${REALM_USE_GASNETEX_WRAPPER})
     set(GEX_DEBUG ${DEBUG_REALM})
     set(GEX_NO_INSTALL NOT ${REALM_USE_GASNETEX_WRAPPER})
+
     add_subdirectory(realm/gasnetex/gasnetex_wrapper EXCLUDE_FROM_ALL)
   endif()
 endif()
@@ -396,8 +408,10 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     find_package(GASNet)
     if (NOT GASNet_FOUND AND Legion_EMBED_GASNet)
       set(GASNet_BUILD_SHARED ${BUILD_SHARED_LIBS})
+
       include(${PROJECT_SOURCE_DIR}/cmake/FetchAndBuildGASNet.cmake)
       find_package(GASNet REQUIRED)
+
     elseif (NOT GASNet_FOUND)
       message(FATAL_ERROR "Unable to find GASNet")
     endif ()
