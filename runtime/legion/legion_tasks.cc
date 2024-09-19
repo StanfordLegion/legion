@@ -4219,6 +4219,7 @@ namespace Legion {
         // then we need to get an event from the owner node because some kinds
         // of tracing (e.g. those with control replication) don't work otherwise
         remote_trace_recorder->request_term_event(single_task_termination);
+        record_completion_effect(single_task_termination);
       }
       // Create our task termination event at this point
       // Note that tracing doesn't track this as a user event, it is just
