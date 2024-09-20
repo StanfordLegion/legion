@@ -1626,7 +1626,7 @@ namespace Realm {
         alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
         tags[i] = redistrict_insts[i]->me;
       }
-      std::vector<size_t> offsets(0, num_insts);
+      std::vector<size_t> offsets(num_insts, 0);
       allocator.split_range(inst->me, tags, sizes, alignments, offsets);
     } else {
       allocator.deallocate(inst->me, missing_ok);
