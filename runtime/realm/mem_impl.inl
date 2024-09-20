@@ -541,10 +541,6 @@ namespace Realm {
       idx = r->next_free;
     }
 
-#ifdef DEBUG_REALM
-    dump_allocator_status();
-#endif
-
     // allocation failed
     return false;
   }

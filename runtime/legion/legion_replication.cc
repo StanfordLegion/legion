@@ -10207,12 +10207,12 @@ namespace Legion {
           // Make sure to bump the future coordinate for this context as well
 #ifndef NDEBUG
 #ifdef DEBUG_LEGION
-          const uint64_t coord =
+          const uint64_t index =
 #endif
 #endif
-            ctx->get_next_future_coordinate();
+            ctx->get_next_blocking_index();
 #ifdef DEBUG_LEGION
-          assert(coord == finder->second.first->coordinate.context_index);
+          assert(index == finder->second.first->coordinate.context_index);
 #endif
           Future result(finder->second.first);
 #ifdef DEBUG_LEGION
@@ -10229,7 +10229,7 @@ namespace Legion {
         // Didn't find it so make it
         FutureImpl *result = new FutureImpl(ctx, runtime, false/*register*/,
             did, op, op->get_generation(),
-            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
+            ContextCoordinate(ctx->get_next_blocking_index(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -10249,7 +10249,7 @@ namespace Legion {
       {
         FutureImpl *impl = new FutureImpl(ctx, runtime, false/*register*/,
             did, op, op->get_generation(),
-            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
+            ContextCoordinate(ctx->get_next_blocking_index(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -10280,12 +10280,12 @@ namespace Legion {
           // Make sure to bump the future coordinate for this context as well
 #ifndef NDEBUG
 #ifdef DEBUG_LEGION
-          const uint64_t coord =
+          const uint64_t index =
 #endif
 #endif
-            ctx->get_next_future_coordinate();
+            ctx->get_next_blocking_index();
 #ifdef DEBUG_LEGION
-          assert(coord == finder->second.first->future_coordinate);
+          assert(index== finder->second.first->blocking_index);
 #endif
           FutureMap result(finder->second.first);
 #ifdef DEBUG_LEGION

@@ -1139,7 +1139,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(),
-          InnerContext::NO_FUTURE_COORDINATE, provenance);
+          InnerContext::NO_BLOCKING_INDEX, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -1280,7 +1280,7 @@ namespace Legion {
         finished_execution(false), has_inline_accessor(false),
         next_created_index(reqs.size()), parent_req_indexes(parent_indexes),
         virtual_mapped(virt_mapped), total_children_count(0),
-        next_future_coordinate(0), total_tunable_count(0),
+        next_blocking_index(0), total_tunable_count(0),
         outstanding_prepipeline_tasks(0),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -6782,7 +6782,7 @@ namespace Legion {
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
           mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
           mid, tag, false/*leaf region*/, virtual_mapped, 
-          false/*never collective*/, runtime);
+          false/*never collective*/, NO_BLOCKING_INDEX, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
       if (!virtual_mapped)
       {
@@ -6837,10 +6837,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    uint64_t InnerContext::get_next_future_coordinate(void)
+    uint64_t InnerContext::get_next_blocking_index(void)
     //--------------------------------------------------------------------------
     {
-      return next_future_coordinate++;
+      return next_blocking_index++;
     }
 
     //--------------------------------------------------------------------------
@@ -7001,7 +7001,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-        NO_FUTURE_COORDINATE, provenance);
+        NO_BLOCKING_INDEX, provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -10008,7 +10008,7 @@ namespace Legion {
       add_to_dependence_queue(trace_op);
       // Now mark that we are starting a trace
       current_trace = trace;
-      current_trace_future_coordinate = next_future_coordinate;
+      current_trace_blocking_index = next_blocking_index;
     }
 
     //--------------------------------------------------------------------------
@@ -10081,7 +10081,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_blocking_call(uint64_t future_coordinate)
+    void InnerContext::record_blocking_call(uint64_t blocking_index)
     //--------------------------------------------------------------------------
     {
       // It's only a blocking call if the wait occurs from an operation 
@@ -10090,8 +10090,8 @@ namespace Legion {
       // we know those operations are not traceable so they had to be 
       // issued before we started capturing the trace
       if ((current_trace != NULL) && 
-          (future_coordinate != NO_FUTURE_COORDINATE) &&
-          (current_trace_future_coordinate <= future_coordinate))
+          (blocking_index != NO_BLOCKING_INDEX) &&
+          (current_trace_blocking_index <= blocking_index))
       {
         if (is_replaying_physical_trace())
           REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
@@ -13192,7 +13192,7 @@ namespace Legion {
     {
       if (map.impl == NULL)
         return;
-      hasher.hash(map.impl->future_coordinate, description);
+      hasher.hash(map.impl->blocking_index, description);
     }
 
     //--------------------------------------------------------------------------
@@ -18394,7 +18394,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              NO_FUTURE_COORDINATE, provenance));
+              NO_BLOCKING_INDEX, provenance));
       }
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -19757,7 +19757,7 @@ namespace Legion {
       add_to_dependence_queue(trace_op);
       // Now mark that we are starting a trace
       current_trace = trace;
-      current_trace_future_coordinate = next_future_coordinate;
+      current_trace_blocking_index = next_blocking_index;
     }
 
     //--------------------------------------------------------------------------
@@ -20026,7 +20026,7 @@ namespace Legion {
     PredicateImpl* ReplicateContext::create_predicate_impl(Operation *op)
     //--------------------------------------------------------------------------
     {
-      return new ReplPredicateImpl(op, get_next_future_coordinate(),
+      return new ReplPredicateImpl(op, get_next_blocking_index(),
           get_next_collective_index(COLLECTIVE_LOC_1));
     }
 
@@ -24396,7 +24396,8 @@ namespace Legion {
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
           ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
-          true/*leaf region*/, virtual_mapped, false/*collective*/, runtime);
+          true/*leaf region*/, virtual_mapped, false/*collective*/,
+          InnerContext::NO_BLOCKING_INDEX, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
       if (mapped)
         impl->set_references(physical_instances, true/*safe*/);
@@ -24929,7 +24930,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_blocking_call(uint64_t future_coordinate)
+    void LeafContext::record_blocking_call(uint64_t blocking_index)
     //--------------------------------------------------------------------------
     {
     }
