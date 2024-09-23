@@ -136,6 +136,7 @@ namespace Realm {
       size_t cfg_hostreg_limit = 1 << 30;
       int cfg_d2d_stream_priority = -1;
       bool cfg_use_cuda_ipc = true;
+      int cfg_pageable_access = 0;
 
       // resources
       bool resource_discovered = false;
