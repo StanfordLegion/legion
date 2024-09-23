@@ -1,7 +1,11 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 24.09.0 (September ??, 2024)
+Version 24.09.0 (September 27, 2024)
+  * Legion
+    - Bug fixes for control replication and multi-node configurations
+  * Regent
+    - Fixes for ROCm 6.0 code generation
   * Tools
     - Legion Prof now uses subcommands (e.g., `legion_prof view`) to clarify
        which options apply to which actions
@@ -14,6 +18,19 @@ Version 24.09.0 (September ??, 2024)
     - The old Python Legion Prof implementation is no longer supported
   * Realm
     - `Point` fields `x`, `y`, `z` and `w` have been replaced by methods
+    - Support for launching CUDA tasks onto a CUDA stream asynchronously via
+       `cuCtxRecordEvent` without the need of CUDA hijack
+    - Support for CUDA fabric sharing
+    - Support for host-to-host copies via CUDA DMA
+    - Support for querying number of NUMA nodes from the `NumaModuleConfig`
+    - Added reference counting for preimage operations
+    - Make `std::atomic` as the default atomic implementation
+    - Remove `REALM_CXX_STANDARD`, and bump the minimal requirement to C++17
+    - Implemented an ABI stable wrapper for GASNetEX
+    - Additional unit tests including `CircularQueue`, `ReplicatedHeap`,
+       `find_fastest_path`, `DynaamicTableAllocator`, `generate_gather_paths`,
+       `TransferIteratorIndexSpace`
+    - Dead code cleanups and bug fixes
 
 Version 24.06.0 (June 28, 2024)
   * Build
