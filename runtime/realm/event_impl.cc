@@ -429,7 +429,6 @@ namespace Realm {
     GenEventImpl::trigger(*this, true /*poisoned*/);
   }
 
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class EventTriggerNotifier
@@ -1483,26 +1482,27 @@ namespace Realm {
     return op;
   }
 
-    /*static*/ void EventUpdateMessage::handle_message(NodeID sender, const EventUpdateMessage &args,
-						       const void *data, size_t datalen,
-						       TimeLimit work_until)
-    {
-      const EventImpl::gen_t *new_poisoned_gens = (const EventImpl::gen_t *)data;
-      int new_poisoned_count = datalen / sizeof(EventImpl::gen_t);
-      assert((new_poisoned_count * sizeof(EventImpl::gen_t)) == datalen);  // no remainders or overflow please
+  /*static*/ void EventUpdateMessage::handle_message(NodeID sender,
+                                                     const EventUpdateMessage &args,
+                                                     const void *data, size_t datalen,
+                                                     TimeLimit work_until)
+  {
+    const EventImpl::gen_t *new_poisoned_gens = (const EventImpl::gen_t *)data;
+    int new_poisoned_count = datalen / sizeof(EventImpl::gen_t);
+    assert((new_poisoned_count * sizeof(EventImpl::gen_t)) ==
+           datalen); // no remainders or overflow please
 
-      log_event.debug() << "event update: event=" << args.event
-			<< " poisoned=" << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens, new_poisoned_count);
+    log_event.debug() << "event update: event=" << args.event << " poisoned="
+                      << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens,
+                                                              new_poisoned_count);
 
-      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-      impl->process_update(ID(args.event).event_generation(),
-			   new_poisoned_gens, new_poisoned_count,
-			   work_until);
-    }
+    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+    impl->process_update(ID(args.event).event_generation(), new_poisoned_gens,
+                         new_poisoned_count, work_until);
+  }
 
-
-    bool GenEventImpl::has_triggered(gen_t needed_gen, bool& poisoned)
-    {
+  bool GenEventImpl::has_triggered(gen_t needed_gen, bool &poisoned)
+  {
 #ifdef EVENT_TRACING
       {
         EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -1541,7 +1541,7 @@ namespace Realm {
         return true;
       }
       return false;
-    }
+  }
 
     void GenEventImpl::subscribe(gen_t subscribe_gen)
     {
@@ -1844,22 +1844,21 @@ namespace Realm {
       bool free_event = false;
 
       {
-	AutoLock<> a(mutex);
-	if(free_list_insertion_delayed) {
-	  free_event = true;
-	  free_list_insertion_delayed = false;
-	}
+        AutoLock<> a(mutex);
+        if(free_list_insertion_delayed) {
+          free_event = true;
+          free_list_insertion_delayed = false;
+        }
       }
 
       if(free_event)
         GenEventImpl::free_genevent(this);
     }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class CompletionQueue
-  //
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class CompletionQueue
+    //
 
     /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = {
         /* zero-initialization */};
