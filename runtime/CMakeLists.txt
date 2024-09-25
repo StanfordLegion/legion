@@ -49,6 +49,8 @@ list(APPEND REALM_SRC
   realm/bgwork.h            realm/bgwork.cc
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
+  realm/barrier_impl.h        realm/barrier_impl.cc
+  realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
