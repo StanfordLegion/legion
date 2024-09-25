@@ -27,9 +27,6 @@ namespace Realm {
   Logger log_poison("poison");
   Logger log_compqueue("compqueue");
 
-  // used in places that don't currently propagate poison but should
-  static const bool POISON_FIXME = false;
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class Event
