@@ -946,12 +946,10 @@ if(Legion_ENABLE_TESTING)
     list(APPEND Legion_TEST_ARGS -ll:ocpu 1 -ll:onuma 0)
   endif()
 endif()
-if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
-  # Make a namespaced alias so in-build examples can use it the same way as if
-  # it were imported
-  add_library(Legion::Legion ALIAS Legion)
-  add_library(Legion::Realm ALIAS Realm)
 
+add_library(Legion::Legion ALIAS Legion)
+add_library(Legion::Realm ALIAS Realm)
+if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   if(Legion_HIP_TARGET STREQUAL "ROCM")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} ${HIPCC_FLAGS} ${HIP_GENCODE}")
   endif()
@@ -975,8 +973,6 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
     add_subdirectory(jupyter_notebook)
   endif()
 elseif(Legion_BUILD_REALM_TESTS)
-  # temporary hackery to just enable the realm tests
-  add_library(Legion::Realm ALIAS Realm)
   add_subdirectory(test/realm)
 endif()
 if(Legion_BUILD_REALM_UNIT_TESTS)
