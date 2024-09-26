@@ -962,9 +962,10 @@ namespace Realm {
         for(const PendingRelease &release : pending_releases) {
           if(release.inst == old_inst) {
             al.release();
-            for(RegionInstanceImpl *inst : new_insts)
+            for(RegionInstanceImpl *inst : new_insts) {
               inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
                                       TimeLimit::responsive());
+            }
             return ALLOC_INSTANT_FAILURE;
           }
         }
@@ -976,10 +977,11 @@ namespace Realm {
             RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY) ||
            (old_inst->metadata.inst_offset ==
             RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT)) {
-          for(unsigned idx = 0; idx < num_insts; idx++)
+          for(unsigned idx = 0; idx < num_insts; idx++) {
             new_insts[idx]->notify_allocation(ALLOC_INSTANT_FAILURE,
                                               RegionInstanceImpl::INSTOFFSET_FAILED,
                                               TimeLimit::responsive());
+          }
           return ALLOC_INSTANT_FAILURE;
         }
         if(pending_allocs.empty()) {
@@ -1013,9 +1015,10 @@ namespace Realm {
         for(const PendingRelease &release : pending_releases) {
           if(release.inst == old_inst) {
             al.release();
-            for(RegionInstanceImpl *inst : new_insts)
+            for(RegionInstanceImpl *inst : new_insts) {
               inst->notify_allocation(AllocationResult::ALLOC_INSTANT_FAILURE, 0,
                                       TimeLimit::responsive());
+            }
             return ALLOC_INSTANT_FAILURE;
           }
         }
@@ -1025,10 +1028,11 @@ namespace Realm {
             RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY) ||
            (old_inst->metadata.inst_offset ==
             RegionInstanceImpl::INSTOFFSET_DELAYEDREDISTRICT)) {
-          for(unsigned idx = 0; idx < num_insts; idx++)
+          for(unsigned idx = 0; idx < num_insts; idx++) {
             new_insts[idx]->notify_allocation(ALLOC_INSTANT_FAILURE,
                                               RegionInstanceImpl::INSTOFFSET_FAILED,
                                               TimeLimit::responsive());
+          }
           return ALLOC_INSTANT_FAILURE;
         }
         if(old_inst->metadata.inst_offset ==
@@ -1070,12 +1074,13 @@ namespace Realm {
       }
       // Finish setting up the new instances with the results
       if(offsets_valid) {
-        for(unsigned idx = 0; idx < num_insts; idx++)
+        for(unsigned idx = 0; idx < num_insts; idx++) {
           new_insts[idx]->notify_allocation(
               (idx < allocated)
                   ? (triggered ? ALLOC_INSTANT_SUCCESS : ALLOC_EVENTUAL_SUCCESS)
                   : (triggered ? ALLOC_INSTANT_FAILURE : ALLOC_EVENTUAL_FAILURE),
               offsets[idx], TimeLimit::responsive());
+        }
       }
       if(!successful_allocs.empty()) {
         for(std::vector<std::pair<RegionInstanceImpl *, size_t>>::iterator it =
@@ -1202,10 +1207,11 @@ namespace Realm {
       // Swapping the order of notifications could result in a race
       if(!offsets.empty()) {
         assert(inst->metadata.ext_resource == 0); // should not be an external instance
-        for(unsigned idx = 0; idx < offsets.size(); idx++)
+        for(unsigned idx = 0; idx < offsets.size(); idx++) {
           inst->deferred_redistrict[idx]->notify_allocation(
               (idx < allocated) ? result : ALLOC_INSTANT_FAILURE, offsets[idx],
               work_until);
+        }
         inst->deferred_redistrict.clear();
       }
       // if we needed an alloc result, send deferred responses too
