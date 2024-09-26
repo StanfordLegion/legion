@@ -10389,20 +10389,58 @@ namespace Legion {
       const std::pair<uint64_t,DomainPoint> key{context_index,point};
       AutoLock r_lock(point_wise_lock);
 
-      std::map<std::pair<uint64_t,DomainPoint>,RtUserEvent>::iterator finder =
+      /*{
+        AutoLock child_lock(child_op_lock);
+        if (reorder_buffer.front().operation_index > context_index) return;
+      }*/
+
+      //printf("RECORD context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+      std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>>::iterator finder =
         pending_point_wise_deps.find(key);
 
       if (finder != pending_point_wise_deps.end())
       {
-        Runtime::trigger_event(finder->second, point_mapped);
-        pending_point_wise_deps.erase(finder);
+        //printf("RECORD FOUND PENDING context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+        //printf("Record PENDING event %lld, count: %d\n", finder->second.first.id, finder->second.second);
+        if (finder->second.first.exists() && !finder->second.first.has_triggered() && finder->second.second != 0)
+        {
+          Runtime::trigger_event(finder->second.first, point_mapped);
+          finder->second.second = 0;
+        }
+
+        if (finder->second.second == 0)
+        {
+          //printf("RECORD FOUND PENDING AND REMOVING context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+          //pending_point_wise_deps.erase(finder);
+        }
       }
       else
       {
 #ifdef DEBUG_LEGION
-        assert(ready_point_wise_deps.find(key) == ready_point_wise_deps.end());
-        ready_point_wise_deps[key] = point_mapped;
+        //assert(ready_point_wise_deps.find(key) == ready_point_wise_deps.end());
 #endif
+        std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtEvent,int>>::iterator finder =
+          ready_point_wise_deps.find(key);
+        if (finder != ready_point_wise_deps.end())
+        {
+          //printf("RECORD DID NOT FIND PENDING BUT FOUND IN READY context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+          //assert(point_mapped == finder->second);
+          if (point_mapped != finder->second.first)
+          {
+            std::set<RtEvent> ready_events = {point_mapped, finder->second.first};
+            ready_point_wise_deps[key] = std::pair<RtEvent,int>{Runtime::merge_events(ready_events),1};
+          }
+          else
+          {
+            finder->second.second += 1;
+          }
+          return;
+        }
+        else
+        {
+          //printf("RECORD DID NOT FIND PENDING DID NOT FIND IN READY context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+          ready_point_wise_deps[key] = std::pair<RtEvent,int>{point_mapped,1};
+        }
       }
     }
 
@@ -10414,21 +10452,35 @@ namespace Legion {
       std::pair<uint64_t,DomainPoint> key{context_index, point};
       AutoLock r_lock(point_wise_lock);
 
-      std::map<std::pair<uint64_t,DomainPoint>,RtEvent>::iterator finder =
+      //printf("FINDER context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+      std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtEvent,int>>::iterator finder =
         ready_point_wise_deps.find(key);
       if (finder != ready_point_wise_deps.end())
       {
-        ready_point_wise_deps.erase(finder);
-        return finder->second;
+        //printf("FINDER FOUND IN READY context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+        //ready_point_wise_deps.erase(finder);
+        finder->second.second -= 1;
+        //if (finder->second.second == 0)
+          //ready_point_wise_deps.erase(finder);
+        return finder->second.first;
       }
       else
       {
 #ifdef DEBUG_LEGION
-        assert(pending_point_wise_deps.find(key) ==
-                pending_point_wise_deps.end());
+        //assert(pending_point_wise_deps.find(key) ==
+        //        pending_point_wise_deps.end());
 #endif
+        std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>>::iterator finder =
+        pending_point_wise_deps.find(key);
+        if (finder != pending_point_wise_deps.end())
+        {
+          //printf("FINDER DID NOT FIND IN READY BUT FOUND IN PENDING context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+          //printf("FIND PENDING event %lld, count: %d\n", finder->second.first.id, finder->second.second);
+          return finder->second.first;
+        }
+        //printf("FINDER DID NOT FIND IN READY AND DID NOT FIND IN PENDING context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
         const RtUserEvent pending_event = Runtime::create_rt_user_event();
-        pending_point_wise_deps[key] = pending_event;
+        pending_point_wise_deps[key] = std::pair<RtUserEvent,int>{pending_event,1};
         return pending_event;
       }
     }
@@ -10446,6 +10498,29 @@ namespace Legion {
 
       Runtime::trigger_event(pending_event, find_point_wise_dependence(context_index,
             point));
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::clear_map(uint64_t context_index, std::vector<DomainPoint> points)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(point_wise_lock);
+
+      for(std::vector<DomainPoint>::iterator it =
+          points.begin(); it != points.end(); it++)
+      {
+        std::pair<uint64_t,DomainPoint> key{context_index, (*it)};
+
+        std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtEvent,int>>::iterator ready_finder =
+          ready_point_wise_deps.find(key);
+        if (ready_finder != ready_point_wise_deps.end())
+          ready_point_wise_deps.erase(ready_finder);
+
+        std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>>::iterator pending_finder =
+          pending_point_wise_deps.find(key);
+        if (pending_finder != pending_point_wise_deps.end())
+           pending_point_wise_deps.erase(pending_finder);
+      }
     }
 #endif
 

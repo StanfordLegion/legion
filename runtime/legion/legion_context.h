@@ -1657,6 +1657,7 @@ namespace Legion {
       void handle_point_wise_dependence(Deserializer &derez);
       RtEvent find_point_wise_dependence(uint64_t context_index,
           DomainPoint point);
+      void clear_map(uint64_t context_index, std::vector<DomainPoint> points);
 #endif
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -2048,8 +2049,8 @@ namespace Legion {
     protected:
       mutable LocalLock point_wise_lock;
       // We always use point of "prev IndexTask" as key
-      std::map<std::pair<uint64_t,DomainPoint>,RtEvent> ready_point_wise_deps;
-      std::map<std::pair<uint64_t,DomainPoint>,RtUserEvent> pending_point_wise_deps;
+      std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtEvent,int>> ready_point_wise_deps;
+      std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>> pending_point_wise_deps;
 /*#ifdef LEGION_SPY
       struct point_task_info {
         public:

@@ -1935,6 +1935,42 @@ namespace Legion {
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
+    void ReplIndexTask::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(op_lock);
+      if (need_to_clear)
+      {
+        Domain local_domain;
+        std::vector<DomainPoint> points;
+
+        if (internal_space.exists())
+        {
+          runtime->forest->find_domain(internal_space, local_domain);
+        }
+        else
+          assert(1);
+
+
+        for (RectInDomainIterator<1> itr(local_domain); itr(); itr++)
+        {
+          for (PointInRectIterator<1> pir(*itr); pir(); pir++)
+          {
+            points.push_back((*pir));
+          }
+        }
+        parent_ctx->clear_map(context_index, points);
+      }
+    }
+
+
+    //--------------------------------------------------------------------------
     RtEvent ReplIndexTask::find_point_wise_dependence(DomainPoint point,
         LogicalRegion lr,
         unsigned region_idx)
@@ -1950,7 +1986,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
 
-      if (should_connect_to_prev_point())
+      if (should_connect_to_prev_point(region_idx))
       {
         // Find prev index task
         std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =

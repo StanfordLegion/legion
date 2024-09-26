@@ -16013,6 +16013,11 @@ namespace Legion {
             check_projection_region_result(req.region, static_cast<Task*>(*it),
                                            idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+            (*it)->record_point_wise_dependence(result, idx);
+#endif
+
             if (find_dependences)
             {
               std::vector<DomainPoint> &region_deps = dependences[result];
@@ -16045,6 +16050,11 @@ namespace Legion {
             check_projection_partition_result(req.partition,
                 static_cast<Task*>(*it), idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+            (*it)->record_point_wise_dependence(result, idx);
+#endif
+
             if (find_dependences)
             {
               std::vector<DomainPoint> &region_deps = dependences[result];
@@ -16073,6 +16083,11 @@ namespace Legion {
             check_projection_region_result(req.region, static_cast<Task*>(*it),
                                            idx, result, runtime);
             (*it)->set_projection_result(idx, result);
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+            (*it)->record_point_wise_dependence(result, idx);
+#endif
+
             if (find_dependences)
             {
               std::vector<DomainPoint> &region_deps = dependences[result];

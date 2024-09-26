@@ -2036,6 +2036,7 @@ namespace Legion {
       virtual RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
           unsigned region_idx);
+      virtual void clear_context_maps(void);
 #endif
     public:
       // Output regions

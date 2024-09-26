@@ -748,15 +748,44 @@ namespace Legion {
         std::map<DomainPoint,RtEvent> point_wise_dependences;
         // Flag to indicate if we have a previous task for which
         // we can map point-task-wise instead of whole index-task-wise.
-        bool connect_to_prev_point = false;
+        //bool connect_to_prev_point = false;
+        //TODO: SET should be enough
+        std::map<unsigned,bool> connect_to_prev_points;
         // Flag to indicate if we have a next task for which
         // we can map point-task-wise instead of whole index-task-wise.
-        bool connect_to_next_point = false;
+        //bool connect_to_next_point = false;
+        //TODO: SET should be enough
+        std::map<unsigned,bool> connect_to_next_points;
       public:
+        /*
         void set_connect_to_prev_point (void) { connect_to_prev_point = true; }
         void set_connect_to_next_point (void) { connect_to_next_point = true; }
         bool should_connect_to_prev_point (void) { return connect_to_prev_point; }
         bool should_connect_to_next_point (void) { return connect_to_next_point; }
+        */
+        void set_connect_to_prev_point (unsigned region_idx)
+        {
+          connect_to_prev_points[region_idx] = true;
+        }
+        void set_connect_to_next_point (unsigned region_idx)
+        {
+          connect_to_next_points[region_idx] = true;
+        }
+        bool should_connect_to_prev_point (unsigned region_idx)
+        {
+          std::map<unsigned,bool>::iterator finder =
+            connect_to_prev_points.find(region_idx);
+          //return connect_to_prev_point;
+          return finder != connect_to_prev_points.end();
+        }
+        bool should_connect_to_next_point (unsigned region_idx)
+        {
+          std::map<unsigned,bool>::iterator finder =
+            connect_to_next_points.find(region_idx);
+          return finder != connect_to_next_points.end();
+          //return connect_to_next_point;
+        }
+
 #endif
       protected:
         // This barrier is only here to help with a bug that currently
@@ -1400,6 +1429,7 @@ namespace Legion {
       bool prev_point_wise_user_set(unsigned region_req_idx);
       void record_point_wise_dependence_completed_points_prev_task(
           ProjectionSummary *shard_proj, uint64_t context_index);
+      virtual void clear_context_maps(void);
     protected:
       void get_points(RegionRequirement &req,
           ProjectionFunction *projection,

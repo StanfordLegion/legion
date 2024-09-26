@@ -16578,7 +16578,9 @@ namespace Legion {
               case LEGION_TRUE_DEPENDENCE:
                 {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-                  if (prev.shard_proj != NULL && user.shard_proj != NULL)
+                  if (prev.shard_proj != NULL && user.shard_proj != NULL &&
+                      prev.op->get_operation_kind() == Operation::TASK_OP_KIND &&
+                      user.op->get_operation_kind() == Operation::TASK_OP_KIND)
                   {
                     if (static_cast<IndexTask*>(user.op)->
                         prev_point_wise_user_set(user.idx))
