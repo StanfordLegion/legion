@@ -498,7 +498,7 @@ namespace Realm {
     {
       assert(mem != nullptr);
 
-      if(info->pageable_access_supported) {
+      if(info->pageable_access_supported && (module->config->cfg_pageable_access != 0)) {
         // System that support full unified memory access may access any host accessible
         // memory, so exclude all memories that are not host accessible.  This assumes
         // that the memory given is somehow accessible by the current node
@@ -1477,7 +1477,8 @@ namespace Realm {
         unsigned latency = 1000;       // HACK - estimate at 1 us
         unsigned frag_overhead = 2000; // HACK - estimate at 2 us
 
-        if(src_gpu->info->pageable_access_supported) {
+        if(src_gpu->info->pageable_access_supported &&
+           (src_gpu->module->config->cfg_pageable_access != 0)) {
           // GPU can access all host memories, so add a path for each memory kind that is
           // accessible to the host as the source
           // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
@@ -1524,7 +1525,8 @@ namespace Realm {
         unsigned latency = 1000;          // HACK - estimate at 1 us
         unsigned frag_overhead = 2000;    // HACK - estimate at 2 us
 
-        if(src_gpu->info->pageable_access_supported) {
+        if(src_gpu->info->pageable_access_supported &&
+           (src_gpu->module->config->cfg_pageable_access != 0)) {
           // GPU can access all host memories, so add a path for each memory kind that is
           // accessible to the host as the source
           // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
@@ -2139,7 +2141,8 @@ namespace Realm {
 
       // TODO(cperry): Even though this is a HOST fill, mark it as a GPU_TO_FB xfer kind.
       // Is it really necesscary to annotate the kind of transfer?
-      if(gpu->info->pageable_access_supported) {
+      if(gpu->info->pageable_access_supported &&
+         (gpu->module->config->cfg_pageable_access != 0)) {
         // GPU can access all host memories, so add a path for each memory kind that is
         // accessible to the host
         // TODO(cperry): Add a query for the memory kind that it is CPU accessible.

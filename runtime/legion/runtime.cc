@@ -11029,8 +11029,10 @@ namespace Legion {
       assert(measured);
 #endif
       success.store(result.success);
-      Runtime::trigger_event(ready);
       fevent = unique_event;
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
+      Runtime::trigger_event(ready);
       return true;
     }
 
