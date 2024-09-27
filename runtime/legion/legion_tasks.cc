@@ -9992,9 +9992,6 @@ namespace Legion {
         else
           commit_preconditions.insert(profiling_reported);
       }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      clear_context_maps();
-#endif
       if (must_epoch != NULL)
       {
         RtEvent commit_precondition;
@@ -10012,6 +10009,9 @@ namespace Legion {
         else
           commit_operation(true/*deactivate*/);
       }
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      clear_context_maps();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10337,12 +10337,9 @@ namespace Legion {
       else
         shard_proj->domain->get_domain(local_domain);
 
-      for (RectInDomainIterator<1> itr(local_domain); itr(); itr++)
+      for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
       {
-        for (PointInRectIterator<1> pir(*itr); pir(); pir++)
-        {
-          prev_index_task_points.push_back((*pir));
-        }
+        prev_index_task_points.push_back((*dpi));
       }
 
       assert(!prev_index_task_points.empty());
@@ -10373,12 +10370,9 @@ namespace Legion {
         std::vector<DomainPoint> points;
         launch_space->get_domain(local_domain);
 
-        for (RectInDomainIterator<1> itr(local_domain); itr(); itr++)
+        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
         {
-          for (PointInRectIterator<1> pir(*itr); pir(); pir++)
-          {
-            points.push_back((*pir));
-          }
+          points.push_back((*dpi));
         }
         parent_ctx->clear_map(context_index, points);
       }

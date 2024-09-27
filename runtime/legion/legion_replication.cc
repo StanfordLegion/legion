@@ -1958,12 +1958,9 @@ namespace Legion {
           assert(1);
 
 
-        for (RectInDomainIterator<1> itr(local_domain); itr(); itr++)
+        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
         {
-          for (PointInRectIterator<1> pir(*itr); pir(); pir++)
-          {
-            points.push_back((*pir));
-          }
+          points.push_back((*dpi));
         }
         parent_ctx->clear_map(context_index, points);
       }
