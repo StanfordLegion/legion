@@ -3043,35 +3043,36 @@ namespace Realm {
       CommandLineParser cp;
 
       cp.add_option_int_units("-ll:fsize", cfg_fb_mem_size, 'm')
-        .add_option_int_units("-ll:zsize", cfg_zc_mem_size, 'm')
-        .add_option_int_units("-ll:ib_fsize", cfg_fb_ib_size, 'm')
-        .add_option_int_units("-ll:ib_zsize", cfg_zc_ib_size, 'm')
-        .add_option_int_units("-ll:msize", cfg_uvm_mem_size, 'm')
-        .add_option_int("-cuda:dynfb", cfg_use_dynamic_fb)
-        .add_option_int_units("-cuda:dynfb_max", cfg_dynfb_max_size, 'm')
-        .add_option_int("-ll:gpu", cfg_num_gpus)
-        .add_option_string("-ll:gpu_ids", cfg_gpu_idxs)
-        .add_option_int("-ll:streams", cfg_task_streams)
-        .add_option_int("-ll:d2d_streams", cfg_d2d_streams)
-        .add_option_int("-ll:d2d_priority", cfg_d2d_stream_priority)
-        .add_option_int("-ll:gpuworkthread", cfg_use_worker_threads)
-        .add_option_int("-ll:gpuworker", cfg_use_shared_worker)
-        .add_option_int("-ll:pin", cfg_pin_sysmem)
-        .add_option_bool("-cuda:callbacks", cfg_fences_use_callbacks)
-        .add_option_bool("-cuda:nohijack", cfg_suppress_hijack_warning)
-        .add_option_int("-cuda:skipgpus", cfg_skip_gpu_count)
-        .add_option_bool("-cuda:skipbusy", cfg_skip_busy_gpus)
-        .add_option_int_units("-cuda:minavailmem", cfg_min_avail_mem, 'm')
-        .add_option_int("-cuda:legacysync", cfg_task_legacy_sync)
-        .add_option_int("-cuda:contextsync", cfg_task_context_sync)
-        .add_option_int("-cuda:maxctxsync", cfg_max_ctxsync_threads)
-        .add_option_int("-cuda:lmemresize", cfg_lmem_resize_to_max)
-        .add_option_int("-cuda:mtdma", cfg_multithread_dma)
-        .add_option_int_units("-cuda:hostreg", cfg_hostreg_limit, 'm')
-        .add_option_int("-cuda:ipc", cfg_use_cuda_ipc);
-  #ifdef REALM_USE_CUDART_HIJACK
-        cp.add_option_int("-cuda:nongpusync", Cuda::cudart_hijack_nongpu_sync);
-  #endif
+          .add_option_int_units("-ll:zsize", cfg_zc_mem_size, 'm')
+          .add_option_int_units("-ll:ib_fsize", cfg_fb_ib_size, 'm')
+          .add_option_int_units("-ll:ib_zsize", cfg_zc_ib_size, 'm')
+          .add_option_int_units("-ll:msize", cfg_uvm_mem_size, 'm')
+          .add_option_int("-cuda:dynfb", cfg_use_dynamic_fb)
+          .add_option_int_units("-cuda:dynfb_max", cfg_dynfb_max_size, 'm')
+          .add_option_int("-ll:gpu", cfg_num_gpus)
+          .add_option_string("-ll:gpu_ids", cfg_gpu_idxs)
+          .add_option_int("-ll:streams", cfg_task_streams)
+          .add_option_int("-ll:d2d_streams", cfg_d2d_streams)
+          .add_option_int("-ll:d2d_priority", cfg_d2d_stream_priority)
+          .add_option_int("-ll:gpuworkthread", cfg_use_worker_threads)
+          .add_option_int("-ll:gpuworker", cfg_use_shared_worker)
+          .add_option_int("-ll:pin", cfg_pin_sysmem)
+          .add_option_bool("-cuda:callbacks", cfg_fences_use_callbacks)
+          .add_option_bool("-cuda:nohijack", cfg_suppress_hijack_warning)
+          .add_option_int("-cuda:skipgpus", cfg_skip_gpu_count)
+          .add_option_bool("-cuda:skipbusy", cfg_skip_busy_gpus)
+          .add_option_int_units("-cuda:minavailmem", cfg_min_avail_mem, 'm')
+          .add_option_int("-cuda:legacysync", cfg_task_legacy_sync)
+          .add_option_int("-cuda:contextsync", cfg_task_context_sync)
+          .add_option_int("-cuda:maxctxsync", cfg_max_ctxsync_threads)
+          .add_option_int("-cuda:lmemresize", cfg_lmem_resize_to_max)
+          .add_option_int("-cuda:mtdma", cfg_multithread_dma)
+          .add_option_int_units("-cuda:hostreg", cfg_hostreg_limit, 'm')
+          .add_option_int("-cuda:pageable_access", cfg_pageable_access)
+          .add_option_int("-cuda:ipc", cfg_use_cuda_ipc);
+#ifdef REALM_USE_CUDART_HIJACK
+      cp.add_option_int("-cuda:nongpusync", Cuda::cudart_hijack_nongpu_sync);
+#endif
 
       bool ok = cp.parse_command_line(cmdline);
       if(!ok) {

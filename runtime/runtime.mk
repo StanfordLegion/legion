@@ -1015,6 +1015,7 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
     $(LG_RT_DIR)/realm/deppart/byfield.cc \
     $(LG_RT_DIR)/realm/deppart/setops.cc \
     $(LG_RT_DIR)/realm/event_impl.cc \
+    $(LG_RT_DIR)/realm/barrier_impl.cc \
     $(LG_RT_DIR)/realm/rsrv_impl.cc \
     $(LG_RT_DIR)/realm/proc_impl.cc \
     $(LG_RT_DIR)/realm/mem_impl.cc \
