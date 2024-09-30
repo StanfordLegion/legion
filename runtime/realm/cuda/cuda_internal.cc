@@ -2232,15 +2232,6 @@ namespace Realm {
         }
       }
 
-      dst_gpus.resize(outputs_info.size(), 0);
-      for(size_t i = 0; i < output_ports.size(); i++) {
-        dst_gpus[i] = mem_to_gpu(output_ports[i].mem);
-        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
-          // sanity-check
-          assert(dst_gpus[i]);
-        }
-      }
-
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
 
       // select reduction kernel now - translate to CUfunction if possible
@@ -2352,7 +2343,6 @@ namespace Realm {
             uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
 
             GPU *in_gpu = nullptr;
-            GPU *out_gpu = nullptr;
 
             bool in_is_ipc = false;
             if(input_control.current_io_port >= 0) {
@@ -2363,23 +2353,16 @@ namespace Realm {
               in_is_ipc = src_is_ipc[input_control.current_io_port];
             }
 
-            if(output_control.current_io_port >= 0) {
-              out_gpu = dst_gpus[output_control.current_io_port];
-              if(out_gpu == nullptr) {
-                out_gpu = channel->gpu;
-              }
-            }
-
             if(in_is_ipc) {
-              assert(out_gpu != nullptr);
-              // TODO: select the stream?
               const GPU::CudaIpcMapping *in_mapping =
-                  out_gpu->find_ipc_mapping(in_port->mem->me);
+                  channel->gpu->find_ipc_mapping(in_port->mem->me);
               assert(in_mapping);
               in_base = in_mapping->local_base;
             } else {
               in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
             }
+
+            assert(channel->gpu->can_access_peer(in_gpu));
 
             while(total_elems < max_elems) {
               AddressListCursor& in_alc = in_port->addrcursor;
