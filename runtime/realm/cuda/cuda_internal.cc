@@ -2217,6 +2217,30 @@ namespace Realm {
       kernel_host_proxy = nullptr;
       assert(redop);
 
+      src_is_ipc.resize(inputs_info.size(), false);
+      src_gpus.resize(inputs_info.size(), 0);
+      for(size_t i = 0; i < input_ports.size(); i++) {
+        src_gpus[i] = mem_to_gpu(input_ports[i].mem);
+        // sanity-check
+        if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+          assert(src_gpus[i]);
+        } else {
+          // assume a memory owned by another node is ipc
+          if(NodeID(ID(input_ports[i].mem->me).memory_owner_node()) !=
+             Network::my_node_id)
+            src_is_ipc[i] = true;
+        }
+      }
+
+      dst_gpus.resize(outputs_info.size(), 0);
+      for(size_t i = 0; i < output_ports.size(); i++) {
+        dst_gpus[i] = mem_to_gpu(output_ports[i].mem);
+        if(output_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+          // sanity-check
+          assert(dst_gpus[i]);
+        }
+      }
+
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
 
       // select reduction kernel now - translate to CUfunction if possible
@@ -2324,8 +2348,38 @@ namespace Realm {
             log_xd.info() << "gpureduce chunk: min=" << min_xfer_size
                           << " max_elems=" << max_elems;
 
-            uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+            uintptr_t in_base = 0;
             uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+            GPU *in_gpu = nullptr;
+            GPU *out_gpu = nullptr;
+
+            bool in_is_ipc = false;
+            if(input_control.current_io_port >= 0) {
+              in_gpu = src_gpus[input_control.current_io_port];
+              if(in_gpu == nullptr) {
+                in_gpu = channel->gpu;
+              }
+              in_is_ipc = src_is_ipc[input_control.current_io_port];
+            }
+
+            if(output_control.current_io_port >= 0) {
+              out_gpu = dst_gpus[output_control.current_io_port];
+              if(out_gpu == nullptr) {
+                out_gpu = channel->gpu;
+              }
+            }
+
+            if(in_is_ipc) {
+              assert(out_gpu != nullptr);
+              // TODO: select the stream?
+              const GPU::CudaIpcMapping *in_mapping =
+                  out_gpu->find_ipc_mapping(in_port->mem->me);
+              assert(in_mapping);
+              in_base = in_mapping->local_base;
+            } else {
+              in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+            }
 
             while(total_elems < max_elems) {
               AddressListCursor& in_alc = in_port->addrcursor;
@@ -2482,9 +2536,9 @@ namespace Realm {
     // class GPUreduceChannel
 
     GPUreduceChannel::GPUreduceChannel(GPU *_gpu, BackgroundWorkManager *bgwork)
-      : SingleXDQChannel<GPUreduceChannel,GPUreduceXferDes>(bgwork,
-                                                            XFER_GPU_IN_FB,
-                                                            stringbuilder() << "cuda reduce channel (gpu=" << _gpu->info->index << ")")
+      : SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes>(
+            bgwork, XFER_GPU_IN_FB,
+            stringbuilder() << "cuda reduce channel (gpu=" << _gpu->info->index << ")")
       , gpu(_gpu)
     {
       std::vector<Memory> local_gpu_mems;
@@ -2548,17 +2602,17 @@ namespace Realm {
                 gpu->info->logical_peer_latency[peer_gpu->info->index]);
             unsigned frag_overhead = 2000; // HACK - estimate at 2 us
             if(peer_gpu->fbmem != nullptr) {
-              add_path(local_gpu_mems, peer_gpu->fbmem->me, bw, latency, frag_overhead,
+              add_path(peer_gpu->fbmem->me, local_gpu_mems, bw, latency, frag_overhead,
                        XFER_GPU_PEER_FB)
                   .allow_redops();
             }
             if(peer_gpu->fb_dmem != nullptr) {
-              add_path(local_gpu_mems, peer_gpu->fb_dmem->me, bw, latency, frag_overhead,
+              add_path(peer_gpu->fb_dmem->me, local_gpu_mems, bw, latency, frag_overhead,
                        XFER_GPU_PEER_FB)
                   .allow_redops();
             }
             if(peer_gpu->fb_ibmem != nullptr) {
-              add_path(local_gpu_mems, peer_gpu->fb_ibmem->me, bw, latency, frag_overhead,
+              add_path(peer_gpu->fb_ibmem->me, local_gpu_mems, bw, latency, frag_overhead,
                        XFER_GPU_PEER_FB)
                   .allow_redops();
             }
@@ -2568,7 +2622,7 @@ namespace Realm {
             size_t bw = std::max(gpu->info->c2c_bandwidth, gpu->info->pci_bandwidth);
             size_t latency = 2000;         // HACK - estimate at 2 us
             unsigned frag_overhead = 2000; // HACK - estimate at 2 us
-            add_path(local_gpu_mems, mem, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+            add_path(mem, local_gpu_mems, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
                 .allow_redops();
           }
           for(const GPU::CudaIpcMapping &mapping : gpu->cudaipc_mappings) {
@@ -2579,7 +2633,7 @@ namespace Realm {
               bw = gpu->info->logical_peer_bandwidth[mapping.src_gpu->info->index];
               latency = gpu->info->logical_peer_latency[mapping.src_gpu->info->index];
             }
-            add_path(local_gpu_mems, mapping.mem, bw, latency, frag_overhead,
+            add_path(mapping.mem, local_gpu_mems, bw, latency, frag_overhead,
                      XFER_GPU_PEER_FB)
                 .allow_redops();
           }

@@ -1033,6 +1033,8 @@ namespace Realm {
       CUfunction kernel;
       const void *kernel_host_proxy;
       GPUStream *stream;
+      std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> src_is_ipc;
     };
 
     class GPUreduceChannel : public SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes> {
