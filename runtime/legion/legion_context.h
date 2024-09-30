@@ -2135,34 +2135,6 @@ namespace Legion {
       // Only valid on the onwer context node
       std::map<RegionTreeID,
                std::vector<CollectiveResult*> >         collective_results; 
-    protected:
-      // The InnerContext and ReplicateContext will handle the execution
-      // and synchronization of asynchronous trace identification meta
-      // tasks, either on a single shard, or multiple shards.
-
-      // initialize_async_trace_analysis initializes any state needed
-      // for this context to handle asynchronous trace analysis.
-      void initialize_async_trace_analysis(size_t max_in_flight);
-      // enqueue_trace_analysis_meta_task enqueues an
-      // AutoTraceProcessRepeats meta task at the given logical
-      // operation counter. It can optionally immediately wait on
-      // the job to complete. It is up to the caller to make sure
-      // that at most max_in_flight jobs are currently executing.
-      RtEvent enqueue_trace_analysis_meta_task(
-        const AutoTraceProcessRepeatsArgs& args,
-        size_t opidx,
-        bool wait,
-        RtEvent precondition = RtEvent::NO_RT_EVENT
-      );
-      // poll_pending_trace_analysis_tasks returns the finish event
-      // of a meta task if one has completed, or NO_RT_EVENT if no
-      // tasks have completed yet. If must_pop is true, then it will
-      // always return a valid finish event, but requires that the
-      // caller has done the necessary synchronization.
-      RtEvent poll_pending_trace_analysis_tasks(size_t opidx, bool must_pop);
-    private:
-      // The InnerContext just maintains a completion queue for pending tasks.
-      CompletionQueue trace_analysis_comp_queue;
     };
 
     /**

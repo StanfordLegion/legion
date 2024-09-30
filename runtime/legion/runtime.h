@@ -2515,16 +2515,6 @@ namespace Legion {
             program_order_execution(false),
             dump_physical_traces(false),
             enable_automatic_tracing(false),
-            auto_trace_in_flight_jobs(16),
-            auto_trace_wait_async_jobs(false),
-            auto_trace_batchsize(100),
-            auto_trace_commit_threshold(15),
-            auto_trace_max_start_watch(10),
-            auto_trace_min_trace_length(5),
-            auto_trace_max_trace_length(std::numeric_limits<unsigned>::max()),
-            auto_trace_multi_scale_factor(100),
-            auto_trace_repeats_alg(NonOverlappingAlgorithm::SUFFIX_TREE_WALK),
-            auto_trace_identifier_alg(0),
             no_tracing(false),
             no_physical_tracing(false),
             no_trace_optimization(false),
@@ -2590,16 +2580,6 @@ namespace Legion {
         bool program_order_execution;
         bool dump_physical_traces;
         bool enable_automatic_tracing;
-        unsigned auto_trace_in_flight_jobs;
-        bool auto_trace_wait_async_jobs;
-        unsigned auto_trace_batchsize;
-        unsigned auto_trace_commit_threshold;
-        unsigned auto_trace_max_start_watch;
-        unsigned auto_trace_min_trace_length;
-        uint64_t auto_trace_max_trace_length;
-        uint64_t auto_trace_multi_scale_factor;
-        NonOverlappingAlgorithm auto_trace_repeats_alg;
-        uint64_t auto_trace_identifier_alg;
         bool no_tracing;
         bool no_physical_tracing;
         bool no_trace_optimization;
@@ -2646,8 +2626,6 @@ namespace Legion {
         bool prof_all_critical_arrivals;
       public:
         bool parse_alloc_percentage_override_argument(const std::string& s);
-        bool parse_auto_trace_repeats_algorithm_argument(const std::string& s);
-        bool parse_auto_trace_identifier_algorithm_argument(const std::string& s);
       };
     public:
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
@@ -2732,36 +2710,6 @@ namespace Legion {
     public:
       const bool program_order_execution;
       const bool dump_physical_traces;
-      const bool enable_automatic_tracing;
-      // How many async string processing jobs can be concurrently
-      // executing at once (default 16).
-      const unsigned auto_trace_in_flight_jobs;
-      // Whether or not the runtime should wait on the execution
-      // of string processing jobs (default false).
-      const bool auto_trace_wait_async_jobs;
-      // How many operations the runtime should buffer at once
-      // to find repeated traces (default ?).
-      const unsigned auto_trace_batchsize;
-      // How many times a trace needs to be visited before the
-      // runtime considers automatically replaying it (default 15).
-      const unsigned auto_trace_commit_threshold;
-      // How many traces should be moved to the "watching" state
-      // from the trace identification process (default 10).
-      const unsigned auto_trace_max_start_watch;
-      // The minimum trace length that we are willing to record (default 5).
-      const unsigned auto_trace_min_trace_length;
-      // The maximum trace length that we are willing to replay (default uint64_t max).
-      const uint64_t auto_trace_max_trace_length;
-      // The scale factor size for the multi-scale identification algorithm.
-      // The multi-scale algorithm will use this value as the minimum buffer
-      // size to run partial analyses over (default 100).
-      const uint64_t auto_trace_multi_scale_factor;
-      // The algorithm we will use to identify repeated sequences of
-      // tasks issued by the program.
-      const NonOverlappingAlgorithm auto_trace_repeats_alg;
-      // The algorithm we will use to decide when to run repeats
-      // processing jobs on task buffers.
-      const uint64_t auto_trace_identifier_alg;
       const bool no_tracing;
       const bool no_physical_tracing;
       const bool no_trace_optimization;

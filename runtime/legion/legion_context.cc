@@ -1299,8 +1299,7 @@ namespace Legion {
         current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit_creation(NULL),
-        last_implicit_creation_gen(0), current_priority(task_priority),
-        trace_analysis_comp_queue(CompletionQueue::NO_QUEUE)
+        last_implicit_creation_gen(0), current_priority(task_priority)
     //--------------------------------------------------------------------------
     {
       mutable_priority = context_configuration.mutable_priority;
@@ -12339,34 +12338,6 @@ namespace Legion {
           0/*idx*/, LEGION_TRUE_DEPENDENCE);
     }
 #endif
-
-    void InnerContext::initialize_async_trace_analysis(size_t max_in_flight) {
-      this->trace_analysis_comp_queue = CompletionQueue::create_completion_queue(max_in_flight);
-    }
-
-    RtEvent InnerContext::enqueue_trace_analysis_meta_task(
-      const AutoTraceProcessRepeatsArgs &args,
-      size_t opidx,
-      bool wait,
-      RtEvent precondition
-    ) {
-      // TODO (rohany): Not sure of the priority to use here.
-      RtEvent event = this->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, precondition);
-      this->trace_analysis_comp_queue.add_event(event);
-      if (wait) { event.wait(); }
-      return event;
-    }
-
-    RtEvent InnerContext::poll_pending_trace_analysis_tasks(size_t opidx, bool must_pop) {
-      // All there is to do here is check the completion queue for any results.
-      RtEvent finish_event = RtEvent::NO_RT_EVENT;
-      size_t num_completed = this->trace_analysis_comp_queue.pop_events(&finish_event, 1);
-      // If must_pop is true, then the AutomaticTracingContext must have waited
-      // on the first finish event, so we must have gotten something out of
-      // the completion queue.
-      if (must_pop) { assert(num_completed == 1); }
-      return finish_event;
-    }
 
     /////////////////////////////////////////////////////////////
     // Top Level Context 
