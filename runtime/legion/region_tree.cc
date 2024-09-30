@@ -16582,38 +16582,44 @@ namespace Legion {
                       prev.op->get_operation_kind() == Operation::TASK_OP_KIND &&
                       user.op->get_operation_kind() == Operation::TASK_OP_KIND)
                   {
-                    if (static_cast<IndexTask*>(user.op)->
-                        prev_point_wise_user_set(user.idx))
+                    if (static_cast<TaskOp*>(user.op)->get_task_kind() ==
+                        TaskOp::INDEX_TASK_KIND &&
+                        static_cast<TaskOp*>(prev.op)->get_task_kind() ==
+                        TaskOp::INDEX_TASK_KIND)
                     {
-                      // We bail if we have more than one ancestor for now
-                      logical_analysis.bail_point_wise_analysis = true;
-                    }
-                    if (!logical_analysis.bail_point_wise_analysis) {
-                      if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
+                      if (static_cast<IndexTask*>(user.op)->
+                          prev_point_wise_user_set(user.idx))
+                      {
+                        // We bail if we have more than one ancestor for now
                         logical_analysis.bail_point_wise_analysis = true;
                       }
-                      else if ((user.shard_proj->projection->projection_id !=
-                            prev.shard_proj->projection->projection_id) ||
-                          !user.shard_proj->projection->is_functional) //||
-                          //!user.shard_proj->projection->is_invertible)
-                      {
-                        logical_analysis.bail_point_wise_analysis = true;
-                      }
-                      else
-                      {
-                        bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
-                        if(parent_dominates)
+                      if (!logical_analysis.bail_point_wise_analysis) {
+                        if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
+                          logical_analysis.bail_point_wise_analysis = true;
+                        }
+                        else if ((user.shard_proj->projection->projection_id !=
+                              prev.shard_proj->projection->projection_id) ||
+                            !user.shard_proj->projection->is_functional) //||
+                            //!user.shard_proj->projection->is_invertible)
                         {
-                          printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
-                          skip_registering_region_dependece = true;
-                          if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
-                              &user, prev.gen, prev.idx))
+                          logical_analysis.bail_point_wise_analysis = true;
+                        }
+                        else
+                        {
+                          bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
+                          if(parent_dominates)
                           {
-                            static_cast<IndexTask*>(user.op)->record_point_wise_dependence_completed_points_prev_task(
-                                prev.shard_proj, prev.ctx_index);
+                            printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
+                            skip_registering_region_dependece = true;
+                            if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
+                                &user, prev.gen, prev.idx))
+                            {
+                              static_cast<IndexTask*>(user.op)->record_point_wise_dependence_completed_points_prev_task(
+                                  prev.shard_proj, prev.ctx_index);
+                            }
+                            static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
+                                &prev, user.idx, dtype, prev.idx);
                           }
-                          static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
-                              &prev, user.idx, dtype, prev.idx);
                         }
                       }
                     }
