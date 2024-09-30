@@ -22,8 +22,6 @@
 #include "legion/legion_instances.h"
 #include "legion/legion_allocation.h"
 
-#include <memory>
-
 namespace Legion {
   namespace Internal {
    
