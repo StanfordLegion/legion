@@ -20,7 +20,6 @@
 #include "legion/legion_context.h"
 #include "legion/legion_types.h"
 #include "legion/legion_utilities.h"
-#include "legion/suffix_tree.h"
 #include "legion/trie.h"
 
 #include <limits>
@@ -266,6 +265,12 @@ namespace Legion {
      */
     class TraceRecognizer {
     public:
+      // Non overlapping repeats implementation.
+      struct NonOverlappingRepeatsResult {
+        size_t start;
+        size_t end;
+        size_t repeats;
+      };
       struct FindRepeatsResult {
         std::vector<Murmur3Hasher::Hash> hashes; // only for storage
         std::vector<NonOverlappingRepeatsResult> result;

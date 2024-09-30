@@ -25,7 +25,6 @@
 #include "legion/legion_profiling.h"
 #include "legion/legion_allocation.h"
 #include "legion/garbage_collection.h"
-#include "legion/suffix_tree.h"
 
 #define REPORT_LEGION_FATAL(code, fmt, ...)               \
 {                                                         \

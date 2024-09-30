@@ -14,7 +14,6 @@
  */
 
 #include "legion/legion_auto_trace.h"
-#include "legion/suffix_tree.h"
 
 #include <cmath>
 #include <iterator>

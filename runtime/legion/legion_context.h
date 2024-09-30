@@ -21,7 +21,6 @@
 #include "legion/legion_mapping.h"
 #include "legion/legion_instances.h"
 #include "legion/legion_allocation.h"
-#include "legion/suffix_tree.h"
 
 #include <memory>
 
@@ -915,58 +914,6 @@ namespace Legion {
         const PartitionKind kind;
         const char *const func;
       };
-
-      // Offline string analysis operations.
-      struct AutoTraceProcessRepeatsArgs : public LgTaskArgs<AutoTraceProcessRepeatsArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID;
-      public:
-        // A constructor for when the entire operations_ vector is being
-        // consumed by this analysis. In this case, the sentinel is assumed
-        // to be at the end of operations_.
-        AutoTraceProcessRepeatsArgs(
-            std::vector<Murmur3Hasher::Hash>* operations_,
-            std::vector<NonOverlappingRepeatsResult>* result_,
-            size_t min_trace_length_,
-            NonOverlappingAlgorithm alg_
-        ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
-            operations(operations_),
-            result(result_),
-            min_trace_length(min_trace_length_),
-            alg(alg_),
-            raw_operations(nullptr),
-            raw_operations_len(0),
-            operations_dest(nullptr) {}
-        // A constructor for when a slice of an existing vector is being used,
-        // and the sentinel is not present. In this case, the analysis must make
-        // a copy of the input data, and write this copy out to the desired location.
-        AutoTraceProcessRepeatsArgs(
-            Murmur3Hasher::Hash* raw_operations_,
-            uint64_t raw_operations_len_,
-            std::vector<Murmur3Hasher::Hash>* operations_dest_,
-            std::vector<NonOverlappingRepeatsResult>* result_,
-            size_t min_trace_length_,
-            NonOverlappingAlgorithm alg_
-        ) : LgTaskArgs<AutoTraceProcessRepeatsArgs>(implicit_provenance),
-            operations(nullptr),
-            result(result_),
-            min_trace_length(min_trace_length_),
-            alg(alg_),
-            raw_operations(raw_operations_),
-            raw_operations_len(raw_operations_len_),
-            operations_dest(operations_dest_) {}
-      public:
-        std::vector<Murmur3Hasher::Hash>* operations;
-        std::vector<NonOverlappingRepeatsResult>* result;
-        size_t min_trace_length;
-        NonOverlappingAlgorithm alg;
-      public:
-        // Fields used in the slice case.
-        Murmur3Hasher::Hash* raw_operations;
-        uint64_t raw_operations_len;
-        std::vector<Murmur3Hasher::Hash>* operations_dest;
-      };
-
       template<typename T>
       struct QueueEntry {
       public:
@@ -3428,44 +3375,6 @@ namespace Legion {
       // number of repeat jobs that are ready across all the shards
       AllReduceCollective<
         MinReduction<unsigned>,false> *minimize_repeats_collective;
-    protected:
-      // The ReplicateContext will also provide definitions of
-      // asynchronous trace processing task management APIs.
-      // See the definitions above in the InnerContext for
-      // more information about how they work.
-      void initialize_async_trace_analysis(size_t max_in_flight);
-      RtEvent enqueue_trace_analysis_meta_task(
-          const AutoTraceProcessRepeatsArgs& args,
-          size_t opidx,
-          bool wait,
-          RtEvent precondition = RtEvent::NO_RT_EVENT
-      );
-      RtEvent poll_pending_trace_analysis_tasks(
-          size_t opidx,
-          bool must_pop
-      );
-    private:
-      // Unlike the InnerContext, the ReplicateContext uses a different
-      // strategy to make sure that all shards agree to complete (and thus
-      // ingest the results of the trace analysis) at the same logical
-      // time. In order to avoid unnecessary blocking of the top level
-      // task, we do this by maintaining an interval of operations that every
-      // shard agrees to wait on a task after. Then, when the shards wait,
-      // they all record (and tell each other) if anyone actually had to wait.
-      // If any shard actually had to wait, then we double interval. This way
-      // we eventually hit a steady state where no blocking is occurring.
-      size_t trace_analysis_async_task_wait_interval = 10;
-      struct InFlightTraceAnalysisTask {
-        InFlightTraceAnalysisTask(RtEvent finish_event, size_t opidx)
-          : finish_event(finish_event), opidx(opidx) {}
-        RtEvent finish_event;
-        size_t opidx;
-      };
-      std::list<InFlightTraceAnalysisTask> trace_analysis_inflight_tasks;
-      // trace_analysis_did_block_collective is a collective that holds on
-      // to the "previous" wait's result of shards reducing whether or not
-      // they had to wait.
-      std::unique_ptr<AllReduceCollective<SumReduction<bool>, false>> trace_analysis_did_block_collective;
     };
 
     /**
