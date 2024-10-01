@@ -835,11 +835,6 @@ namespace Legion {
       SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      SLICE_FIND_POINT_WISE_DEP,
-      SLICE_RECORD_POINT_WISE_DEP,
-      SLICE_ADD_POINT_TO_COMPLETED_LIST,
-#endif
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
       SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS,
       SLICE_REMOTE_OUTPUT_EXTENTS,
@@ -921,9 +916,6 @@ namespace Legion {
       SEND_REPL_REFINE_EQUIVALENCE_SETS,
       SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
       SEND_REPL_INTRA_SPACE_DEP,
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      SEND_REPL_POINT_WISE_DEP,
-#endif
       SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
@@ -1099,6 +1091,10 @@ namespace Legion {
       SEND_PROFILER_EVENT_POISON,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
+      SLICE_FIND_POINT_WISE_DEP,
+      SLICE_RECORD_POINT_WISE_DEP,
+      SLICE_ADD_POINT_TO_COMPLETED_LIST,
+      SEND_REPL_POINT_WISE_DEP,
       LAST_SEND_KIND, // This one must be last
     };
 
@@ -1431,6 +1427,10 @@ namespace Legion {
         "Send Profiler Event Poison",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
+        "Slice Find Point Wise Dep",                                  \
+        "Slice Record Point Wise Dep",                                \
+        "Slice Add Point To Completed List",                          \
+        "Send Repl Point Wise Dep",                                   \
       };
 
     // Runtime task numbering 
