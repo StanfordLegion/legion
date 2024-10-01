@@ -158,6 +158,7 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
       total_point = num_iterations;
     }
   public:
+    using DefaultMapper::select_sharding_functor;
 		void select_sharding_functor(const Mapping::MapperContext       ctx,
 																 const Task&                        task,
 																 const SelectShardingFunctorInput&  input,
@@ -181,7 +182,7 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
     {
       DefaultMapper::select_tasks_to_map(ctx, input, output);
       return;
-      unsigned count = 0;
+      /*unsigned count = 0;
       for (std::list<const Task*>::const_iterator it =
             input.ready_tasks.begin(); (count < max_schedule_count) &&
             (it != input.ready_tasks.end()); it++)
@@ -210,7 +211,7 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
       {
         select_tasks_to_map_event = this->runtime->create_mapper_event(ctx);
         output.deferral_event = select_tasks_to_map_event;
-      }
+      }*/
     }
 
     virtual void slice_task(const MapperContext ctx,

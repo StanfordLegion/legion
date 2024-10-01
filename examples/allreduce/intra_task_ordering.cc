@@ -56,6 +56,17 @@ public:
      ordered_points.push_back(itr.p);
     }
   }
+
+  virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+                      const Domain &launch_domain,
+                      std::vector<DomainPoint> &ordered_points) override
+  {
+   for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+   {
+     ordered_points.push_back(itr.p);
+    }
+  }
+
   virtual unsigned get_depth(void) const override { return 0; }
   virtual bool is_functional(void) const override { return true; }
   virtual bool is_invertible(void) const override { return true; }
