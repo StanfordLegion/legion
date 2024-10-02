@@ -16599,8 +16599,9 @@ namespace Legion {
                         }
                         else if ((user.shard_proj->projection->projection_id !=
                               prev.shard_proj->projection->projection_id) ||
-                            !user.shard_proj->projection->is_functional) //||
-                            //!user.shard_proj->projection->is_invertible)
+                            !user.shard_proj->projection->is_functional ||
+                            (!user.shard_proj->projection->is_invertible &&
+                             user.shard_proj->projection->projection_id != 0))
                         {
                           logical_analysis.bail_point_wise_analysis = true;
                         }
