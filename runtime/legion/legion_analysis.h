@@ -1027,7 +1027,8 @@ namespace Legion {
       virtual bool is_disjoint(void) const = 0;
       virtual bool is_leaves_only(void) const = 0;
       virtual bool is_unique_shards(void) const = 0;
-      virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
+      virtual bool interferes(ProjectionNode *other,
+          ShardID local, bool &dominates) const = 0;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1052,7 +1053,8 @@ namespace Legion {
       virtual bool is_disjoint(void) const;
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
-      virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      virtual bool interferes(ProjectionNode *other,
+          ShardID local, bool &dominates) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1061,7 +1063,8 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
-      bool has_interference(ProjectionRegion *other, ShardID local) const;
+      bool has_interference(ProjectionRegion *other, ShardID local,
+                            bool &dominates) const;
       void add_user(ShardID shard);
       void add_child(ProjectionPartition *child);
     public:
@@ -1087,7 +1090,8 @@ namespace Legion {
       virtual bool is_disjoint(void) const;
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
-      virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      virtual bool interferes(ProjectionNode *other,
+          ShardID local, bool &dominates) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1096,7 +1100,8 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
-      bool has_interference(ProjectionPartition *other, ShardID local) const;
+      bool has_interference(ProjectionPartition *other, ShardID local,
+                            bool &dominates) const;
       void add_child(ProjectionRegion *child);
     public:
       PartitionNode *const partition;
@@ -1367,7 +1372,7 @@ namespace Legion {
                                           const ProjectionInfo &proj_info);
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
-                          ProjectionSummary *one, ProjectionSummary *two);
+          ProjectionSummary *one, ProjectionSummary *two, bool &dominates);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1439,7 +1444,8 @@ namespace Legion {
       // be pruned out once they are no longer alive
       std::list<ProjectionSummary*> projection_summary_cache;
       std::unordered_map<ProjectionSummary*,
-        std::unordered_map<ProjectionSummary*,bool> > interfering_shards;
+        std::unordered_map<ProjectionSummary*,
+         std::pair<bool/*interferes*/,bool/*dominates*/> > > interfering_shards;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
