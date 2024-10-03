@@ -55,5 +55,43 @@ namespace Realm {
     return b;
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct BarrierTriggerMessageArgs
+  //
+
+  template <typename S>
+  bool serialize(S &ser, const BarrierTriggerMessageArgs &args)
+  {
+    bool success = false;
+
+    success = (ser & args.internal.trigger_gen) && (ser & args.internal.previous_gen) &&
+              (ser & args.internal.first_generation) && (ser & args.internal.redop_id) &&
+              (ser & args.internal.migration_target) &&
+              (ser & args.internal.base_arrival_count) &&
+              (ser & args.internal.broadcast_index) &&
+              (ser & args.internal.is_complete_list) &&
+              (ser & args.internal.invalid_reduction_gen) &&
+              (ser & args.remote_notifications);
+
+    return success;
+  }
+
+  template <typename S>
+  bool deserialize(S &dez, BarrierTriggerMessageArgs &args)
+  {
+    bool success = false;
+    success = (dez & args.internal.trigger_gen) && (dez & args.internal.previous_gen) &&
+              (dez & args.internal.first_generation) && (dez & args.internal.redop_id) &&
+              (dez & args.internal.migration_target) &&
+              (dez & args.internal.base_arrival_count) &&
+              (dez & args.internal.broadcast_index) &&
+              (dez & args.internal.is_complete_list) &&
+              (dez & args.internal.invalid_reduction_gen) &&
+              (dez & args.remote_notifications);
+
+    return success;
+  }
+
 }; // namespace Realm
 
