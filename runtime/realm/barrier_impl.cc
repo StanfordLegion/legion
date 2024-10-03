@@ -785,7 +785,7 @@ namespace Realm {
         broadcast_trigger(b, remote_notifications, remote_broadcast_targets,
                           oldest_previous, broadcast_previous, first_generation,
                           migration_target, base_arrival_count, redop_id,
-                          final_values_copy, 0);
+                          final_values_copy, /*datalen=*/0);
       }
     }
 
@@ -1142,9 +1142,11 @@ namespace Realm {
     Barrier b = id.convert<Barrier>();
     BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
-    if(trigger_args.remote_notifications.size() > 0) {
+    if(!trigger_args.remote_notifications.empty()) {
       AutoLock<> a(impl->mutex);
 
+      // TODO(apryakhin@): This might be incorrect if chunks
+      // broadcasted from the parent received out of order.
       impl->buffered_notifications.insert(impl->buffered_notifications.end(),
                                           trigger_args.remote_notifications.begin(),
                                           trigger_args.remote_notifications.end());
@@ -1162,7 +1164,8 @@ namespace Realm {
       get_broadcast_targets(node, num_peers, BarrierConfig::broadcast_radix,
                             broadcast_targets);
 
-      broadcast_trigger(b, impl->buffered_notifications, broadcast_targets, 0, 0,
+      broadcast_trigger(b, impl->buffered_notifications, broadcast_targets,
+                        /*oldest_previous=*/0, /*broadcast_previous=*/0,
                         trigger_args.internal.first_generation,
                         trigger_args.internal.migration_target,
                         trigger_args.internal.base_arrival_count,
