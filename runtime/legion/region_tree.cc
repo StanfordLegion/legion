@@ -16556,7 +16556,7 @@ namespace Legion {
           }
           const FieldMask overlap = check_mask & it->second;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-          bool skip_registering_region_dependece = false;
+          bool skip_registering_region_dependence = false;
 #endif
           if (!!overlap)
           {
@@ -16587,6 +16587,10 @@ namespace Legion {
                         static_cast<TaskOp*>(prev.op)->get_task_kind() ==
                         TaskOp::INDEX_TASK_KIND)
                     {
+                      if(logical_analysis.bail_point_wise_analysis)
+                      {
+                        printf("bailing!!!!\n");
+                      }
                       if (static_cast<IndexTask*>(user.op)->
                           prev_point_wise_user_set(user.idx))
                       {
@@ -16610,8 +16614,8 @@ namespace Legion {
                           bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
                           if(parent_dominates)
                           {
-                            printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
-                            skip_registering_region_dependece = true;
+                            printf("FOUND POINT-WISE ANCESTOR: %d %lld %lld\n", context->runtime->address_space, prev.uid, user.uid);
+                            skip_registering_region_dependence = true;
                             if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
                                 &user, prev.gen, prev.idx))
                             {
@@ -16625,7 +16629,7 @@ namespace Legion {
                       }
                     }
                   }
-                  if(!skip_registering_region_dependece)
+                  if(!skip_registering_region_dependence)
                   {
 #endif
                   // If we can validate a region record which of our

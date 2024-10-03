@@ -4023,9 +4023,18 @@ class LogicalVerificationState(object):
                 # all of their local points are
                 need_fence = False
             if op.has_point_wise_dependence(req.index):
-                if not op.has_mapping_dependence(req, prev_op, prev_req, dep_type, self.field):
-                    return dominates, False
-            elif not logical_op.has_verification_mapping_dependence(
+                state_bad_graph_on_error = op.state.bad_graph_on_error
+                state_assert = op.state.assert_on_error
+                op.state.bad_graph_on_error = False
+                op.state.assert_on_error = False
+
+                has_mapping_dependence = op.has_mapping_dependence(req, prev_op, prev_req, dep_type, self.field)
+
+                op.state.bad_graph_on_error = state_bad_graph_on_error
+                op.state.assert_on_error = state_assert
+                if has_mapping_dependence:
+                    return dominates, True
+            if not logical_op.has_verification_mapping_dependence(
                     logical_op.reqs[req.index], prev_logical, 
                     prev_logical.reqs[prev_req.index], dep_type, 
                     self.field, need_fence, previous_deps):
@@ -7533,8 +7542,6 @@ class Operation(object):
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
                                             field, need_fence, previous_deps):
         tree_id = req.logical_node.tree_id
-        #if prev_op.uid == 24:
-        #    breakpoint()
         # Do a quick check to see if it is in the previous deps
         if prev_op in previous_deps:
             if need_fence:

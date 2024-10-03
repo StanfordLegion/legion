@@ -10459,8 +10459,10 @@ namespace Legion {
         IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.previous_index_task);
         GenerationID prev_task_gen = finder->second.previous_index_task_generation;
 
+#ifndef LEGION_SPY
         if (prev_task_gen < prev_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
+#endif
 
         RegionRequirement &req = logical_regions[region_idx];
         std::vector<DomainPoint> previous_index_task_points;
@@ -10475,10 +10477,7 @@ namespace Legion {
         }
         assert(!previous_index_task_points.empty());
 
-        if (get_unique_id() == 62)
-        {
           //printf("BLA context_index: %ld, current task: %lld, region_idx: %d, point: %lld, context_index: %ld, previous task: %lld, region_idx: %d, point: %lld\n", context_index, get_unique_id(), region_idx, point.point_data[0], finder->second.ctx_index, prev_index_task->get_unique_id(), finder->second.region_idx, previous_index_task_points[0].point_data[0]);
-        }
 
 #ifdef LEGION_SPY
         LegionSpy::log_mapping_point_wise_dependence(
@@ -10489,7 +10488,11 @@ namespace Legion {
             context_index, point,
             region_idx, 0,
             finder->second.dep_type);
+
+        if (prev_task_gen < prev_index_task->get_generation())
+          return RtEvent::NO_RT_EVENT;
 #endif
+
 
         return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
             previous_index_task_points[0]);
