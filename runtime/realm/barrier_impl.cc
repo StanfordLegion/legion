@@ -690,6 +690,12 @@ namespace Realm {
             if(remote_notifications.empty() || (rn.previous_gen < oldest_previous))
               oldest_previous = rn.previous_gen;
             remote_notifications.push_back(rn);
+
+            if(remote_notifications.size() == 1) {
+              broadcast_previous = rn.previous_gen;
+            } else {
+              broadcast_previous = std::min(broadcast_previous, rn.previous_gen);
+            }
           }
         }
 
@@ -765,15 +771,8 @@ namespace Realm {
 
       NodeID node = (Network::my_node_id - owner + Network::max_node_id + 1) %
                     (Network::max_node_id + 1);
-      for(size_t i = 0; i < remote_notifications.size(); i++) {
-        broadcast_previous =
-            i == 0 ? remote_notifications[i].previous_gen
-                   : std::min(broadcast_previous, remote_notifications[i].previous_gen);
-      }
-
       get_broadcast_targets(node, remote_notifications.size(),
                             BarrierConfig::broadcast_radix, remote_broadcast_targets);
-
     } while(0);
 
     if(forward_to_node != (NodeID)-1) {
