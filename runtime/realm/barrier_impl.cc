@@ -25,9 +25,7 @@
 #define DISABLE_BARRIER_MIGRATION
 
 namespace BarrierConfig {
-  int reduction_radix = 2;
   int broadcast_radix = 2;
-  int max_arrivals_payload = 256;
   int max_notifies_payload = 256;
 }; // namespace BarrierConfig
 
@@ -36,7 +34,6 @@ TYPE_IS_SERIALIZABLE(Realm::RemoteNotification);
 namespace Realm {
 
   Logger log_barrier("barrier");
-  Logger log_barrier_scale("barrier_scale");
 
   // used in places that don't currently propagate poison but should
   static const bool POISON_FIXME = false;
@@ -457,16 +454,13 @@ namespace Realm {
     for(const NodeID target : broadcast_targets) {
       EventImpl::gen_t trigger_gen = notifications[target].trigger_gen;
 
-      const void *reduce_data = nullptr;
-      size_t reduce_data_size = 0;
+      const void *reduce_data = data;
+      size_t reduce_data_size = datalen;
 
       if(datalen == 0 && redop_id != 0) {
         reduce_data = (char *)data +
                       ((broadcast_previous - oldest_previous) * impl->redop->sizeof_lhs);
         reduce_data_size = (trigger_gen - broadcast_previous) * impl->redop->sizeof_lhs;
-      } else {
-        reduce_data = data;
-        reduce_data_size = datalen;
       }
 
       BarrierTriggerMessageArgs trigger_args;
@@ -503,14 +497,14 @@ namespace Realm {
 
         trigger_args.internal.is_complete_list = (end == notifications.size());
 
-        log_barrier_scale.info()
-            << "trigger broadcast N:" << Network::my_node_id << " index:" << target
-            << " target:" << notifications[target].node
-            << " trigger_gen:" << notifications[target].trigger_gen
-            << " datalen:" << datalen
-            << " prev_gen:" << notifications[target].previous_gen
-            << " bcast_prev_gen:" << broadcast_previous
-            << " max_node:" << Network::max_node_id;
+        log_barrier.info() << "trigger broadcast N:" << Network::my_node_id
+                           << " index:" << target
+                           << " target:" << notifications[target].node
+                           << " trigger_gen:" << notifications[target].trigger_gen
+                           << " datalen:" << datalen
+                           << " prev_gen:" << notifications[target].previous_gen
+                           << " bcast_prev_gen:" << broadcast_previous
+                           << " max_node:" << Network::max_node_id;
 
         BarrierTriggerMessage::send_request(notifications[target].node, barrier.id,
                                             trigger_args, reduce_data, reduce_data_size);
@@ -1130,9 +1124,6 @@ namespace Realm {
                                                         const void *data, size_t datalen,
                                                         TimeLimit work_until)
   {
-    log_barrier.info("received remote barrier trigger: " IDFMT "/%d -> %d",
-                     args.barrier_id, args.previous_gen, args.trigger_gen);
-
     Serialization::FixedBufferDeserializer fbd(data, datalen);
     BarrierTriggerMessageArgs trigger_args;
     bool ok = fbd & trigger_args;
@@ -1142,6 +1133,9 @@ namespace Realm {
     datalen = fbd.bytes_left();
 
     EventImpl::gen_t trigger_gen = trigger_args.internal.trigger_gen;
+
+    log_barrier.info("received remote barrier trigger: " IDFMT "/%d -> %d",
+                     args.barrier_id, trigger_args.internal.previous_gen, trigger_gen);
 
     ID id(args.barrier_id);
     id.barrier_generation() = trigger_gen;
