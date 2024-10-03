@@ -301,12 +301,6 @@ namespace Realm {
     ActiveMessage<BarrierTriggerMessage> amsg(target, total_payload_size);
     amsg->barrier_id = barrier_id;
     amsg.add_payload(dbs.get_buffer(), total_payload_size);
-
-    ID id(barrier_id);
-    id.barrier_generation() = trigger_gen;
-    Barrier b = id.convert<Barrier>();
-    BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
-
     amsg.commit();
   }
 
@@ -325,12 +319,6 @@ namespace Realm {
     ActiveMessage<BarrierTriggerMessage> amsg(target, total_payload_size);
     amsg->barrier_id = barrier_id;
     amsg.add_payload(dbs.get_buffer(), total_payload_size);
-
-    ID id(barrier_id);
-    id.barrier_generation() = trigger_args.internal.trigger_gen;
-    Barrier b = id.convert<Barrier>();
-    BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
-
     amsg.commit();
   }
 
@@ -457,14 +445,13 @@ namespace Realm {
     }
   }
 
-  static void broadcast_trigger(Barrier barrier, bool include_notification_payload,
-                                const std::vector<RemoteNotification> &notifications,
-                                const std::vector<NodeID> &broadcast_targets,
-                                EventImpl::gen_t oldest_previous,
-                                EventImpl::gen_t broadcast_previous,
-                                EventImpl::gen_t first_generation,
-                                NodeID migration_target, unsigned base_arrival_count,
-                                ReductionOpID redop_id, const void *data, size_t datalen)
+  static void
+  broadcast_trigger(Barrier barrier, const std::vector<RemoteNotification> &notifications,
+                    const std::vector<NodeID> &broadcast_targets,
+                    EventImpl::gen_t oldest_previous, EventImpl::gen_t broadcast_previous,
+                    EventImpl::gen_t first_generation, NodeID migration_target,
+                    unsigned base_arrival_count, ReductionOpID redop_id, const void *data,
+                    size_t datalen, bool include_notifications = true)
   {
     BarrierImpl *impl = get_barrier_impl(barrier);
     for(const NodeID target : broadcast_targets) {
@@ -508,7 +495,7 @@ namespace Realm {
       for(size_t start = 0; start < notifications.size(); start += max_notifications) {
         size_t end = std::min(start + max_notifications, notifications.size());
 
-        if(include_notification_payload) {
+        if(include_notifications) {
           std::vector<RemoteNotification> chunk_remote_notifications(
               notifications.begin() + start, notifications.begin() + end);
           trigger_args.remote_notifications = chunk_remote_notifications;
@@ -801,7 +788,7 @@ namespace Realm {
 
       {
         AutoLock<> al(mutex);
-        broadcast_trigger(b, true, remote_notifications, remote_broadcast_targets,
+        broadcast_trigger(b, remote_notifications, remote_broadcast_targets,
                           oldest_previous, broadcast_previous, first_generation,
                           migration_target, base_arrival_count, redop_id,
                           final_values_copy, 0);
@@ -1181,7 +1168,7 @@ namespace Realm {
       get_broadcast_targets(node, num_peers, BarrierConfig::broadcast_radix,
                             broadcast_targets);
 
-      broadcast_trigger(b, true, impl->buffered_notifications, broadcast_targets, 0, 0,
+      broadcast_trigger(b, impl->buffered_notifications, broadcast_targets, 0, 0,
                         trigger_args.internal.first_generation,
                         trigger_args.internal.migration_target,
                         trigger_args.internal.base_arrival_count,
