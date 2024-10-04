@@ -668,8 +668,11 @@ namespace Realm {
                 remote_trigger_gens[rn.node] = rn.trigger_gen;
               }
             }
-            if(remote_notifications.empty() || (rn.previous_gen < oldest_previous))
+
+            if(remote_notifications.empty() || (rn.previous_gen < oldest_previous)) {
               oldest_previous = rn.previous_gen;
+            }
+
             remote_notifications.push_back(rn);
 
             if(remote_notifications.size() == 1) {
@@ -782,6 +785,11 @@ namespace Realm {
 
       {
         AutoLock<> al(mutex);
+        // TODO(apryakhin@): Consider not sorting by rank id.
+        std::sort(remote_notifications.begin(), remote_notifications.end(),
+                  [](const RemoteNotification &a, const RemoteNotification &b) {
+                    return a.node < b.node;
+                  });
         broadcast_trigger(b, remote_notifications, remote_broadcast_targets,
                           oldest_previous, broadcast_previous, first_generation,
                           migration_target, base_arrival_count, redop_id,
@@ -1145,8 +1153,6 @@ namespace Realm {
     if(!trigger_args.remote_notifications.empty()) {
       AutoLock<> a(impl->mutex);
 
-      // TODO(apryakhin@): This might be incorrect if chunks
-      // broadcasted from the parent received out of order.
       impl->buffered_notifications.insert(impl->buffered_notifications.end(),
                                           trigger_args.remote_notifications.begin(),
                                           trigger_args.remote_notifications.end());
@@ -1155,14 +1161,15 @@ namespace Realm {
         return;
       }
 
-      size_t num_peers = impl->buffered_notifications.size();
+      std::sort(impl->buffered_notifications.begin(), impl->buffered_notifications.end(),
+                [](const RemoteNotification &a, const RemoteNotification &b) {
+                  return a.node < b.node;
+                });
 
-      // TODO(apryakhin:): Make it so that we don't need
-      // broadcast_index.
-      NodeID node = trigger_args.internal.broadcast_index;
       std::vector<NodeID> broadcast_targets;
-      get_broadcast_targets(node, num_peers, BarrierConfig::broadcast_radix,
-                            broadcast_targets);
+      get_broadcast_targets(trigger_args.internal.broadcast_index,
+                            impl->buffered_notifications.size(),
+                            BarrierConfig::broadcast_radix, broadcast_targets);
 
       broadcast_trigger(b, impl->buffered_notifications, broadcast_targets,
                         /*oldest_previous=*/0, /*broadcast_previous=*/0,
