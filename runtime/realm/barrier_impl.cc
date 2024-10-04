@@ -277,8 +277,7 @@ namespace Realm {
       NodeID target, ID::IDType barrier_id, EventImpl::gen_t trigger_gen,
       EventImpl::gen_t previous_gen, EventImpl::gen_t first_generation,
       ReductionOpID redop_id, NodeID migration_target, unsigned base_arrival_count,
-      int broadcast_index, const void *data, size_t datalen,
-      EventImpl::gen_t invalid_reduction_gen)
+      int broadcast_index, const void *data, size_t datalen)
   {
     BarrierTriggerMessageArgs trigger_args;
     trigger_args.internal.trigger_gen = trigger_gen;
@@ -288,7 +287,6 @@ namespace Realm {
     trigger_args.internal.migration_target = migration_target;
     trigger_args.internal.base_arrival_count = base_arrival_count;
     trigger_args.internal.broadcast_index = broadcast_index;
-    trigger_args.internal.invalid_reduction_gen = invalid_reduction_gen;
     Serialization::DynamicBufferSerializer dbs(datalen);
     bool ok = dbs & trigger_args;
     assert(ok);

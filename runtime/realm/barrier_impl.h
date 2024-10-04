@@ -185,7 +185,6 @@ namespace Realm {
     unsigned base_arrival_count;
     int broadcast_index;
     bool is_complete_list;
-    EventImpl::gen_t invalid_reduction_gen = 0;
   };
 
   struct BarrierTriggerMessageArgs {
@@ -203,8 +202,7 @@ namespace Realm {
                              EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
                              EventImpl::gen_t first_generation, ReductionOpID redop_id,
                              NodeID migration_target, unsigned base_arrival_count,
-                             int broadcast_index, const void *data, size_t datalen,
-                             EventImpl::gen_t invalid_reduction_gen = 0);
+                             int broadcast_index, const void *data, size_t datalen);
 
     static void send_request(NodeID target, ID::IDType barrier_id,
                              BarrierTriggerMessageArgs &trigger_args, const void *data,

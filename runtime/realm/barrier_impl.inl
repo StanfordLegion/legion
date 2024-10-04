@@ -71,7 +71,6 @@ namespace Realm {
               (ser & args.internal.base_arrival_count) &&
               (ser & args.internal.broadcast_index) &&
               (ser & args.internal.is_complete_list) &&
-              (ser & args.internal.invalid_reduction_gen) &&
               (ser & args.remote_notifications);
 
     return success;
@@ -87,7 +86,6 @@ namespace Realm {
               (dez & args.internal.base_arrival_count) &&
               (dez & args.internal.broadcast_index) &&
               (dez & args.internal.is_complete_list) &&
-              (dez & args.internal.invalid_reduction_gen) &&
               (dez & args.remote_notifications);
 
     return success;
