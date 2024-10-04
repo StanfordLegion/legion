@@ -16589,7 +16589,7 @@ namespace Legion {
                     {
                       if(logical_analysis.bail_point_wise_analysis)
                       {
-                        printf("bailing!!!!\n");
+                        //printf("bailing!!!! %lld %lld\n", prev.uid, user.uid);
                       }
                       if (static_cast<IndexTask*>(user.op)->
                           prev_point_wise_user_set(user.idx))
@@ -16614,7 +16614,7 @@ namespace Legion {
                           bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
                           if(parent_dominates)
                           {
-                            printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
+                            //printf("FOUND POINT-WISE ANCESTOR: %d prev_uid: %lld prev_region_idx: %d  user_uid: %lld user_region_idx: %d\n", context->runtime->address_space, prev.uid, prev.idx, user.uid, user.idx);
                             skip_registering_region_dependence = true;
                             if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
                                 &user, prev.gen, prev.idx))

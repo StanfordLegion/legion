@@ -2003,6 +2003,7 @@ namespace Legion {
         if (previous_index_task_points.size() > 1)
         {
           // throw _error
+          assert(1);
         }
         assert(!previous_index_task_points.empty());
 

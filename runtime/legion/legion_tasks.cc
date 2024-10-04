@@ -10474,6 +10474,7 @@ namespace Legion {
         if (previous_index_task_points.size() > 1)
         {
           // throw _error
+          assert(1);
         }
         assert(!previous_index_task_points.empty());
 
@@ -13048,11 +13049,13 @@ namespace Legion {
     {
       {
         AutoLock o_lock(op_lock);
+#ifndef LEGION_SPY
         std::map<DomainPoint,RtEvent>::const_iterator finder =
           point_wise_dependences.find(point);
         // If we've already got it then we're done
         if (finder != point_wise_dependences.end())
           return finder->second;
+#endif
         // If we're remote, make up an event and send a message to index_owner.
         if (is_remote())
         {
