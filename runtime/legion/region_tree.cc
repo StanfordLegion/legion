@@ -16614,7 +16614,7 @@ namespace Legion {
                           bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
                           if(parent_dominates)
                           {
-                            printf("FOUND POINT-WISE ANCESTOR: %d %lld %lld\n", context->runtime->address_space, prev.uid, user.uid);
+                            printf("FOUND POINT-WISE ANCESTOR: %d\n", context->runtime->address_space);
                             skip_registering_region_dependence = true;
                             if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
                                 &user, prev.gen, prev.idx))
