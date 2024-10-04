@@ -134,6 +134,7 @@ namespace Realm {
     std::map<unsigned, gen_t> remote_subscribe_gens, remote_trigger_gens;
     std::map<gen_t, gen_t> held_triggers;
 
+    bool needs_ordering;
     std::vector<RemoteNotification> buffered_notifications;
 
     unsigned base_arrival_count;
