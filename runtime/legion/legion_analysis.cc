@@ -2874,17 +2874,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ProjectionRegion::interferes(ProjectionNode *other,
-                                      ShardID local_shard) const 
+                                     ShardID local_shard, bool &dominates) const 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       ProjectionRegion *rhs = dynamic_cast<ProjectionRegion*>(other);
       assert(rhs != NULL);
       assert(region == rhs->region);
-      return has_interference(rhs, local_shard);
+      return has_interference(rhs, local_shard, dominates);
 #else
       return has_interference(static_cast<ProjectionRegion*>(other),
-                              local_shard);
+                              local_shard, dominates);
 #endif
     }
 
@@ -2958,7 +2958,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ProjectionRegion::has_interference(ProjectionRegion *other,
-                                            ShardID local_shard) const
+                                     ShardID local_shard, bool &dominates) const
     //--------------------------------------------------------------------------
     {
       // If either one has more than one shard ID then we're done
@@ -2973,7 +2973,7 @@ namespace Legion {
       if (!shard_children.empty() || !other->shard_children.empty())
         return true;
       // If we have different numbers of partitions then we are definitely
-      // going ot be interfering on something
+      // going to be interfering on something
       if (local_children.size() != other->local_children.size())
         return true;
       for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
@@ -2983,7 +2983,7 @@ namespace Legion {
           finder = other->local_children.find(it->first);
         if (finder == other->local_children.end())
           return true;
-        if (it->second->has_interference(finder->second, local_shard))
+        if (it->second->has_interference(finder->second, local_shard,dominates))
           return true;
       }
       return false;
@@ -3087,17 +3087,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ProjectionPartition::interferes(ProjectionNode *other,
-                                         ShardID local_shard) const 
+                                     ShardID local_shard, bool &dominates) const 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       ProjectionPartition *rhs = dynamic_cast<ProjectionPartition*>(other);
       assert(rhs != NULL);
       assert(partition == rhs->partition);
-      return has_interference(rhs, local_shard);
+      return has_interference(rhs, local_shard, dominates);
 #else
       return has_interference(static_cast<ProjectionPartition*>(other),
-                              local_shard);
+                              local_shard, dominates);
 #endif
     }
 
@@ -3183,7 +3183,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ProjectionPartition::has_interference(ProjectionPartition *other,
-                                               ShardID local_shard) const
+                                     ShardID local_shard, bool &dominates) const
     //--------------------------------------------------------------------------
     {
       if (partition->row_source->is_disjoint(false/*from app*/))
@@ -3199,8 +3199,11 @@ namespace Legion {
             // Check to see if there is a remote shard with that child
             if (other->shard_children.has_child(it->first))
               return true;
+            // Otherwise this does not dominate us
+            dominates = false;
           }
-          else if (it->second->has_interference(finder->second, local_shard))
+          else if (it->second->has_interference(finder->second, 
+                                        local_shard, dominates))
             return true;
         }
         // Check in the opposite direction too
@@ -3236,7 +3239,8 @@ namespace Legion {
             finder = other->local_children.find(it->first);
           if (finder == other->local_children.end())
             return true;
-          if (it->second->has_interference(finder->second, local_shard))
+          if (it->second->has_interference(finder->second, 
+                                  local_shard, dominates))
             return true;
         }
         return false;
@@ -4922,11 +4926,13 @@ namespace Legion {
         }
       }
       std::unordered_map<ProjectionSummary*,
-        std::unordered_map<ProjectionSummary*,bool> >::iterator finder =
-          interfering_shards.find(summary);
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> > >::iterator finder =
+            interfering_shards.find(summary);
       if (finder != interfering_shards.end())
       {
-        for (std::unordered_map<ProjectionSummary*,bool>::const_iterator it =
+        for (std::unordered_map<ProjectionSummary*,
+              std::pair<bool,bool> >::const_iterator it =
               finder->second.begin(); it != finder->second.end(); it++)
           interfering_shards[it->first].erase(summary);
         interfering_shards.erase(finder);
@@ -4935,10 +4941,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LogicalState::has_interfering_shards(LogicalAnalysis &analysis,
-                                 ProjectionSummary *one, ProjectionSummary *two)
+        ProjectionSummary *one, ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(dominates);
       assert(one->owner == this);
       assert(two->owner == this);
 #endif
@@ -4949,19 +4956,25 @@ namespace Legion {
         return (!one->can_perform_name_based_self_analysis() ||
                 !one->has_unique_shard_users());
       std::unordered_map<ProjectionSummary*,
-        std::unordered_map<ProjectionSummary*,bool> >::const_iterator
-          one_finder = interfering_shards.find(one);
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> > >::const_iterator
+            one_finder = interfering_shards.find(one);
       if (one_finder != interfering_shards.end())
       {
-        std::unordered_map<ProjectionSummary*,bool>::const_iterator
-          two_finder = one_finder->second.find(two);
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> >::const_iterator
+            two_finder = one_finder->second.find(two);
         if (two_finder != one_finder->second.end())
-          return two_finder->second;
+        {
+          dominates = two_finder->second.second;
+          return two_finder->second.first;
+        }
       }
       // Do the test and save the results for later
-      const bool result = analysis.context->has_interfering_shards(one,two);
-      interfering_shards[one][two] = result;
-      interfering_shards[two][one] = result;
+      const bool result = 
+        analysis.context->has_interfering_shards(one, two, dominates);
+      interfering_shards[one][two] = std::make_pair(result, dominates);
+      interfering_shards[two][one] = std::make_pair(result, dominates);
       return result;
     }
 

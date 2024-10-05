@@ -11059,10 +11059,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InnerContext::has_interfering_shards(ProjectionSummary *one,
-                                              ProjectionSummary *two)
+        ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
-      return one->get_tree()->interferes(two->get_tree(), 0/*local shard*/);
+#ifdef DEBUG_LEGION
+      assert(dominates);
+#endif
+      return one->get_tree()->interferes(
+          two->get_tree(), 0/*local shard*/, dominates);
     }
 
     //--------------------------------------------------------------------------
@@ -20375,16 +20379,46 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::has_interfering_shards(ProjectionSummary *one,
-                                                  ProjectionSummary *two)
+                                      ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
-      bool result = one->get_tree()->interferes(two->get_tree(), 
-                                          owner_shard->shard_id);
+#ifdef DEBUG_LEGION
+      assert(dominates);
+#endif
+      const bool result = one->get_tree()->interferes(two->get_tree(),
+          owner_shard->shard_id, dominates);
+      // This is a bit tricky so pay attention: we're going to exchange both
+      // the interference result and the dominates result using a single 
+      // all-reduce collective. We can do this because the interfering shards
+      // result is a bool OR all-reduce and the result of dominates is a
+      // bool AND all-reduce. Therefore we can encode this as a single max
+      // all-reduce computation. The states will be:
+      // 0: not-interfering and dominating
+      // 1: not-interfering and not-dominating
+      // 2: interfering (dominate doesn't matter in this case)
+      // We can then do a max all-reduce and determine if all the shards
+      // are non-interfering and dominating
+      uint32_t code = (result ? 2 : (dominates ? 0 : 1));
       // Now we need to perform a collective to make sure that all the 
       // shards agree on the result of the interference
-      AllReduceCollective<SumReduction<bool>,false> any_interfering(this,
+      AllReduceCollective<MaxReduction<uint32_t>,false> any_interfering(this,
           get_next_collective_index(COLLECTIVE_LOC_105, true/*logical*/));
-      return any_interfering.sync_all_reduce(result);
+      code = any_interfering.sync_all_reduce(code);
+#ifdef DEBUG_LEGION
+      assert(code <= 2);
+#endif
+      if (code == 0)
+      {
+        dominates = true;
+        return false;
+      }
+      else if (code == 1)
+      {
+        dominates = false;
+        return false;
+      }
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------

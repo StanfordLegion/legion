@@ -1717,7 +1717,7 @@ namespace Legion {
           Operation *op, unsigned index, const RegionRequirement &req,
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
-                                          ProjectionSummary *two);
+          ProjectionSummary *two, bool &dominates);
       virtual bool match_timeouts(std::vector<LogicalUser*> &timeouts,
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);
@@ -2948,7 +2948,7 @@ namespace Legion {
           Operation *op, unsigned index, const RegionRequirement &req,
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
-                                          ProjectionSummary *two);
+          ProjectionSummary *two, bool &dominates);
       virtual bool match_timeouts(std::vector<LogicalUser*> &timeouts,
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);

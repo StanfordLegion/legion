@@ -3946,9 +3946,11 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->handle_failed_instance_allocation();
       }
-      // No matter what trigger the event
-      Runtime::trigger_event(profiling_ready);
       fevent = current_unique_event;
+      // No matter what trigger the event
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
+      Runtime::trigger_event(profiling_ready);
       return true;
     }
 

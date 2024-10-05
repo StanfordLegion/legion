@@ -2128,7 +2128,6 @@ impl Inst {
         self
     }
     fn set_critical(&mut self, critical: EventID) -> &mut Self {
-        assert!(critical.exists());
         assert!(self.critical.is_none());
         self.critical = Some(critical);
         self
@@ -2176,9 +2175,9 @@ impl Inst {
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         self.time_range.trim_time_range(start, stop)
     }
-    fn set_creator(&mut self, creator: Option<ProfUID>) -> &mut Self {
-        assert!(self.creator.map_or(true, |c| c == creator.unwrap()));
-        self.creator = creator;
+    fn set_creator(&mut self, creator: ProfUID) -> &mut Self {
+        assert!(self.creator.map_or(true, |c| c == creator));
+        self.creator = Some(creator);
         self
     }
     pub fn allocated_immediately(&self) -> bool {
@@ -2716,19 +2715,9 @@ impl Operation {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct EventID(pub u64);
+pub struct EventID(pub NonZeroU64);
 
 impl EventID {
-    fn exists(&self) -> bool {
-        self.0 != 0
-    }
-    fn existing(&self) -> Option<EventID> {
-        if self.exists() {
-            Some(*self)
-        } else {
-            None
-        }
-    }
     // Important: keep this in sync with realm/id.h
     // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
     // owner_node = event_id[62:47]
@@ -2736,21 +2725,21 @@ impl EventID {
     // owner_node = barrier_id[59:44]
     pub fn node_id(&self) -> NodeID {
         if self.is_barrier() {
-            NodeID((self.0 >> 44) & ((1 << 16) - 1))
+            NodeID((self.0.get() >> 44) & ((1 << 16) - 1))
         } else {
-            NodeID((self.0 >> 47) & ((1 << 16) - 1))
+            NodeID((self.0.get() >> 47) & ((1 << 16) - 1))
         }
     }
     pub fn is_barrier(&self) -> bool {
-        (self.0 >> 60) == 2
+        (self.0.get() >> 60) == 2
     }
     pub fn generation(&self) -> u64 {
-        self.0 & ((1 << 20) - 1)
+        self.0.get() & ((1 << 20) - 1)
     }
     pub fn get_previous_phase(&self) -> Option<EventID> {
         assert!(self.is_barrier());
         if self.generation() > 1 {
-            Some(EventID(self.0 - 1))
+            Some(EventID(NonZeroU64::new(self.0.get() - 1).unwrap()))
         } else {
             None
         }
@@ -3143,21 +3132,16 @@ impl ProfUIDAllocator {
         self.next_prof_uid.0 += 1;
         self.next_prof_uid
     }
-    fn create_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
-        if let Some(event) = fevent.existing() {
-            Some(*self.fevents.entry(event).or_insert_with(|| {
-                self.next_prof_uid.0 += 1;
-                self.next_prof_uid
-            }))
-        } else {
-            None
-        }
+    fn create_reference(&mut self, fevent: EventID) -> ProfUID {
+        *self.fevents.entry(fevent).or_insert_with(|| {
+            self.next_prof_uid.0 += 1;
+            self.next_prof_uid
+        })
     }
     fn create_object(&mut self, fevent: EventID) -> ProfUID {
-        assert!(fevent.exists());
         assert!(!self.used_fevents.contains(&fevent));
         self.used_fevents.insert(fevent);
-        self.create_reference(fevent).unwrap()
+        self.create_reference(fevent)
     }
     fn complete_parse(&mut self) {
         // Invert the mapping so we can lookup fevents from ProfUIDs too
@@ -3335,7 +3319,7 @@ impl State {
             .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
-    fn create_fevent_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
+    fn create_fevent_reference(&mut self, fevent: EventID) -> ProfUID {
         self.prof_uid_allocator.create_reference(fevent)
     }
 
@@ -3351,7 +3335,6 @@ impl State {
         time: Timestamp,
         deduplicate: bool,
     ) -> CriticalPathVertex {
-        assert!(fevent.exists());
         if let Some(index) = self.event_lookup.get(&fevent) {
             let node_weight = self.event_graph.node_weight_mut(*index).unwrap();
             if node_weight.kind == EventEntryKind::UnknownEvent {
@@ -3377,7 +3360,6 @@ impl State {
     }
 
     fn find_event_node(&mut self, event: EventID) -> CriticalPathVertex {
-        assert!(event.exists());
         if let Some(index) = self.event_lookup.get(&event) {
             return *index;
         }
@@ -3398,7 +3380,6 @@ impl State {
     }
 
     pub fn find_critical_entry(&self, event: EventID) -> Option<&EventEntry> {
-        assert!(event.exists());
         let Some(node_id) = self.event_lookup.get(&event) else {
             return None;
         };
@@ -3450,8 +3431,8 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
         implicit: bool,
     ) -> &mut ProcEntry {
@@ -3461,7 +3442,7 @@ impl State {
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
         if implicit {
             // The fevent for implicit top-level tasks is a user event that
@@ -3486,7 +3467,7 @@ impl State {
             ProcEntryKind::Task(task_id, variant_id),
             time_range,
             creator_uid,
-            critical.existing(),
+            critical,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -3509,14 +3490,14 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
         self.record_event_node(
             fevent,
@@ -3533,7 +3514,7 @@ impl State {
             ProcEntryKind::MetaTask(variant_id),
             time_range,
             creator_uid,
-            critical.existing(),
+            critical,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -3554,11 +3535,11 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
-        fevent: EventID,
+        fevent: Option<EventID>,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = fevent.map(|e| alloc.create_reference(e));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3582,10 +3563,10 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-        fevent: EventID,
+        fevent: Option<EventID>,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = fevent.map(|e| alloc.create_reference(e));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3605,11 +3586,11 @@ impl State {
         provenance: ProvenanceID,
         proc_id: ProcID,
         time_range: TimeRange,
-        fevent: EventID,
+        fevent: Option<EventID>,
     ) -> &mut ProcEntry {
         assert!(self.provenances.contains_key(&provenance));
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = fevent.map(|e| alloc.create_reference(e));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3634,7 +3615,7 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = Some(alloc.create_reference(fevent));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3674,7 +3655,7 @@ impl State {
             Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::ProfTask,
             time_range,
-            creator_uid,
+            Some(creator_uid),
             None,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
@@ -3682,18 +3663,18 @@ impl State {
     }
 
     fn create_copy<'a>(
-        &'a mut self,
+        &mut self,
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
         collective: u32,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::new(alloc);
         self.record_event_node(
             fevent,
@@ -3710,7 +3691,7 @@ impl State {
                 op_id,
                 size,
                 creator_uid,
-                critical.existing(),
+                critical,
                 collective,
             )
         })
@@ -3721,13 +3702,13 @@ impl State {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::new(alloc);
         self.record_event_node(
             fevent,
@@ -3737,16 +3718,9 @@ impl State {
             false,
         );
         assert!(!fills.contains_key(&fevent));
-        fills.entry(fevent).or_insert_with(|| {
-            Fill::new(
-                base,
-                time_range,
-                op_id,
-                size,
-                creator_uid,
-                critical.existing(),
-            )
-        })
+        fills
+            .entry(fevent)
+            .or_insert_with(|| Fill::new(base, time_range, op_id, size, creator_uid, critical))
     }
 
     fn create_deppart(
@@ -3755,14 +3729,14 @@ impl State {
         op_id: OpID,
         part_op: DepPartKind,
         time_range: TimeRange,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
     ) {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         self.record_event_node(
             fevent,
             EventEntryKind::DepPartEvent,
@@ -3782,7 +3756,7 @@ impl State {
             time_range,
             op_id,
             creator_uid,
-            critical.existing(),
+            critical,
         ));
     }
 
@@ -3797,7 +3771,7 @@ impl State {
         fevent: EventID,
         insts: &'a mut BTreeMap<ProfUID, Inst>,
     ) -> &'a mut Inst {
-        let prof_uid = self.prof_uid_allocator.create_reference(fevent).unwrap();
+        let prof_uid = self.prof_uid_allocator.create_reference(fevent);
         insts
             .entry(prof_uid)
             .or_insert_with(|| Inst::new(Base::from_fevent(&mut self.prof_uid_allocator, fevent)))
@@ -4591,7 +4565,6 @@ fn process_record(
             fspace_id,
             tree_id,
         } => {
-            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
@@ -4608,7 +4581,6 @@ fn process_record(
             eqk,
             align_desc,
         } => {
-            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
@@ -4626,7 +4598,6 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => unreachable!("bad dim kind"),
             };
-            assert!(fevent.exists());
             state
                 .create_inst(*fevent, insts)
                 .add_dim_order(dim, dim_kind);
@@ -4637,9 +4608,8 @@ fn process_record(
             index_id,
             field_id,
         } => {
-            assert!(fevent.exists());
             state.create_op(*op_id);
-            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            let inst_uid = state.create_fevent_reference(*fevent);
             let operation_inst_info = OperationInstInfo::new(inst_uid, *index_id, *field_id);
             state
                 .find_op_mut(*op_id)
@@ -4712,13 +4682,7 @@ fn process_record(
                 .find_task_mut(*op_id)
                 .unwrap()
                 .waiters
-                .add_wait_interval(WaitInterval::from_event(
-                    *start,
-                    *ready,
-                    *end,
-                    event.existing().unwrap(),
-                    None,
-                ));
+                .add_wait_interval(WaitInterval::from_event(*start, *ready, *end, *event, None));
         }
         Record::MetaWaitInfo {
             op_id,
@@ -4733,13 +4697,7 @@ fn process_record(
                 .find_last_meta_mut(*op_id, *lg_id)
                 .unwrap()
                 .waiters
-                .add_wait_interval(WaitInterval::from_event(
-                    *start,
-                    *ready,
-                    *end,
-                    event.existing().unwrap(),
-                    None,
-                ));
+                .add_wait_interval(WaitInterval::from_event(*start, *ready, *end, *event, None));
         }
         Record::TaskInfo {
             op_id,
@@ -4916,8 +4874,8 @@ fn process_record(
             if *dst != MemID(0) {
                 dst_mem = Some(*dst);
             }
-            let src_uid = state.create_fevent_reference(*src_inst);
-            let dst_uid = state.create_fevent_reference(*dst_inst);
+            let src_uid = src_inst.map(|i| state.create_fevent_reference(i));
+            let dst_uid = dst_inst.map(|i| state.create_fevent_reference(i));
             let copy_inst_info = CopyInstInfo::new(
                 src_mem, dst_mem, *src_fid, *dst_fid, src_uid, dst_uid, *num_hops, *indirect,
             );
@@ -4947,7 +4905,7 @@ fn process_record(
             dst_inst,
             fevent,
         } => {
-            let dst_uid = state.create_fevent_reference(*dst_inst).unwrap();
+            let dst_uid = state.create_fevent_reference(*dst_inst);
             let fill_inst_info = FillInstInfo::new(*dst, *fid, dst_uid);
             let fill = fills.get_mut(fevent).unwrap();
             fill.add_fill_inst_info(fill_inst_info);
@@ -4963,11 +4921,9 @@ fn process_record(
             destroy,
             creator,
         } => {
-            assert!(fevent.exists());
-            assert!(creator.exists());
             state.create_op(*op_id);
             let creator_uid = state.create_fevent_reference(*creator);
-            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            let inst_uid = state.create_fevent_reference(*fevent);
             state.insts.entry(inst_uid).or_insert_with(|| *mem_id);
             state
                 .create_inst(*fevent, insts)
@@ -5067,8 +5023,6 @@ fn process_record(
             fevent,
             completion,
         } => {
-            assert!(fevent.exists());
-            assert!(creator.exists());
             let time_range = TimeRange::new_call(*start, *stop);
             let entry = state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
@@ -5094,7 +5048,7 @@ fn process_record(
             event,
             backtrace_id,
         } => {
-            let task_uid = state.create_fevent_reference(*fevent).unwrap();
+            let task_uid = state.create_fevent_reference(*fevent);
             let proc = state.procs.get_mut(proc_id).unwrap();
             proc.record_event_wait(task_uid, *event, *backtrace_id);
         }
@@ -5107,9 +5061,7 @@ fn process_record(
             pre2,
             pre3,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Event mergers can record multiple of these statements so need to deduplicate
             let dst = state.record_event_node(
                 *result,
@@ -5118,20 +5070,20 @@ fn process_record(
                 *performed,
                 true,
             );
-            if pre0.exists() {
-                let src = state.find_event_node(*pre0);
+            if let Some(pre0) = *pre0 {
+                let src = state.find_event_node(pre0);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre1.exists() {
-                let src = state.find_event_node(*pre1);
+            if let Some(pre1) = *pre1 {
+                let src = state.find_event_node(pre1);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre2.exists() {
-                let src = state.find_event_node(*pre2);
+            if let Some(pre2) = *pre2 {
+                let src = state.find_event_node(pre2);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre3.exists() {
-                let src = state.find_event_node(*pre3);
+            if let Some(pre3) = *pre3 {
+                let src = state.find_event_node(pre3);
                 state.event_graph.add_edge(src, dst, ());
             }
         }
@@ -5141,9 +5093,7 @@ fn process_record(
             precondition,
             performed,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Only need to deduplicate if it was triggered on a remote node
             let deduplicate = result.node_id() != fevent.node_id();
             let dst = state.record_event_node(
@@ -5153,8 +5103,8 @@ fn process_record(
                 *performed,
                 deduplicate,
             );
-            if precondition.exists() {
-                let src = state.find_event_node(*precondition);
+            if let Some(precondition) = *precondition {
+                let src = state.find_event_node(precondition);
                 if deduplicate {
                     // Use update edge to deduplicate edges
                     state.event_graph.update_edge(src, dst, ());
@@ -5168,9 +5118,7 @@ fn process_record(
             fevent,
             performed,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Only need to deduplicate if it was poisoned on a remote node
             let deduplicate = result.node_id() != fevent.node_id();
             state.record_event_node(
@@ -5187,10 +5135,8 @@ fn process_record(
             precondition,
             performed,
         } => {
-            assert!(result.exists());
             assert!(result.is_barrier());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Barrier arrivals are strange in that we might ultimately have multiple
             // arrivals on the barrier and we need to deduplicate those and find the
             // last arrival which we can't do with record_event_node
@@ -5226,8 +5172,8 @@ fn process_record(
                     state.event_graph.add_edge(previous_index, index, ());
                 }
             }
-            if precondition.exists() {
-                let src = state.find_event_node(*precondition);
+            if let Some(precondition) = *precondition {
+                let src = state.find_event_node(precondition);
                 let dst = *state.event_lookup.get(&result).unwrap();
                 // Use update edge here to deduplicate adding edges in case
                 // we did a reduction of arrivals with the barrier in the runtime
@@ -5241,9 +5187,7 @@ fn process_record(
             performed,
             reservation: _, // Ignoring this for now until we can do a contention analysis
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             let dst = state.record_event_node(
                 *result,
                 EventEntryKind::ReservationAcquire,
@@ -5251,31 +5195,8 @@ fn process_record(
                 *performed,
                 false,
             );
-            if precondition.exists() {
-                let src = state.find_event_node(*precondition);
-                state.event_graph.add_edge(src, dst, ());
-            }
-        }
-        Record::InstanceReadyInfo {
-            result,
-            precondition,
-            fevent,
-            performed,
-        } => {
-            assert!(result.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            let dst = state.record_event_node(
-                *result,
-                EventEntryKind::InstanceReady,
-                creator_uid,
-                *performed,
-                false,
-            );
-            if precondition.exists() {
-                state
-                    .create_inst(*fevent, insts)
-                    .set_critical(*precondition);
-                let src = state.find_event_node(*precondition);
+            if let Some(precondition) = *precondition {
+                let src = state.find_event_node(precondition);
                 state.event_graph.add_edge(src, dst, ());
             }
         }
@@ -5288,9 +5209,7 @@ fn process_record(
             pre2,
             pre3,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Completion queue events are weird in a similar way to how event mergers are weird in
             // that we might ultimately have multiple preconditions on the event and we need to
             // deduplicate those and find the first triggering event
@@ -5301,20 +5220,40 @@ fn process_record(
                 *performed,
                 true,
             );
-            if pre0.exists() {
-                let src = state.find_event_node(*pre0);
+            if let Some(pre0) = *pre0 {
+                let src = state.find_event_node(pre0);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre1.exists() {
-                let src = state.find_event_node(*pre1);
+            if let Some(pre1) = *pre1 {
+                let src = state.find_event_node(pre1);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre2.exists() {
-                let src = state.find_event_node(*pre2);
+            if let Some(pre2) = *pre2 {
+                let src = state.find_event_node(pre2);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre3.exists() {
-                let src = state.find_event_node(*pre3);
+            if let Some(pre3) = *pre3 {
+                let src = state.find_event_node(pre3);
+                state.event_graph.add_edge(src, dst, ());
+            }
+        }
+        Record::InstanceReadyInfo {
+            result,
+            precondition,
+            fevent,
+            performed,
+        } => {
+            let creator_uid = state.create_fevent_reference(*fevent);
+            let dst = state.record_event_node(
+                *result,
+                EventEntryKind::InstanceReady,
+                creator_uid,
+                *performed,
+                false,
+            );
+            if let Some(precondition) = *precondition {
+                state.create_inst(*fevent, insts).set_critical(precondition);
+                let src = state.find_event_node(precondition);
                 state.event_graph.add_edge(src, dst, ());
             }
         }
