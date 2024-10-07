@@ -830,6 +830,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmake_cmd.append('-DLegion_USE_HIP=%s' % ('ON' if env['USE_HIP'] == '1' else 'OFF'))
     if 'HIP_ARCH' in env:
         cmake_cmd.append('-DLegion_HIP_ARCH=%s' % env['HIP_ARCH'])
+    if 'HIP_TARGET' in env:
+        cmake_cmd.append('-DLegion_HIP_TARGET=%s' % env['HIP_TARGET'])
     if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
         cmake_cmd.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
     cmake_cmd.append('-DLegion_USE_NVTX=%s' % ('ON' if env['USE_NVTX'] == '1' else 'OFF'))
@@ -1004,7 +1006,7 @@ def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
                 test_perf, test_ctest, test_realm_unit_ctest, test_jupyter, networks,
-                use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
+                use_cuda, use_hip, hip_target, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
@@ -1036,6 +1038,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Networks:   %s' % networks)
     print('###   * CUDA:       %s' % use_cuda)
     print('###   * HIP:        %s' % use_hip)
+    print('###   * HIP_TARGET: %s' % hip_target)
     print('###   * OpenMP:     %s' % use_openmp)
     print('###   * Kokkos:     %s' % use_kokkos)
     print('###   * Python:     %s' % use_python)
@@ -1108,6 +1111,7 @@ def run_tests(test_modules=None,
                               envprefix=prefix, **kwargs)
     use_cuda = feature_enabled('cuda', False)
     use_hip = feature_enabled('hip', False)
+    hip_target = os.environ['HIP_TARGET'] if 'HIP_TARGET' in os.environ else 'CUDA',
     use_openmp = feature_enabled('openmp', False)
     use_kokkos = feature_enabled('kokkos', False)
     use_python = feature_enabled('python', False)
@@ -1175,7 +1179,7 @@ def run_tests(test_modules=None,
                 test_external1, test_external2, test_private,
                 test_perf, test_ctest, test_realm_unit_ctest, test_jupyter,
                 networks,
-                use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
+                use_cuda, use_hip, hip_target, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
