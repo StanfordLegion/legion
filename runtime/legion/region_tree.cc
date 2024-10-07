@@ -16591,6 +16591,13 @@ namespace Legion {
                       {
                         //printf("bailing!!!! %lld %lld\n", prev.uid, user.uid);
                       }
+                      if (static_cast<IndexTask*>(prev.op)->
+                          region_has_collective(prev.idx, prev.gen) ||
+                          static_cast<IndexTask*>(user.op)->
+                          region_has_collective(user.idx, user.gen))
+                      {
+                        logical_analysis.bail_point_wise_analysis = true;
+                      }
                       if (static_cast<IndexTask*>(user.op)->
                           prev_point_wise_user_set(user.idx))
                       {

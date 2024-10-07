@@ -32,11 +32,6 @@ enum FieldIDs {
   FID_DATA,
 };
 
-struct ReadTaskArg {
-    int points;
-    int iteration;
-};
-
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
@@ -86,20 +81,18 @@ void top_level_task(const Task *task,
                         LEGION_REDOP_SUM_UINT64, LEGION_EXCLUSIVE, lr));
   reduce_launcher.add_field(0, FID_DATA);
 
-  TaskLauncher read_launcher(READ_FIELD_TASK_ID, TaskArgument(NULL, 0));
+  IndexLauncher read_launcher(READ_FIELD_TASK_ID, launch_is,
+                              TaskArgument(NULL, 0), arg_map);
   read_launcher.add_region_requirement(
-      RegionRequirement(lr,
+      RegionRequirement(lr, 0/*projection ID*/,
                         LEGION_READ_ONLY, LEGION_EXCLUSIVE, lr));
   read_launcher.add_field(0, FID_DATA);
 
   for (int idx = 1; idx <= num_iterations; idx++)
   {
-    ReadTaskArg arg;
-    arg.points = num_points;
-    arg.iteration = idx;
     runtime->execute_index_space(ctx, reduce_launcher);
-    read_launcher.argument = TaskArgument(&arg, sizeof(arg));
-    runtime->execute_task(ctx, read_launcher);
+    read_launcher.global_arg = TaskArgument(&idx, sizeof(idx));
+    runtime->execute_index_space(ctx, read_launcher);
   }
 
   runtime->destroy_logical_region(ctx, lr);
@@ -135,19 +128,17 @@ void read_field_task(const Task *task,
   assert(regions.size() == 1); 
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
-  assert(task->arglen == sizeof(ReadTaskArg));
-
-  ReadTaskArg *arg = (ReadTaskArg*)task->args;
-  const int points = arg->points;
-  const int iteration = arg->iteration;
+  assert(task->arglen == sizeof(int));
+  const int iteration = *((const int*)task->args);
 
   const FieldAccessor<LEGION_READ_ONLY,uint64_t,1,coord_t,
                  Realm::AffineAccessor<uint64_t,1,coord_t> >
     accessor(regions[0], FID_DATA);
 
+  Rect<1> bounds = task->index_domain;
   uint64_t expected = 0;
-  for (int idx = 0; idx <points; idx++)
-    expected += idx;
+  for (PointInRectIterator<1> pir(bounds); pir(); pir++)
+    expected += (*pir)[0];
   expected *= iteration;
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,

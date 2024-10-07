@@ -1430,6 +1430,7 @@ namespace Legion {
       void record_point_wise_dependence_completed_points_prev_task(
           ProjectionSummary *shard_proj, uint64_t context_index);
       virtual void clear_context_maps(void);
+      bool region_has_collective(unsigned region_idx, GenerationID gen);
     protected:
       void get_points(RegionRequirement &req,
           ProjectionFunction *projection,

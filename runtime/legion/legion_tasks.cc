@@ -31,7 +31,6 @@
 namespace Legion {
   namespace Internal {
 
-//#define POINT_WISE_LOGICAL_ANALYSIS 1
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -10265,8 +10264,25 @@ namespace Legion {
     }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    bool IndexTask::region_has_collective(unsigned region_idx, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (gen < get_generation()) return false;
+
+      if (std::binary_search(
+            check_collective_regions.begin(),
+            check_collective_regions.end(), region_idx))
+        return true;
+
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::add_point_to_completed_list(DomainPoint point,
         unsigned region_idx, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
       if (!should_connect_to_next_point(region_idx))
