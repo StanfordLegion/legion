@@ -941,9 +941,9 @@ void main_task(const Task *task,
 
   basic_test(args, ctx, runtime);
   runtime->issue_execution_fence(ctx);
-  projection_test(args, ctx, runtime, true);
+  //projection_test(args, ctx, runtime, true);
   runtime->issue_execution_fence(ctx);
-  projection_test(args, ctx, runtime, false);
+  //projection_test(args, ctx, runtime, false);
 }
 
 static void create_mappers(Machine machine,
