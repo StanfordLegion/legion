@@ -3450,6 +3450,10 @@ namespace Legion {
       // We'll only issue this warning once on each node for now
       if (!need_default_mapper_warning.exchange(false/*no longer needed*/))
         return;
+      // Check to see if the application has registered other mappers other
+      // than the default mapper, if it has then we don't issue this warning
+      if (runtime->has_non_default_mapper())
+        return;
       // Give a massive warning for profilig when using the default mapper
       for (int i = 0; i < 2; i++)
         fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
