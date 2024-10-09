@@ -690,7 +690,7 @@ impl Proc {
         }
         prof_uid_proc.insert(base.prof_uid, self.proc_id);
         match kind {
-            ProcEntryKind::Task(_, _) => {
+            ProcEntryKind::Task(..) => {
                 self.tasks.insert(op.unwrap(), base.prof_uid);
             }
             ProcEntryKind::MetaTask(variant_id) => {
@@ -876,7 +876,7 @@ impl Proc {
                 // Update the operation info for the calls
                 let call_entry = self.entries.get_mut(&call_uid).unwrap();
                 match task_entry.kind {
-                    ProcEntryKind::Task(_, _) => {
+                    ProcEntryKind::Task(..) => {
                         call_entry.initiation_op = task_entry.op_id;
                     }
                     ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
