@@ -670,9 +670,8 @@ namespace Legion {
                              const Realm::ProfilingResponse &response);
       void process_arrival(const ProfilingInfo *info,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline);
-      void process_implicit(UniqueID op_id, TaskID tid, Processor proc,
-          long long start, long long stop, std::deque<WaitInfo> &waits,
-          LgEvent finish_event);
+      void process_implicit(UniqueID op_id, TaskID tid, long long start,
+          long long stop, std::deque<WaitInfo> &waits, LgEvent finish_event);
       void process_mem_desc(const Memory &m);
       void process_proc_desc(const Processor &p);
       void process_proc_mem_aff_desc(const Memory &m);
@@ -798,6 +797,12 @@ namespace Legion {
       void record_memory(Memory m);
       void record_processor(Processor p);
       void record_affinities(std::vector<Memory> &memories_to_log);
+      // We make a custom processor rendering any implicit top-level tasks
+      // because we need to render them separately from other tasks since 
+      // they might be running concurrently on different threads
+      // (Note also that the same implicit top-level task doesn't even
+      // need to stay on the same external thread for its whole lifespan.)
+      ProcID get_implicit_processor(void);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p, 
@@ -925,6 +930,8 @@ namespace Legion {
     private:
       // For knowing when we need to start dumping early
       std::atomic<size_t> total_memory_footprint;
+    private:
+      std::atomic<ProcID> implicit_top_level_task_proc;
     private:
       // Issue the default mapper warning
       std::atomic<bool> need_default_mapper_warning; 

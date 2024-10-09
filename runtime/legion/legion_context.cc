@@ -11839,7 +11839,7 @@ namespace Legion {
         const long long stop = Realm::Clock::current_time_in_nanoseconds();
         // log this with the profiler 
         implicit_profiler->process_implicit(get_unique_id(),owner_task->task_id,
-            executing_processor, implicit_task_profiler->start_time, stop,
+            implicit_task_profiler->start_time, stop,
             implicit_task_profiler->waits, owner_task->get_completion_event());
       }
       // See if there are any runtime warnings to issue
