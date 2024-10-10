@@ -17013,6 +17013,8 @@ namespace Legion {
         no_tracing(config.no_tracing),
         no_physical_tracing(config.no_physical_tracing || no_tracing ||
                             program_order_execution),
+        no_auto_tracing(config.no_auto_tracing || no_tracing || 
+                        program_order_execution),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
         no_transitive_reduction(config.no_transitive_reduction),
@@ -17228,6 +17230,7 @@ namespace Legion {
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
+        no_auto_tracing(rhs.no_auto_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
         no_transitive_reduction(rhs.no_transitive_reduction),
@@ -30660,6 +30663,8 @@ namespace Legion {
         .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
         .add_option_bool("-lg:no_physical_tracing",
                          config.no_physical_tracing, !filter)
+        .add_option_bool("-lg:no_auto_tracing",
+                         config.no_auto_tracing, !filter)
         .add_option_bool("-lg:no_trace_optimization",
                          config.no_trace_optimization, !filter)
         .add_option_bool("-lg:no_fence_elision",

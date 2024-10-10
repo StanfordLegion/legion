@@ -2517,6 +2517,7 @@ namespace Legion {
             enable_automatic_tracing(false),
             no_tracing(false),
             no_physical_tracing(false),
+            no_auto_tracing(false),
             no_trace_optimization(false),
             no_fence_elision(false),
             no_transitive_reduction(false),
@@ -2582,6 +2583,7 @@ namespace Legion {
         bool enable_automatic_tracing;
         bool no_tracing;
         bool no_physical_tracing;
+        bool no_auto_tracing;
         bool no_trace_optimization;
         bool no_fence_elision;
         bool no_transitive_reduction;
@@ -2712,6 +2714,7 @@ namespace Legion {
       const bool dump_physical_traces;
       const bool no_tracing;
       const bool no_physical_tracing;
+      const bool no_auto_tracing;
       const bool no_trace_optimization;
       const bool no_fence_elision;
       const bool no_transitive_reduction;

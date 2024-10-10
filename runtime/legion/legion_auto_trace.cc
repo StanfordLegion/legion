@@ -236,7 +236,9 @@ namespace Legion {
             // pointer are starting at the same opidx.
             // TODO (rohany): This can actually happen if we allow for 
             // prefixes like the comment earlier above suggests. We'll deal 
-            // with that when we get there.
+            // with that when we get there. Right now we don't allow prefixes
+            // and instead split longer traces into smaller ones with prefix
+            // and postfix parts split into separate traces.
             assert(false);
           }
           // Else There are active pointers behind our earliest completed

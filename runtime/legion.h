@@ -9358,6 +9358,24 @@ namespace Legion {
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
        * ---------------------
+       *  Tracing
+       * ---------------------
+       * -lg:no_tracing Disable execution with tracing of any kind. All calls
+       *              to begin and end traces will be ignored.
+       * -lg:no_physical_tracing Disable physical tracing. All calls to begin
+       *              and end traces will only be performed with regards to
+       *              logical dependence analysis.
+       * -lg:no_auto_tracing Disable auto-tracing by default so that Legion
+       *              is not trying to find traces inside tasks. Mappers can
+       *              still override this default value and set it to true 
+       *              to opt-in to auto-tracing
+       * -lg:no_trace_optimization Turn off all trace optimizations
+       * -lg:no_fence_elision Turn off the fence elision optimization that
+       *              improves the performance of back-to-back idempotent
+       *              trace replays
+       * -lg:no_transitive_reduction Turn off the transitive reduction
+       *              optimization that is performed on captured traces
+       * ---------------------
        *  Resiliency
        * ---------------------
        * -lg:resilient Enable features that make the runtime resilient

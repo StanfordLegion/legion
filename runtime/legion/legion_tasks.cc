@@ -3635,7 +3635,7 @@ namespace Legion {
       context_configuration.max_templates_per_trace =
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
-      context_configuration.auto_tracing_enabled = true;
+      context_configuration.auto_tracing_enabled = !runtime->no_auto_tracing;
       context_configuration.auto_tracing_batchsize = 100;
       context_configuration.auto_tracing_multi_scale_factor = 100;
       context_configuration.auto_tracing_min_trace_length = 5;
