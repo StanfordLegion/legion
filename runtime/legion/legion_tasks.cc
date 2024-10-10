@@ -4696,14 +4696,15 @@ namespace Legion {
         if (query.count() == 0)
         {
           const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
+#define MEM_NAMES(name, desc) #name,
             REALM_MEMORY_KINDS(MEM_NAMES) 
 #undef MEM_NAMES
           };
           REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-              "Unable to find a visible %s memory for task %s (UID %lld) "
-              "for creating dynamic memory pool.", mem_names[it->first],
-              get_task_name(), get_unique_id());
+              "Unable to find a visible %s memory from processor " IDFMT 
+              "for task %s (UID %lld) for creating dynamic memory pool "
+              "from static constraint.", mem_names[it->first],
+              target_proc.id, get_task_name(), get_unique_id());
         }
         const Memory target = query.first();
         // Check to see if we also got a dynamic memory pool bound, if we 
