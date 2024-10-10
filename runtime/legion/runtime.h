@@ -1334,6 +1334,7 @@ namespace Legion {
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid) const;
+      bool has_non_default_mapper(void) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -2969,6 +2970,7 @@ namespace Legion {
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
+      bool has_non_default_mapper(void) const;
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                 MapperID map_id, Processor proc, bool is_default = false);
     public:

@@ -32,6 +32,7 @@
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)
 #include "realm/event_impl.h"
+#include "realm/barrier_impl.h"
 #include "realm/rsrv_impl.h"
 #include "realm/subgraph_impl.h"
 
@@ -120,6 +121,8 @@ namespace Realm {
       int num_cpu_procs = 1, num_util_procs = 1, num_io_procs = 0;
       int concurrent_io_threads = 1; // Legion does not support values > 1 right now
       size_t sysmem_size = 512 << 20;
+      size_t sysmem_ipc_limit = 0; // make the sysmem as shared only if share_sysmem_limit
+                                   // == 0 or sysmem_size <= share_sysmem_limit
       size_t stack_size = 2 << 20;
       bool pin_util_procs = false;
       long long cpu_bgwork_timeslice = 0, util_bgwork_timeslice = 0;

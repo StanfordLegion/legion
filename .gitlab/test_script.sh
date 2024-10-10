@@ -67,6 +67,9 @@ fi
 # required for machine_config test to pin NUMA memory
 ulimit -l $(( 1024 * 1024 )) # KB
 
+# get backtraces if necessary
+export REALM_BACKTRACE=1
+
 # run test script
 ./tools/add_github_host_key.sh
 grep 'model name' /proc/cpuinfo | uniq -c || true

@@ -111,7 +111,9 @@ else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
 NVCC_FLAGS	+= -Xcompiler -fPIC
-HIPCC_FLAGS     += -fPIC
+ifeq ($(strip $(HIP_TARGET)),CUDA)
+HIPCC_FLAGS += -Xcompiler -fPIC
+endif
 ifeq ($(shell uname -s),Darwin)
 SLIB_LEGION     := liblegion.dylib
 SLIB_REALM      := librealm.dylib
@@ -1015,6 +1017,7 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
     $(LG_RT_DIR)/realm/deppart/byfield.cc \
     $(LG_RT_DIR)/realm/deppart/setops.cc \
     $(LG_RT_DIR)/realm/event_impl.cc \
+    $(LG_RT_DIR)/realm/barrier_impl.cc \
     $(LG_RT_DIR)/realm/rsrv_impl.cc \
     $(LG_RT_DIR)/realm/proc_impl.cc \
     $(LG_RT_DIR)/realm/mem_impl.cc \

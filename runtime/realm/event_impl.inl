@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-// Event/UserEvent/Barrier implementations for Realm
+// Event/UserEvent implementations for Realm
 
 // nop, but helps IDEs
 #include "realm/event_impl.h"
@@ -23,7 +23,6 @@
 namespace Realm { 
   extern EventImpl *get_event_impl(Event e);
   extern GenEventImpl *get_genevent_impl(Event e);
-  extern BarrierImpl *get_barrier_impl(Event e);
 };
 
 namespace Realm {
@@ -73,36 +72,6 @@ namespace Realm {
     impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id,
 		  poisoned, work_until);
   }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class BarrierImpl
-
-  inline Barrier BarrierImpl::current_barrier(Barrier::timestamp_t timestamp /*= 0*/) const
-  {
-    ID id(me);
-    gen_t gen = this->generation.load() + 1;
-    if(gen > id.barrier_generation().MAXVAL)
-      return Barrier::NO_BARRIER;
-    id.barrier_generation() = gen;
-    Barrier b = id.convert<Barrier>();
-    b.timestamp = timestamp;
-    return b;
-  }
-
-  inline Barrier BarrierImpl::make_barrier(gen_t gen,
-					   Barrier::timestamp_t timestamp /*= 0*/) const
-  {
-    ID id(me);
-    if(gen > id.barrier_generation().MAXVAL)
-      return Barrier::NO_BARRIER;
-    id.barrier_generation() = gen;
-    Barrier b = id.convert<Barrier>();
-    b.timestamp = timestamp;
-    return b;
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //

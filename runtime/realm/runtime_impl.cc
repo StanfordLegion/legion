@@ -743,6 +743,7 @@ namespace Realm {
     config_map.insert({"util", &num_util_procs});
     config_map.insert({"io", &num_io_procs});
     config_map.insert({"sysmem", &sysmem_size});
+    config_map.insert({"sysmem_ipc_limit", &sysmem_ipc_limit});
     config_map.insert({"stack_size", &stack_size});
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
@@ -882,15 +883,16 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
     // config for CoreModule
     cp.add_option_int("-ll:cpu", num_cpu_procs)
-      .add_option_int("-ll:util", num_util_procs)
-      .add_option_int("-ll:io", num_io_procs)
-      .add_option_int("-ll:concurrent_io", concurrent_io_threads)
-      .add_option_int_units("-ll:csize", sysmem_size, 'm')
-      .add_option_int_units("-ll:stacksize", stack_size, 'm')
-      .add_option_bool("-ll:pin_util", pin_util_procs)
-      .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
-      .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
-      .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
+        .add_option_int("-ll:util", num_util_procs)
+        .add_option_int("-ll:io", num_io_procs)
+        .add_option_int("-ll:concurrent_io", concurrent_io_threads)
+        .add_option_int_units("-ll:csize", sysmem_size, 'm')
+        .add_option_int_units("-ll:ipc_limit", sysmem_ipc_limit, 'm')
+        .add_option_int_units("-ll:stacksize", stack_size, 'm')
+        .add_option_bool("-ll:pin_util", pin_util_procs)
+        .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
+        .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
+        .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
 
     // config for RuntimeImpl
     // low-level runtime parameters
@@ -2150,7 +2152,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       //  maps where non-CPU devices can see them
       repl_heap.init(config->replheap_size, 1 /*chunks*/);
 
-      if (!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0) {
+      if(!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0 &&
+         (config->sysmem_ipc_limit == 0 ||
+          config->sysmem_size <= config->sysmem_ipc_limit)) {
         if (!share_memories()) {
           log_runtime.fatal("Failed to share memories with peers");
           abort();
