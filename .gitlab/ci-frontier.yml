@@ -47,6 +47,11 @@ variables:
 .nodes2: &nodes2
   SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 2 -n 2 -c 56 -p batch --exclusive"
 
+.tokens: &tokens
+  id_tokens:
+    OLCF_ID_TOKEN:
+      aud: https://code.olcf.ornl.gov
+
 .tests: &tests
   script:
     - .gitlab/test_script.sh
@@ -62,6 +67,7 @@ stages:
   - clean
 
 prep:
+  <<: [*tokens]
   stage: prep
   script:
     - .gitlab/prep_script.sh
@@ -70,7 +76,7 @@ prep:
     - frontier
 
 legion_rocm571:
-  <<: [*tests]
+  <<: [*tokens, *tests]
   stage: test
   tags:
     - slurm
@@ -79,7 +85,7 @@ legion_rocm571:
     <<: [*legion, *rocm571, *nodes1]
 
 legion_rocm600:
-  <<: [*tests]
+  <<: [*tokens, *tests]
   stage: test
   tags:
     - slurm
@@ -88,7 +94,7 @@ legion_rocm600:
     <<: [*legion, *rocm600, *nodes2]
 
 legion_cmake_rocm571:
-  <<: [*tests]
+  <<: [*tokens, *tests]
   stage: test
   tags:
     - slurm
@@ -97,7 +103,7 @@ legion_cmake_rocm571:
     <<: [*legion, *cmake, *ctest, *rocm571, *nodes1]
 
 legion_cmake_rocm600:
-  <<: [*tests]
+  <<: [*tokens, *tests]
   stage: test
   tags:
     - slurm
@@ -106,7 +112,7 @@ legion_cmake_rocm600:
     <<: [*legion, *cmake, *ctest, *rocm600, *nodes1]
 
 regent_rocm600:
-  <<: [*tests]
+  <<: [*tokens, *tests]
   stage: test
   tags:
     - slurm
@@ -115,7 +121,7 @@ regent_rocm600:
     <<: [*regent, *rocm600, *nodes1]
 
 regent_cmake_rocm600:
-  <<: [*tests]
+  <<: [*tokens, *tests]
   stage: test
   tags:
     - slurm
@@ -124,6 +130,7 @@ regent_cmake_rocm600:
     <<: [*regent, *cmake, *rocm600, *nodes2]
 
 clean:
+  <<: [*tokens]
   stage: clean
   script:
     - rm -rf ${EXTERNAL_WORKDIR}*

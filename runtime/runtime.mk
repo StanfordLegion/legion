@@ -111,7 +111,11 @@ else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
 NVCC_FLAGS	+= -Xcompiler -fPIC
-HIPCC_FLAGS     += -fPIC
+ifeq ($(strip $(HIP_TARGET)),CUDA)
+HIPCC_FLAGS += -Xcompiler -fPIC
+else
+HIPCC_FLAGS += -fPIC
+endif
 ifeq ($(shell uname -s),Darwin)
 SLIB_LEGION     := liblegion.dylib
 SLIB_REALM      := librealm.dylib
