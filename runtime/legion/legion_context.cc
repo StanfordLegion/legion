@@ -892,18 +892,36 @@ namespace Legion {
 #endif
       }
       RtEvent ready;
+      const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
       if (layouts == NULL)
       {
 #ifdef DEBUG_LEGION
         assert(num_results == 1);
 #endif
-        const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
         ready = RtEvent(instance.redistrict(results, &layout,
               num_results, &requests.front()));
       }
       else
+      {
+        // Compute the difference in sizes so we can update the memory
+        // manager with any space that has been freed up
+        size_t remainder = layout->bytes_used;
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+#ifdef DEBUG_LEGION
+          assert(layouts[idx]->bytes_used <= remainder);
+#endif
+          remainder -= layouts[idx]->bytes_used;
+        }
+        if (remainder > 0)
+        {
+          MemoryManager *manager = 
+            runtime->find_memory_manager(instance.get_location());
+          manager->update_remaining_capacity(remainder);
+        }
         ready = RtEvent(instance.redistrict(results, layouts,
             num_results, &requests.front()));
+      }
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < allocators.size(); idx++)
       {

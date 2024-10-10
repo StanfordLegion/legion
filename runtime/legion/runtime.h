@@ -1705,6 +1705,8 @@ namespace Legion {
           };
           return mem_names[memory.kind()];
         }
+      inline void update_remaining_capacity(size_t size)
+        { remaining_capacity.fetch_add(size); }
     public:
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);

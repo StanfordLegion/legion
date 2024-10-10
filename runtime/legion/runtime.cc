@@ -9400,7 +9400,11 @@ namespace Legion {
         // Then go through and delete the remaining backing stores
         for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
               backing_instances.begin(); it != backing_instances.end(); it++)
+        {
+          manager->update_remaining_capacity(
+              it->first.get_layout()->bytes_used);
           it->first.destroy(it->second);
+        }
         // Now the only remaining backing instances are the ones we made
         backing_instances.swap(new_backing_instances);
         released = true;
@@ -9415,7 +9419,11 @@ namespace Legion {
       // once the done event is triggered
       for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
             backing_instances.begin(); it != backing_instances.end(); it++)
+      {
+        manager->update_remaining_capacity(
+            it->first.get_layout()->bytes_used);
         it->first.destroy(Runtime::merge_events(it->second, done));
+      }
     }
 
     //--------------------------------------------------------------------------
