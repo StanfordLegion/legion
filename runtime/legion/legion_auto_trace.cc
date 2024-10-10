@@ -1162,7 +1162,12 @@ namespace Legion {
         return true;
       }
       else
+      {
+        // Increment the current trace blocking index so we know
+        // when we need to flush operations under blocking calls
+        this->current_trace_blocking_index = this->next_blocking_index;
         return T::add_to_dependence_queue(op, dependences);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1170,7 +1175,11 @@ namespace Legion {
     void AutoTracing<T>::record_blocking_call(uint64_t blocking_index)
     //--------------------------------------------------------------------------
     {
-      if (blocking_index != InnerContext::NO_BLOCKING_INDEX)
+      // Check to see if the blocking operation happens for any operation
+      // that occurs inside of the range of operations that we are buffering
+      if ((blocking_index != InnerContext::NO_BLOCKING_INDEX) &&
+          (this->current_trace == NULL) &&
+          (this->current_trace_blocking_index <= blocking_index))
       {
         // Handling waits from the application is very similar
         // to the case in add_to_dependence_queue when we encounter an
@@ -1179,6 +1188,7 @@ namespace Legion {
         // whether a wait is coming from the application by seeing if the
         // future being waited on has a valid coordinate.
         this->recognizer.record_operation_untraceable(this->opidx);
+        this->current_trace_blocking_index = this->next_blocking_index;
       }
       // Need to also do whatever the base context was going to do.
       T::record_blocking_call(blocking_index);
