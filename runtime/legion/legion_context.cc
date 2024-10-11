@@ -784,8 +784,8 @@ namespace Legion {
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
-      const TaskID owner_task_id = owner_task->task_id;
       assert(owner_task != NULL);
+      const TaskID owner_task_id = owner_task->task_id;
 #endif
       Runtime *runtime_ptr = runtime;
       // Tell the parent context that we are ready for post-end
