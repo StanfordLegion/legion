@@ -16,6 +16,8 @@ use legion_prof_viewer::{
 
 #[cfg(feature = "archiver")]
 use legion_prof::backend::archiver;
+#[cfg(feature = "nvtxw")]
+use legion_prof::backend::nvtxw;
 #[cfg(feature = "server")]
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
@@ -125,6 +127,23 @@ enum Commands {
         #[command(flatten)]
         out: OutputArgs,
     },
+    #[command(about = "process data through NVTXW for NVIDIA Nsight Systems")]
+    NVTXW {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[arg(long, help = "path to NVTXW backend implementation")]
+        backend: Option<OsString>,
+
+        #[arg(long, help = "output nsys-rep filename")]
+        output: OsString,
+
+        #[arg(short, long, help = "overwrite output file if it exists")]
+        force: bool,
+
+        #[arg(long, help = "input nsys-rep filename to merge with Legion Prof data")]
+        merge: Option<OsString>,
+    },
     #[command(about = "start profile HTTP server")]
     Serve {
         #[command(flatten)]
@@ -187,6 +206,13 @@ fn main() -> io::Result<()> {
                  Rebuild with --features=client to enable."
             );
         }
+        Commands::NVTXW { .. } => {
+            #[cfg(not(feature = "nvtxw"))]
+            panic!(
+                "Legion Prof was not built with the \"nvtxw\" feature. \
+                 Rebuild with --features=nvtxw to enable."
+            );
+        }
         Commands::Serve { .. } => {
             #[cfg(not(feature = "server"))]
             panic!(
@@ -227,6 +253,7 @@ fn main() -> io::Result<()> {
         Commands::Archive { ref args, .. }
         | Commands::Dump { ref args, .. }
         | Commands::Legacy { ref args, .. }
+        | Commands::NVTXW { ref args, .. }
         | Commands::View { ref args, .. }
         | Commands::Serve { ref args, .. }
         | Commands::Statistics { ref args, .. }
@@ -353,6 +380,21 @@ fn main() -> io::Result<()> {
         Commands::Legacy { out, .. } => {
             state.assign_colors();
             visualize::emit_interactive_visualization(&state, out.output, out.force)?;
+        }
+        Commands::NVTXW {
+            backend,
+            output,
+            force,
+            merge,
+            ..
+        } => {
+            #[cfg(feature = "nvtxw")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                let zero_time = state.zero_time;
+                nvtxw::write(state, backend, output, force, merge, zero_time)?;
+            }
         }
         Commands::View { .. } => {
             #[cfg(feature = "viewer")]
