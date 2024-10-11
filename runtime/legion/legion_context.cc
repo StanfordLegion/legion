@@ -784,6 +784,7 @@ namespace Legion {
       // Grab some information before doing the next step in case it
       // results in the deletion of 'this'
 #ifdef DEBUG_LEGION
+      const TaskID owner_task_id = owner_task->task_id;
       assert(owner_task != NULL);
 #endif
       Runtime *runtime_ptr = runtime;
@@ -804,7 +805,9 @@ namespace Legion {
         // data onto the stack before we do any of the cleanup because
         // we might end up deleting this 
         const UniqueID local_uid = get_unique_id();
+#ifndef DEBUG_LEGION
         const TaskID owner_task_id = owner_task->task_id;
+#endif
         const ApEvent local_completion = owner_task->get_completion_event();
         ImplicitTaskProfiler *local_task_profiler = implicit_task_profiler;
         implicit_task_profiler = NULL; // We take ownership
@@ -827,7 +830,6 @@ namespace Legion {
       {
         post_end_task();
 #ifdef DEBUG_LEGION
-        const TaskID owner_task_id = owner_task->task_id;
         runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
                                                        false/*meta*/);
 #else
