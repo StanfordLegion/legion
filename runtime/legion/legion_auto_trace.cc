@@ -1174,7 +1174,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    void AutoTracing<T>::record_blocking_call(uint64_t blocking_index)
+    void AutoTracing<T>::record_blocking_call(uint64_t blocking_index,
+                                              bool invalidate_trace)
     //--------------------------------------------------------------------------
     {
       // Check to see if the blocking operation happens for any operation
@@ -1193,7 +1194,7 @@ namespace Legion {
         this->current_trace_blocking_index = this->next_blocking_index;
       }
       // Need to also do whatever the base context was going to do.
-      T::record_blocking_call(blocking_index);
+      T::record_blocking_call(blocking_index, invalidate_trace);
     }
 
     template class AutoTracing<InnerContext>;

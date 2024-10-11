@@ -359,7 +359,8 @@ namespace Legion {
           bool unordered = false, bool outermost = true) override;
       // If the application performs a blocking operation, we need to know
       // about that, so override TaskContext::record_blocking_call().
-      virtual void record_blocking_call(uint64_t future_coordinate) override;
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true) override;
     private:
       TraceRecognizer recognizer;
       uint64_t opidx;

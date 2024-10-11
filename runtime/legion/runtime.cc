@@ -4797,7 +4797,22 @@ namespace Legion {
       {
         RtEvent wait_on = get_sharding_function_ready();
         if (wait_on.exists() && !wait_on.has_triggered())
+        {
+          // This is a bit unfortunate but should be a pretty rare
+          // situation so we just need to make it correct right now
+          // Index tasks and other operations going through the pipeline
+          // don't pick their sharding functor until they start going
+          // through the pipeline, so we need to tell auto-tracing to
+          // not buffer the producer of this future map to avoid a hang.
+          // This doesn't apply to invalidating traces though since we're
+          // not actually blocking waiting on a result computed by the
+          // trace so we set the flag saying this doesn't invalidate 
+          // the trace replay.
+          if (!internal)
+            context->record_blocking_call(blocking_index,
+                false/*invalidate trace*/);
           wait_on.wait();
+        }
       }
       Domain domain;
       shard_domain->get_domain(domain);

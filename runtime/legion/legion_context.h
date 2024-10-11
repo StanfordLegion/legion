@@ -509,7 +509,8 @@ namespace Legion {
         Provenance *provenance, bool from_application = true) = 0;
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance, bool from_application = true) = 0;
-      virtual void record_blocking_call(uint64_t future_coordinate) = 0;
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true) = 0;
       virtual void wait_on_future(FutureImpl *future, RtEvent ready) = 0;
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready) = 0;
     public:
@@ -1641,7 +1642,8 @@ namespace Legion {
           Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance, bool from_application = true);
-      virtual void record_blocking_call(uint64_t future_coordinate);
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true);
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:
@@ -3928,7 +3930,8 @@ namespace Legion {
           Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance, bool from_application = true);
-      virtual void record_blocking_call(uint64_t future_coordinate);
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true);
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:

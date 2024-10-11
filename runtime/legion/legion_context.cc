@@ -10089,7 +10089,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_blocking_call(uint64_t blocking_index)
+    void InnerContext::record_blocking_call(uint64_t blocking_index,
+                                            bool invalidate_trace)
     //--------------------------------------------------------------------------
     {
       // It's only a blocking call if the wait occurs from an operation 
@@ -10097,7 +10098,7 @@ namespace Legion {
       // were produced before the trace or in the case of inline mappings
       // we know those operations are not traceable so they had to be 
       // issued before we started capturing the trace
-      if ((current_trace != NULL) && 
+      if ((current_trace != NULL) && invalidate_trace &&
           (blocking_index != NO_BLOCKING_INDEX) &&
           (current_trace_blocking_index <= blocking_index))
       {
@@ -25023,7 +25024,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_blocking_call(uint64_t blocking_index)
+    void LeafContext::record_blocking_call(uint64_t blocking_index,
+                                           bool invalidate_trace)
     //--------------------------------------------------------------------------
     {
     }
