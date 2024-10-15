@@ -61,7 +61,7 @@ namespace Realm {
   //
 
   template <typename S>
-  bool serialize(S &ser, const BarrierTriggerMessageArgs &args)
+  bool serdez(S &ser, const BarrierTriggerMessageArgs &args)
   {
     bool success = false;
 
@@ -72,21 +72,6 @@ namespace Realm {
               (ser & args.internal.broadcast_index) &&
               (ser & args.internal.is_complete_list) &&
               (ser & args.remote_notifications);
-
-    return success;
-  }
-
-  template <typename S>
-  bool deserialize(S &dez, BarrierTriggerMessageArgs &args)
-  {
-    bool success = false;
-    success = (dez & args.internal.trigger_gen) && (dez & args.internal.previous_gen) &&
-              (dez & args.internal.first_generation) && (dez & args.internal.redop_id) &&
-              (dez & args.internal.migration_target) &&
-              (dez & args.internal.base_arrival_count) &&
-              (dez & args.internal.broadcast_index) &&
-              (dez & args.internal.is_complete_list) &&
-              (dez & args.remote_notifications);
 
     return success;
   }
