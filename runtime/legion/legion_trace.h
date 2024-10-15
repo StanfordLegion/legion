@@ -83,10 +83,46 @@ namespace Legion {
         RegionTreeNode *node;
 #endif
       };
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      struct TracePointWisePreviousIndexTaskInfo : public LegionHeapify<TracePointWisePreviousIndexTaskInfo> {
+      public:
+        TracePointWisePreviousIndexTaskInfo(IndexSpaceNode *domain, ProjectionFunction *projection,
+            ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
+            TraceLocalID prev_op_trace_idx, unsigned op_idx,
+            GenerationID prev_op_gen, size_t ctx_index, unsigned dep_type,
+            unsigned region_idx)
+          : domain(domain), projection(projection), sharding(sharding), sharding_domain(sharding_domain),
+          index_domain(index_domain),
+          prev_op_trace_idx(prev_op_trace_idx), op_idx(op_idx),
+          prev_op_gen(prev_op_gen),
+          ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
+      {}
+      public:
+        IndexSpaceNode *domain;
+        ProjectionFunction *projection;
+        ShardingFunction *sharding;
+        IndexSpaceNode *sharding_domain;
+        Domain index_domain;
+        TraceLocalID prev_op_trace_idx;
+        unsigned op_idx;
+        GenerationID prev_op_gen;
+        size_t ctx_index;
+        unsigned dep_type;
+        unsigned region_idx;
+      };
+#endif
+
       struct OperationInfo {
       public:
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        uint64_t context_index;
+        std::map<unsigned,bool> connect_to_next_points;
+        std::map<unsigned,bool> connect_to_prev_points;
+        std::map<unsigned,TracePointWisePreviousIndexTaskInfo> prev_ops;
+#endif
       };
       struct VerificationInfo {
       public:
@@ -158,6 +194,14 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype,
                                     const FieldMask &dependent_mask);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      void set_next_point_wise_user(const LogicalUser *next,
+          unsigned region_idx, Operation *source);
+      void set_prev_point_wise_user(const LogicalUser *prev,
+          unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
+          Operation *source);
+      void set_point_wise_dependences(size_t index, Operation *op);
+#endif
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }

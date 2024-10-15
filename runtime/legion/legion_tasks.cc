@@ -10308,6 +10308,11 @@ namespace Legion {
         unsigned region_idx, unsigned dep_type, unsigned prev_region_idx)
     //--------------------------------------------------------------------------
     {
+      if ((trace != NULL) && trace->is_recording())
+      {
+        trace->set_prev_point_wise_user(prev, region_idx, dep_type, prev_region_idx,
+            this);
+      }
       AutoLock o_lock(op_lock);
       //printf("[%d] SET DEPTYPE ==== %u\n", parent_ctx->get_shard_id(), dep_type);
       prev_index_tasks.insert({
@@ -10399,6 +10404,11 @@ namespace Legion {
         GenerationID user_gen, unsigned region_idx)
     //--------------------------------------------------------------------------
     {
+      if ((trace != NULL) && trace->is_recording())
+      {
+        trace->set_next_point_wise_user(next, region_idx, this);
+      }
+
       AutoLock o_lock(op_lock);
 
       if (user_gen < gen)

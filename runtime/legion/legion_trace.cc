@@ -379,6 +379,9 @@ namespace Legion {
           static_translator->pop_dependences(to_translate);
           translate_dependence_records(op, op_index, to_translate);
         }
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        replay_info[index].context_index = op->get_context_index();
+#endif
         return index;
       }
       else
@@ -396,7 +399,11 @@ namespace Legion {
                         context->get_task_name(), 
                         context->get_unique_id(), index+1)
         // Check to see if the meta-data alignes
-        const OperationInfo &info = replay_info[index];
+        OperationInfo &info = replay_info[index];
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        info.context_index = op->get_context_index();
+        set_point_wise_dependences(index, op);
+#endif
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
         operations.push_back(key);
@@ -604,6 +611,100 @@ namespace Legion {
       }
       return true;
     }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+    //--------------------------------------------------------------------------
+    void LogicalTrace::set_next_point_wise_user(const LogicalUser *next,
+        unsigned region_idx, Operation* source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      const std::pair<Operation*,GenerationID> next_key(next->op, next->gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        next_finder = op_map.find(next_key);
+      if (next_finder == op_map.end()) return;
+      OperationInfo &info = replay_info[source->get_trace_local_id().context_index];
+      info.connect_to_next_points[region_idx] = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::set_prev_point_wise_user(const LogicalUser *prev,
+        unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
+        Operation *source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      const std::pair<Operation*,GenerationID> prev_key(prev->op, prev->gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        prev_finder = op_map.find(prev_key);
+      if (prev_finder == op_map.end()) return;
+
+      OperationInfo &info = replay_info[source->get_trace_local_id().context_index];
+      info.prev_ops.insert({
+                              region_idx,
+                              TracePointWisePreviousIndexTaskInfo(
+                                  prev->shard_proj->domain,
+                                  prev->shard_proj->projection,
+                                  prev->shard_proj->sharding,
+                                  prev->shard_proj->sharding_domain,
+                                  static_cast<IndexTask*>(prev->op)->index_domain,
+                                  prev->op->get_trace_local_id(),
+                                  prev_finder->second,
+                                  prev->gen, prev->ctx_index, dep_type,
+                                  prev_region_idx)
+                              });
+
+      info.connect_to_prev_points[region_idx] = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::set_point_wise_dependences(size_t index, Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      OperationInfo &info = replay_info[index];
+      int num_regions = op->get_region_count();
+      for (int i = 0; i < num_regions; i++)
+      {
+        std::map<unsigned,bool>::iterator next_finder =
+          info.connect_to_next_points.find(i);
+        if (next_finder != info.connect_to_next_points.end())
+        {
+          static_cast<IndexTask*>(op)->set_connect_to_next_point(i);
+        }
+        std::map<unsigned,bool>::iterator prev_finder =
+          info.connect_to_prev_points.find(i);
+        if (prev_finder != info.connect_to_prev_points.end())
+        {
+
+          std::map<unsigned,TracePointWisePreviousIndexTaskInfo>::iterator prev_info_finder =
+            info.prev_ops.find(i);
+          assert(prev_info_finder != info.prev_ops.end());
+
+          const std::pair<Operation*,GenerationID> &prev =
+                                                operations[prev_info_finder->second.op_idx];
+          static_cast<IndexTask*>(op)->prev_index_tasks.insert({
+                              i,
+                              PointWisePreviousIndexTaskInfo(
+                                  prev_info_finder->second.domain,
+                                  prev_info_finder->second.projection,
+                                  prev_info_finder->second.sharding,
+                                  prev_info_finder->second.sharding_domain,
+                                  prev_info_finder->second.index_domain,
+                                  prev.first, prev.second,
+                                  replay_info[prev_info_finder->second.prev_op_trace_idx.context_index].context_index,
+                                  prev_info_finder->second.dep_type,
+                                  prev_info_finder->second.region_idx)
+                              });
+
+          static_cast<IndexTask*>(op)->set_connect_to_prev_point(i);
+        }
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     bool LogicalTrace::record_region_dependence(Operation *target, 

@@ -412,6 +412,7 @@ namespace Legion {
     public:
       uint64_t get_context_index(void) const;
       void set_context_index(uint64_t index);
+      TraceLocalID get_trace_local_id(void);
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used

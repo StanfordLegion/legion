@@ -40,6 +40,9 @@ import subprocess
 import sys
 import tempfile
 
+import io
+from contextlib import redirect_stdout
+
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
 TRUE_DEPENDENCE = 1
@@ -4022,23 +4025,65 @@ class LogicalVerificationState(object):
                 # replication since all index operations are not mapped until
                 # all of their local points are
                 need_fence = False
+
+            '''
             if op.has_point_wise_dependence(req.index):
                 state_bad_graph_on_error = op.state.bad_graph_on_error
                 state_assert = op.state.assert_on_error
                 op.state.bad_graph_on_error = False
                 op.state.assert_on_error = False
 
-                has_mapping_dependence = op.has_mapping_dependence(req, prev_op, prev_req, dep_type, self.field)
+                has_mapping_dependence = op.has_mapping_dependence(req, prev_op, prev_req, dep_type, self.field,
+                        show_error=False)
 
                 op.state.bad_graph_on_error = state_bad_graph_on_error
                 op.state.assert_on_error = state_assert
                 if has_mapping_dependence:
                     return dominates, True
+
+                if logical_op.uid == 7:
+                    breakpoint()
+                if not op.has_verification_point_wise_mapping_dependence(
+                    op.reqs[req.index], prev_op,
+                    prev_op.reqs[prev_req.index], dep_type,
+                    self.field, previous_deps):
+                    breakpoint()
+                else:
+                    brakpoint()
+
             if not logical_op.has_verification_mapping_dependence(
                     logical_op.reqs[req.index], prev_logical, 
                     prev_logical.reqs[prev_req.index], dep_type, 
                     self.field, need_fence, previous_deps):
                 return dominates,False
+            '''
+            f = io.StringIO()
+            with redirect_stdout(f):
+                try:
+                    has_verification_mapping_dependence = logical_op.has_verification_mapping_dependence(
+                            logical_op.reqs[req.index], prev_logical,
+                            prev_logical.reqs[prev_req.index], dep_type,
+                            self.field, need_fence, previous_deps)
+
+                    if has_verification_mapping_dependence:
+                        return dominates,True
+                except AssertionError:
+                    if op.state.has_point_wise_dependeces:
+                        if op.has_point_wise_dependence(req.index):
+                            has_mapping_dependence = op.has_mapping_dependence(req,
+                                    prev_op, prev_req, dep_type, self.field)
+                            if has_mapping_dependence:
+                                return dominates, True
+                        if not op.has_verification_point_wise_mapping_dependence(
+                                op.reqs[req.index], prev_op,
+                                prev_op.reqs[prev_req.index], dep_type,
+                            self.field, previous_deps):
+                            return dominates, False
+                    else:
+                        print(f.getvalue())
+                        if op.state.assert_on_error:
+                            assert False
+
         return dominates,True
 
 
@@ -7538,6 +7583,62 @@ class Operation(object):
                 next_op.generation = next_gen
                 queue.append(next_op)
         return False
+
+    def has_verification_point_wise_mapping_dependence(self, req, prev_op, prev_req, dtype,
+                                            field, previous_deps):
+        tree_id = req.logical_node.tree_id
+        # Do a quick check to see if it is in the previous deps
+        if prev_op in previous_deps:
+            # We already found this prev_op as a previous dependence
+            return True
+        self.has_verification_transitive_point_wise_mapping_dependence(prev_op,
+                                                    field, tree_id, previous_deps)
+        # Did not find it so issue the error and return false
+        if prev_op not in previous_deps:
+            print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
+                  "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
+                  str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
+                  str(self)+" (UID "+str(self.uid)+")")
+            if self.state.bad_graph_on_error:
+                self.state.dump_bad_graph(self.context, tree_id, field)
+            if self.state.assert_on_error:
+                assert False
+        else:
+            return True
+        return False
+
+    def has_verification_transitive_point_wise_mapping_dependence(self, prev_op,
+                                                    field, tree_id, previous_deps):
+        # Equal is for stupid must epoch launches
+        #assert prev_op.get_context_index() <= self.get_context_index()
+        if True:
+            # If we don't need a close then we can do BFS which is much more efficient
+            # at finding dependences of things nearby in the graph
+            queue = collections.deque()
+            queue.append(self)
+            if len(previous_deps) > 0:
+                # We already started BFS-ing so we can restart from all
+                # the operations that we already visited
+                for op in iterkeys(previous_deps):
+                    #if prev_op.get_context_index() <= op.get_context_index():
+                    queue.append(op)
+            while queue:
+                current = queue.popleft()
+                if not current.logical_incoming:
+                    continue
+                # If this operation comes earlier in the program than the
+                # previous operation that we're searching for then there
+                # is no need to search past it for now
+                #if current.get_context_index() < prev_op.get_context_index():
+                #    continue
+                for next_op in current.logical_incoming:
+                    if next_op in previous_deps:
+                        continue
+                    previous_deps[next_op] = None
+                    if next_op is prev_op:
+                        return True
+                    queue.append(next_op)
+
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
                                             field, need_fence, previous_deps):
@@ -12479,6 +12580,8 @@ def parse_legion_spy_line(line, state):
             prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
             next_ctx_idx, next_region_idx, next_point, next_shard,
             dep_type))
+        if not state.has_point_wise_dependeces:
+            state.has_point_wise_dependeces = True
         #print("ctx %d, repl_id %d, max_dim %d, prev_ctx_idx %d, prev_region_idx: %d, prev_dim:%d, prev_shard: %d, next_ctx_idx: %d, next_region_idx: %d, next_dim: %d, next_shard: %d, dep_type: %d values: %s" % (ctx, repl_id, max_dim, prev_ctx_idx, prev_region_idx, prev_dim, prev_shard, next_ctx_idx, next_region_idx, next_dim, next_shard, dep_type, values))
         return True
     m = future_create_pat.match(line)
@@ -13222,7 +13325,8 @@ class State(object):
                  'slice_slice', 'point_slice', 'point_point', 'futures', 'next_generation', 
                  'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
                  'assert_on_error', 'assert_on_warning', 'bad_graph_on_error', 
-                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants', 'eq_sets']
+                 'eq_graph_on_error', 'config', 'detailed_logging', 'replicants', 'eq_sets',
+                 'has_point_wise_dependeces']
     def __init__(self, temp_dir, verbose, details, assert_on_error, 
                  assert_on_warning, bad_graph_on_error, eq_graph_on_error):
         self.temp_dir = temp_dir
@@ -13281,6 +13385,8 @@ class State(object):
         self.next_generation = 1
         self.next_realm_num = 1
         self.next_indirections_num = 1
+        # For point-wise dependencies
+        self.has_point_wise_dependeces = False
 
     def set_config(self, detailed):
         self.config = True
