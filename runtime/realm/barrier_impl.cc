@@ -273,35 +273,6 @@ namespace Realm {
     amsg.commit();
   }
 
-  /*static*/ void BarrierTriggerMessage::send_request(
-      NodeID target, ID::IDType barrier_id, EventImpl::gen_t trigger_gen,
-      EventImpl::gen_t previous_gen, EventImpl::gen_t first_generation,
-      ReductionOpID redop_id, NodeID migration_target, unsigned base_arrival_count,
-      int broadcast_index, const void *data, size_t datalen)
-  {
-    BarrierTriggerMessageArgs trigger_args;
-    trigger_args.internal.trigger_gen = trigger_gen;
-    trigger_args.internal.previous_gen = previous_gen;
-    trigger_args.internal.first_generation = first_generation;
-    trigger_args.internal.redop_id = redop_id;
-    trigger_args.internal.migration_target = migration_target;
-    trigger_args.internal.base_arrival_count = base_arrival_count;
-    trigger_args.internal.broadcast_index = broadcast_index;
-    Serialization::DynamicBufferSerializer dbs(datalen);
-    bool ok = dbs & trigger_args;
-    assert(ok);
-    if(datalen > 0) {
-      ok = dbs.append_bytes(data, datalen);
-    }
-
-    size_t total_payload_size = dbs.bytes_used();
-
-    ActiveMessage<BarrierTriggerMessage> amsg(target, total_payload_size);
-    amsg->barrier_id = barrier_id;
-    amsg.add_payload(dbs.get_buffer(), total_payload_size);
-    amsg.commit();
-  }
-
   /*static*/ void
   BarrierTriggerMessage::send_request(NodeID target, ID::IDType barrier_id,
                                       BarrierTriggerMessageArgs &trigger_args,
@@ -1125,10 +1096,18 @@ namespace Realm {
     if(trigger_gen > 0) {
       log_barrier.info("sending immediate barrier trigger: " IDFMT "/%d -> %d",
                        args.barrier_id, previous_gen, trigger_gen);
-      BarrierTriggerMessage::send_request(
-          args.subscriber, args.barrier_id, trigger_gen, previous_gen,
-          impl->first_generation, impl->redop_id, (NodeID)-1 /*no migration*/,
-          0 /*dummy arrival count*/, 0, final_values_copy, final_values_size);
+
+      BarrierTriggerMessageArgs trigger_args;
+      trigger_args.internal.trigger_gen = trigger_gen;
+      trigger_args.internal.previous_gen = previous_gen;
+      trigger_args.internal.first_generation = impl->first_generation;
+      trigger_args.internal.redop_id = impl->redop_id;
+      trigger_args.internal.migration_target = (NodeID)-1;
+      trigger_args.internal.base_arrival_count = 0;
+      trigger_args.internal.broadcast_index = 0;
+
+      BarrierTriggerMessage::send_request(args.subscriber, args.barrier_id, trigger_args,
+                                          final_values_copy, final_values_size);
     }
 
     if(final_values_copy)
