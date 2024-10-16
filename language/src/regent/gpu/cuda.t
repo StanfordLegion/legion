@@ -334,7 +334,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     check(DriverAPI.cuInit(0), "cuInit")
 
     var num_devices: int = -1
-    checkrt(RuntimeAPI.cudaGetDeviceCount(&num_devices), "cudaGetDeviceCount")
+    check(DriverAPI.cuDeviceGetCount(&num_devices), "cuDeviceGetCount")
     escape
       for _, k in ipairs(kernels) do
         local kernel = k.kernel
@@ -350,7 +350,11 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     end
 
     for dev_id = 0, num_devices do
-      checkrt(RuntimeAPI.cudaSetDevice(dev_id), "cudaSetDevice")
+      var dev : DriverAPI.CUdevice
+      check(DriverAPI.cuDeviceGet(&dev, dev_id), "cuDeviceGet")
+      var ctx : DriverAPI.CUcontext
+      check(DriverAPI.cuDevicePrimaryCtxRetain(&ctx, dev), "cuDevicePrimaryCtxRetain")
+      check(DriverAPI.cuCtxPushCurrent_v2(ctx), "cuCtxPushCurrent_v2")
       var module : DriverAPI.CUmodule
       check(DriverAPI.cuModuleLoadData(&module, image), "cuModuleLoadData")
       escape
@@ -365,6 +369,8 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
           end
         end
       end
+      check(DriverAPI.cuCtxPopCurrent_v2(&ctx), "cuCtxPopCurrent_v2")
+      check(DriverAPI.cuDevicePrimaryCtxRelease_v2(dev), "cuDevicePrimaryCtxRelease_v2")
     end
   end
 
@@ -532,10 +538,11 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
       base.assert(ok, "unable to get task CUDA stream")
       var dev_id : int
       checkrt(RuntimeAPI.cudaGetDevice(&dev_id), "cudaGetDevice")
+
       [launch_domain_init]
       [setupArguments]
-      [check](
-        [DriverAPI.cuLaunchKernel](
+      check(
+        DriverAPI.cuLaunchKernel(
           [func][dev_id],
           [grid].x, [grid].y, [grid].z,
           [block].x, [block].y, [block].z,
