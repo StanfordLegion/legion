@@ -96,20 +96,9 @@ do
 end
 
 function cudahelper.driver_library_link_flags()
-  -- If the hijack is turned off, we need extra dependencies to link
-  -- the generated CUDA code correctly
-  if base.c.REGENT_USE_HIJACK == 0 then
-    return terralib.newlist({
-      "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
-      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
-      "-lpthread", "-lrt"
-    })
-  else
-    return terralib.newlist({
-      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
-    })
-  end
-  return terralib.newlist()
+  return terralib.newlist({
+    "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
+  })
 end
 
 -- #####################################
