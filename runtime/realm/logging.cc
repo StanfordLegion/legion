@@ -628,8 +628,8 @@ namespace Realm {
   {
     if(active) {
       static const int MAXLEN = 4096;
-       char msg[MAXLEN] = {0};
-       int prefixLength = strlen(msg);
+      char msg[MAXLEN] = {0};
+      int prefixLength = strlen(msg);
       int full = prefixLength + vsnprintf(msg + prefixLength, MAXLEN - prefixLength, fmt, args);
       // If this is an error or a warning, print out the full string
       // no matter what
@@ -646,5 +646,5 @@ namespace Realm {
     }
     return *this;
   }
-    
+
 }; // namespace Realm

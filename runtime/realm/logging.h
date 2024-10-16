@@ -88,10 +88,10 @@ namespace Realm {
     LoggerMessage warning(void);
     LoggerMessage error(void);
     LoggerMessage fatal(void);
-    
+
     // use this only if you want a dynamic level for some reason
     LoggerMessage newmsg(LoggingLevel level);
-    
+
     // old printf-style interface
     REALM_ATTR_PRINTF_FORMAT(void spew(const char *fmt, ...), 2, 3);
     REALM_ATTR_PRINTF_FORMAT(void debug(const char *fmt, ...), 2, 3);
@@ -100,7 +100,7 @@ namespace Realm {
     REALM_ATTR_PRINTF_FORMAT(void warning(const char *fmt, ...), 2, 3);
     REALM_ATTR_PRINTF_FORMAT(void error(const char *fmt, ...), 2, 3);
     REALM_ATTR_PRINTF_FORMAT(void fatal(const char *fmt, ...), 2, 3);
-    
+
   protected:
     friend class LoggerMessage;
 
@@ -135,27 +135,26 @@ namespace Realm {
   protected:
     // can only be created by a Logger
     friend class Logger;
-    
+
     LoggerMessage(void);  // default constructor makes an inactive message
     LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level);
-    
-    
+
   public:
     LoggerMessage(const LoggerMessage& to_copy);
     ~LoggerMessage(void);
-    
+
     template <typename T>
     LoggerMessage& operator<<(const T& val);
-    
+
     // vprintf-style
     LoggerMessage& vprintf(const char *fmt, va_list ap);
-    
+
     bool is_active(void) const;
 
     void deactivate(void);
 
     std::ostream& get_stream(void);
-    
+
   protected:
     Logger *logger;
     bool active;
