@@ -370,7 +370,8 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
         end
       end
       check(DriverAPI.cuCtxPopCurrent_v2(&ctx), "cuCtxPopCurrent_v2")
-      check(DriverAPI.cuDevicePrimaryCtxRelease_v2(dev), "cuDevicePrimaryCtxRelease_v2")
+      -- Hack: leak the context because otherwise the module/function handles will be invalidated
+      -- check(DriverAPI.cuDevicePrimaryCtxRelease_v2(dev), "cuDevicePrimaryCtxRelease_v2")
     end
   end
 
