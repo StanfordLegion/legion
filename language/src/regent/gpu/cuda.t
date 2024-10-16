@@ -554,7 +554,7 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
 end
 
 terra cudahelper.device_synchronize()
-  checkrt(RuntimeAPI.cudaDeviceSynchronize(), "cudaDeviceSynchronize")
+  check(DriverAPI.cuCtxSynchronize(), "cuCtxSynchronize")
 end
 
 local function get_nv_fn_name(name, type)
