@@ -546,7 +546,7 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
           [func][dev_id],
           [grid].x, [grid].y, [grid].z,
           [block].x, [block].y, [block].z,
-          [shared_mem_size], [stream], [arg_arr], nil),
+          [shared_mem_size], stream, [arg_arr], nil),
         "cuLaunchKernel")
     end
   end
