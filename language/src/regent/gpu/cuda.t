@@ -530,7 +530,7 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
       var stream : DriverAPI.CUstream
       var ok = base.c.regent_get_task_cuda_stream(&stream)
       base.assert(ok, "unable to get task CUDA stream")
-      var dev : CUdevice
+      var dev : DriverAPI.CUdevice
       check(DriverAPI.cuCtxGetDevice(&dev), "cuCtxGetDevice")
       -- Important: CUdevice is really a typedef for int
       var dev_id : int = dev
