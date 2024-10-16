@@ -1412,6 +1412,11 @@ namespace Legion {
           // Only leaf tasks should map their reduction regions to instances
           if (chosen.is_leaf)
           {
+	    // check task layout constraints are valid before trying to
+	    // create instances for this region req
+	    check_valid_task_layout_constraints(task,ctx,
+		layout_constraints,target_proc, target_memory,
+		task.regions[idx], idx);
             size_t footprint;
             if (!default_create_custom_instances(ctx, target_proc,
                     target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1464,6 +1469,11 @@ namespace Legion {
           if (missing_fields[idx].empty())
             continue;
         }
+	// check task layout constraints are valid before trying to
+	// create instances for this region req
+	check_valid_task_layout_constraints(task,ctx,
+		    layout_constraints,target_proc, target_memory,
+		    task.regions[idx], idx);
         // Otherwise make normal instances for the given region
         size_t footprint;
         if (!default_create_custom_instances(ctx, target_proc,
@@ -1862,6 +1872,209 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void inline DefaultMapper::partition_task_layout_constraint_sets(
+			   const MapperContext ctx,
+			   const unsigned index,
+			   std::set<FieldID> &needed_fields,
+			   const TaskLayoutConstraintSet &layout_constraints,
+			   std::vector<std::vector<FieldID> > &field_arrays,
+			   std::vector<std::vector<FieldID> > &leftover_fields,
+			   std::vector<LayoutConstraintID> &field_layout_ids,
+			   std::vector<LayoutConstraintID> &non_field_layout_ids)
+    //--------------------------------------------------------------------------
+    {
+      // partition task layout constraints sets into 2 - those that have fields
+      // explicitly specified and those that don't
+      for (auto lay_it =
+	     layout_constraints.layouts.lower_bound(index); lay_it !=
+	     layout_constraints.layouts.upper_bound(index); lay_it++)
+      {
+	// Get the layout constraints from the task layout set
+	const LayoutConstraintSet &index_constraints =
+	  runtime->find_layout_constraints(ctx, lay_it->second);
+	bool field_layout_cid = false;
+	// determine overlapping fields between the task layout constraint and needed_fields
+	std::vector<FieldID> overlapping_fields;
+	const std::vector<FieldID> &constraint_fields =
+	  index_constraints.field_constraint.get_field_set();
+
+	// check if there are any field constraints in the current task layout constraint
+	if (!constraint_fields.empty()) {
+	  field_layout_cid = true;
+	  for (FieldID fid: constraint_fields)
+	  {
+	    // check if the field is included in the needed_fields i.e. overlaps
+	    auto finder = needed_fields.find(fid);
+	    if (finder != needed_fields.end()) {
+	      overlapping_fields.push_back(fid);
+	      // Remove from the needed fields since we're going to handle it
+	      needed_fields.erase(finder);
+	    }
+	  }
+	}
+	// alignment constraints may have an explicit field
+	if (!index_constraints.alignment_constraints.empty()) {
+	  field_layout_cid = true;
+	  for (unsigned idx = 0; idx < index_constraints.alignment_constraints.size(); idx++) {
+	    auto fid = index_constraints.alignment_constraints[idx].fid;
+	    auto finder = needed_fields.find(fid);
+	    if (finder != needed_fields.end()) {
+	      overlapping_fields.push_back(fid);
+	      // Remove from the needed fields since we're going to handle it
+	      needed_fields.erase(finder);
+	    }
+	  }
+	}
+	// offset constraints may have an explicit field
+	if (!index_constraints.offset_constraints.empty()) {
+	  field_layout_cid = true;
+	  for (unsigned idx = 0; idx < index_constraints.offset_constraints.size(); idx++) {
+	    auto fid = index_constraints.offset_constraints[idx].fid;
+	    auto finder = needed_fields.find(fid);
+	    if (finder != needed_fields.end()) {
+	      overlapping_fields.push_back(fid);
+	      // Remove from the needed fields since we're going to handle it
+	      needed_fields.erase(finder);
+	    }
+	  }
+	}
+	// If we don't have any overlapping fields, then keep going
+	if (field_layout_cid && overlapping_fields.empty())
+	  continue;
+	if (!field_layout_cid)  { // constraint_field empty
+	  non_field_layout_ids.push_back(lay_it->second);
+	}
+	if (!overlapping_fields.empty()) {
+	  field_arrays.push_back(overlapping_fields);
+	  field_layout_ids.push_back(lay_it->second);
+	}
+      }
+      // after all explicit field related constraints have been identified
+      // leftover fields is the remaining fields
+      if (!needed_fields.empty()) {
+	std::vector<FieldID> fields;
+	fields.insert(fields.end(), needed_fields.begin(),needed_fields.end());
+	leftover_fields.push_back(fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool
+    DefaultMapper::create_instances_from_partitioned_task_layout_constraint_set(
+		      const MapperContext ctx,
+		      const Memory target_memory,
+		      const std::vector<std::vector<FieldID> > &field_arrays,
+		      const std::vector<LayoutConstraintID> &layout_ids,
+		      const unsigned int layout_ids_size,
+		      std::vector<PhysicalInstance> &instances,
+		      const RegionRequirement &req,
+		      const bool force_new_instances,
+		      size_t *footprint,
+		      const bool is_field_constraints,
+		      const bool all_fields_opt)
+    //--------------------------------------------------------------------------
+    {
+
+      for (unsigned idx = 0; idx < layout_ids_size; idx++)
+      {
+	instances.resize(instances.size()+1);
+	LayoutConstraintID lay_id = layout_ids[idx];
+	std::vector<FieldID> overlapping_fields;
+	const LayoutConstraintSet &index_constraints =
+	  runtime->find_layout_constraints(ctx, lay_id);
+	overlapping_fields = field_arrays[idx];
+	LayoutConstraintSet creation_constraints = index_constraints;
+	if (is_field_constraints && (!index_constraints.field_constraint.get_field_set().empty()))
+	{
+	  // add field constraints
+	  creation_constraints.add_constraint(
+				 FieldConstraint(overlapping_fields,
+				 index_constraints.field_constraint.contiguous,
+				 index_constraints.field_constraint.inorder));
+	}
+
+	else {
+	  // default case - constraint applied to remaining fields
+	  // leftover_fields
+	  // if not optimizing for all fields in the field space, add the
+	  // overlapping_fields in the field constraint
+	  if (!all_fields_opt)
+	    creation_constraints.add_constraint(
+		      FieldConstraint(overlapping_fields, false/*contig*/, false/*inorder*/));
+	  else
+	    {
+	      assert(creation_constraints.field_constraint.field_set.size() == 0);
+	      std::vector<FieldID> creation_fields;
+	      default_policy_select_constraint_fields(ctx, req, creation_fields);
+	      creation_constraints.add_constraint(
+		  FieldConstraint(creation_fields, false/*contig*/, false/*inorder*/));
+	    }
+	}
+	// let the default mapper add any additional constraints
+	default_policy_select_constraints(ctx, creation_constraints,
+					  target_memory, req);
+	if (!default_make_instance(ctx, target_memory, creation_constraints,
+				   instances.back(), TASK_MAPPING, force_new_instances,
+				   true/*meets*/, req, footprint))
+	  return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::check_valid_task_layout_constraints(const Task &task,
+				    MapperContext ctx,
+				    const TaskLayoutConstraintSet &layout_constraints,
+				    const Processor target_proc, const Memory target_memory,
+				    const RegionRequirement &req, const unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // if we have reduce privileges on region requirements - check if the
+      // req.redop is same as that in 'specialized constraints'
+      if (req.privilege == LEGION_REDUCE)
+	{
+	  for (auto lay_it =
+	   layout_constraints.layouts.lower_bound(index); lay_it !=
+	   layout_constraints.layouts.upper_bound(index); lay_it++)
+	    {
+	      // Get the layout constraints from the task layout set
+	      const LayoutConstraintSet &index_constraints =
+		runtime->find_layout_constraints(ctx, lay_it->second);
+	      std::vector<FieldID> overlapping_fields;
+	      const std::vector<FieldID> &constraint_fields =
+		index_constraints.field_constraint.get_field_set();
+	      // check if there are any field constraints in the current task layout constraint
+	      if (!constraint_fields.empty()) {
+
+		for (FieldID fid: constraint_fields)
+		  {
+		    // check if the field is included in the privilege fields
+		    auto finder =  req.privilege_fields.find(fid);
+		    if (finder != req.privilege_fields.end()) {
+		      // check specialized constraint
+                      const SpecializedConstraint constraint(
+                          LEGION_AFFINE_REDUCTION_SPECIALIZE, req.redop); 
+                      if (index_constraints.specialized_constraint.conflicts(constraint))
+			{
+			  log_mapper.error("Default mapper failed allocation for "
+			   "region requirement %d of task %s (UID %lld) in memory "
+			   IDFMT " (%s) for processor " IDFMT " (%s). Mismatch between "
+			   "reduction type in task layout constraint "
+			   "and region requirement for FieldID (%u)",
+			   index,
+			   task.get_task_name(), task.get_unique_id(),
+			   target_memory.id, Utilities::to_string(target_memory.kind()),
+			   target_proc.id, Utilities::to_string(target_proc.kind()), fid);
+			  assert(false);
+			}
+		    }
+		  }
+	      }
+	    }
+	}
+    }
+
+    //--------------------------------------------------------------------------
     bool DefaultMapper::default_create_custom_instances(MapperContext ctx,
                           Processor target_proc, Memory target_memory,
                           const RegionRequirement &req, unsigned index,
@@ -1872,134 +2085,85 @@ namespace Legion {
                           size_t *footprint /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Special case for reduction instances, no point in checking
-      // for existing ones and we also know that currently we can only
-      // make a single instance for each field of a reduction
-      if (req.privilege == LEGION_REDUCE)
-      {
-        // Iterate over the fields one by one for now, once Realm figures
-        // out how to deal with reduction instances that contain
-        bool force_new_instances = true; // always have to force new instances
-        LayoutConstraintID our_layout_id =
-         default_policy_select_layout_constraints(ctx, target_memory, req,
-               TASK_MAPPING, needs_field_constraint_check, force_new_instances);
-        LayoutConstraintSet our_constraints =
-                      runtime->find_layout_constraints(ctx, our_layout_id);
-        instances.resize(instances.size() + req.privilege_fields.size());
-        unsigned idx = 0;
-        for (std::set<FieldID>::const_iterator it =
-              req.privilege_fields.begin(); it !=
-              req.privilege_fields.end(); it++, idx++)
-        {
-          our_constraints.field_constraint.field_set.clear();
-          our_constraints.field_constraint.field_set.push_back(*it);
-          if (!default_make_instance(ctx, target_memory, our_constraints,
-                       instances[idx], TASK_MAPPING, force_new_instances,
-                       true/*meets*/, req, footprint))
-            return false;
-        }
-        return true;
-      }
-      // Before we do anything else figure out our
-      // constraints for any instances of this task, then we'll
-      // see if these constraints conflict with or are satisfied by
-      // any of the other constraints
       bool force_new_instances = false;
+      // include all the fields in the region req for reduce privileges
+      if (req.privilege == LEGION_REDUCE) {
+	force_new_instances = default_policy_select_reduction_instance_reuse(ctx) ? false: true;
+	needed_fields.clear();
+	needed_fields.insert(req.privilege_fields.begin(), req.privilege_fields.end());
+      }
+      // preprocess all the task constraint sets
+      // partition them into field/non-field constraint sets + fields
+      std::vector<std::vector<FieldID> > field_arrays, leftover_fields;
+      std::vector<LayoutConstraintID> field_layout_ids, non_field_layout_ids;
+      unsigned needed_fields_size = needed_fields.size();
+      partition_task_layout_constraint_sets(ctx, index, needed_fields,
+					    layout_constraints,
+					    field_arrays, leftover_fields,
+					    field_layout_ids,
+					    non_field_layout_ids);
+      // case 1 - create instances for fields with explicit constraints
+      if (!field_layout_ids.empty())
+      {
+	bool ok = create_instances_from_partitioned_task_layout_constraint_set(
+		           ctx,
+			   target_memory,
+			   field_arrays,
+			   field_layout_ids,
+			   field_layout_ids.size(),
+			   instances,
+			   req,
+			   force_new_instances,
+			   footprint,
+			   /* field constraints */true);
+	if (!ok)
+	  return false;
+      }
+
+      // case 2 - non-field constraints + needed fields not empty
+      if((!non_field_layout_ids.empty()) && (!needed_fields.empty()))
+      {
+	// all_fields_opt ->  creates an instance with all fields
+	// in a region requirement is not valid for region req with reduce privileges.
+	bool all_fields_opt = ((needed_fields.size() == needed_fields_size)
+			       && (req.privilege != LEGION_REDUCE)) ? true: false;
+	// we will process all the needed_fields and use one non-field layout set
+	needed_fields.clear();
+	bool ok = create_instances_from_partitioned_task_layout_constraint_set(
+			   ctx,
+			   target_memory,
+			   leftover_fields,
+			   non_field_layout_ids,
+			   1,
+			   instances,
+			   req,
+			   force_new_instances,
+			   footprint,
+			   /* non-field constraints */ false, all_fields_opt);
+	if (!ok)
+	  return false;
+      }
+      if (needed_fields.empty())
+	return true;
+
+      // case 3 - no constraints + needed_fields is not empty
+      // There are no constraints for these fields so we get to do what we want
+      instances.resize(instances.size()+1);
       LayoutConstraintID our_layout_id =
        default_policy_select_layout_constraints(ctx, target_memory, req,
                TASK_MAPPING, needs_field_constraint_check, force_new_instances);
-      const LayoutConstraintSet &our_constraints =
-                    runtime->find_layout_constraints(ctx, our_layout_id);
-      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator lay_it =
-            layout_constraints.layouts.lower_bound(index); lay_it !=
-            layout_constraints.layouts.upper_bound(index); lay_it++)
-      {
-        // Get the constraints
-        const LayoutConstraintSet &index_constraints =
-                  runtime->find_layout_constraints(ctx, lay_it->second);
-        std::vector<FieldID> overlapping_fields;
-        const std::vector<FieldID> &constraint_fields =
-          index_constraints.field_constraint.get_field_set();
-        if (!constraint_fields.empty())
-        {
-          for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
-          {
-            FieldID fid = constraint_fields[idx];
-            std::set<FieldID>::iterator finder = needed_fields.find(fid);
-            if (finder != needed_fields.end())
-            {
-              overlapping_fields.push_back(fid);
-              // Remove from the needed fields since we're going to handle it
-              needed_fields.erase(finder);
-            }
-          }
-          // If we don't have any overlapping fields, then keep going
-          if (overlapping_fields.empty())
-            continue;
-        }
-        else // otherwise it applies to all the fields
-        {
-          overlapping_fields.insert(overlapping_fields.end(),
-              needed_fields.begin(), needed_fields.end());
-          needed_fields.clear();
-        }
-        // Now figure out how to make an instance
-        instances.resize(instances.size()+1);
-        // Check to see if these constraints conflict with our constraints
-        // or whether they entail our mapper preferred constraints
-        if (runtime->do_constraints_conflict(ctx, our_layout_id, lay_it->second)
-            || runtime->do_constraints_entail(ctx, lay_it->second, our_layout_id))
-        {
-          // They conflict or they entail our constraints so we're just going
-          // to make an instance using these constraints
-          // Check to see if they have fields and if not constraints with fields
-          if (constraint_fields.empty())
-          {
-            LayoutConstraintSet creation_constraints = index_constraints;
-            default_policy_select_constraints(ctx, creation_constraints,
-                                              target_memory, req);
-            creation_constraints.add_constraint(
-                FieldConstraint(overlapping_fields,
-                  index_constraints.field_constraint.contiguous,
-                  index_constraints.field_constraint.inorder));
-            if (!default_make_instance(ctx, target_memory, creation_constraints,
-                         instances.back(), TASK_MAPPING, force_new_instances,
-                         true/*meets*/, req, footprint))
-              return false;
-          }
-          else if (!default_make_instance(ctx, target_memory, index_constraints,
-                     instances.back(), TASK_MAPPING, force_new_instances,
-                     false/*meets*/, req, footprint))
-            return false;
-        }
-        else
-        {
-          // These constraints don't do as much as we want but don't
-          // conflict so make an instance with them and our constraints
-          LayoutConstraintSet creation_constraints = index_constraints;
-          default_policy_select_constraints(ctx, creation_constraints,
-                                            target_memory, req);
-          creation_constraints.add_constraint(
-              FieldConstraint(overlapping_fields,
-                creation_constraints.field_constraint.contiguous ||
-                index_constraints.field_constraint.contiguous,
-                creation_constraints.field_constraint.inorder ||
-                index_constraints.field_constraint.inorder));
-          if (!default_make_instance(ctx, target_memory, creation_constraints,
-                         instances.back(), TASK_MAPPING, force_new_instances,
-                         true/*meets*/, req, footprint))
-            return false;
-        }
-      }
-      // If we don't have anymore needed fields, we are done
-      if (needed_fields.empty())
-        return true;
-      // There are no constraints for these fields so we get to do what we want
-      instances.resize(instances.size()+1);
+      LayoutConstraintSet our_constraints =
+	runtime->find_layout_constraints(ctx, our_layout_id);
       LayoutConstraintSet creation_constraints = our_constraints;
       std::vector<FieldID> creation_fields;
-      default_policy_select_instance_fields(ctx, req, needed_fields,
-          creation_fields);
+      // for reduce privileges disable adding all fields in the field space
+      if ((needed_fields.size() != needed_fields_size) || (req.privilege == LEGION_REDUCE))
+	default_policy_select_instance_fields(ctx, req, needed_fields,
+					      creation_fields);
+      else
+	// if we don't have any fields in task layout constraints
+	// as an optimization, add all fields in the field space
+	default_policy_select_constraint_fields(ctx, req, creation_fields);
       creation_constraints.add_constraint(
           FieldConstraint(creation_fields, false/*contig*/, false/*inorder*/));
       if (!default_make_instance(ctx, target_memory, creation_constraints,
@@ -2136,12 +2300,17 @@ namespace Legion {
                                     bool &force_new_instances)
     //--------------------------------------------------------------------------
     {
-      // Do something special for reductions and
-      // it is not an explicit region-to-region copy
+      // We always set force_new_instances to false since we are
+      // deciding to optimize for minimizing memory usage instead
+      // of avoiding Write-After-Read (WAR) dependences
+      // for reduc privileges - we use the default policy
+      if (req.privilege == LEGION_REDUCE)
+	force_new_instances =
+	  default_policy_select_reduction_instance_reuse(ctx) ? false: true;
+      else
+	force_new_instances = false;
       if ((req.privilege == LEGION_REDUCE) && (mapping_kind != COPY_MAPPING))
       {
-        // Always make new reduction instances
-        force_new_instances = true;
         std::pair<Memory::Kind,ReductionOpID> constraint_key(
             target_memory.kind(), req.redop);
         std::map<std::pair<Memory::Kind,ReductionOpID>,LayoutConstraintID>::
@@ -2159,10 +2328,6 @@ namespace Legion {
         reduction_constraint_cache[constraint_key] = result;
         return result;
       }
-      // We always set force_new_instances to false since we are
-      // deciding to optimize for minimizing memory usage instead
-      // of avoiding Write-After-Read (WAR) dependences
-      force_new_instances = false;
       // See if we've already made a constraint set for this layout
       std::pair<Memory::Kind,FieldSpace> constraint_key(target_memory.kind(),
                                                req.region.get_field_space());
@@ -2313,8 +2478,7 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new ||
-          ((req.privilege == LEGION_REDUCE) && (kind != COPY_MAPPING))) {
+      if (force_new){
         if (!runtime->create_physical_instance(ctx, target_memory,
               constraints, target_regions, result, true/*acquire*/,
               0/*priority*/, tight_region_bounds, footprint))
@@ -2432,15 +2596,7 @@ namespace Legion {
                                     std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
-      if (total_nodes == 1)
-      {
-        FieldSpace handle = req.region.get_field_space();
-        runtime->get_field_space_fields(ctx, handle, fields);
-      }
-      else
-      {
-        fields.insert(fields.end(), needed_fields.begin(), needed_fields.end());
-      }
+      fields.insert(fields.end(), needed_fields.begin(), needed_fields.end());
     }
 
 
@@ -2866,6 +3022,14 @@ namespace Legion {
     bool DefaultMapper::default_policy_select_close_virtual(
                           const MapperContext ctx,
                           const Close&        close)
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DefaultMapper::default_policy_select_reduction_instance_reuse(
+					       const MapperContext ctx)
     //--------------------------------------------------------------------------
     {
       return true;

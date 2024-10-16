@@ -49,6 +49,8 @@ list(APPEND REALM_SRC
   realm/bgwork.h            realm/bgwork.cc
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
+  realm/barrier_impl.h        realm/barrier_impl.cc
+  realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
@@ -152,6 +154,17 @@ if (Legion_USE_Python)
   )
 endif()
 
+if(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS)
+  if(Legion_USE_CUDA)
+    list(APPEND GASNet_CONFIG_SETTINGS "USE_CUDA=1")
+  endif()
+  if(Legion_USE_HIP)
+    list(APPEND GASNet_CONFIG_SETTINGS "USE_HIP=1")
+  endif()
+else()
+  list(APPEND GASNet_CONFIG_SETTINGS "GASNET_GPU_CONFIGURE_ARGS=")
+endif()
+
 if(REALM_USE_GASNET1)
   list(APPEND REALM_SRC
     realm/gasnet1/gasnet1_module.h
@@ -167,9 +180,17 @@ if(REALM_USE_GASNETEX)
     realm/gasnetex/gasnetex_module.cc
     realm/gasnetex/gasnetex_internal.h
     realm/gasnetex/gasnetex_internal.cc
-    realm/gasnetex/gasnetex_handlers.h
-    realm/gasnetex/gasnetex_handlers.cc
   )
+  if (NOT REALM_USE_GASNETEX_WRAPPER OR Legion_ENABLE_TESTING)
+    # If we're not using the wrapper (i.e. not dynamically loading it)
+    # or we need it for testing, we need to build it
+    set(LEGION_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+    set(GEX_WRAPPER_BUILD_SHARED ${REALM_USE_GASNETEX_WRAPPER})
+    set(GEX_DEBUG ${DEBUG_REALM})
+    set(GEX_NO_INSTALL NOT ${REALM_USE_GASNETEX_WRAPPER})
+
+    add_subdirectory(realm/gasnetex/gasnetex_wrapper EXCLUDE_FROM_ALL)
+  endif()
 endif()
 
 if(REALM_USE_MPI)
@@ -312,13 +333,20 @@ endif()
 find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
+add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC}) # static library for realm unit test
 
 if(TARGET realm_cuda_fatbin)
   add_dependencies(RealmRuntime realm_cuda_fatbin)
+  # HACK: to avoid compiling two realm_cuda_fatbin concurrent, which causes errors
+  #  we create a control dependency between dynamic and static realm library, such that they will be built in order
+  add_dependencies(RealmStatic RealmRuntime)
 endif()
 
 add_library(Legion::RealmRuntime ALIAS RealmRuntime)
 target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+
+add_library(Legion::RealmStatic ALIAS RealmStatic)
+target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 # turn on warnings about partially-overloaded methods, if supported
 check_cxx_compiler_flag("-Woverloaded-virtual" COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
@@ -340,6 +368,7 @@ endif()
 target_link_libraries(RealmRuntime PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 if(UNIX AND NOT APPLE)
   target_link_libraries(RealmRuntime PRIVATE rt)
+  target_link_libraries(RealmStatic PRIVATE rt)
 endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
@@ -363,6 +392,8 @@ endif ()
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
   set_target_properties(RealmRuntime PROPERTIES CXX_VISIBILITY_PRESET hidden)
   set_target_properties(RealmRuntime PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  set_target_properties(RealmStatic PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  set_target_properties(RealmStatic PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
 
 if(Legion_USE_PAPI)
@@ -375,125 +406,56 @@ if(Legion_USE_HWLOC)
 endif()
 
 if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
-  if(Legion_EMBED_GASNet)
-    # we need to configure/build gasnet at cmake configuration time so that
-    #  we can read in libraries and flags and stuff
-    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/embed-gasnet)
-    set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/source)
-    set(GASNet_BUILD_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/build)
-    set(GASNet_INSTALL_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/install)
-    set(GASNet_BUILD_OUTPUT ${PROJECT_BINARY_DIR}/embed-gasnet/build.log)
-    # if we're building shared libraries, we need -fPIC in the gasnet build
-    if(BUILD_SHARED_LIBS)
-      set(GASNET_CFLAGS -fPIC)
-      set(GASNET_CXXFLAGS -fPIC)
-    else()
-      set(GASNET_CFLAGS "")
-      set(GASNET_CXXFLAGS "")
+  if (REALM_USE_GASNET1 OR NOT REALM_USE_GASNETEX_WRAPPER)
+    find_package(GASNet)
+    if (NOT GASNet_FOUND AND Legion_EMBED_GASNet)
+      set(GASNet_BUILD_SHARED ${BUILD_SHARED_LIBS})
+
+      include(${PROJECT_SOURCE_DIR}/cmake/FetchAndBuildGASNet.cmake)
+      find_package(GASNet REQUIRED)
+
+    elseif (NOT GASNet_FOUND)
+      message(FATAL_ERROR "Unable to find GASNet")
+    endif ()
+  endif()
+
+  # cmake won't include GASNet::GASNet in the exported link libraries
+  #  because we're doing a shared build, so force that
+  if(NOT REALM_USE_GASNETEX_WRAPPER AND REALM_USE_GASNETEX)
+    target_sources(RealmRuntime PRIVATE $<TARGET_OBJECTS:realm_gex_wrapper_objs>)
+    target_include_directories(RealmRuntime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/realm/gasnetex/gasnetex_wrapper/exports")
+    target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+    if (BUILD_SHARED_LIBS)
+      target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
     endif()
-    # we'll write the GASNet configuration to a file so that we can rebuild
-    #  (only) if it changes
-    set(GASNet_CONFIG_FILE ${PROJECT_BINARY_DIR}/embed-gasnet/config.txt)
-    set(GASNet_CONFIG_SETTINGS "LEGION_GASNET_CONDUIT=${GASNet_CONDUIT}" "LEGION_GASNET_SYSTEM=${GASNet_SYSTEM}" "GASNET_EXTRA_CONFIGURE_ARGS=${Legion_EMBED_GASNet_CONFIGURE_ARGS}" "GASNET_CFLAGS=${GASNET_CFLAGS}" "GASNET_CXXFLAGS=${GASNET_CXXFLAGS}")
-    if(Legion_EMBED_GASNet_VERSION)
-      # make the source directory version-specific
-      set(GASNet_SOURCE_DIR ${PROJECT_BINARY_DIR}/embed-gasnet/${Legion_EMBED_GASNet_VERSION})
-      list(APPEND GASNet_CONFIG_SETTINGS "GASNET_VERSION=${Legion_EMBED_GASNet_VERSION}")
+  elseif(NOT REALM_USE_GASNETEX_WRAPPER)
+    target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+    if (BUILD_SHARED_LIBS)
+      target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
     endif()
-    if(EXISTS ${GASNet_CONFIG_FILE})
-      file(READ ${GASNet_CONFIG_FILE} PREV_CONFIG_SETTINGS)
-      if("${GASNet_CONFIG_SETTINGS}" STREQUAL "${PREV_CONFIG_SETTINGS}")
-        # configs match - no build needed
-        set(GASNET_BUILD_NEEDED OFF)
-      else()
-        message(STATUS "Embedded GASNet configuration has changed - rebuilding...")
-        file(REMOVE_RECURSE ${GASNet_BUILD_DIR} ${GASNet_INSTALL_DIR} ${GASNet_CONFIG_FILE})
-        # clear any cached paths/conduits/etc.
-        unset(GASNet_INCLUDE_DIR CACHE)
-        unset(GASNet_CONDUITS CACHE)
-        unset(GASNet_THREADING_OPTS CACHE)
-        set(GASNET_BUILD_NEEDED ON)
-      endif()
-    else()
-      message(STATUS "Configuring and building embedded GASNet...")
-      set(GASNET_BUILD_NEEDED ON)
-    endif()
-    if(GASNET_BUILD_NEEDED)
-      if(Legion_EMBED_GASNet_LOCALSRC)
-      # relative paths are relative to the _build_ dir - this does the
-      #  intuitive thing when you do:
-      #     cmake ... -DLegion_EMBED_GASNet_LOCALSRC=relative/to/cwd (source_dir)
-      #  but is a little nonobvious when you type:
-      #     cmake -S (source_dir) -B (build_dir) ... -DLegion_EMBED_GASNet_LOCALSRC=still/relative/to/build_dir
-      get_filename_component(
-        EMBEDDED_GASNET_SRC
-        "${Legion_EMBED_GASNet_LOCALSRC}"
-        ABSOLUTE BASE_DIR ${PROJECT_BINARY_DIR})
-      else()
-        include(FetchContent)
-        FetchContent_Declare(embed-gasnet
-          GIT_REPOSITORY ${Legion_EMBED_GASNet_GITREPO}
-          GIT_TAG        ${Legion_EMBED_GASNet_GITREF}
-          )
-        message(STATUS "Downloading StanfordLegion/gasnet repo from: ${Legion_EMBED_GASNet_GITREPO}")
-        FetchContent_Populate(embed-gasnet)
-        set(EMBEDDED_GASNET_SRC "${embed-gasnet_SOURCE_DIR}")
-        message(STATUS "make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}")
-      endif()
-      execute_process(
-        COMMAND make -C ${EMBEDDED_GASNET_SRC} GASNET_SOURCE_DIR=${GASNet_SOURCE_DIR} GASNET_BUILD_DIR=${GASNet_BUILD_DIR} GASNET_INSTALL_DIR=${GASNet_INSTALL_DIR} ${GASNet_CONFIG_SETTINGS}
-        RESULT_VARIABLE GASNET_BUILD_STATUS
-        OUTPUT_FILE ${GASNet_BUILD_OUTPUT}
-        ERROR_FILE ${GASNet_BUILD_OUTPUT}
-      )
-      if(GASNET_BUILD_STATUS)
-        message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
-      endif()
-      file(WRITE ${GASNet_CONFIG_FILE} "${GASNet_CONFIG_SETTINGS}")
-    endif()
-    # make sure GASNet_ROOT_DIR is defined at the top level
-    set(GASNet_ROOT_DIR ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
-    find_package(GASNet REQUIRED)
-    # make a list of the gasnet libraries we need to install along with realm
+  elseif (Legion_ENABLE_TESTING)
+    set_target_properties(realm_gex_wrapper PROPERTIES EXCLUDE_FROM_ALL FALSE)
+  endif()
+
+  # Skip installing gasnet extra libraries if we're using the gasnetex wrapper
+  if (NOT REALM_USE_GASNETEX_WRAPPER)
     if(BUILD_SHARED_LIBS)
       # get the list of libraries and filter only those that are not in the
       #  (gasnet) install dir - the gasnet ones are sucked into librealm.so
       get_target_property(gasnet_ext_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
-      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_ROOT_DIR}")
       set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_ext_libs} PARENT_SCOPE)
-      # cmake won't include GASNet::GASNet in the exported link libraries
-      #  because we're doing a shared build, so force that
-      target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
     else()
       # get the list of libraries and filter out those that are not in the
       #  (gasnet) install dir
       get_target_property(gasnet_all_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
       set(gasnet_libs "${gasnet_all_libs}")
-      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_ROOT_DIR}")
       set(gasnet_installed_libs ${gasnet_libs})
-      string(REGEX REPLACE "${GASNet_INSTALL_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
+      string(REGEX REPLACE "${GASNet_ROOT_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
       install(FILES ${gasnet_libs} DESTINATION ${CMAKE_INSTALL_LIBDIR})
       set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_installed_libs} PARENT_SCOPE)
     endif()
-  else()
-    # we're using an external GASNet, but we still need to compute the list
-    #  of GASNet-related libraries that applications will need when using an
-    #  installed Legion build
-    # (this way, the application doesn't need to be able to find the original
-    #  GASNet root and pick the right conduit and the like)
-    get_target_property(gasnet_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
-    if(BUILD_SHARED_LIBS)
-      # filter out the actual gasnet libs because we suck those into librealm.so
-      list(FILTER gasnet_libs EXCLUDE REGEX "^${GASNet_ROOT_DIR}")
-    endif()
-    set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_libs} PARENT_SCOPE)
-  endif()
-
-  target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
-  # cmake won't include GASNet::GASNet in the exported link libraries
-  #  if we're building shared libraries, so force that
-  if(BUILD_SHARED_LIBS)
-    target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
   endif()
 endif()
 
@@ -521,10 +483,12 @@ endif()
 if(Legion_USE_LLVM)
   if(Legion_LINK_LLVM_LIBS)
     target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
+    target_link_libraries(RealmStatic PRIVATE LLVM::LLVM)
   else()
     # even if we dont link, we still need the LLVM include directories
     get_target_property(llvm_incdir LLVM::LLVM INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(RealmRuntime PRIVATE ${llvm_incdir})
+    target_include_directories(RealmStatic PRIVATE ${llvm_incdir})
   endif()
 endif()
 
@@ -547,6 +511,7 @@ if(Legion_USE_CUDA)
                          PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                  ${PROJECT_BINARY_DIR}/runtime)
       target_link_libraries(RealmRuntime PRIVATE realm_cudarthijack)
+      target_link_libraries(RealmStatic PRIVATE realm_cudarthijack)
       install(TARGETS realm_cudarthijack EXPORT LegionTargets)
     else()
       # without Kokkos interop, we can just add the hijack directly
@@ -555,19 +520,26 @@ if(Legion_USE_CUDA)
   else()
     if(REALM_CUDA_DYNAMIC_LOAD)
       target_link_libraries(RealmRuntime INTERFACE CUDA::cudart)
+      target_link_libraries(RealmStatic INTERFACE CUDA::cudart)
     else()
       target_link_libraries(RealmRuntime INTERFACE CUDA::cudart_static)
+      target_link_libraries(RealmStatic INTERFACE CUDA::cudart_static)
     endif()
   endif()
 
   target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
+  target_link_libraries(RealmStatic PUBLIC CUDA::toolkit)
   # Advertise our driver link to Realm consumers while ensuring libcuda.so isn't in Realm's RPATH
   target_link_libraries(RealmRuntime INTERFACE CUDA::cuda_driver)
+  target_link_libraries(RealmStatic INTERFACE CUDA::cuda_driver)
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
+  target_compile_definitions(RealmStatic INTERFACE USE_CUDA)
 
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
+  set_target_cuda_standard(RealmStatic STANDARD ${Legion_CUDA_STANDARD})
+  set_target_cuda_architectures(RealmStatic ARCHITECTURES ${Legion_CUDA_ARCH})
 
   # build cuda hook library
   add_library(realm_cuhook SHARED
@@ -753,11 +725,27 @@ endif()
 if(Legion_BACKTRACE_USE_LIBDW)
   target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
   target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
+  target_include_directories(RealmStatic PRIVATE ${LIBDW_INCLUDE_DIR})
+  target_link_libraries(RealmStatic PRIVATE ${LIBDW_LIBRARY})
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
+set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
 
 target_include_directories(RealmRuntime
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime
+)
+
+target_include_directories(RealmStatic
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
@@ -775,26 +763,6 @@ install(TARGETS RealmRuntime EXPORT LegionTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-add_library(RealmStatic STATIC EXCLUDE_FROM_ALL ${REALM_SRC})
-add_library(Legion::RealmStatic ALIAS RealmStatic)
-target_compile_options(RealmStatic PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-if(UNIX AND NOT APPLE)
-  target_link_libraries(RealmStatic PRIVATE rt)
-endif()
-set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
-target_include_directories(RealmStatic
-  INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-
-  # Include paths for generated header files.
-  INTERFACE
-    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime>
-  PRIVATE
-    ${PROJECT_BINARY_DIR}/runtime
-  )
 
 # Mapper objects
 list(APPEND MAPPER_SRC
@@ -1049,3 +1017,41 @@ set_target_properties(Realm PROPERTIES
   INTERFACE_LINK_LIBRARIES RealmRuntime
 )
 install(TARGETS Legion Realm EXPORT LegionTargets)
+
+if (Legion_BUILD_DOCS)
+  set(DOXYGEN_STRIP_FROM_INC_PATH ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+  set(DOXYGEN_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/legion_docs)
+  set(DOXYGEN_PROJECT_NAME "Legion")
+  set(DOXYGEN_PROJECT_NUMBER ${LEGION_VERSION})
+  configure_file(${CMAKE_SOURCE_DIR}/doxygen/selectversion.js.in ${CMAKE_BINARY_DIR}/legion_docs/selectversion.js @ONLY)
+  # TODO(mbauer): Annotate and or list all public legion headers
+  doxygen_add_docs(LegionDocs
+      ${CMAKE_CURRENT_SOURCE_DIR}/legion.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/legion
+      ${CMAKE_CURRENT_BINARY_DIR}/legion_defines.h
+      COMMENT "Generating Legion Documentation" ALL)
+
+  set(DOXYGEN_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/realm_docs)
+  set(DOXYGEN_PROJECT_NAME "Realm")
+  set(DOXYGEN_PROJECT_NUMBER ${REALM_VERSION})
+  set(DOXYGEN_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+  set(DOXYGEN_FILE_PATTERNS "*.h")
+  configure_file(${CMAKE_SOURCE_DIR}/doxygen/selectversion.js.in ${CMAKE_BINARY_DIR}/realm_docs/selectversion.js @ONLY)
+  if (NOT DOXYGEN_INTERNAL_DOCS)
+    # TODO(cperry): Remove this when we properly annotate all public and headers
+    set(DOXYGEN_EXCLUDE_SYMBOLS "Realm::*Impl" "Realm::*Internal" "std::*" "*::detail::*")
+    set(DOXYGEN_EXCLUDE_PATTERNS "*_internal.h")
+  else()
+    list(APPEND DOXYGEN_FILE_PATTERNS "*.inl" "*.cc" "*.c")
+  endif()
+  doxygen_add_docs(RealmDocs
+      ${CMAKE_CURRENT_SOURCE_DIR}/realm.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/realm
+      ${CMAKE_CURRENT_BINARY_DIR}/realm_defines.h
+      COMMENT "Generating Realm Documentation" ALL)
+
+  install(DIRECTORY "${CMAKE_BINARY_DIR}/legion_docs/html/" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Legion/${LEGION_VERSION}" COMPONENT Legion_doc)
+  install(DIRECTORY "${CMAKE_BINARY_DIR}/realm_docs/html/" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Realm/${REALM_VERSION}" COMPONENT Realm_doc)
+  install(FILES "${CMAKE_BINARY_DIR}/realm_docs/selectversion.js" "${CMAKE_SOURCE_DIR}/doxygen/dropdown.css" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Realm" COMPONENT Realm_doc)
+  install(FILES "${CMAKE_BINARY_DIR}/legion_docs/selectversion.js" "${CMAKE_SOURCE_DIR}/doxygen/dropdown.css" DESTINATION "${CMAKE_INSTALL_DOCDIR}/Legion" COMPONENT Legion_doc)
+endif ()

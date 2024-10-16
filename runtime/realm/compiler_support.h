@@ -48,37 +48,19 @@
   // unknown compiler?
 #endif
 
-// REALM_CXX_STANDARD - one of: 0(c++98), 11, 14, 17
-//                      if set from outside, remap 98->0 to allow comparisons
-//                      if not set from outside, autodetect
-#ifdef REALM_CXX_STANDARD
-  #if REALM_CXX_STANDARD == 98
-    #undef REALM_CXX_STANDARD
-    #define REALM_CXX_STANDARD 0
-  #endif
-#else
-  #if __cplusplus >= 201703L
-    #define REALM_CXX_STANDARD 17
-  #elif __cplusplus >= 201402L
-    #define REALM_CXX_STANDARD 14
-  #elif __cplusplus >= 201103L
-    #define REALM_CXX_STANDARD 11
-  #else
-    #ifdef _MSC_VER
-      // MSVC doesn't advertise it by default, but always supports at least C++11
-      #define REALM_CXX_STANDARD 11
-    #else
-      #define REALM_CXX_STANDARD 0
-    #endif
-  #endif
+// realm.h can be include by C, so we only check for C++17 when
+// imported by C++
+#ifdef __cplusplus
+// C++ 17 is supported after Visual Studio 2017 15.8, and __cplusplus
+// is available for MSVC after 2017 15.7, so it is safe to just check
+// __cplusplus
+#if __cplusplus < 201703L
+#error "Realm needs at least C++17"
+#endif
 #endif
 
 // REALM_NOEXCEPT - indicates that the declaration does not throw exceptions
-#if REALM_CXX_STANDARD >= 11
-  #define REALM_NOEXCEPT noexcept
-#else
-  #define REALM_NOEXCEPT throw()
-#endif
+#define REALM_NOEXCEPT noexcept
 
 // REALM_ON_LINUX   - defined if Realm is being built for a Linux host
 // REALM_ON_MACOS   - defined if Realm is being built for a macOS host
@@ -188,11 +170,7 @@
 #endif
 
 // REALM_ALIGNOF(type) - returns the byte alignment required for `type`
-#if REALM_CXX_STANDARD >= 11
-  #define REALM_ALIGNOF(type)  alignof(type)
-#else
-  #define REALM_ALIGNOF(type) __alignof__(type)
-#endif
+#define REALM_ALIGNOF(type) alignof(type)
 
 // REALM_ALIGNED_TYPE_SAMEAS(newtype, origtype, reftype) - defines type `newtype`
 //         that is identical to `origtype` except that it is aligned as `reftype`

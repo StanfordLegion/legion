@@ -520,8 +520,7 @@ namespace Legion {
         {
           op->register_region_dependence(it->next_idx, target.first,
                                          target.second, it->prev_idx,
-                                         it->dtype, it->validates,
-                                         it->dependent_mask);
+                                         it->dtype, it->dependent_mask);
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
               op->get_context()->get_unique_id(),
@@ -614,7 +613,6 @@ namespace Legion {
                                                 unsigned target_idx, 
                                                 unsigned source_idx,
                                                 DependenceType dtype,
-                                                bool validates,
                                                 const FieldMask &dep_mask)
     //--------------------------------------------------------------------------
     {
@@ -677,7 +675,7 @@ namespace Legion {
       }
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second, target_idx, source_idx,
-                              validates, dtype, dep_mask);
+                              dtype, dep_mask);
       if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
 #ifdef DEBUG_LEGION
@@ -868,11 +866,11 @@ namespace Legion {
           // Record the dependence of the close on the previous op
           close_op->register_region_dependence(0/*close index*/,
               prev.first, prev.second, it->previous_req_index,
-              LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+              LEGION_TRUE_DEPENDENCE, mask);
           // Then record our dependence on the close operation
           op->register_region_dependence(it->current_req_index,
               close_op, close_op->get_generation(), 0/*close index*/,
-              LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+              LEGION_TRUE_DEPENDENCE, mask);
           // Dispatch this close op
           close_op->end_dependence_analysis();
         }
@@ -881,7 +879,7 @@ namespace Legion {
           // Can just record a normal dependence
           op->register_region_dependence(it->current_req_index,
               prev.first, prev.second, it->previous_req_index,
-              it->dependence_type, it->validates, mask);
+              it->dependence_type, mask);
         }
       }
     }
@@ -3114,67 +3112,132 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
-                    bool allow_independent, FailedPrecondition *condition) const
+    bool TraceViewSet::subsumed_by(TraceViewSet &set, 
+        const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+        FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
+      bool subsumed = true;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              vit->second.begin(); it != vit->second.end(); ++it)
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+              vit->second.begin(); eit != vit->second.end(); ++eit)
         {
-          if (allow_independent)
+          // First check to see what fields and expressions are not dominated
+          LegionMap<LogicalView*,
+                    FieldMaskSet<IndexSpaceExpression> > non_dominated;
+          set.dominates(vit->first, eit->first, eit->second, non_dominated);
+          if (non_dominated.empty())
+            continue;
+          // For all the non-dominated fields and expressions we need to
+          // check to see if they are dirty or not. If there are any dirty
+          // expression-fields that are not dominated then set is no longer
+          // subsumed. If the non-dominated fields are not dirty, then it's
+          // ok for them to not be subsumed as that means they are just
+          // read-only and any additional copies in the postconditions.
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator dit =
+                non_dominated.begin(); dit != non_dominated.end(); /*nothing*/)
           {
-            // If we're allowing independent views, that means the set
-            // does not need to dominate the view as long as there are no
-            // views in the set that overlap logically with the test view
-            // This allows us to handle the read-only precondition case
-            // where we have read-only views that show up in the preconditions
-            // but do not appear logically anywhere in the postconditions
-            LegionMap<LogicalView*,
-                      FieldMaskSet<IndexSpaceExpression> > non_dominated;
-            set.dominates(vit->first, it->first, it->second, non_dominated);
-            for (LegionMap<LogicalView*,
-                  FieldMaskSet<IndexSpaceExpression> >::const_iterator dit =
-                  non_dominated.begin(); dit != non_dominated.end(); dit++)
+            FieldMaskSet<IndexSpaceExpression> to_add;
+            std::vector<IndexSpaceExpression*> to_delete;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator nit =
+                  dit->second.begin(); nit != dit->second.end(); nit++)
             {
-              for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
-                    dit->second.begin(); nit != dit->second.end(); nit++)
+              // Check to see if it interferes with the dirty expressions
+              if (nit->second * unique_dirty_exprs.get_valid_mask())
+                continue;
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    unique_dirty_exprs.begin(); it != 
+                    unique_dirty_exprs.end(); it++)
               {
-                // If all the fields are independent from anything that was
-                // written in the postcondition then we know this is a
-                // read-only precondition that does not need to be subsumed
-                FieldMask mask = nit->second;
-                set.filter_independent_fields(nit->first, mask);
-                if (!mask)
+                const FieldMask overlap = nit->second & it->second;
+                if (!overlap)
                   continue;
+                IndexSpaceExpression *expr_overlap = 
+                  forest->intersect_index_spaces(nit->first, it->first);
+                if (expr_overlap->is_empty())
+                  continue;
+                // These are dirty expr-fields which are not subsumed
+                subsumed = false;
                 if (condition != NULL)
                 {
                   condition->view = vit->first;
-                  condition->expr = nit->first;
-                  condition->mask = mask;
+                  condition->expr = expr_overlap;
+                  condition->mask = overlap;
                 }
-                return false;
+                if (expr_overlap->get_volume() < nit->first->get_volume())
+                {
+                  // Not everything is dominated so we need to record it
+                  IndexSpaceExpression *non_dirty =
+                    forest->subtract_index_spaces(nit->first, it->first);
+                  to_add.insert(non_dirty, overlap);
+                }
+                nit.filter(overlap);
+                if (!nit->second)
+                {
+                  to_delete.push_back(nit->first);
+                  break;
+                }
               }
             }
-          }
-          else
-          {
-            FieldMask mask = it->second;
-            if (!set.dominates(vit->first, it->first, mask))
+            // Update the non-dominated expressions
+            for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
             {
-              if (condition != NULL)
+              if (to_add.find(*it) != to_add.end())
+                continue;
+              dit->second.erase(*it);
+            }
+            if (!to_add.empty())
+            {
+              if (!dit->second.empty())
               {
-                condition->view = vit->first;
-                condition->expr = it->first;
-                condition->mask = mask;
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                      to_add.begin(); it != to_add.end(); it++)
+                  dit->second.insert(it->first, it->second);
               }
-              return false;
+              else
+                dit->second.swap(to_add);
+            }
+            if (dit->second.empty())
+            {
+              LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator 
+                  delete_it = dit++;
+              non_dominated.erase(delete_it);
+            }
+            else
+              dit++;
+          }
+          // If there are any remanining non-dominated fields then we
+          // add them to the postconditions because views that are both
+          // non-dirty and non-dominated need to be in the postconditions
+          // so we don't invalidate them when we do the overwriting
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator dit =
+                non_dominated.begin(); dit != non_dominated.end(); dit++)
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
+                  dit->second.begin(); nit != dit->second.end(); nit++)
+            {
+              // This is a small optimization to see if there are any
+              // fields which are independent for this view against all
+              // the other views in the postcondition set. If there are
+              // then we don't need to record this view at all since 
+              // there won't be any postcondition to overwrite it.
+              FieldMask mask = nit->second;
+              set.filter_independent_fields(nit->first, mask);
+              if (!mask)
+                continue;
+              set.insert(dit->first, nit->first, mask);
             }
           }
         }
-
-      return true;
+      }
+      return subsumed;
     }
 
     //--------------------------------------------------------------------------
@@ -4419,24 +4482,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::find_execution_fence_preconditions(
-                                               std::set<ApEvent> &preconditions)
+    void PhysicalTemplate::record_execution_fence(const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-      // No need for a lock here, the mapping fence protects us
+      AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
+      assert(is_recording());
       assert(!events.empty());
       assert(events.size() == instructions.size());
 #endif
+      // This is dumb, in the future we should find the frontiers
       // Scan backwards until we find the previous execution fence (if any)
       // Skip the most recent one as that is going to be our term event
-      for (int idx = events.size() - 2; idx > 0; idx--)
+      std::set<unsigned> preconditions;
+      for (int idx = events.size() - 1; idx > 0; idx--)
       {
-        preconditions.insert(events[idx]);
+        if (events[idx].exists())
+          preconditions.insert(idx);
         if (instructions[idx] == last_fence)
-          return;
+        {
+          preconditions.insert(last_fence->complete);
+          break;
+        }
       }
-      preconditions.insert(events.front());
+      if (last_fence == NULL)
+        preconditions.insert(0);
+#ifdef DEBUG_LEGION
+      assert(!preconditions.empty());
+#endif
+      unsigned complete = 0;
+      if (preconditions.size() > 1)
+      {
+        // Record a merge event 
+        complete = events.size();
+        events.push_back(ApEvent());
+        insert_instruction(
+            new MergeEvent(*this, complete, preconditions, tlid));
+      }
+      else
+        complete = *(preconditions.begin());
+      events.push_back(ApEvent());
+      CompleteReplay *fence = new CompleteReplay(*this, tlid, complete);
+      insert_instruction(fence);
+      // update the last fence
+      last_fence = fence;
     }
 
     //--------------------------------------------------------------------------
@@ -4868,15 +4957,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::receive_trace_conditions(TraceViewSet *previews,
-                       TraceViewSet *antiviews, TraceViewSet *postviews,
-                       unsigned parent_req_index, RegionTreeID tree_id,
-                       std::atomic<unsigned> *result)
+                   TraceViewSet *antiviews, TraceViewSet *postviews,
+                   const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+                   unsigned parent_req_index, RegionTreeID tree_id,
+                   std::atomic<unsigned> *result)
     //--------------------------------------------------------------------------
     {
       // First check to see if these conditions are idempotent or not  
       TraceViewSet::FailedPrecondition fail;
       if ((previews != NULL) && (postviews != NULL) &&
-          !previews->subsumed_by(*postviews, true/*allow independent*/, &fail))
+          !previews->subsumed_by(*postviews, unique_dirty_exprs, &fail))
       {
         unsigned initial = IDEMPOTENT;
         if (result->compare_exchange_strong(initial,
@@ -5301,9 +5391,7 @@ namespace Legion {
             {
               CompleteReplay *complete = (*it)->as_complete_replay();
               InstructionKind generator_kind =
-                instructions[complete->pre]->get_kind();
-              num_merges += (generator_kind != MERGE_EVENT) ? 1 : 0;
-              generator_kind = instructions[complete->post]->get_kind(); 
+                instructions[complete->complete]->get_kind();
               num_merges += (generator_kind != MERGE_EVENT) ? 1 : 0;
               break;
             }
@@ -5337,9 +5425,7 @@ namespace Legion {
               if (finder == op_insts.end()) break;
               std::set<unsigned> users;
               find_all_last_users(finder->second, users);
-              rewrite_preconditions(replay->pre, users, instructions, 
-                  new_instructions, gen, merge_starts);
-              rewrite_preconditions(replay->post, users, instructions, 
+              rewrite_preconditions(replay->complete, users, instructions, 
                   new_instructions, gen, merge_starts);
               break;
             }
@@ -5538,11 +5624,9 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
-              used[gen[complete->pre]] = true;
-              used[gen[complete->post]] = true;
+              used[gen[complete->complete]] = true;
               break;
             }
-          case GET_TERM_EVENT:
           case REPLAY_MAPPING:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
@@ -5648,7 +5732,7 @@ namespace Legion {
       }
       // Don't eliminate the last fence instruction
       if (last_fence != NULL)
-        used[gen[last_fence->lhs]] = true;
+        used[gen[last_fence->complete]] = true;
     }
 
     //--------------------------------------------------------------------------
@@ -5863,10 +5947,7 @@ namespace Legion {
               }
             case COMPLETE_REPLAY:
               {
-                parallelize_replay_event(inst->as_complete_replay()->pre,
-                    slice_index, gen, slice_indices_by_inst,
-                    crossing_counts, crossing_instructions);
-                parallelize_replay_event(inst->as_complete_replay()->post,
+                parallelize_replay_event(inst->as_complete_replay()->complete,
                     slice_index, gen, slice_indices_by_inst,
                     crossing_counts, crossing_instructions);
                 break;
@@ -5988,7 +6069,6 @@ namespace Legion {
       // First, build a DAG and find nodes with no incoming edges
       if (state->stage == 1)
       {  
-        std::map<TraceLocalID, GetTermEvent*> &term_insts = state->term_insts;
         std::map<TraceLocalID, ReplayMapping*> &replay_insts = 
           state->replay_insts;
         for (unsigned idx = state->iteration; idx < instructions.size(); ++idx)
@@ -6013,13 +6093,6 @@ namespace Legion {
           Instruction *inst = instructions[idx];
           switch (inst->get_kind())
           {
-            // Pass these instructions as their events will be added later
-            case GET_TERM_EVENT :
-              {
-                GetTermEvent *term = inst->as_get_term_event();
-                term_insts[term->owner] = term; 
-                break;
-              }
             case REPLAY_MAPPING:
               {
                 ReplayMapping *replay = inst->as_replay_mapping();
@@ -6125,27 +6198,9 @@ namespace Legion {
                   replay_insts.find(replay->owner);
                 if (replay_finder != replay_insts.end())
                 {
-                  incoming[replay_finder->second->lhs].push_back(replay->pre);
-                  outgoing[replay->pre].push_back(replay_finder->second->lhs);
+                  incoming[replay_finder->second->lhs].push_back(replay->complete);
+                  outgoing[replay->complete].push_back(replay_finder->second->lhs);
                   replay_insts.erase(replay_finder);
-                }
-                // Lastly check to see if we can find a term inst to match
-                std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
-                  term_insts.find(replay->owner);
-                if (term_finder != term_insts.end())
-                {
-                  if (replay->post != 0)
-                  {
-                    incoming[term_finder->second->lhs].push_back(replay->post);
-                    outgoing[replay->post].push_back(term_finder->second->lhs);
-                    term_insts.erase(term_finder);
-                  }
-                  else if (replay->pre != 0)
-                  {
-                    incoming[term_finder->second->lhs].push_back(replay->pre);
-                    outgoing[replay->pre].push_back(term_finder->second->lhs);
-                    term_insts.erase(term_finder);
-                  }
                 }
                 break;
               }
@@ -6160,20 +6215,8 @@ namespace Legion {
         // should have seen a complete replay instruction for every replay mapping
         assert(replay_insts.empty());
 #endif
-        if (!term_insts.empty())
-        {
-          // Any term instructions that don't match with a complete replay
-          // need to be recorded as sources for the BFS
-          for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
-                term_insts.begin(); it != term_insts.end(); it++)
-          {
-            inv_topo_order[it->second->lhs] = topo_order.size();
-            topo_order.push_back(it->second->lhs);
-          }
-        }
         state->stage++;
         state->iteration = 0;
-        term_insts.clear();
         replay_insts.clear();
       }
 
@@ -6535,12 +6578,6 @@ namespace Legion {
         int lhs = -1;
         switch (inst->get_kind())
         {
-          case GET_TERM_EVENT:
-            {
-              GetTermEvent *term = inst->as_get_term_event();
-              lhs = term->lhs;
-              break;
-            }
           case REPLAY_MAPPING:
             {
               ReplayMapping *replay = inst->as_replay_mapping();
@@ -6659,12 +6696,9 @@ namespace Legion {
             {
               CompleteReplay *replay = inst->as_complete_replay();
               std::map<unsigned,unsigned>::const_iterator finder =
-                substitutions.find(replay->pre);
+                substitutions.find(replay->complete);
               if (finder != substitutions.end())
-                replay->pre = finder->second;
-              finder = substitutions.find(replay->post);
-              if (finder != substitutions.end())
-                replay->post = finder->second;
+                replay->complete = finder->second;
               break;
             }
           default:
@@ -6761,8 +6795,8 @@ namespace Legion {
         Instruction *inst = instructions[idx];
         InstructionKind kind = inst->get_kind();
         // We only eliminate two kinds of instructions currently:
-        // GetTermEvent and SetOpSyncEvent
-        used[idx] = (kind != SET_OP_SYNC_EVENT) && (kind != GET_TERM_EVENT);
+        // SetOpSyncEvent
+        used[idx] = (kind != SET_OP_SYNC_EVENT);
         switch (kind)
         {
           case MERGE_EVENT:
@@ -6839,11 +6873,9 @@ namespace Legion {
             {
               CompleteReplay *complete = inst->as_complete_replay();
 #ifdef DEBUG_LEGION
-              assert(gen[complete->pre] != -1U);
-              assert(gen[complete->post] != -1U);
+              assert(gen[complete->complete] != -1U);
 #endif
-              used[gen[complete->pre]] = true;
-              used[gen[complete->post]] = true;
+              used[gen[complete->complete]] = true;
               break;
             }
           case BARRIER_ARRIVAL:
@@ -6855,7 +6887,6 @@ namespace Legion {
               used[gen[arrival->rhs]] = true;
               break;
             }
-          case GET_TERM_EVENT:
           case REPLAY_MAPPING:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
@@ -7131,21 +7162,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_completion_event(ApEvent lhs,
-                                     unsigned op_kind, const TraceLocalID &tlid)
-    //--------------------------------------------------------------------------
-    {
-      const bool fence = (op_kind == Operation::FENCE_OP_KIND);
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      unsigned lhs_ = convert_event(lhs);
-      record_memo_entry(tlid, lhs_, op_kind);
-      insert_instruction(new GetTermEvent(*this, lhs_, tlid, fence));
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_replay_mapping(ApEvent lhs,
                  unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
     //--------------------------------------------------------------------------
@@ -7364,7 +7380,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!bar.exists());
 #endif
-      bar = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
+      bar = implicit_runtime->create_ap_barrier(total_arrivals); 
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -7417,7 +7433,8 @@ namespace Legion {
                                              LgEvent src_unique,
                                              LgEvent dst_unique,
                                              int priority,
-                                             CollectiveKind collective)
+                                             CollectiveKind collective,
+                                             bool record_effect)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -7440,7 +7457,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            rhs_, src_unique, dst_unique, priority, collective)); 
+            rhs_, src_unique, dst_unique, priority, collective,record_effect)); 
     }
 
     //--------------------------------------------------------------------------
@@ -7459,7 +7476,8 @@ namespace Legion {
                                              PredEvent pred_guard,
                                              LgEvent unique_event,
                                              int priority,
-                                             CollectiveKind collective)
+                                             CollectiveKind collective,
+                                             bool record_effect)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -7482,7 +7500,7 @@ namespace Legion {
                                        fill_uid, handle, tree_id,
 #endif
                                        rhs_, unique_event,
-                                       priority, collective));
+                                       priority, collective, record_effect));
     }
 
     //--------------------------------------------------------------------------
@@ -7706,7 +7724,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_complete_replay(const TraceLocalID &tlid,
-                   ApEvent pre, ApEvent post, std::set<RtEvent> &applied_events)
+                            ApEvent complete, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -7714,10 +7732,10 @@ namespace Legion {
       assert(is_recording());
 #endif
       // Do this first in case it gets preempted
-      const unsigned pre_ = pre.exists() ? find_event(pre, tpl_lock) : 0;
-      const unsigned post_ = post.exists() ? find_event(post, tpl_lock) : 0;
+      const unsigned complete_ = 
+        complete.exists() ? find_event(complete, tpl_lock) : 0;
       events.push_back(ApEvent());
-      insert_instruction(new CompleteReplay(*this, tlid, pre_, post_));
+      insert_instruction(new CompleteReplay(*this, tlid, complete_));
     }
 
     //--------------------------------------------------------------------------
@@ -7747,6 +7765,57 @@ namespace Legion {
       CachedAllreduce &allreduce = cached_allreduces[tlid];
       allreduce.target_memories = target_memories;
       allreduce.future_size = future_size;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_concurrent_barrier(IndexTask *task,
+        RtBarrier barrier, const std::vector<ShardID> &shards, size_t arrivals)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!shards.empty());
+      assert(std::is_sorted(shards.begin(), shards.end()));
+#endif
+      const TraceLocalID tlid = task->get_trace_local_id();
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(concurrent_barriers.find(tlid) == concurrent_barriers.end());
+#endif
+      ConcurrentBarrier &concurrent = concurrent_barriers[tlid];
+      concurrent.barrier = barrier;
+      concurrent.shards = shards;
+      concurrent.participants = arrivals;
+    }
+
+    //--------------------------------------------------------------------------
+    RtBarrier PhysicalTemplate::get_concurrent_barrier(IndexTask *task)
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID tlid = task->get_trace_local_id();
+      AutoLock tpl_lock(template_lock);
+      std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+        concurrent_barriers.find(tlid);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_barriers.end());
+#endif
+      const RtBarrier result = finder->second.barrier;
+      Runtime::advance_barrier(finder->second.barrier);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<ShardID>& PhysicalTemplate::get_concurrent_shards(
+                                                            ReplIndexTask *task)
+    //--------------------------------------------------------------------------
+    {
+      const TraceLocalID tlid = task->get_trace_local_id();
+      AutoLock tpl_lock(template_lock);
+      std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+        concurrent_barriers.find(tlid);
+#ifdef DEBUG_LEGION
+      assert(finder != concurrent_barriers.end());
+#endif
+      return finder->second.shards;
     }
 
     //--------------------------------------------------------------------------
@@ -7844,7 +7913,7 @@ namespace Legion {
       if (recurrent)
       {
         if (last_fence != NULL)
-          events[fence_completion_id] = events[last_fence->lhs];
+          events[fence_completion_id] = events[last_fence->complete];
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = events[it->first];
@@ -7919,6 +7988,17 @@ namespace Legion {
             finder->second[idx]->set_managed_barrier(it->second);
         }
       }
+      for (std::map<TraceLocalID,ConcurrentBarrier>::iterator it =
+            concurrent_barriers.begin(); it != concurrent_barriers.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->second.shards.size() == 1);
+        assert(it->second.shards.back() == 0);
+#endif
+        it->second.barrier.destroy_barrier();
+        it->second.barrier = 
+          implicit_runtime->create_rt_barrier(it->second.participants);
+      }
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -7950,7 +8030,7 @@ namespace Legion {
             frontiers.begin(); it != frontiers.end(); it++)
         postconditions.insert(events[it->first]);
       if (last_fence != NULL)
-        postconditions.insert(events[last_fence->lhs]);
+        postconditions.insert(events[last_fence->complete]);
       operations.clear();
     }
 
@@ -8556,7 +8636,8 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent src_unique, LgEvent dst_unique, 
-                                 int priority, CollectiveKind collective)
+                                 int priority, CollectiveKind collective,
+                                 bool record_effect)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -8578,7 +8659,7 @@ namespace Legion {
 #endif
                                           precondition, pred_guard,
                                           src_unique, dst_unique,
-                                          priority, collective); 
+                                          priority, collective, record_effect);
     } 
     
     //--------------------------------------------------------------------------
@@ -8592,7 +8673,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent unique_event, int priority,
-                                 CollectiveKind collective)
+                                 CollectiveKind collective, bool record_effect)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -8613,7 +8694,8 @@ namespace Legion {
                                           fill_uid, handle, tree_id,
 #endif
                                           precondition, pred_guard, 
-                                          unique_event, priority, collective);
+                                          unique_event, priority,
+                                          collective, record_effect);
     }
 
     //--------------------------------------------------------------------------
@@ -8662,10 +8744,11 @@ namespace Legion {
       if (barrier_finder == managed_barriers.end())
       {
         // Make a new barrier and record it in the events
-        ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
+        ApBarrier barrier =
+          implicit_runtime->create_ap_barrier(1/*arrival count*/);
         // The first generation of each barrier should be triggered when
         // it is recorded in a barrier arrival instruction
-        Runtime::phase_barrier_arrive(barrier, 1/*count*/);
+        implicit_runtime->phase_barrier_arrive(barrier, 1/*count*/);
         // Record this in the instruction stream
 #ifdef DEBUG_LEGION
         const unsigned lhs = convert_event(barrier, false/*check*/);
@@ -8754,8 +8837,8 @@ namespace Legion {
       if (barrier_finder == local_frontiers.end())
       {
         // Make a barrier and record it 
-        const ApBarrier result(
-            Realm::Barrier::create_barrier(1/*arrival count*/));
+        const ApBarrier result =
+          implicit_runtime->create_ap_barrier(1/*arrival count*/);
         barrier_finder = local_frontiers.insert(
             std::make_pair(finder->second, result)).first;
       }
@@ -8887,9 +8970,22 @@ namespace Legion {
                 else
                   finder->second->remote_refresh_barrier(bar);
               }
-              refreshed_barriers += num_barriers;
-              const size_t expected = 
-                local_advances.size() + managed_arrivals.size();
+              size_t num_concurrent;
+              derez.deserialize(num_concurrent);
+              for (unsigned idx = 0; idx < num_concurrent; idx++)
+              {
+                TraceLocalID tlid;
+                tlid.deserialize(derez);
+                std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+                  concurrent_barriers.find(tlid);
+#ifdef DEBUG_LEGION
+                assert(finder != concurrent_barriers.end());
+#endif
+                derez.deserialize(finder->second.barrier);
+              }
+              refreshed_barriers += num_barriers + num_concurrent;
+              const size_t expected = local_advances.size() +
+                managed_arrivals.size() + concurrent_barriers.size();
 #ifdef DEBUG_LEGION
               assert(refreshed_barriers <= expected);
 #endif
@@ -8916,6 +9012,18 @@ namespace Legion {
                         pending_refresh_barriers.end());
 #endif
                 derez.deserialize(pending_refresh_barriers[key]); 
+              }
+              size_t num_concurrent;
+              derez.deserialize(num_concurrent);
+              for (unsigned idx = 0; idx < num_concurrent; idx++)
+              {
+                TraceLocalID tlid;
+                tlid.deserialize(derez);
+#ifdef DEBUG_LEGION
+                assert(pending_concurrent_barriers.find(tlid) ==
+                    pending_concurrent_barriers.end());
+#endif
+                derez.deserialize(pending_concurrent_barriers[tlid]);
               }
             }
             break;
@@ -9261,8 +9369,8 @@ namespace Legion {
           for (std::map<unsigned,ApBarrier>::iterator it = 
                 local_frontiers.begin(); it != local_frontiers.end(); it++)
           {
-            const ApBarrier new_barrier(
-                Realm::Barrier::create_barrier(1/*arrival count*/));
+            const ApBarrier new_barrier =
+              implicit_runtime->create_ap_barrier(1/*arrival count*/);
 #ifdef DEBUG_LEGION
             assert(local_subscriptions.find(it->first) !=
                     local_subscriptions.end());
@@ -9355,7 +9463,7 @@ namespace Legion {
         for (std::map<unsigned,ApBarrier>::iterator it = 
               local_frontiers.begin(); it != local_frontiers.end(); it++)
         {
-          Runtime::phase_barrier_arrive(it->second, 1/*count*/, 
+          implicit_runtime->phase_barrier_arrive(it->second, 1/*count*/, 
                                         events[it->first]);
           if (advance_barriers)
             Runtime::advance_barrier(it->second);
@@ -9409,9 +9517,33 @@ namespace Legion {
       for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
             managed_barriers.begin(); it != managed_barriers.end(); it++)
         it->second->refresh_barrier(it->first, notifications);
+      // Also see if we have any concurrent barriers to update
+      size_t local_refreshed = 0;
+      std::map<ShardID,std::map<TraceLocalID,RtBarrier> > concurrent_updates;
+      for (std::map<TraceLocalID,ConcurrentBarrier>::iterator it =
+            concurrent_barriers.begin(); it != concurrent_barriers.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!it->second.shards.empty());
+        assert(std::binary_search(it->second.shards.begin(),
+              it->second.shards.end(), local_shard));
+#endif
+        if (local_shard == it->second.shards.front())
+        {
+          it->second.barrier.destroy_barrier();
+          it->second.barrier = 
+            implicit_runtime->create_rt_barrier(it->second.participants);
+          for (unsigned idx = 1; idx < it->second.shards.size(); idx++)
+          {
+            ShardID shard = it->second.shards[idx];
+            notifications[shard]; // instantiate so it is there
+            concurrent_updates[shard][it->first] = it->second.barrier;
+          }
+          local_refreshed++;
+        }
+      }
       // Send out the notifications to all the shards
       ShardManager *manager = repl_ctx->shard_manager;
-      size_t local_refreshed = 0;
       for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
             nit = notifications.begin(); nit != notifications.end(); nit++)
       {
@@ -9429,6 +9561,20 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
+          std::map<ShardID,std::map<TraceLocalID,RtBarrier> >::const_iterator
+            finder = concurrent_updates.find(nit->first);
+          if (finder != concurrent_updates.end())
+          {
+            rez.serialize<size_t>(finder->second.size());
+            for (std::map<TraceLocalID,RtBarrier>::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              it->first.serialize(rez);
+              rez.serialize(it->second);
+            }
+          }
+          else
+            rez.serialize<size_t>(0);
           manager->send_trace_update(nit->first, rez);
         }
         else
@@ -9478,11 +9624,26 @@ namespace Legion {
               finder->second->remote_refresh_barrier(it->second);
           }
           refreshed_barriers += pending_refresh_barriers.size();
-
           pending_refresh_barriers.clear();
         }
-        const size_t expected = 
-          local_advances.size() + managed_arrivals.size();
+        if (!pending_concurrent_barriers.empty())
+        {
+          for (std::map<TraceLocalID,RtBarrier>::const_iterator it =
+                pending_concurrent_barriers.begin(); it !=
+                pending_concurrent_barriers.end(); it++)
+          {
+            std::map<TraceLocalID,ConcurrentBarrier>::iterator finder =
+              concurrent_barriers.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(finder != concurrent_barriers.end()); 
+#endif
+            finder->second.barrier = it->second;
+          }
+          refreshed_barriers += pending_concurrent_barriers.size();
+          pending_concurrent_barriers.clear();
+        }
+        const size_t expected = local_advances.size() +
+          managed_arrivals.size() + concurrent_barriers.size();
 #ifdef DEBUG_LEGION
         assert(refreshed_barriers <= expected);
 #endif
@@ -9976,53 +10137,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // GetTermEvent
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l,
-                               const TraceLocalID& r, bool fence)
-      : Instruction(tpl, r), lhs(l)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(lhs < tpl.events.size());
-#endif
-      if (fence)
-        tpl.update_last_fence(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void GetTermEvent::execute(std::vector<ApEvent> &events,
-                               std::map<unsigned,ApUserEvent> &user_events,
-                               std::map<TraceLocalID,MemoizableOp*> &operations,
-                               const bool recurrent_replay)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(operations.find(owner)->second != NULL);
-#endif
-      events[lhs] = operations[owner]->get_completion_event();
-    }
-
-    //--------------------------------------------------------------------------
-    std::string GetTermEvent::to_string(const MemoEntries &memo_entries)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      MemoEntries::const_iterator finder = memo_entries.find(owner);
-#ifdef DEBUG_LEGION
-      assert(finder != memo_entries.end());
-#endif
-      ss << "events[" << lhs << "] = operations[" << owner
-         << "].get_completion_event()    (op kind: "
-         << Operation::op_names[finder->second.second]
-         << ")";
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
     // ReplayMapping
     /////////////////////////////////////////////////////////////
 
@@ -10253,14 +10367,15 @@ namespace Legion {
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
                          unsigned pi, LgEvent src_uni, LgEvent dst_uni,
-                         int pr, CollectiveKind collect)
+                         int pr, CollectiveKind collect, bool effect)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
         reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
         precondition_idx(pi), src_unique(src_uni),
-        dst_unique(dst_uni), priority(pr), collective(collect)
+        dst_unique(dst_uni), priority(pr), collective(collect),
+        record_effect(effect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10310,7 +10425,8 @@ namespace Legion {
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
                                      src_unique, dst_unique,
-                                     collective, priority, true/*replay*/);
+                                     collective, record_effect,
+                                     priority, true/*replay*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10433,13 +10549,13 @@ namespace Legion {
                          UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
                          unsigned pi, LgEvent unique, int pr,
-                         CollectiveKind collect)
+                         CollectiveKind collect, bool effect)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
         fill_uid(uid), handle(h), tree_id(tid),
 #endif
         precondition_idx(pi), unique_event(unique), priority(pr),
-        collective(collect)
+        collective(collect), record_effect(effect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10489,8 +10605,8 @@ namespace Legion {
                                      fill_uid, handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     unique_event, collective, priority,
-                                     true/*replay*/);
+                                     unique_event, collective, record_effect,
+                                     priority, true/*replay*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10571,13 +10687,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompleteReplay::CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& l,
-                                   unsigned pr, unsigned po)
-      : Instruction(tpl, l), pre(pr), post(po)
+                                   unsigned c)
+      : Instruction(tpl, l), complete(c)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(pre < tpl.events.size());
-      assert(post < tpl.events.size());
+      assert(complete < tpl.events.size());
 #endif
     }
 
@@ -10596,7 +10711,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      memoizable->complete_replay(events[pre], events[post]);
+      memoizable->complete_replay(events[complete]);
     }
 
     //--------------------------------------------------------------------------
@@ -10609,8 +10724,8 @@ namespace Legion {
       assert(finder != memo_entries.end());
 #endif
       ss << "operations[" << owner
-         << "].complete_replay(events[" << pre
-         << "], events[ " << post << "])    (op kind: "
+         << "].complete_replay(events[" << complete 
+         << "])    (op kind: "
          << Operation::op_names[finder->second.second]
          << ")";
       return ss.str();
@@ -10644,7 +10759,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
 #endif
-      Runtime::phase_barrier_arrive(barrier, total_arrivals, events[rhs]);
+      implicit_runtime->phase_barrier_arrive(
+          barrier, total_arrivals, events[rhs]);
       events[lhs] = barrier;
       if (managed)
         Runtime::advance_barrier(barrier);
@@ -10754,7 +10870,7 @@ namespace Legion {
       // Destroy the old barrier
       barrier.destroy_barrier();
       // Make the new barrier
-      barrier = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
+      barrier = implicit_runtime->create_ap_barrier(total_arrivals);
       for (std::vector<ShardID>::const_iterator it = 
             subscribed_shards.begin(); it != subscribed_shards.end(); it++)
         notifications[*it][key] = barrier;

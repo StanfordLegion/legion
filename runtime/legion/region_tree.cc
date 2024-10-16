@@ -1207,8 +1207,6 @@ namespace Legion {
                                       bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_field(fid, runtime->address_space, applied, sharded_non_owner);
     }
@@ -1256,8 +1254,6 @@ namespace Legion {
                                        bool sharded_non_owner)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(handle))
-        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_fields(to_free, runtime->address_space, applied, 
                         sharded_non_owner);
@@ -1615,7 +1611,10 @@ namespace Legion {
         shard_proj = destination->compute_projection_summary(op, idx, req,
                                               logical_analysis, proj_info);
       }
-      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),shard_proj);
+      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
+          shard_proj, (op->get_must_epoch_op() == NULL) ? UINT_MAX :
+          op->get_must_epoch_op()->find_operation_index(
+            op, op->get_generation()));
       user->add_reference();
 #ifdef DEBUG_LEGION
       InnerContext *context = op->get_context();
@@ -3404,8 +3403,8 @@ namespace Legion {
         // still be getting notifications to compute the complete
         if (complete < 0)
           result->initialize_disjoint_complete_notifications();
-        else if ((runtime->profiler != NULL) && result->is_owner())
-          runtime->profiler->record_index_partition(parent->handle.id,
+        else if ((implicit_profiler != NULL) && result->is_owner())
+          implicit_profiler->register_index_partition(parent->handle.id,
               p.id, disjoint, result->color);
         result->register_with_runtime();
       }
@@ -4340,12 +4339,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid,bool first/*=true*/)
+    RegionNode* RegionTreeForest::get_tree(RegionTreeID tid, bool can_fail,
+                                           bool first/*=true*/)
     //--------------------------------------------------------------------------
     {
       if (tid == 0)
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_TREE_ID,
           "Invalid request for tree ID 0 which is never a tree ID")
+      }
       RtEvent wait_on;
       RegionNode *result = NULL;
       {
@@ -4389,8 +4393,10 @@ namespace Legion {
         if (pending_wait.exists())
         {
           pending_wait.wait();
-          return get_tree(tid, false/*first*/); 
+          return get_tree(tid, can_fail, false/*first*/); 
         }
+        else if (can_fail)
+          return NULL;
         else
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for region tree ID %d", tid)
@@ -4425,12 +4431,16 @@ namespace Legion {
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
       if (finder == tree_nodes.end())
+      {
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_TOPLEVEL_TREE,
           "Unable to find top-level tree entry for "
                          "region tree %d.  This is either a runtime "
                          "bug or requires Legion fences if names are "
                          "being returned out of the context in which"
                          "they are being created.", tid)
+      }
       return finder->second;
     }
 
@@ -4473,56 +4483,6 @@ namespace Legion {
       }
       else
         return wait_finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_nodes.find(space) != index_nodes.end());
-    }
-    
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexPartition part)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_parts.find(part) != index_parts.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (field_nodes.find(space) != field_nodes.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_space) && has_node(handle.field_space) &&
-              has_tree(handle.tree_id));
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_partition) && has_node(handle.field_space)
-              && has_tree(handle.tree_id));
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_tree(RegionTreeID tid)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (tree_nodes.find(tid) != tree_nodes.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4775,9 +4735,7 @@ namespace Legion {
         return true;
       if (child.get_tree_id() != parent.get_tree_id())
         return false;
-      std::vector<LegionColor> path;
-      return compute_index_path(parent.get_index_space(),
-                                child.get_index_space(), path);
+      return has_index_path(parent.get_index_space(), child.get_index_space());
     }
 
     //--------------------------------------------------------------------------
@@ -5017,47 +4975,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::compute_index_path(IndexSpace parent, 
-                               IndexSpace child, std::vector<LegionColor> &path)
+    bool RegionTreeForest::has_index_path(IndexSpace parent, 
+                                          IndexSpace child)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(child); 
-      path.push_back(child_node->color);
       if (parent == child) 
         return true; // Early out
       IndexSpaceNode *parent_node = get_node(parent);
       while (parent_node != child_node)
       {
         if (parent_node->depth >= child_node->depth)
-        {
-          path.clear();
           return false;
-        }
         if (child_node->parent == NULL)
-        {
-          path.clear();
           return false;
-        }
-        path.push_back(child_node->parent->color);
-        path.push_back(child_node->parent->parent->color);
         child_node = child_node->parent->parent;
       }
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::compute_partition_path(IndexSpace parent, 
-                           IndexPartition child, std::vector<LegionColor> &path)
+    bool RegionTreeForest::has_partition_path(IndexSpace parent, 
+                                              IndexPartition child)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *child_node = get_node(child);
-      path.push_back(child_node->color);
       if (child_node->parent == NULL)
-      {
-        path.clear();
         return false;
-      }
-      return compute_index_path(parent, child_node->parent->handle, path);
+      return has_index_path(parent, child_node->parent->handle);
     }
 
     //--------------------------------------------------------------------------
@@ -5148,12 +5093,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_space_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_index_space(handle.id, ptr);
+	implicit_profiler->register_index_space(handle.id, ptr);
       }
     }
 
@@ -5176,12 +5121,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_index_partition_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_index_part(handle.id, ptr);
+	implicit_profiler->register_index_part(handle.id, ptr);
       }
     }
 
@@ -5204,12 +5149,12 @@ namespace Legion {
         memcpy(&ptr, &buffer, sizeof(ptr));
         LegionSpy::log_field_space_name(handle.id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_field_space(handle.id, ptr);
+	implicit_profiler->register_field_space(handle.id, ptr);
       }
     }
 
@@ -5233,12 +5178,12 @@ namespace Legion {
         memcpy(&ptr, &buf, sizeof(ptr));
         LegionSpy::log_field_name(handle.id, fid, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buf) == sizeof(ptr));
         memcpy(&ptr, &buf, sizeof(ptr));
-	runtime->profiler->record_field(handle.id, fid, size, ptr); 
+	implicit_profiler->register_field(handle.id, fid, size, ptr); 
       }
     }
 
@@ -5262,12 +5207,12 @@ namespace Legion {
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
       }
-      if (runtime->profiler && (LEGION_NAME_SEMANTIC_TAG == tag))
+      if ((implicit_profiler != NULL) && (LEGION_NAME_SEMANTIC_TAG == tag))
       {
         const char *ptr = NULL;
         static_assert(sizeof(buffer) == sizeof(ptr));
         memcpy(&ptr, &buffer, sizeof(ptr));
-	runtime->profiler->record_logical_region(handle.index_space.id,
+	implicit_profiler->register_logical_region(handle.index_space.id,
             handle.field_space.id, handle.tree_id, ptr);
       }
     }
@@ -9609,8 +9554,8 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                 runtime->address_space, result->get_domain_point_color());
-          if (runtime->profiler != NULL)
-            runtime->profiler->record_index_subspace(handle.id, is.id,
+          if (implicit_profiler != NULL)
+            implicit_profiler->register_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
           return result;
         }
@@ -10212,8 +10157,8 @@ namespace Legion {
             complete.store((parent_volume == total_children_volume));
           }
         }
-        if (context->runtime->profiler != NULL)
-          context->runtime->profiler->record_index_partition(parent->handle.id,
+        if (implicit_profiler != NULL)
+          implicit_profiler->register_index_partition(parent->handle.id,
               handle.id, disjoint.load(), color);
       }
       has_disjoint.store(true);
@@ -16508,16 +16453,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::report_uninitialized_usage(Operation *op, unsigned idx,
-         const RegionUsage usage, const FieldMask &uninit, RtUserEvent reported)
+                                  const FieldMask &uninit, RtUserEvent reported)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_region());
       assert(reported.exists());
 #endif
-      LogicalRegion handle = as_region_node()->handle;
       char *field_string = column_source->to_string(uninit, op->get_context());
-      op->report_uninitialized_usage(idx, handle, usage, field_string,reported);
+      op->report_uninitialized_usage(idx, field_string, reported);
       free(field_string);
     }
 
@@ -16567,8 +16511,6 @@ namespace Legion {
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
       FieldMask observed_mask; 
-      const bool validates_local = arrived && (!proj_info.is_projecting() || 
-                                proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))
       {
         bool tighten = false;
@@ -16598,7 +16540,6 @@ namespace Legion {
               observed_mask |= overlap;
             const DependenceType dtype = 
               check_dependence_type<true>(prev.usage, user.usage);
-            bool validate = validates_local;
             switch (dtype)
             {
               case LEGION_NO_DEPENDENCE:
@@ -16610,13 +16551,6 @@ namespace Legion {
               case LEGION_ANTI_DEPENDENCE:
               case LEGION_ATOMIC_DEPENDENCE:
               case LEGION_SIMULTANEOUS_DEPENDENCE:
-                {
-                  // Mark that these kinds of dependences are not allowed
-                  // to validate region inputs
-                  validate = false;
-                  // No break so we register dependences just like
-                  // a true dependence
-                }
               case LEGION_TRUE_DEPENDENCE:
                 {
                   // If we can validate a region record which of our
@@ -16624,7 +16558,7 @@ namespace Legion {
                   // just register a normal dependence
                   user.op->register_region_dependence(user.idx, prev.op,
                                                       prev.gen, prev.idx,
-                                                      dtype, validate, overlap);
+                                                      dtype, overlap);
 #ifdef LEGION_SPY
                   LegionSpy::log_mapping_dependence(
                       user.op->get_context()->get_unique_id(),
@@ -16664,9 +16598,22 @@ namespace Legion {
                       assert(proj_info.is_sharding());
                       assert(user.shard_proj != NULL);
 #endif
+                      bool dominates = true;
                       if (!state.has_interfering_shards(logical_analysis,
-                                          prev.shard_proj, user.shard_proj))
+                            prev.shard_proj, user.shard_proj, dominates))
+                      {
+                        // If the two projections are non-interfering, then 
+                        // we can only consider the second projection as 
+                        // dominating the first if it uses all the same data.
+                        // Otherwise you can cases like those that occur in 
+                        // https://github.com/StanfordLegion/legion/issues/1765
+                        // where some index tasks push earlier index tasks out
+                        // of the set of current/previous epoch users and then 
+                        // we end up missing a merge close op fence.
+                        if (!dominates)
+                          dominator_mask -= it->second;
                         break;
+                      }
                     }
                     // We weren't able to prove that the projections were
                     // non-interfering with each other so we need a close
@@ -17467,7 +17414,7 @@ namespace Legion {
     {
       RegionTreeID tid;
       derez.deserialize(tid);
-      RegionNode *node = forest->get_tree(tid);
+      RegionNode *node = forest->get_tree(tid, true/*can fail*/);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       AddressSpaceID source;

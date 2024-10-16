@@ -106,12 +106,18 @@ cache: &global_cache
 .cxx17_normal: &cxx17_normal
   CXXFLAGS: ""
   CXX_STANDARD: "17"
+.cxx17_external: &cxx17_external
+  CXXFLAGS: ""
+  CXX_STANDARD: "17"
+  # Extra flags here for external projects that don't enforce C++ versions correctly
+  CXX_FLAGS: "-std=c++17"
+  NVCC_FLAGS: "-std=c++17"
 .cxx17_hardened: &cxx17_hardened
   CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "17"
 .cxx17_precise: &cxx17_precise
   # Intel compilers turn on some overly aggressive optimizations by default
-  CXXFLAGS: "-fp-model=precise -no-ansi-alias"
+  CXXFLAGS: "-fp-model=precise"
   CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
   CXXFLAGS: ""
@@ -161,18 +167,17 @@ cache: &global_cache
   GASNET_DEBUG: "1"
   # GASNet headers are not guaranteed to be warning-free in debug mode
   WARN_AS_ERROR: "0"
-.gasnetex_mpi_nightly: &gasnetex_mpi_nightly
+.gasnetex_mpi_stable: &gasnetex_mpi_stable
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "mpi"
-  GASNET_VERSION: "GASNet-EX-snapshot"
-  # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
-  #  it not to be public at this time
-  #GASNETEX_SNAPSHOT_SOURCE_URL: ...
+  GASNET_VERSION: "GASNet-stable"
 .gasnetex_ucx : &gasnetex_ucx
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "ucx"
   UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
+.gasnetex_wrapper: &gasnetex_wrapper
+  USE_GASNETEX_WRAPPER: "1"
 .gasnet1_ucx : &gasnet1_ucx
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "ucx"
@@ -215,6 +220,10 @@ cache: &global_cache
 
 .ctest: &ctest
   TEST_CTEST: "1"
+
+# The realm unit tests only works on single node
+.realm_unit_ctest: &realm_unit_ctest
+  TEST_REALM_UNIT_CTEST: "1"
 
 .regent: &regent
   TEST_LEGION_CXX: "0"
@@ -333,6 +342,7 @@ before_script:
             export GASNET_ROOT="$PWD/gasnet/release"
           fi
         fi
+        export REALM_GASNETEX_WRAPPER=${CI_PROJECT_DIR}/tmp-build/build/lib/librealm_gex_wrapper.so
       fi
       if [[ "$REALM_NETWORKS" == ucx ]]; then
         # build mpi bootstrap .so file.
@@ -482,12 +492,25 @@ before_script:
   CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
-.cuda124: &cuda124
+.cuda125: &cuda125
   <<: *cuda_base
-  CUDA: "/usr/local/cuda-12.4"
+  CUDA: "/usr/local/cuda-12.5"
   CUDA_TOOLKIT_ROOT: "$CUDA"
   CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
+
+.hip_cuda: &hip_cuda125
+  IS_NVIDIA_JOB: "1"
+  USE_HIP: "1"
+  HIP_TARGET: "CUDA"
+  # rocm 6.x requires cuda 12.x
+  CUDA: "/usr/local/cuda-12.5"
+  CUDA_PATH: "/usr/local/cuda-12.5"
+  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
+  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+  WARN_AS_ERROR: "0"
+  ROCM_PATH: "/opt/rocm"
+  HIPCC_FLAGS: "-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80"
 
 ###
 ### Docker Image
@@ -728,12 +751,12 @@ gcc9_cxx17_debug_openmp_system_regent:
 gcc9_cxx17_debug_python3_cmake_prof_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *python3, *cmake, *legion, *ctest, *prof, *shared, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *python3, *cmake, *legion, *ctest, *realm_unit_ctest, *prof, *shared, *short]
 #   * LLVM
 gcc9_cxx17_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *realm_unit_ctest, *shared, *libdw]
 gcc9_cxx17_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -785,7 +808,7 @@ gcc9_cxx17_release_gasnetex_mpi_legion:
 gcc9_cxx17_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *gasnetex_wrapper, *cmake, *legion, *ctest, *short, *shared, *libdw]
 gcc9_cxx17_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -794,19 +817,19 @@ gcc9_cxx17_debug_gasnetex_mpi_debug_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_debug, *regent, *incremental, *libdw]
-gcc9_cxx17_debug_gasnetex_mpi_nightly_regent:
+gcc9_cxx17_debug_gasnetex_mpi_stable_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_nightly, *regent, *incremental, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_mpi_stable, *regent, *incremental, *libdw]
 #   * GASNet (UCX conduit)
 gcc9_cxx17_release_gasnet1_ucx_legion:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *legion, *short, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *legion, *libdw]
 gcc9_cxx17_release_gasnet1_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *release, *cxx17_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared, *short, *libdw]
 gcc9_cxx17_release_gasnet1_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -818,7 +841,7 @@ gcc9_cxx17_release_gasnetex_ucx_legion:
 gcc9_cxx17_debug_gasnetex_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_ucx, *cmake, *legion, *ctest, *shared, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *gasnetex_ucx, *gasnetex_wrapper, *cmake, *legion, *ctest, *shared, *libdw]
 gcc9_cxx17_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -938,7 +961,7 @@ gcc9_cxx17_debug_external1:
 gcc9_cxx17_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
+    <<: [*gcc9, *terra12, *debug, *cxx17_external, *maxdim4, *openmp, *hdf5, *external2, *short, *libdw]
 gcc9_cxx17_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -998,7 +1021,7 @@ clang12_cxx17_debug_python3_legion:
 clang12_cxx17_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *llvm, *llvm12, *cmake, *legion, *ctest, *realm_unit_ctest, *libdw]
 clang12_cxx17_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -1016,7 +1039,7 @@ clang12_cxx17_debug_hdf5_regent:
 clang12_cxx17_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *gasnetex_mpi, *gasnetex_wrapper, *cmake, *shared, *legion, *ctest, *libdw]
 clang12_cxx17_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -1120,7 +1143,7 @@ clang12_cxx17_debug_external1:
 clang12_cxx12_debug_maxdim4_external2:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *maxdim4, *openmp, *hdf5, *external2, *libdw]
+    <<: [*clang12, *terra12, *debug, *cxx17_external, *maxdim4, *openmp, *hdf5, *external2, *libdw]
 clang12_cxx17_debug_private:
   <<: [*linux_compute, *image_2004, *external_tests]
   variables:
@@ -1138,7 +1161,7 @@ macos_clang_cxx17_release_legion:
 macos_clang_cxx20_release_cmake_legion:
   <<: [*macos, *tests]
   variables:
-    <<: [*macos_clang, *release, *cxx20_normal, *cmake, *legion, *ctest, *short, *no_ccache]
+    <<: [*macos_clang, *release, *cxx20_normal, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *no_ccache]
 # macos_clang_cxx17_debug_cmake_regent:
 #   <<: [*macos, *tests]
 #   variables:
@@ -1228,67 +1251,73 @@ clang14_cxx20_release_regent:
   variables:
     <<: [*clang14, *terra14, *release, *cxx20_normal, *regent]
 
+# HIP CUDA tests:
+nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion:
+  <<: [*nvidia, *tests]
+  variables:
+    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *short, *shared, *libdw]
+
 # CUDA tests:
 nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc10, *debug, *cxx17_normal, *cuda117, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared, *libdw]
+    <<: [*gcc10, *debug, *cxx17_normal, *cuda117, *cmake, *legion, *cuda_dynamic, *ctest, *realm_unit_ctest, *short, *shared, *libdw]
 nvidia_cuda117_gcc10_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc10, *release, *cxx17_normal, *cuda117, *legion, *cmake, *ctest, *shared]
+    <<: [*gcc10, *release, *cxx17_normal, *cuda117, *legion, *cmake, *ctest, *realm_unit_ctest, *shared]
 nvidia_cuda121_gcc11_cxx17_debug_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *legion, *short, *cmake, *ctest, *shared, *libdw]
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *legion, *short, *cmake, *ctest, *realm_unit_ctest, *shared, *libdw]
 nvidia_cuda121_gcc11_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *release, *cxx17_normal, *cuda121, *cmake, *legion, *ctest, *shared]
-nvidia_cuda124_gcc11_cxx17_release_cmake_cuda_legion:
+    <<: [*gcc11, *release, *cxx17_normal, *cuda121, *cmake, *legion, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda125_gcc11_cxx17_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *release, *cxx17_normal, *cuda124, *legion, *cmake, *ctest, *shared]
-nvidia_cuda124_gcc11_cxx20_debug_checks_cmake_cuda_legion:
+    <<: [*gcc11, *release, *cxx17_normal, *cuda125, *legion, *cmake, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda125_gcc11_cxx20_debug_checks_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx20_normal, *checks, *cuda124, *legion, *short, *cmake, *ctest, *shared, *libdw]
-nvidia_cuda124_gcc11_cxx20_release_cmake_cuda_legion:
+    <<: [*gcc11, *debug, *cxx20_normal, *checks, *cuda125, *legion, *short, *cmake, *ctest, *realm_unit_ctest, *shared, *libdw]
+nvidia_cuda125_gcc11_cxx20_release_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *release, *cxx20_normal, *cuda124, *cmake, *legion, *ctest, *shared]
-nvidia_cuda124_clang12_cxx17_release_cmake_cuda_regent:
+    <<: [*gcc11, *release, *cxx20_normal, *cuda125, *cmake, *legion, *ctest, *realm_unit_ctest, *shared]
+nvidia_cuda125_clang12_cxx17_release_cmake_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx17_normal, *cuda124, *regent, *cmake, *ctest, *short]
-nvidia_cuda124_clang12_cxx20_release_cmake_cuda_regent:
+    <<: [*clang12, *llvm12, *release, *cxx17_normal, *cuda125, *regent, *cmake, *ctest, *realm_unit_ctest, *short]
+nvidia_cuda125_clang12_cxx20_release_cmake_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *llvm12, *release, *cxx20_normal, *cuda124, *cmake, *ctest, *regent, *shared]
-nvidia_cuda124_gcc11_cxx17_debug_maxdim4_external2:
+    <<: [*clang12, *llvm12, *release, *cxx20_normal, *cuda125, *cmake, *ctest, *realm_unit_ctest, *regent, *shared]
+nvidia_cuda125_gcc11_cxx17_debug_maxdim4_external2:
   <<: [*nvidia, *external_tests]
   variables:
-    <<: [*gcc11, *llvm12, *debug, *cxx17_normal, *cuda124, *maxdim4, *openmp, *hdf5, *external2, *short]
+    <<: [*gcc11, *llvm12, *debug, *cxx17_external, *cuda125, *maxdim4, *openmp, *hdf5, *external2, *short]
 
 # CUDA+GASNet tests:
 nvidia_cuda121_gcc11_cxx17_debug_gasnetex_mpi_cmake_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *gasnetex_mpi, *legion, *ctest, *short, *libdw]
-nvidia_cuda124_gcc11_cxx17_release_gasnetex_mpi_cuda_regent:
+    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *gasnetex_mpi, *gasnetex_wrapper, *shared, *legion, *ctest, *short, *libdw]
+nvidia_cuda125_gcc11_cxx17_release_gasnetex_mpi_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *llvm12, *release, *cxx17_normal, *cuda124, *gasnetex_mpi, *regent]
+    <<: [*gcc11, *llvm12, *release, *cxx17_normal, *cuda125, *gasnetex_mpi, *regent]
 
 # CUDA+UCX tests:
 nvidia_cuda121_gcc11_cxx17_debug_ucx_cmake_cuda_legion:
  <<: [*nvidia, *tests]
  variables:
    <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *cmake, *ucx, *legion, *ctest, *short, *libdw]
-nvidia_cuda124_gcc11_cxx17_release_ucx_cuda_regent:
+nvidia_cuda125_gcc11_cxx17_release_ucx_cuda_regent:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *llvm12, *release, *cxx17_normal, *cuda124, *ucx, *regent]
+    <<: [*gcc11, *llvm12, *release, *cxx17_normal, *cuda125, *ucx, *regent]
 
 # Kokkos tests:
 clang12_cxx17_debug_kokkos_legion:
@@ -1308,18 +1337,18 @@ nvidia_cuda117_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
     <<: [*clang10, *debug, *cxx17_normal, *cuda117, *kokkos, *cmake, *legion, *ctest, *libdw]
-nvidia_cuda124_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
+nvidia_cuda125_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang12, *debug, *cxx17_normal, *cuda124, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*clang12, *debug, *cxx17_normal, *cuda125, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
 nvidia_cuda121_gcc11_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
     <<: [*gcc11, *debug, *cxx17_normal, *cuda121, *kokkos, *openmp, *cmake, *legion, *ctest, *libdw]
-nvidia_cuda124_gcc11_cxx17_debug_shared_kokkos_cuda_openmp_legion:
+nvidia_cuda125_gcc11_cxx17_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *shared, *cxx17_normal, *cuda124, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*gcc11, *debug, *shared, *cxx17_normal, *cuda125, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *libdw]
 
 # HPCSDK (nvc++) tests:
 hpcsdk2211_cxx17_release_cmake_legion:
@@ -1339,7 +1368,7 @@ icc212_cxx17_release_legion:
 icc212_cxx17_debug_cmake_legion:
   <<: [*linux, *image_icc, *tests]
   variables:
-    <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *short, *libdw]
+    <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *libdw]
 
 # MSVC (Realm only):
 msvc169_realm:

@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::state::{
     Align, Bounds, ChanEntry, ChanID, ChanPoint, Config, Container, CopyInstInfo, DeviceKind,
-    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint,
-    NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    DimKind, FSpace, FieldID, FillInstInfo, ISpaceID, Inst, MemID, MemKind, MemPoint, NodeID,
+    ProcID, ProcKind, ProcPoint, ProfUID, State, TimePoint, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -22,6 +22,7 @@ pub trait StatePostprocess {
     fn group_procs(&self) -> BTreeMap<ProcGroup, Vec<ProcID>>;
     fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>>;
     fn group_chans(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
+    fn group_depparts(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
 
     fn proc_group_timepoints(
         &self,
@@ -104,13 +105,13 @@ impl StatePostprocess for State {
             // Do NOT filter empty procs here because they count towards
             // utilization totals
             let nodes = [None, Some(proc.proc_id.node_id())];
-            let devices: &'static [_] = match proc.kind {
+            let devices: &'static [_] = match proc.kind.unwrap() {
                 ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
                 _ => &[None],
             };
             for node in nodes {
                 for device in devices {
-                    let group = ProcGroup(node, proc.kind, *device);
+                    let group = ProcGroup(node, proc.kind.unwrap(), *device);
                     groups
                         .entry(group)
                         .or_insert_with(Vec::new)
@@ -145,21 +146,64 @@ impl StatePostprocess for State {
         let mut groups = BTreeMap::new();
 
         for (chan_id, chan) in &self.chans {
+            match *chan_id {
+                ChanID::Copy { .. }
+                | ChanID::Fill { .. }
+                | ChanID::Gather { .. }
+                | ChanID::Scatter { .. } => {} // ok
+                _ => {
+                    continue;
+                }
+            }
+
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.util_time_points(None).is_empty() && chan_id.node_id().is_some() {
-                // gathers/scatters
+            if !chan.util_time_points(None).is_empty() {
                 let mut nodes = vec![None];
-                if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
-                    nodes.push(chan_id.dst.map(|dst| dst.node_id()));
-                }
-                if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
-                    nodes.push(chan_id.src.map(|src| src.node_id()));
+                match *chan_id {
+                    ChanID::Copy { src, dst } => {
+                        nodes.push(Some(src.node_id()));
+                        nodes.push(Some(dst.node_id()));
+                    }
+                    ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                        nodes.push(Some(dst.node_id()))
+                    }
+                    ChanID::Scatter { src } => nodes.push(Some(src.node_id())),
+                    ChanID::DepPart { .. } => unreachable!(),
                 }
                 nodes.dedup();
                 for node in nodes {
                     groups.entry(node).or_insert_with(Vec::new).push(*chan_id)
+                }
+            }
+        }
+
+        groups
+    }
+
+    fn group_depparts(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>> {
+        let mut groups = BTreeMap::new();
+
+        for (chan_id, chan) in &self.chans {
+            match *chan_id {
+                ChanID::DepPart { .. } => {} // ok
+                _ => {
+                    continue;
+                }
+            }
+            if !chan.is_visible() {
+                continue;
+            }
+            if !chan.util_time_points(None).is_empty() {
+                let mut nodes = vec![None];
+                match *chan_id {
+                    ChanID::DepPart { node_id } => nodes.push(Some(node_id)),
+                    _ => unreachable!(),
+                }
+                nodes.dedup();
+                for node in nodes {
+                    groups.entry(node).or_insert_with(Vec::new).push(*chan_id);
                 }
             }
         }
@@ -218,13 +262,13 @@ impl StatePostprocess for State {
                 continue;
             }
             let nodes = [None, Some(proc.proc_id.node_id())];
-            let devices: &'static [_] = match proc.kind {
+            let devices: &'static [_] = match proc.kind.unwrap() {
                 ProcKind::GPU => &[Some(DeviceKind::Device), Some(DeviceKind::Host)],
                 _ => &[None],
             };
             for node in nodes {
                 for device in devices {
-                    let group = ProcGroup(node, proc.kind, *device);
+                    let group = ProcGroup(node, proc.kind.unwrap(), *device);
                     proc_count.entry(group).and_modify(|i| *i += 1).or_insert(1);
                     if !proc.is_empty() {
                         timepoint
@@ -269,14 +313,18 @@ impl StatePostprocess for State {
             if !chan.is_visible() {
                 continue;
             }
-            if !chan.time_points(None).is_empty() && chan_id.node_id().is_some() {
-                // gathers/scatters
+            if !chan.time_points(None).is_empty() {
                 let mut nodes = vec![None];
-                if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
-                    nodes.push(chan_id.dst.map(|dst| dst.node_id()));
-                }
-                if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
-                    nodes.push(chan_id.src.map(|src| src.node_id()));
+                match *chan_id {
+                    ChanID::Copy { src, dst } => {
+                        nodes.push(Some(src.node_id()));
+                        nodes.push(Some(dst.node_id()));
+                    }
+                    ChanID::Fill { dst } | ChanID::Gather { dst } => {
+                        nodes.push(Some(dst.node_id()))
+                    }
+                    ChanID::Scatter { src } => nodes.push(Some(src.node_id())),
+                    ChanID::DepPart { node_id } => nodes.push(Some(node_id)),
                 }
                 nodes.dedup();
                 for node in nodes {
@@ -848,8 +896,8 @@ impl fmt::Display for ChanEntryFieldsPretty<'_> {
 pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_inst
     pub Option<&'a Inst>, // src_dst
-    pub InstUID,          // src_inst_uid
-    pub InstUID,          // dst_inst_uid
+    pub Option<ProfUID>,  // src_inst_uid
+    pub Option<ProfUID>,  // dst_inst_uid
     pub FieldID,          // src_fid
     pub FieldID,          // dst_fid
     pub u32,              // num_hops
@@ -865,16 +913,16 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
         if let Some(dst_inst) = self.1 {
             dst_inst_id = dst_inst.inst_id.unwrap().0;
         }
-        match (self.2 .0, self.3 .0) {
-            (0, 0) => unreachable!(),
-            (0, _) => {
+        match (self.2, self.3) {
+            (None, None) => unreachable!(),
+            (None, _) => {
                 write!(
                     f,
                     "Scatter: dst_indirect_inst=0x{:x}, fid={}",
                     dst_inst_id, self.5 .0
                 )
             }
-            (_, 0) => {
+            (_, None) => {
                 write!(
                     f,
                     "Gather: src_indirect_inst=0x{:x}, fid={}",
@@ -898,8 +946,16 @@ pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
 impl fmt::Display for CopyInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid);
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
+            let src_inst = if let Some(src_inst_uid) = elt.src_inst_uid {
+                self.1.find_inst(src_inst_uid)
+            } else {
+                None
+            };
+            let dst_inst = if let Some(dst_inst_uid) = elt.dst_inst_uid {
+                self.1.find_inst(dst_inst_uid)
+            } else {
+                None
+            };
             write!(
                 f,
                 "$req[{}]: {}",
@@ -927,29 +983,29 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            // src_inst_uid = 0 means scatter (indirection inst)
-            if elt.src_inst_uid != InstUID(0) {
-                if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+            // src_inst_uid = None means scatter (indirection inst)
+            if let Some(src_inst_uid) = elt.src_inst_uid {
+                if let Some(src_inst) = self.1.find_inst(src_inst_uid) {
                     insts_set.insert(src_inst);
                 } else {
                     conditional_assert!(
                         false,
                         Config::all_logs(),
                         "Copy can not find src_inst:0x{:x}",
-                        elt.src_inst_uid.0
+                        src_inst_uid.0
                     );
                 }
             }
-            // dst_inst_uid = 0 means gather (indirection inst)
-            if elt.dst_inst_uid != InstUID(0) {
-                if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+            // dst_inst_uid = None means gather (indirection inst)
+            if let Some(dst_inst_uid) = elt.dst_inst_uid {
+                if let Some(dst_inst) = self.1.find_inst(dst_inst_uid) {
                     insts_set.insert(dst_inst);
                 } else {
                     conditional_assert!(
                         false,
                         Config::all_logs(),
                         "Copy can not find dst_inst:0x{:x}",
-                        elt.dst_inst_uid.0
+                        dst_inst_uid.0
                     );
                 }
             }

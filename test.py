@@ -99,6 +99,7 @@ legion_cxx_tests = [
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':0:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:0', '-ll:cpu', '4']],
     ['test/ctrl_repl_safety/ctrl_repl_safety', [':1:1', '-ll:cpu', '4', '-lg:safe_ctrlrepl', '1']],
+    ['test/mapper/mapper', []],
 
     # Tutorial/realm
     ['tutorial/realm/hello_world/realm_hello_world', []],
@@ -805,7 +806,7 @@ def check_test_legion_cxx(root_dir):
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
                 test_regent, test_legion_cxx,
-                test_external1, test_external2, test_perf, test_ctest):
+                test_external1, test_external2, test_perf, test_ctest, test_realm_unit_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -821,12 +822,16 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmake_cmd.append('-DGASNet_CONDUIT=' + env['CONDUIT'])
         if 'EMBED_GASNET_SRC' in env:
             cmake_cmd.append('-DLegion_EMBED_GASNet_LOCALSRC=' + env['EMBED_GASNET_SRC'])
+    if 'USE_GASNETEX_WRAPPER' in env:
+        cmake_cmd.append('-DLegion_USE_GASNETEX_WRAPPER=%s' % ('ON' if env['USE_GASNETEX_WRAPPER'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
     if 'GPU_ARCH' in env:
         cmake_cmd.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
     cmake_cmd.append('-DLegion_USE_HIP=%s' % ('ON' if env['USE_HIP'] == '1' else 'OFF'))
     if 'HIP_ARCH' in env:
         cmake_cmd.append('-DLegion_HIP_ARCH=%s' % env['HIP_ARCH'])
+    if 'HIP_TARGET' in env:
+        cmake_cmd.append('-DLegion_HIP_TARGET=%s' % env['HIP_TARGET'])
     if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
         cmake_cmd.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
     cmake_cmd.append('-DLegion_USE_NVTX=%s' % ('ON' if env['USE_NVTX'] == '1' else 'OFF'))
@@ -848,6 +853,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         if 'LAUNCHER' in env:
             cmake_cmd.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
         cmake_cmd.append('-DLegion_TEST_ARGS=%s' % ' '.join(get_default_args(env)))
+        if test_realm_unit_ctest:
+            cmake_cmd.append('-DLegion_BUILD_REALM_UNIT_TESTS=ON')
     else:
         cmake_cmd.append('-DLegion_ENABLE_TESTING=OFF')
     if test_regent or (test_legion_cxx and (env['USE_PYTHON'] == '1')):
@@ -895,6 +902,16 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
+
+    # Check the build with various settings to make sure we're not breaking anything
+    allow_unused_variables_env = dict(list(env.items()) + [
+        ('RUSTFLAGS', '-Aunused_variables'), # When not all features are enabled, some variables may be unused
+    ])
+    cmd(['cargo', 'check', '--no-default-features'],
+        env=allow_unused_variables_env, cwd=legion_prof_dir)
+    cmd(['cargo', 'check', '--release'],
+        env=env, cwd=legion_prof_dir)
+
     cmd(['cargo', 'install',
          '--all-features',
          '--locked',
@@ -988,8 +1005,8 @@ class Stage(object):
 def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
-                test_perf, test_ctest, test_jupyter, networks,
-                use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
+                test_perf, test_ctest, test_realm_unit_ctest, test_jupyter, networks,
+                use_cuda, use_hip, hip_target, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
@@ -1014,12 +1031,14 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Private:    %s' % test_private)
     print('###   * Perf:       %s' % test_perf)
     print('###   * CTest:      %s' % test_ctest)
+    print('###   * Realm Unit CTest:      %s' % test_realm_unit_ctest)
     print('###   * Jupyter:    %s' % test_jupyter)
     print('###')
     print('### Build Flags:')
     print('###   * Networks:   %s' % networks)
     print('###   * CUDA:       %s' % use_cuda)
     print('###   * HIP:        %s' % use_hip)
+    print('###   * HIP_TARGET: %s' % hip_target)
     print('###   * OpenMP:     %s' % use_openmp)
     print('###   * Kokkos:     %s' % use_kokkos)
     print('###   * Python:     %s' % use_python)
@@ -1037,7 +1056,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * NVTX:       %s' % use_nvtx)
     print('###   * LIBDW:      %s' % use_libdw)
     print('###   * Max DIM:    %s' % max_dim)
-    print('###   * CXX STD:    %s' % cxx_standard)
+    print('###   * C++ STD:    %s' % cxx_standard)
     print('#'*60)
     print()
     sys.stdout.flush()
@@ -1083,6 +1102,7 @@ def run_tests(test_modules=None,
     test_private = module_enabled('private', False)
     test_perf = module_enabled('perf', False)
     test_ctest = module_enabled('ctest', False)
+    test_realm_unit_ctest = module_enabled('realm_unit_ctest', False)
     test_jupyter = module_enabled('jupyter', False)
 
     # Determine which features to build with.
@@ -1091,6 +1111,7 @@ def run_tests(test_modules=None,
                               envprefix=prefix, **kwargs)
     use_cuda = feature_enabled('cuda', False)
     use_hip = feature_enabled('hip', False)
+    hip_target = os.environ['HIP_TARGET'] if 'HIP_TARGET' in os.environ else 'CUDA',
     use_openmp = feature_enabled('openmp', False)
     use_kokkos = feature_enabled('kokkos', False)
     use_python = feature_enabled('python', False)
@@ -1137,14 +1158,15 @@ def run_tests(test_modules=None,
     launcher = launcher.split() if launcher is not None else []
 
     # CXX Standard
-    cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
+    cxx_standard = os.environ.get('CXX_STANDARD', '')
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
-    if use_cmake == False:
-        if cxx_standard != '':
-            if 'CXX_STANDARD' in os.environ:
-                os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
-            else:
-                os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']
+    if not use_cmake and cxx_standard != '':
+        cxx_std_flag = " -std=c++" + cxx_standard
+        os.environ['CXXFLAGS'] = os.environ.get('CXXFLAGS', '') + cxx_std_flag
+        if use_cuda:
+            os.environ['NVCC_FLAGS'] = os.environ.get('NVCC_FLAGS', '') + cxx_std_flag
+        if use_hip:
+            os.environ['HIPCC_FLAGS'] = os.environ.get('HIPCC_FLAGS', '') + cxx_std_flag
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
@@ -1155,9 +1177,9 @@ def run_tests(test_modules=None,
     report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external1, test_external2, test_private,
-                test_perf, test_ctest, test_jupyter,
+                test_perf, test_ctest, test_realm_unit_ctest, test_jupyter,
                 networks,
-                use_cuda, use_hip, use_openmp, use_kokkos, use_python, use_llvm,
+                use_cuda, use_hip, hip_target, use_openmp, use_kokkos, use_python, use_llvm,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
@@ -1235,7 +1257,7 @@ def run_tests(test_modules=None,
                     root_dir, tmp_dir, env, thread_count,
                     test_regent, test_legion_cxx, test_external1,
                     test_external2,
-                    test_perf, test_ctest)
+                    test_perf, test_ctest, test_realm_unit_ctest)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(

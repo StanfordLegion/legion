@@ -218,6 +218,8 @@ namespace Legion {
       // e.g. do we need to see all stage 0 messages before stage 1
       AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
+      AllGatherCollective(ReplicateContext *ctx, CollectiveID id,
+                          const std::vector<ShardID> &participants);
       virtual ~AllGatherCollective(void);
     public:
       virtual MessageKind get_message_kind(void) const = 0;
@@ -242,13 +244,16 @@ namespace Legion {
       void complete_exchange(void);
       virtual RtEvent post_complete_exchange(void) 
         { return RtEvent::NO_RT_EVENT; }
-    public: 
-      const int shard_collective_radix;
-      const int shard_collective_log_radix;
-      const int shard_collective_stages;
-      const int shard_collective_participating_shards;
-      const int shard_collective_last_radix;
-      const bool participating; 
+    protected:
+      const std::vector<ShardID> *const participants; // can be NULL
+      const size_t total_shards;
+      int local_index;
+      int shard_collective_radix;
+      int shard_collective_log_radix;
+      int shard_collective_stages;
+      int shard_collective_participating_shards;
+      int shard_collective_last_radix;
+      bool participating; 
     private:
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
@@ -1486,26 +1491,29 @@ namespace Legion {
      * concurrent index space task launches to ensure that all the point
      * tasks have been mapped to different processors.
      */
-    class ConcurrentMappingRendezvous : public GatherCollective {
+    class ConcurrentMappingRendezvous : public AllGatherCollective<true> {
     public:
       ConcurrentMappingRendezvous(ReplIndexTask *owner,
-          CollectiveIndexLocation loc, ReplicateContext *ctx,
-          ShardID target, size_t expected_points);
+          CollectiveIndexLocation loc, ReplicateContext *ctx);
       virtual ~ConcurrentMappingRendezvous(void) { }
     public:
       virtual MessageKind get_message_kind(void) const
         { return SEND_CONTROL_REPLICATION_CONCURRENT_MAPPING_RENDEZVOUS; }
-      virtual void pack_collective(Serializer &rez) const;
-      virtual void unpack_collective(Deserializer &derez);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual RtEvent post_complete_exchange(void);
     public:
+      void set_trace_barrier(RtBarrier barrier);
       void perform_rendezvous(std::map<Processor,DomainPoint> &processors,
-                              ApUserEvent all_mapped_event);
+          RtEvent precondition);
     public:
       ReplIndexTask *const owner;
-      const size_t expected_points;
     protected:
       std::map<Processor,DomainPoint> concurrent_processors;
-      ApUserEvent all_mapped_event;
+      std::vector<ShardID> nonempty_shards;
+      std::vector<RtEvent> preconditions;
+      RtBarrier barrier;
     };
     
     /**
@@ -1520,8 +1528,8 @@ namespace Legion {
      */
     class ConcurrentAllreduce : public AllGatherCollective<true> {
     public:
-      ConcurrentAllreduce(CollectiveIndexLocation loc, ReplicateContext *ctx,
-                          size_t expected_points);
+      ConcurrentAllreduce(ReplicateContext *ctx, CollectiveID id,
+                          const std::vector<ShardID> &participants);
       ConcurrentAllreduce(const ConcurrentAllreduce &rhs) = delete;
       virtual ~ConcurrentAllreduce(void);
     public:
@@ -1535,17 +1543,14 @@ namespace Legion {
     public:
       void exchange(std::vector<std::pair<SliceTask*,AddressSpaceID> > &slices,
         uint64_t lamport_clock, bool poisoned, RtBarrier collective_kernel_bar,
-        VariantID variant, size_t points);
+        VariantID variant);
     protected:
-      void notify_concurrent_slices(void);
-    public:
-      const size_t expected_points;
+      virtual RtEvent post_complete_exchange(void);
     protected:
       std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
       RtBarrier collective_kernel_barrier;
       uint64_t concurrent_lamport_clock;
       VariantID concurrent_variant;
-      size_t total_points;
       bool concurrent_poisoned;
     };
 
@@ -2010,10 +2015,12 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
-      virtual ApEvent rendezvous_concurrent_mapped(
-          const DomainPoint &point, Processor target);
-      virtual ApEvent rendezvous_concurrent_mapped(
+      virtual void rendezvous_concurrent_mapped(
+          const DomainPoint &point, Processor target, RtEvent precondition);
+      virtual void rendezvous_concurrent_mapped(RtEvent precondition,
           std::vector<std::pair<Processor,DomainPoint> > &targets);
+      void finish_concurrent_mapped(RtEvent precondition, RtBarrier barrier,
+          const std::vector<ShardID> &participants);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
@@ -2050,6 +2057,7 @@ namespace Legion {
       // For setting up concurrent execution
       ConcurrentMappingRendezvous *concurrent_mapping_rendezvous;
       ConcurrentAllreduce *concurrent_exchange;
+      CollectiveID concurrent_exchange_id;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2347,6 +2355,17 @@ namespace Legion {
     class ReplDeletionOp : 
       public ReplCollectiveVersioning<CollectiveVersioning<DeletionOp> > {
     public:
+      struct DeferDeletionCommitArgs : 
+        public LgTaskArgs<DeferDeletionCommitArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_DELETION_COMMIT_TASK_ID;
+      public:
+        DeferDeletionCommitArgs(ReplDeletionOp *o)
+          : LgTaskArgs(o->get_unique_op_id()), op(o) { }
+      public:
+        ReplDeletionOp *const op;
+      };
+    public:
       ReplDeletionOp(Runtime *rt);
       ReplDeletionOp(const ReplDeletionOp &rhs) = delete;
       virtual ~ReplDeletionOp(void);
@@ -2359,12 +2378,12 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
     public:
       void initialize_replication(ReplicateContext *ctx, bool is_first,
                                   RtBarrier *ready_barrier = NULL,
                                   RtBarrier *mapping_barrier = NULL,
-                                  RtBarrier *execution_barrier = NULL);
+                                  RtBarrier *commit_barrier = NULL);
       // Help for handling unordered deletions 
       void record_unordered_kind(
        std::map<IndexSpace,ReplDeletionOp*> &index_space_deletions,
@@ -2372,10 +2391,12 @@ namespace Legion {
        std::map<FieldSpace,ReplDeletionOp*> &field_space_deletions,
        std::map<std::pair<FieldSpace,FieldID>,ReplDeletionOp*> &field_deletions,
        std::map<LogicalRegion,ReplDeletionOp*> &logical_region_deletions);
+    public:
+      static void handle_defer_commit(const void *args);
     protected:
       RtBarrier ready_barrier;
       RtBarrier mapping_barrier;
-      RtBarrier execution_barrier;
+      RtBarrier commit_barrier;
       bool is_first_local_shard;
     };
 
@@ -2540,31 +2561,6 @@ namespace Legion {
     protected:
       ShardingGatherCollective *sharding_collective;
 #endif
-    };
-
-    /**
-     * \class ReplTimingOp
-     * A timing operation that is aware that it is 
-     * being executed in a control replication context
-     */
-    class ReplTimingOp : public TimingOp {
-    public:
-      ReplTimingOp(Runtime *rt);
-      ReplTimingOp(const ReplTimingOp &rhs);
-      virtual ~ReplTimingOp(void);
-    public:
-      ReplTimingOp& operator=(const ReplTimingOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(bool free = true);
-    public:
-      virtual void trigger_mapping(void);
-      virtual void trigger_execution(void);
-    public:
-      inline void set_timing_collective(ValueBroadcast<long long> *collective) 
-        { timing_collective = collective; }
-    protected:
-      ValueBroadcast<long long> *timing_collective;
     }; 
 
     /**
@@ -2639,12 +2635,47 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent pre, ApEvent complete_event);
+      virtual void trigger_complete(ApEvent complete);
     protected:
       void initialize_fence_barriers(ReplicateContext *repl_ctx = NULL);
     protected:
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
+    };
+
+    /**
+     * \class ReplTimingOp
+     * A timing operation that is aware that it is 
+     * being executed in a control replication context
+     */
+    class ReplTimingOp : public ReplFenceOp {
+    public:
+      ReplTimingOp(Runtime *rt);
+      ReplTimingOp(const ReplTimingOp &rhs) = delete;
+      virtual ~ReplTimingOp(void);
+    public:
+      ReplTimingOp& operator=(const ReplTimingOp &rhs) = delete;
+    public:
+      Future initialize(InnerContext *ctx, const TimingLauncher &launcher,
+                        Provenance *provenance);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
+        { return false; }
+    public:
+      virtual void trigger_complete(ApEvent complete); 
+      virtual void trigger_commit(void);
+      virtual void perform_measurement(void);
+    public:
+      inline void set_timing_collective(ValueBroadcast<long long> *collective) 
+        { timing_collective = collective; }
+    protected:
+      TimingMeasurement measurement;
+      RtEvent measured;
+      ValueBroadcast<long long> *timing_collective;
     };
 
     /**
@@ -2836,7 +2867,6 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
-      virtual ApEvent get_complete_effects(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void record_unordered_kind(std::map<
@@ -3122,11 +3152,15 @@ namespace Legion {
       virtual FenceOp* get_begin_operation(void) { return this; }
       virtual PhysicalTemplate* create_fresh_template(PhysicalTrace *trace);
       virtual bool allreduce_template_status(bool &valid, bool acquired);
+    protected:
+      void perform_template_creation_barrier(void);
     private:
       // If we do back-to-back executions of different traces
       // then we fuse the invalidation of the previous trace into the
       // begin operation of the next trace
       std::vector<CollectiveID> status_collective_ids;
+      SlowBarrier *slow_barrier;
+      CollectiveID slow_barrier_id;
     };
 
     /**
@@ -3188,13 +3222,9 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
+      virtual void trigger_mapping(void); 
     protected:
-      void perform_template_creation_barrier(void);
-    protected:
-      LogicalTrace *previous;
-      SlowBarrier *slow_barrier;
-      CollectiveID slow_barrier_id;
+      LogicalTrace *previous; 
       bool has_blocking_call;
       bool has_intermediate_fence;
       bool remove_trace_reference;
@@ -3260,7 +3290,6 @@ namespace Legion {
                    std::vector<DomainPoint> &&sorted_points,
                    std::vector<ShardID> &&shard_lookup,
                    SingleTask *original = NULL,
-                   RtBarrier shard_task_bar = RtBarrier::NO_RT_BARRIER,
                    RtBarrier callback_bar = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs) = delete;
       ~ShardManager(void);
@@ -3269,8 +3298,6 @@ namespace Legion {
     public:
       void notify_local(void);
     public:
-      inline RtBarrier get_shard_task_barrier(void) const
-        { return shard_task_barrier; }
       inline ShardMapping& get_mapping(void) const
         { return *address_spaces; }
       inline CollectiveMapping& get_collective_mapping(void) const
@@ -3346,7 +3373,7 @@ namespace Legion {
           DistributedID did, Provenance *provenance); 
       FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
           IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
-          DistributedID did, ApEvent completion, Provenance *provenance);
+          DistributedID did, Provenance *provenance);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
       template<typename T>
@@ -3376,11 +3403,12 @@ namespace Legion {
                                     void *data, size_t size);
       void barrier_shard_local(uint64_t context_index, size_t exchange_index);
     public:
+      RtEvent complete_startup_initialization(bool local = true);
       void handle_post_mapped(bool local, RtEvent precondition);
-      void handle_post_execution(FutureInstance *instance, ApEvent effects,
-                                 void *metadata, size_t metasize, bool local);
-      RtEvent trigger_task_complete(bool local, ApEvent effects_done);
-      void trigger_task_commit(bool local);
+      bool handle_future(ApEvent effects, FutureInstance *instance,
+                         const void *metadata, size_t metasize);
+      ApEvent trigger_task_complete(bool local, ApEvent effects_done);
+      void trigger_task_commit(bool local, RtEvent precondition);
     public:
       void send_collective_message(MessageKind message, ShardID target, 
                                    Serializer &rez);
@@ -3453,8 +3481,8 @@ namespace Legion {
       static void handle_collective_versioning(Deserializer &derez,Runtime *rt);
       static void handle_collective_mapping(Deserializer &derez, Runtime *rt);
       static void handle_virtual_rendezvous(Deserializer &derez, Runtime *rt);
+      static void handle_startup_complete(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
-      static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
@@ -3514,25 +3542,25 @@ namespace Legion {
       ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
     protected:
-      // There are four kinds of signals that come back from 
+      // There are five kinds of signals that come back from 
       // the execution of the shards:
+      // - startup complete
       // - mapping complete
       // - future result
       // - task complete
       // - task commit
+      RtUserEvent startup_complete;
       // The owner applies these to the original task object only
       // after they have occurred for all the shards
+      unsigned    local_startup_complete, remote_startup_complete;
       unsigned    local_mapping_complete, remote_mapping_complete;
-      unsigned    local_execution_complete, remote_execution_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
       unsigned    semantic_attach_counter;
-      FutureInstance *local_future_result;
+      size_t      future_size;
       std::set<RtEvent> mapping_preconditions;
-      std::vector<ApEvent> execution_effects;
     protected:
-      // These barriers only are needed for control replicated tasks
-      RtBarrier shard_task_barrier;
+      // This barrier is only needed for control replicated tasks
       RtBarrier callback_barrier;
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
@@ -3580,7 +3608,9 @@ namespace Legion {
       std::map<DistributedID,std::pair<FillView*,size_t> > 
                                         created_fill_views;
       // ApEvents describing the completion of each shard
+      ApUserEvent all_shards_complete;
       std::set<ApEvent> shard_effects;
+      std::set<RtEvent> commit_preconditions;
 #ifdef LEGION_USE_LIBDL
     protected:
       std::set<Runtime::RegistrationKey> unique_registration_callbacks;

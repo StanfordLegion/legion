@@ -31,12 +31,7 @@
 
 #include <vector>
 
-// we need intptr_t - make it if needed
-#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
-#else
-typedef ptrdiff_t intptr_t;
-#endif
 
 /**
  * \file instance.h
@@ -144,6 +139,34 @@ namespace Realm {
 		     bool exclusive = false) const;
     template <typename T>
     T *pointer(size_t offset) const;
+
+    /**
+     * Reuse an underlying memory of the instance to create the next
+     * set of instances.
+     * \param instance resulting instance
+     * \param layout of a new instance to be created
+     * \param prs profiling information
+     * \param wait_on precondition to wait on
+     * \return The event to wait on before using the new instance.
+     */
+    // TODO(apryakhin@): Add deferred execution
+    Event redistrict(RegionInstance &instance, const InstanceLayoutGeneric *layout,
+                     const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
+
+    /**
+     * Reuse an underlying memory of the instance to create the next
+     * set of instances.
+     * \param instances instances to be redistricted
+     * \param layouts layouts for new instances
+     * \param num_layouts number of instances and instance layouts
+     * \param prs profiling information
+     * \param wait_on precondition to wait on
+     * \return The event to wait on before using the new instance.
+     */
+    // TODO(apryakhin@): Add deferred execution
+    Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
+                     size_t num_layouts, const ProfilingRequestSet *prs,
+                     Event wait_on = Event::NO_EVENT);
 
     /**
      * Create a new region instance. Calls to create_instance return immediately

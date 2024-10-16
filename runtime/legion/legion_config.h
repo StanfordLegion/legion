@@ -1157,7 +1157,8 @@ typedef enum legion_error_t {
   ERROR_UNABLE_ALLOCATE_LOCAL_FIELD = 388,
   ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD = 389,
   ERROR_DEFERRED_BUFFER_DOUBLE_DELETE = 390,
-  //ERROR_PREDICATED_TASK_LAUNCH_FOR_TASK = 392,
+  ERROR_MISMATCHED_PROFILING_RANGE = 391,
+  ERROR_MISSING_PROFILING_PROVENANCE = 392,
   ERROR_PREDICATED_INDEX_TASK_LAUNCH = 393,
   ERROR_ATTEMPTED_INLINE_MAPPING_REGION = 395,
   ERROR_ATTEMPTED_EXTERNAL_ATTACH = 397,
@@ -1412,6 +1413,7 @@ typedef enum legion_error_t {
   LEGION_FATAL_GARBAGE_COLLECTION_RACE = 2017,
   LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP = 2018,
   LEGION_FATAL_MORTON_TILING_FAILURE = 2019,
+  LEGION_FATAL_NO_CRITICAL_PATH_DYNAMIC_COLLECTIVES = 2020,
   
 }  legion_error_t;
 
@@ -1509,6 +1511,8 @@ typedef enum legion_region_flags_t {
   LEGION_COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
   // for indicating created output region requirements
   LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG = 0x00000020,
+  // Suppress warnings on this region requirement
+  LEGION_SUPPRESS_WARNINGS_FLAG = 0x00000040,
   // for backwards compatibility
   LEGION_DEPRECATED_ENUM(NO_FLAG)
   LEGION_DEPRECATED_ENUM(VERIFIED_FLAG)
@@ -1693,7 +1697,8 @@ typedef enum legion_redop_kind_t {
   LEGION_TYPE_##type
 #endif
 typedef enum legion_builtin_redop_t {
-  LEGION_REDOP_BASE           = LEGION_MAX_APPLICATION_REDOP_ID,
+  // LEGION_MAX_APPLICATION_REDOP_ID has been claimed by BarrierArrivalReduction
+  LEGION_REDOP_BASE           = LEGION_MAX_APPLICATION_REDOP_ID + 1,
   ////////////////////////////////////////
   // Sum reductions
   ////////////////////////////////////////
@@ -2121,6 +2126,18 @@ typedef enum legion_domain_max_rect_dim_t {
 #undef LEGION_DEPRECATED_ENUM
 #undef LEGION_DEPRECATED_ENUM_FROM
 
+typedef enum legion_unbound_pool_scope_t {
+  // Bounded pool so other allocations always permitted in parallel
+  LEGION_BOUNDED_POOL,
+  // Nothing else is allowed to allocate in parallel
+  LEGION_STRICT_UNBOUNDED_POOL,
+  // Only tasks in the same index space task launch
+  // are allowed to allocate in parallel
+  LEGION_INDEX_TASK_UNBOUNDED_POOL,
+  // Anything else is allowed to allocate in parallel 
+  LEGION_PERMISSIVE_UNBOUNDED_POOL,
+} legion_unbounded_pool_scope_t;
+
 //==========================================================================
 //                                Types
 //==========================================================================
@@ -2163,6 +2180,7 @@ typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
+typedef unsigned long long legion_provenance_id_t;
 typedef realm_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 typedef long long legion_internal_color_t;

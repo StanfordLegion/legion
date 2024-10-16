@@ -130,6 +130,17 @@ namespace Legion {
     public:
       TaskOp *const proxy_this;
     };
+    struct DeferTriggerChildrenCommitArgs :
+        public LgTaskArgs<DeferTriggerChildrenCommitArgs> {
+      public:
+        static const LgTaskID TASK_ID =LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID;
+      public:
+        DeferTriggerChildrenCommitArgs(TaskOp *t)
+          : LgTaskArgs<DeferTriggerChildrenCommitArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        TaskOp *const task;
+      };
     public:
       TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
@@ -139,7 +150,8 @@ namespace Legion {
       virtual void set_context_index(uint64_t index);
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual const char* get_task_name(void) const;
       virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -148,6 +160,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied) const;
     public:
       bool is_remote(void) const;
+      bool is_forward_progress_task(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicable(void) const { return replicate; }
@@ -185,7 +198,6 @@ namespace Legion {
         { exec_fence = false; return !regions.empty(); }
     public:
       virtual void trigger_dependence_analysis(void) = 0;
-      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
       virtual void predicate_false(void) = 0;
@@ -241,7 +253,6 @@ namespace Legion {
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
       void complete_point_projection(void);
-      bool prepare_steal(void);
       void finalize_output_region_trees(void);
     public:
       void compute_parent_indexes(InnerContext *alt_context = NULL);
@@ -261,17 +272,14 @@ namespace Legion {
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
       // or committed.
-      void trigger_children_complete(void);
-      void trigger_children_committed(void);
+      void trigger_children_committed(RtEvent pre = RtEvent::NO_RT_EVENT);
     protected:
-      // Tasks have two requirements to complete:
-      // - all speculation must be resolved
-      // - all children must be complete
-      virtual void trigger_task_complete(void) = 0;
       // Tasks have two requirements to commit:
       // - all commit dependences must be satisfied (trigger_commit)
       // - all children must commit (children_committed)
       virtual void trigger_task_commit(void) = 0;
+    public:
+      static void handle_deferred_children_commit(const void *args);
     protected:
       TaskRequirements                          logical_regions;
       // Region requirements to check for collective behavior
@@ -285,7 +293,6 @@ namespace Legion {
       // The version infos for this task
       LegionVector<VersionInfo>                 version_infos;
     protected:
-      bool complete_received;
       bool commit_received;
     protected:
       bool options_selected;
@@ -297,8 +304,10 @@ namespace Legion {
     private:
       mutable bool is_local;
       mutable bool local_cached;
+    private:
+      mutable bool is_forward_progress;
+      mutable bool forward_progress_cached;
     protected:
-      bool children_complete;
       bool children_commit;
     protected:
       MapperManager *mapper;
@@ -332,7 +341,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual bool has_parent_task(void) const;
       virtual const Task* get_parent_task(void) const;
-      virtual const std::string& get_provenance_string(bool human = true) const;
+      virtual const std::string_view& get_provenance_string(
+          bool human = true) const;
       virtual const char* get_task_name(void) const;
       virtual Domain get_slice_domain(void) const;
       virtual ShardID get_shard_id(void) const;
@@ -370,18 +380,7 @@ namespace Legion {
             task(t) { }
       public:
         SingleTask *const task;
-      };
-      struct DeferTriggerTaskCompleteArgs :
-        public LgTaskArgs<DeferTriggerTaskCompleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_TRIGGER_TASK_COMPLETE_TASK_ID;
-      public:
-        DeferTriggerTaskCompleteArgs(SingleTask *t)
-          : LgTaskArgs<DeferTriggerTaskCompleteArgs>(t->get_unique_op_id()),
-            task(t) { }
-      public:
-        SingleTask *const task;
-      };
+      }; 
       struct OrderConcurrentLaunchArgs : 
         public LgTaskArgs<OrderConcurrentLaunchArgs> { 
       public:
@@ -466,9 +465,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &respone,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
       void finalize_single_task_profiling(void);
     public:
@@ -486,6 +485,8 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events) = 0;
+      virtual ApEvent order_concurrent_launch(ApEvent start, VariantImpl *impl)
+        { assert(false); return start; }
       virtual void record_output_extent(unsigned idx,
           const DomainPoint &color, const DomainPoint &extents) 
         { assert(false); }
@@ -503,7 +504,6 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       friend class ShardManager;
-      virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
@@ -512,8 +512,8 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions);
     public:
-      virtual void handle_post_execution(FutureInstance *instance,
-                                 void *metadata, size_t metasize,
+      virtual void handle_future(ApEvent effects, FutureInstance *instance,
+                                 const void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor) = 0;
@@ -523,10 +523,6 @@ namespace Legion {
     public:
       // From Memoizable
       virtual ApEvent replay_mapping(void);
-      virtual void find_completion_effects(std::set<ApEvent> &effects,
-                                           bool tracing = false);
-      virtual void find_completion_effects(std::vector<ApEvent> &effects,
-                                           bool tracing = false);
     public:
       virtual void perform_replicate_collective_versioning(unsigned index,
           unsigned parent_req_index, LegionMap<LogicalRegion,
@@ -546,7 +542,6 @@ namespace Legion {
       virtual TaskContext* create_execution_context(VariantImpl *v,
           std::set<ApEvent> &launch_events, bool inline_task, bool leaf_task);
     public:
-      static void handle_deferred_task_complete(const void *args);
       static void order_concurrent_task_launch(const void *args);
     protected:
       // Boolean for each region saying if it is virtual mapped
@@ -576,20 +571,6 @@ namespace Legion {
       // It does NOT encapsulate the 'effects_complete' of this task
       // Only the actual operation completion event captures that
       ApUserEvent                           single_task_termination;
-      // For concurrent index space tasks, this event will represent when
-      // all the point tasks have actually mapped, which is a necessary 
-      // precondition for any of the point tasks in the concurrent index
-      // space task to start running
-      ApEvent                               concurrent_mapped_event;
-      // Event recording when all "effects" are complete
-      // Structure recording when all "effects" are complete
-      // The effects of the task include the following:
-      // 1. the execution of the task
-      // 2. the execution of all child ops of the task
-      // 3. all copy-out operations of child ops
-      // 4. all copy-out operations of the task itself
-      // Note that this definition is recursive
-      std::set<ApEvent>                     task_completion_effects; 
     protected:
       TaskContext*                          execution_context;
       RemoteTraceRecorder*                  remote_trace_recorder;
@@ -599,15 +580,8 @@ namespace Legion {
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
     protected:
-      // Profiling information
-      struct SingleProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>      task_profiling_requests;
       std::vector<ProfilingMeasurementID>      copy_profiling_requests;
-      std::vector<SingleProfilingInfo>                  profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
       int                                           copy_fill_priority;
@@ -681,7 +655,6 @@ namespace Legion {
     public:
       virtual void trigger_mapping(void);
     protected:
-      virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
@@ -745,13 +718,18 @@ namespace Legion {
       // on the same node but moved it to a different processor
       bool first_mapping;
     protected:
-      ApUserEvent concurrent_mapped;
+      union ConcurrentPrecondition {
+        ConcurrentPrecondition(void) 
+          : interpreted(RtUserEvent::NO_RT_USER_EVENT) { }
+        RtUserEvent interpreted;
+        RtBarrier traced;
+      } concurrent_precondition;
+      std::vector<RtEvent> concurrent_preconditions;
       std::map<Processor,DomainPoint> concurrent_processors;
       uint64_t concurrent_lamport_clock;
       VariantID concurrent_variant;
       bool concurrent_poisoned;
     protected:
-      bool children_complete_invoked;
       bool children_commit_invoked;
     protected:
       Future predicate_false_future;
@@ -833,11 +811,11 @@ namespace Legion {
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_complete(ApEvent effects);
       virtual void trigger_task_commit(void);
     public:
-      virtual void handle_post_execution(FutureInstance *instance,
-                                 void *metadata, size_t metasize,
+      virtual void handle_future(ApEvent effects, FutureInstance *instance,
+                                 const void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
@@ -852,21 +830,14 @@ namespace Legion {
       virtual void concurrent_allreduce(ProcessorManager *manager, 
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
-    public:
-      virtual void record_completion_effect(ApEvent effect);
-      virtual void record_completion_effect(ApEvent effect,
-          std::set<RtEvent> &map_applied_events);
-      virtual void record_completion_effects(const std::set<ApEvent> &effects);
-      virtual void record_completion_effects(
-                                          const std::vector<ApEvent> &effects);
     protected:
-      void pack_remote_complete(Serializer &rez, RtEvent precondition);
-      void pack_remote_commit(Serializer &rez);
+      void pack_remote_complete(Serializer &rez, ApEvent effect);
+      void pack_remote_commit(Serializer &rez, RtEvent precondition);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
     public:
       // From MemoizableOp
-      virtual void complete_replay(ApEvent pre, ApEvent completion_event);
+      virtual void complete_replay(ApEvent pre);
     public:
       static void process_unpack_remote_future_size(Deserializer &derez);
       static void process_unpack_remote_mapped(Deserializer &derez);
@@ -879,6 +850,7 @@ namespace Legion {
       std::vector<bool> valid_output_regions;
       // Event for when the output regions are registered with the context
       RtEvent output_regions_registered;
+      RtEvent remote_commit_precondition;
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
@@ -950,20 +922,21 @@ namespace Legion {
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_complete(ApEvent effects);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
     public:
-      virtual void handle_post_execution(FutureInstance *instance,
-                                 void *metadata, size_t metasize,
+      virtual void handle_future(ApEvent effects, FutureInstance *instance,
+                                 const void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor);
       virtual void handle_mispredication(void);
     public:
+      virtual ApEvent order_concurrent_launch(ApEvent start, VariantImpl *impl);
       virtual void concurrent_allreduce(ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
@@ -981,7 +954,7 @@ namespace Legion {
                             const std::vector<FutureMap> &point_futures);
     public:
       // From MemoizableOp
-      virtual void complete_replay(ApEvent pre, ApEvent completion_event);
+      virtual void complete_replay(ApEvent pre);
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
@@ -1005,13 +978,6 @@ namespace Legion {
           const CollectiveViewCreatorBase::RendezvousKey &key,
           std::map<LogicalRegion,
             CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous); 
-    public:
-      virtual void record_completion_effect(ApEvent effect);
-      virtual void record_completion_effect(ApEvent effect,
-          std::set<RtEvent> &map_applied_events);
-      virtual void record_completion_effects(const std::set<ApEvent> &effects);
-      virtual void record_completion_effects(
-                                          const std::vector<ApEvent> &effects);
     public: 
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
@@ -1024,6 +990,22 @@ namespace Legion {
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
       RtBarrier concurrent_task_barrier;
+      // This is the concurrent precondition event that we need to signal
+      // when the preconditions are met for this point task. For non-traced
+      // execution this will be a user event that we signal. For traced
+      // code (either recording or replaying) this will be a barrier that
+      // we will arrive on for each point task.
+      union ConcurrentPrecondition {
+        ConcurrentPrecondition(void)
+          : interpreted(RtUserEvent::NO_RT_USER_EVENT) { }
+        RtUserEvent interpreted;
+        RtBarrier traced;
+      } concurrent_precondition;
+      // This is the postcondition event that need to wait for before
+      // doing the concurrent lamport max all-reduce. It ensures that
+      // the preconditions for all the points in the concurrent task
+      // have been met and therefore it's safe to do the lamport protocol
+      RtEvent concurrent_postcondition;
     };
 
     /**
@@ -1086,8 +1068,8 @@ namespace Legion {
     public:
       // Override these methods from operation class
       virtual void trigger_mapping(void); 
+      virtual void trigger_complete(ApEvent effects);
     protected:
-      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -1096,8 +1078,8 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
               const std::deque<InstanceSet> &parent_regions);
     public:
-      virtual void handle_post_execution(FutureInstance *instance,
-                                 void *metadata, size_t metasize,
+      virtual void handle_future(ApEvent effects, FutureInstance *instance,
+                                 const void *metadata, size_t metasize,
                                  FutureFunctor *functor,
                                  Processor future_proc,
                                  bool own_functor); 
@@ -1146,12 +1128,8 @@ namespace Legion {
       ReplicateContext* get_replicate_context(void) const;
     public:
       void initialize_implicit_task(TaskID tid, MapperID mid, Processor proxy);
-      RtEvent complete_startup_initialization(void);
     public:
       const ShardID shard_id;
-    protected:
-      RtBarrier shard_barrier;
-      bool all_shards_complete;
     };
 
     /**
@@ -1252,10 +1230,10 @@ namespace Legion {
       virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
+      virtual void trigger_complete(ApEvent effects);
     public:
       virtual TaskKind get_task_kind(void) const;
     protected:
-      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
@@ -1275,9 +1253,9 @@ namespace Legion {
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
-      virtual void handle_profiling_response(const ProfilingResponseBase *base,
-                                      const Realm::ProfilingResponse &respone,
-                                      const void *orig, size_t orig_length);
+      virtual bool handle_profiling_response(
+          const Realm::ProfilingResponse &response, const void *orig,
+          size_t orig_length, LgEvent &fevent);
       virtual void handle_profiling_update(int count);
     public:
       virtual void register_must_epoch(void);
@@ -1289,9 +1267,9 @@ namespace Legion {
       virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       // Also virtual for control replication override
-      virtual ApEvent rendezvous_concurrent_mapped(
-          const DomainPoint &point, Processor target);
-      virtual ApEvent rendezvous_concurrent_mapped(
+      virtual void rendezvous_concurrent_mapped(
+          const DomainPoint &point, Processor target, RtEvent precondition);
+      virtual void rendezvous_concurrent_mapped(RtEvent precondition,
           std::vector<std::pair<Processor,DomainPoint> > &targets);
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
@@ -1311,9 +1289,8 @@ namespace Legion {
       // and provide an event for when the result is ready
       virtual void finish_index_task_reduction(void);
     public:
-      void return_slice_mapped(unsigned points, RtEvent applied_condition,
-                               ApEvent slice_complete);
-      void return_slice_complete(unsigned points, RtEvent applied_condition,
+      void return_slice_mapped(unsigned points, RtEvent applied_condition);
+      void return_slice_complete(unsigned points, ApEvent effects,
                              void *metadata = NULL, size_t metasize = 0);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
@@ -1339,30 +1316,22 @@ namespace Legion {
       Future reduction_future;
       unsigned total_points;
       unsigned mapped_points;
-      unsigned complete_points;
+      unsigned completed_points;
       unsigned committed_points;
       unsigned concurrent_points;
     protected:
-      std::set<SliceTask*> origin_mapped_slices;
+      std::vector<SliceTask*> origin_mapped_slices;
       std::vector<FutureInstance*> reduction_instances;
       std::vector<Memory> serdez_redop_targets;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::vector<RtEvent> output_preconditions;
-      std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
       std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
     protected:
-      // Profiling information
-      struct IndexProfilingInfo : public Mapping::Mapper::TaskProfilingInfo {
-      public:
-        void *buffer;
-        size_t buffer_size;
-      };
       std::vector<ProfilingMeasurementID>      task_profiling_requests;
       std::vector<ProfilingMeasurementID>      copy_profiling_requests;
-      std::vector<IndexProfilingInfo>                   profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
       int                                           copy_fill_priority;
@@ -1417,6 +1386,7 @@ namespace Legion {
       virtual void map_and_launch(void);
       virtual bool is_output_global(unsigned idx) const;
       virtual bool is_output_valid(unsigned idx) const;
+      virtual void trigger_complete(ApEvent effects);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1431,7 +1401,7 @@ namespace Legion {
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance, ApEvent effects);
       void handle_future(ApEvent complete, const DomainPoint &point,
-                         FutureInstance *instance, void *metadata, 
+                         FutureInstance *instance, const void *metadata, 
                          size_t metasize, FutureFunctor *functor,
                          Processor future_proc, bool own_functor); 
     public:
@@ -1444,23 +1414,13 @@ namespace Legion {
       void check_target_processors(void) const;
       void update_target_processor(void);
       void expand_replay_slices(std::list<SliceTask*> &slices);
-      void find_commit_preconditions(std::set<RtEvent> &preconditions);
     protected:
-      virtual void trigger_complete(void);
-      virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
-    public:
-      virtual void record_completion_effect(ApEvent effect);
-      virtual void record_completion_effect(ApEvent effect,
-          std::set<RtEvent> &map_applied_events);
-      virtual void record_completion_effects(const std::set<ApEvent> &effects);
-      virtual void record_completion_effects(
-                                          const std::vector<ApEvent> &effects);
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
       void record_point_mapped(RtEvent child_mapped);
-      void record_point_complete(RtEvent child_complete);
+      void record_point_complete(ApEvent child_effects);
       void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
     public:
@@ -1470,20 +1430,17 @@ namespace Legion {
           const DomainPoint &color, const DomainPoint &extent);
       void record_output_registered(RtEvent registered,
                                     std::set<RtEvent> &applied_events);
-      ApEvent rendezvous_concurrent_mapped(const DomainPoint &point,
-                                           Processor target);
+      void rendezvous_concurrent_mapped(const DomainPoint &point,
+          Processor target, RtEvent precondition);
       void concurrent_allreduce(PointTask *point, ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       void finish_concurrent_allreduce(uint64_t lamport_clock, bool poisoned,
                             VariantID vid, RtBarrier concurrent_task_barrier);
     protected:
       void trigger_slice_mapped(void);
-      void trigger_slice_complete(void);
-      void trigger_slice_commit(void);
-    protected:
-      void pack_remote_mapped(Serializer &rez, RtEvent applied_condition,
-                              ApEvent all_points_complete);
-      void pack_remote_complete(Serializer &rez, RtEvent applied_condition);
+      void forward_completion_effects(void);
+      void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
+      void pack_remote_complete(Serializer &rez, ApEvent slice_effects);
       void pack_remote_commit(Serializer &rez, RtEvent applied_condition);
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
@@ -1504,7 +1461,7 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);
-      virtual void complete_replay(ApEvent pre, ApEvent instance_ready_event);
+      virtual void complete_replay(ApEvent instance_ready_event);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -1556,20 +1513,15 @@ namespace Legion {
       std::vector<PointTask*> points;
     protected:
       unsigned num_unmapped_points;
-      unsigned num_uncomplete_points;
+      std::atomic<unsigned> num_uncompleted_points;
       unsigned num_uncommitted_points;
     protected:
       IndexTask *index_owner;
       UniqueID remote_unique_id;
       bool origin_mapped;
       DomainPoint reduction_instance_point;
-      // An event for tracking when origin-mapped slices on the owner
-      // node have committed so we can trigger things appropriately
-      RtUserEvent origin_mapped_complete;
     protected:
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> point_completions;
-      std::set<RtEvent> complete_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
       std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;

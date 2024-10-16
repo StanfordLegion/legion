@@ -71,7 +71,7 @@ fn accumulate_statistics(
     }
     for entry in proc.entries() {
         match entry.kind {
-            ProcEntryKind::Task(_, _) | ProcEntryKind::GPUKernel(_, _) => {
+            ProcEntryKind::Task(..) | ProcEntryKind::GPUKernel(..) => {
                 let stats = task_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());
@@ -85,12 +85,13 @@ fn accumulate_statistics(
                     .or_insert(ProcEntryStats::new());
                 update_stats(&entry, stats);
             }
-            ProcEntryKind::MapperCall(_) => {
+            ProcEntryKind::MapperCall(..) => {
                 let stats = mapper_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());
                 update_stats(&entry, stats);
             }
+            ProcEntryKind::ApplicationCall(_) => {}
         }
     }
 }
@@ -140,7 +141,7 @@ fn print_statistics(
                         state.meta_variants.get(&variant_id).unwrap().name
                     );
                 }
-                ProcEntryKind::MapperCall(call_kind) => {
+                ProcEntryKind::MapperCall(_, _, call_kind) => {
                     println!(
                         "      Mapper Call {}",
                         state.mapper_call_kinds.get(&call_kind).unwrap().name
@@ -169,6 +170,7 @@ fn print_statistics(
                         state.variants.get(&key).unwrap().name
                     );
                 }
+                ProcEntryKind::ApplicationCall(_) => {}
             }
             let threshold = Timestamp::from_us(1000000);
             let stats = statistics.get(&entry).unwrap();

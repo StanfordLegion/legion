@@ -141,7 +141,7 @@ namespace Realm {
 #endif
     };
 
-#if defined(REALM_USE_KOKKOS) && (REALM_CXX_STANDARD >= 11)
+#if defined(REALM_USE_KOKKOS)
     // Kokkos defines this but we can't use it :(
     template <typename T>
     class is_kokkos_execution_space {

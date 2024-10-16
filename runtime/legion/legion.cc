@@ -253,6 +253,19 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    std::size_t LogicalRegion::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      Internal::Murmur3Hasher hasher;
+      hasher.hash(tree_id);
+      hasher.hash(index_space.hash());
+      hasher.hash(field_space.hash());
+      uint64_t result[2];
+      hasher.finalize(result);
+      return result[0] ^ result[1];
+    }
+
     /////////////////////////////////////////////////////////////
     // Logical Partition 
     /////////////////////////////////////////////////////////////
@@ -271,6 +284,19 @@ namespace Legion {
         field_space(FieldSpace::NO_SPACE)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    std::size_t LogicalPartition::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      Internal::Murmur3Hasher hasher;
+      hasher.hash(tree_id);
+      hasher.hash(index_partition.hash());
+      hasher.hash(field_space.hash());
+      uint64_t result[2];
+      hasher.finalize(result);
+      return result[0] ^ result[1];
     }
 
     /////////////////////////////////////////////////////////////
@@ -695,7 +721,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
-      Internal::Runtime::phase_barrier_arrive(*this, count);
+      Internal::implicit_runtime->phase_barrier_arrive(*this, count);
     }
 
     //--------------------------------------------------------------------------
@@ -749,7 +775,7 @@ namespace Legion {
                                    unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::phase_barrier_arrive(*this, count, 
+      Internal::implicit_runtime->phase_barrier_arrive(*this, count, 
                                   Internal::ApEvent::NO_AP_EVENT, value, size);
     }
 
@@ -2373,6 +2399,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::size_t Future::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        return std::hash<unsigned long long>{}(impl->did);
+      else
+        return std::hash<unsigned long long>{}(0);
+    }
+
+    //--------------------------------------------------------------------------
     void Future::get_void_result(bool silence_warnings,
                                  const char *warning_string) const
     //--------------------------------------------------------------------------
@@ -2396,21 +2432,9 @@ namespace Legion {
     bool Future::is_ready(bool subscribe) const
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (subscribe)
-          impl->subscribe();
-        const Internal::ApEvent ready = impl->get_ready_event();
-        // Always subscribe to the Realm event to know when it triggers
-        ready.subscribe();
-        bool poisoned = false;
-        if (ready.has_triggered_faultaware(poisoned))
-          return true;
-        if (poisoned && (Internal::implicit_context != NULL))
-          Internal::implicit_context->raise_poison_exception();
-        return false;
-      }
-      return true; // Empty futures are always ready
+      if ((impl == NULL) || (Internal::implicit_context != impl->context))
+        return true;
+      return impl->is_ready(subscribe);
     }
 
     //--------------------------------------------------------------------------
@@ -2428,6 +2452,17 @@ namespace Legion {
         return impl->get_buffer(
             Internal::implicit_context->get_executing_processor(), memory,
             extent_in_bytes, check_size, silence_warnings, warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    void Future::get_memories(std::set<Memory> &memories,
+                        bool silence_warnings, const char *warning_string) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                        "Illegal request for future memories from empty future")
+      impl->get_memories(memories, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2587,6 +2622,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::size_t FutureMap::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        return std::hash<unsigned long long>{}(impl->did);
+      else
+        return std::hash<unsigned long long>{}(0);
+    }
+
+    //--------------------------------------------------------------------------
     Future FutureMap::get_future(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
@@ -2698,6 +2743,13 @@ namespace Legion {
       impl = rhs.impl;
       rhs.impl = NULL;
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    std::size_t PhysicalRegion::hash(void) const
+    //--------------------------------------------------------------------------
+    {
+      return std::hash<const void*>{}(impl);
     }
 
     //--------------------------------------------------------------------------
@@ -6511,6 +6563,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->concurrent_task_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::start_profiling_range(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      ctx->start_profiling_range();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::stop_profiling_range(Context ctx, const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      ctx->stop_profiling_range(provenance);
     }
 
     //--------------------------------------------------------------------------

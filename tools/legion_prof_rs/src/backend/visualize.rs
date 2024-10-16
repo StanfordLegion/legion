@@ -16,7 +16,7 @@ use crate::backend::common::{
 use crate::state::{
     Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, DeviceKind, Mem, MemID,
     MemKind, MemPoint, MemProcAffinity, NodeID, OpID, OperationInstInfo, Proc, ProcEntryKind,
-    ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, Timestamp,
+    ProcID, ProcKind, ProcPoint, State, Timestamp,
 };
 
 use crate::conditional_assert;
@@ -55,15 +55,6 @@ impl Serialize for Count {
         let len = cursor.position() as usize;
         serializer.serialize_bytes(&buf[..len])
     }
-}
-
-#[derive(Serialize, Copy, Clone)]
-struct DependencyRecord(u64, u64, u64);
-
-#[derive(Serialize, Copy, Clone)]
-struct CriticalPathRecord {
-    tuple: Option<DependencyRecord>,
-    obj: Option<DependencyRecord>,
 }
 
 #[derive(Serialize, Copy, Clone)]
@@ -119,15 +110,6 @@ struct ScaleRecord {
     max_level: u32,
 }
 
-fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord> {
-    let proc_id = state.prof_uid_proc.get(&prof_uid)?;
-    Some(DependencyRecord(
-        proc_id.node_id().0,
-        proc_id.proc_in_node(),
-        prof_uid.0,
-    ))
-}
-
 #[derive(Debug)]
 pub struct OperationInstInfoDumpInstVec<'a>(pub &'a Vec<OperationInstInfo>, pub &'a State);
 
@@ -171,7 +153,6 @@ impl Proc {
         device: Option<DeviceKind>,
         point: &ProcPoint,
         state: &State,
-        spy_state: &SpyState,
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
         let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
@@ -185,7 +166,7 @@ impl Proc {
             // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
             ProcEntryKind::ProfTask => None,
             // And another special case, because for MapperCalls only, we set default to 0 to match with python
-            ProcEntryKind::MapperCall(_) => Some(initiation_op.unwrap_or(OpID::ZERO)),
+            ProcEntryKind::MapperCall(..) => Some(initiation_op.unwrap_or(OpID::ZERO)),
             _ => initiation_op,
         };
 
@@ -194,33 +175,6 @@ impl Proc {
             ProcEntryKind::ProfTask => Some(initiation_op.unwrap()),
             _ => op_id,
         };
-
-        let render_op = |prof_uid: &ProfUID| prof_uid_record(*prof_uid, state);
-
-        let deps = spy_state.spy_op_deps.get(&base.prof_uid);
-
-        let mut in_ = String::new();
-        let mut out = String::new();
-        let mut parent = String::new();
-        let mut children = String::new();
-        if let Some(deps) = deps {
-            let deps_in: Vec<_> = deps.in_.iter().filter_map(render_op).collect();
-            let deps_out: Vec<_> = deps.out.iter().filter_map(render_op).collect();
-            let deps_parent: Vec<_> = deps.parent.iter().filter_map(render_op).collect();
-            let deps_children: Vec<_> = deps.children.iter().filter_map(render_op).collect();
-            if !deps_in.is_empty() {
-                in_ = serde_json::to_string(&deps_in)?;
-            }
-            if !deps_out.is_empty() {
-                out = serde_json::to_string(&deps_out)?;
-            }
-            if !deps_parent.is_empty() {
-                parent = serde_json::to_string(&deps_parent)?;
-            }
-            if !deps_children.is_empty() {
-                children = serde_json::to_string(&deps_children)?;
-            }
-        }
 
         let level = self.max_levels(device) - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready(device) - l);
@@ -266,18 +220,9 @@ impl Proc {
                     end: TimestampFormat(wait.start),
                     opacity: 1.0,
                     title: &name,
-                    // Somehow, these are coming through backwards...
-                    in_: &out, //&in_,
-                    out: &in_, //&out,
-                    children: &children,
-                    parents: &parent,
                     ..default
                 })?;
                 // Only write dependencies once
-                in_ = String::new();
-                out = String::new();
-                parent = String::new();
-                children = String::new();
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
                     ready: Some(TimestampFormat(wait.start)),
@@ -311,11 +256,6 @@ impl Proc {
                 ready: Some(TimestampFormat(time_range.ready.unwrap_or(start))),
                 start: TimestampFormat(start),
                 end: TimestampFormat(time_range.stop.unwrap()),
-                // Somehow, these are coming through backwards...
-                in_: &out, //&in_,
-                out: &in_, //&out,
-                children: &children,
-                parents: &parent,
                 ..default
             })?;
         }
@@ -328,7 +268,6 @@ impl Proc {
         device: Option<DeviceKind>,
         path: P,
         state: &State,
-        spy_state: &SpyState,
     ) -> io::Result<ProcessorRecord> {
         let suffix = match device {
             Some(DeviceKind::Device) => " Device",
@@ -350,16 +289,21 @@ impl Proc {
 
         for point in self.time_points(device) {
             assert!(point.first);
-            self.emit_tsv_point(&mut f, device, point, state, spy_state)?;
+            self.emit_tsv_point(&mut f, device, point, state)?;
         }
 
         let level = max(self.max_levels(device), 1);
 
         Ok(ProcessorRecord {
-            full_text: format!("{:?}{} Processor 0x{:x}", self.kind, suffix, self.proc_id),
+            full_text: format!(
+                "{:?}{} Processor 0x{:x}",
+                self.kind.unwrap(),
+                suffix,
+                self.proc_id
+            ),
             text: format!(
                 "{:?}{} Proc {}",
-                self.kind,
+                self.kind.unwrap(),
                 suffix,
                 self.proc_id.proc_in_node(),
             ),
@@ -512,64 +456,44 @@ impl Chan {
                 .get(&mem_id)
                 .map_or(MemKind::NoMemKind, |mem| mem.kind)
         };
-        let slug = match (
-            self.chan_id.src,
-            self.chan_id.dst,
-            self.chan_id.channel_kind,
-        ) {
-            (Some(src), Some(dst), channel_kind) => format!(
-                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_{})",
+        let slug = match self.chan_id {
+            ChanID::Copy { src, dst } => format!(
+                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_Copy)",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
-                &dst,
-                channel_kind
+                &dst
             ),
-            (None, Some(dst), channel_kind) => format!(
-                "(None,_{}_Memory_0x{:x},_{})",
-                mem_kind(dst),
-                dst,
-                channel_kind
-            ),
-            (Some(src), None, channel_kind) => format!(
-                "({}_Memory_0x{:x},_None,_{})",
-                mem_kind(src),
-                src,
-                channel_kind
-            ),
-            (None, None, channel_kind) => format!("(None,_None,_{})", channel_kind),
+            ChanID::Fill { dst } => format!("(None,_{}_Memory_0x{:x},_Fill)", mem_kind(dst), dst),
+            ChanID::Gather { dst } => {
+                format!("(None,_{}_Memory_0x{:x},_Gather)", mem_kind(dst), dst)
+            }
+            ChanID::Scatter { src } => {
+                format!("(None,_{}_Memory_0x{:x},_Scatter)", mem_kind(src), src)
+            }
+            ChanID::DepPart { node_id } => format!("(Node{},_DepPart)", node_id.0),
         };
 
-        let long_name = match (
-            self.chan_id.src,
-            self.chan_id.dst,
-            self.chan_id.channel_kind,
-        ) {
-            (Some(src), Some(dst), _) => format!(
+        let long_name = match self.chan_id {
+            ChanID::Copy { src, dst } => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
                 &dst
             ),
-            (None, Some(dst), channel_kind) => {
-                format!(
-                    "{} {} Memory 0x{:x} Channel",
-                    channel_kind,
-                    mem_kind(dst),
-                    dst
-                )
+            ChanID::Fill { dst } => format!("Fill {} Memory 0x{:x} Channel", mem_kind(dst), dst),
+            ChanID::Gather { dst } => {
+                format!("Gather {} Memory 0x{:x} Channel", mem_kind(dst), dst)
             }
-            (Some(src), None, _) => format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src),
-            (None, None, _) => "Dependent Partition Channel".to_owned(),
+            ChanID::Scatter { src } => {
+                format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src)
+            }
+            ChanID::DepPart { node_id } => format!("Dependent Partition {}", node_id.0),
         };
 
-        let short_name = match (
-            self.chan_id.src,
-            self.chan_id.dst,
-            self.chan_id.channel_kind,
-        ) {
-            (Some(src), Some(dst), _) => format!(
+        let short_name = match self.chan_id {
+            ChanID::Copy { src, dst } => format!(
                 "{} to {}",
                 MemShort(
                     mem_kind(src),
@@ -584,19 +508,25 @@ impl Chan {
                     state
                 )
             ),
-            (None, Some(dst), channel_kind) => {
-                format!(
-                    "{} {}",
-                    channel_kind,
-                    MemShort(
-                        mem_kind(dst),
-                        state.mems.get(&dst),
-                        state.mem_proc_affinity.get(&dst),
-                        state
-                    )
+            ChanID::Fill { dst } => format!(
+                "Fill {}",
+                MemShort(
+                    mem_kind(dst),
+                    state.mems.get(&dst),
+                    state.mem_proc_affinity.get(&dst),
+                    state
                 )
-            }
-            (Some(src), None, _) => format!(
+            ),
+            ChanID::Gather { dst } => format!(
+                "Gather {}",
+                MemShort(
+                    mem_kind(dst),
+                    state.mems.get(&dst),
+                    state.mem_proc_affinity.get(&dst),
+                    state
+                )
+            ),
+            ChanID::Scatter { src } => format!(
                 "Scatter {}",
                 MemShort(
                     mem_kind(src),
@@ -605,7 +535,7 @@ impl Chan {
                     state
                 )
             ),
-            (None, None, _) => "Dependent Partition Channel".to_owned(),
+            ChanID::DepPart { node_id } => format!("Dependent Partition {}", node_id.0),
         };
 
         let mut filename = PathBuf::new();
@@ -1025,7 +955,6 @@ fn write_file<P: AsRef<Path>>(path: P, content: &[u8]) -> io::Result<()> {
 
 pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state: &State,
-    spy_state: &SpyState,
     path: P,
     force: bool,
 ) -> io::Result<()> {
@@ -1050,7 +979,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let proc_records: BTreeMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty() && proc.is_visible())
-        .flat_map(|proc| match proc.kind {
+        .flat_map(|proc| match proc.kind.unwrap() {
             ProcKind::GPU => vec![
                 (proc, Some(DeviceKind::Device)),
                 (proc, Some(DeviceKind::Host)),
@@ -1058,7 +987,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             _ => vec![(proc, None)],
         })
         .map(|(proc, device)| {
-            proc.emit_tsv(device, &path, state, spy_state)
+            proc.emit_tsv(device, &path, state)
                 .map(|record| ((proc.proc_id, device), record))
         })
         .collect::<io::Result<_>>()?;
@@ -1121,10 +1050,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
             let parent_id = op.parent_id;
-            let provenance = Some(op.provenance.as_deref().unwrap_or(""));
+            let provenance = op.provenance.and_then(|pid| state.find_provenance(pid));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
-                let proc_full_text = format!("{:?} Processor 0x{:x}", proc.kind, proc.proc_id);
+                let proc_full_text =
+                    format!("{:?} Processor 0x{:x}", proc.kind.unwrap(), proc.proc_id);
                 let task = proc.find_task(*op_id).unwrap();
                 let (task_id, variant_id) = match task.kind {
                     ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
@@ -1202,18 +1132,8 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     {
         let filename = path.join("json").join("critical_path.json");
-        let file = File::create(filename)?;
-        let render_op = |prof_uid: ProfUID| prof_uid_record(prof_uid, state);
-        let mut critical_path = Vec::new();
-        let mut last = None;
-        for node in &spy_state.critical_path {
-            critical_path.push(CriticalPathRecord {
-                tuple: render_op(*node),
-                obj: last.and_then(render_op),
-            });
-            last = Some(*node);
-        }
-        serde_json::to_writer(file, &critical_path)?;
+        let mut file = File::create(filename)?;
+        write!(file, "[]")?;
     }
 
     Ok(())

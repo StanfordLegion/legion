@@ -21,7 +21,7 @@
 #include "realm/indexspace.h"
 #include "realm/serialize.h"
 
-#if defined(REALM_USE_KOKKOS) && (REALM_CXX_STANDARD >= 11)
+#if defined(REALM_USE_KOKKOS)
 // we don't want to include Kokkos_View.hpp because it brings in too much
 //  other stuff, so forward declare the pieces we need to define a templated
 //  conversion from Realm accessor to Kokkos::View (anything that actually
@@ -233,6 +233,13 @@ namespace Realm {
     InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
 
     virtual InstanceLayoutGeneric *clone(void) const;
+
+    virtual void relocate(size_t adjust_amt);
+
+    virtual void print(std::ostream &os) const;
+
+    REALM_INTERNAL_API_EXTERNAL_LINKAGE
+    virtual void compile_lookup_program(PieceLookup::CompiledProgram &p) const;
   };
 
   namespace PieceLayoutTypes {

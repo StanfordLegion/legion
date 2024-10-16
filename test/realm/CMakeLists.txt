@@ -53,10 +53,13 @@ list(APPEND REALM_TESTS
   multiaffine
   machine_config
   rsrv_acquire_poisoned
+  refcount_image_test
+  inst_chain_redistrict
+  refcount_preimage_test
   )
 
 if(Legion_USE_CUDA)
-
+  
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
@@ -102,7 +105,6 @@ foreach(test IN LISTS REALM_TESTS)
   endif()
   target_link_libraries(${test} Legion::Realm)
   target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-
   if(Legion_USE_HIP)
     target_include_directories(${test} PRIVATE ${HIP_INCLUDE_DIRS})
     if(Legion_HIP_TARGET STREQUAL "CUDA")
@@ -124,6 +126,7 @@ if(REALM_LIMIT_SYMBOL_VISIBILITY)
 endif()
 
 # some tests need test-specific arguments
+set(TESTARGS_inst_chain_redistrict         -i 2)
 set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
 set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4 -timeout 120)
@@ -135,11 +138,13 @@ set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
 # FIXME: https://github.com/StanfordLegion/legion/issues/1635
 # set(TESTARGS_cuda_arrays       -ll:gpu 1)
-set(TESTARGS_scatter_test       -ll:gpu 1)
-set(TESTARGS_transpose_test       -ll:gpu 1 -unit_test 1)
-set(TESTARGS_cuda_memcpy_test      -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
-set(TESTARGS_machine_config_args    -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
-set(TESTARGS_cuda_transpose_test      -ll:gpu 1)
+set(TESTARGS_task_stream         -ll:gpu 1)
+set(TESTARGS_scatter_test        -ll:gpu 1)
+set(TESTARGS_transpose_test      -ll:gpu 1 -unit_test 1)
+set(TESTARGS_cuda_memcpy_test    -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
+set(TESTARGS_machine_config_args -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
+set(TESTARGS_cuda_transpose_test -ll:gpu 1)
+set(TESTARGS_cuda_scatter_test   -ll:gpu 1)
 
 if(Legion_USE_CUDA)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)

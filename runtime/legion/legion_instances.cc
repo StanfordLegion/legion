@@ -933,7 +933,8 @@ namespace Legion {
                         ApEvent u_event, LgEvent unique, InstanceKind k,
                         const ReductionOp *op /*= NULL*/,
                         CollectiveMapping *mapping /*=NULL*/,
-                        ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
+                        ApEvent p_event /*= ApEvent::NO_AP_EVENT*/,
+                        GarbageCollectionState init /*COLLECTABLE_GC_STATE*/)
       : InstanceManager(ctx, encode_instance_did(did, 
           (k == EXTERNAL_ATTACHED_INSTANCE_KIND), (redop_id > 0)), layout, node,
           // If we're on the owner node we need to produce the expression
@@ -951,7 +952,7 @@ namespace Legion {
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
         kind(k), external_pointer(-1UL), producer_event(p_event),
-        gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
+        gc_state(init), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
         received_valid_references(0), padded_reservations(NULL)
@@ -968,7 +969,14 @@ namespace Legion {
       }
       else // add a resource reference to remove once this manager is set
         add_base_valid_ref(PENDING_UNBOUND_REF);
-
+      // If we're in a pending collectable state, then add a reference
+      if (gc_state == PENDING_COLLECTED_GC_STATE)
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_owner());
+#endif
+        add_base_resource_ref(PENDING_COLLECTIVE_REF);
+      }
       if (!is_owner() && !is_external_instance())
         memory_manager->register_remote_instance(this);
 #ifdef LEGION_GC
@@ -1316,24 +1324,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::register_deletion_subscriber(
-                                         InstanceDeletionSubscriber *subscriber)
+                  InstanceDeletionSubscriber *subscriber, bool allow_duplicates)
     //--------------------------------------------------------------------------
     {
+      bool result = false;
       subscriber->add_subscriber_reference(this);
       {
         AutoLock inst(inst_lock);
         if (gc_state != COLLECTED_GC_STATE)
         {
+          if (subscribers.insert(subscriber).second)
+            return true;
 #ifdef DEBUG_LEGION
-          assert(subscribers.find(subscriber) == subscribers.end());
+          assert(allow_duplicates);
 #endif
-          subscribers.insert(subscriber);
-          return true;
+          result = true;
+          // Fall through to remove the duplicate reference on the subscriber
         }
       }
       if (subscriber->remove_subscriber_reference(this))
         delete subscriber;
-      return false;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2328,22 +2339,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::initialize_remote_gc_state(
-                                                   GarbageCollectionState state)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(gc_state == COLLECTABLE_GC_STATE);
-#endif
-      gc_state = state;
-      // If we're in a pending collectable state, then add a reference
-      if (state == PENDING_COLLECTED_GC_STATE)
-        add_base_resource_ref(PENDING_COLLECTIVE_REF);
-    }
-
-    //--------------------------------------------------------------------------
     bool PhysicalManager::collect(RtEvent &ready, AutoLock *i_lock)
     //--------------------------------------------------------------------------
     {
@@ -3160,8 +3155,8 @@ namespace Legion {
                                             space_node, tree_id, layout, 
                                             redop, false/*reg now*/, 
                                             inst_footprint, use_event, 
-                                            unique_event, kind, op);
-      man->initialize_remote_gc_state(state);
+                                            unique_event, kind, op,
+                                            NULL, ApEvent::NO_AP_EVENT, state);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime();
       // Remove the reference we got back on the layout description
@@ -3763,7 +3758,7 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
-      ProfilingResponseBase base(this);
+      ProfilingResponseBase base(this, creator_id, false/*completion*/);
 #ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
@@ -3784,18 +3779,23 @@ namespace Legion {
       }
       ApEvent ready;
       if (runtime->profiler != NULL)
+      {
         runtime->profiler->add_inst_request(requests, creator_id, unique_event);
+        current_unique_event = unique_event;
+      }
 #ifndef LEGION_MALLOC_INSTANCES
       ready = ApEvent(PhysicalInstance::create_instance(instance,
             memory_manager->memory, inst_layout, requests, precondition));
+      if (ready.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(ready, unique_event);
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout, 
-                                                      requests, instance));
+      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
+            requests, instance, unique_event));
       if (!instance.exists())
       {
         if (unsat_kind != NULL)
@@ -3896,15 +3896,15 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
       memory_manager->record_legion_instance(result, instance);
 #endif
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
         // Log the logical regions and fields that make up this instance
         for (std::vector<LogicalRegion>::const_iterator it =
               regions.begin(); it != regions.end(); it++)
           if (it->exists())
-            runtime->profiler->record_physical_instance_region(unique_event, 
-                                                               *it);
-        runtime->profiler->record_physical_instance_layout(unique_event,
+            implicit_profiler->register_physical_instance_region(unique_event,
+                                                                 *it);
+        implicit_profiler->register_physical_instance_layout(unique_event,
                                                      layout->owner->handle,
                                                      *layout->constraints);
       }
@@ -3912,10 +3912,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceBuilder::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+    bool InstanceBuilder::handle_profiling_response(
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3943,8 +3942,12 @@ namespace Legion {
         if (runtime->profiler != NULL)
           runtime->profiler->handle_failed_instance_allocation();
       }
+      fevent = current_unique_event;
       // No matter what trigger the event
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
       Runtime::trigger_event(profiling_ready);
+      return true;
     }
 
     //--------------------------------------------------------------------------

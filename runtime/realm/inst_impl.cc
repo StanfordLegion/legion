@@ -63,7 +63,47 @@ namespace Realm {
     return Event::NO_EVENT;
   }
 
-  
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RegionInstanceImpl::DeferredRedistrict
+  //
+
+  void RegionInstanceImpl::DeferredRedistrict::defer(
+      RegionInstanceImpl *_inst, std::vector<RegionInstanceImpl *> &_new_insts,
+      Event _after, Event wait_on)
+  {
+    inst = _inst;
+    new_insts.swap(_new_insts);
+    after = _after;
+    EventImpl::add_waiter(wait_on, this);
+  }
+
+  void RegionInstanceImpl::DeferredRedistrict::event_triggered(bool poisoned,
+                                                               TimeLimit work_until)
+  {
+    if(poisoned) {
+      for(RegionInstanceImpl *new_inst : new_insts) {
+        new_inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
+                                    0 /*offset*/, TimeLimit::responsive());
+      }
+      GenEventImpl::trigger(after, true /*poisoned*/, work_until);
+    } else {
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(inst->memory);
+      m_impl->reuse_allocated_range(inst, new_insts);
+      GenEventImpl::trigger(after, false /*poisoned*/, work_until);
+    }
+  }
+
+  void RegionInstanceImpl::DeferredRedistrict::print(std::ostream &os) const
+  {
+    os << "deferred instance redistrict";
+  }
+
+  Event RegionInstanceImpl::DeferredRedistrict::get_finish_event(void) const
+  {
+    return after;
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class RegionInstanceImpl::DeferredDestroy
@@ -429,6 +469,25 @@ namespace Realm {
 	        Memory::NO_MEMORY);
     }
 
+    Event RegionInstance::redistrict(RegionInstance &instance,
+                                     const InstanceLayoutGeneric *layout,
+                                     const ProfilingRequestSet &prs, Event wait_on)
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return inst_impl->redistrict(&instance, &layout, 1, &prs, wait_on);
+    }
+
+    Event RegionInstance::redistrict(RegionInstance *instances,
+                                     const InstanceLayoutGeneric **layouts,
+                                     size_t num_layouts, const ProfilingRequestSet *prs,
+                                     Event wait_on)
+    {
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
+    }
+
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
 						     InstanceLayoutGeneric *ilg,
@@ -512,11 +571,11 @@ namespace Realm {
 
       NodeID target_node = ID(target).proc_owner_node();
       if(target_node == Network::my_node_id) {
-	// local metadata request
-	return r_impl->request_metadata();
+        // local metadata request
+        return r_impl->request_metadata();
       } else {
-	// prefetch on other node's behalf
-	return r_impl->prefetch_metadata(target_node);
+        // prefetch on other node's behalf
+        return r_impl->prefetch_metadata(target_node);
       }
     }
 
@@ -778,44 +837,15 @@ namespace Realm {
 							 Event wait_on)
     {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
-      RegionInstanceImpl *impl = m_impl->new_instance();
+      RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
       if(!impl) {
-	inst = RegionInstance::NO_INST;
-	// import the profiling requests to see if anybody is paying attention to
-	//  failure
-	ProfilingMeasurementCollection pmc;
-	pmc.import_requests(prs);
-	bool reported = false;
-	if(pmc.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
-	  ProfilingMeasurements::InstanceStatus stat;
-	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
-	  stat.error_code = 0;
-	  pmc.add_measurement(stat);
-	  reported = true;
-	}
-	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAbnormalStatus>()) {
-	  ProfilingMeasurements::InstanceAbnormalStatus stat;
-	  stat.result = ProfilingMeasurements::InstanceStatus::INSTANCE_COUNT_EXCEEDED;
-	  stat.error_code = 0;
-	  pmc.add_measurement(stat);
-	  reported = true;
-	}
-	if(pmc.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
-	  ProfilingMeasurements::InstanceAllocResult result;
-	  result.success = false;
-	  pmc.add_measurement(result);
-	}
-	if(!reported) {
-	  // fatal error
-	  log_inst.fatal() << "FATAL: instance count exceeded for memory " << memory;
-	  assert(0);
-	}
-	// generate a poisoned event for completion
-	GenEventImpl *ev = GenEventImpl::create_genevent();
-	Event ready_event = ev->current_event();
-	GenEventImpl::trigger(ready_event, true /*poisoned*/);
-	return ready_event;
+        inst = RegionInstance::NO_INST;
+        // generate a poisoned event for completion
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        Event ready_event = ev->current_event();
+        GenEventImpl::trigger(ready_event, true /*poisoned*/);
+        return ready_event;
       }
 
       // set this handle before we do anything that can result in a
@@ -931,6 +961,77 @@ namespace Realm {
       else
 	log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
       return ready_event;
+    }
+
+    Event RegionInstanceImpl::redistrict(RegionInstance *instances,
+                                         const InstanceLayoutGeneric **layouts,
+                                         size_t num_layouts,
+                                         const ProfilingRequestSet *prs, Event wait_on)
+    {
+      if(num_layouts == 0 || layouts == nullptr || instances == nullptr) {
+        return Event::NO_EVENT;
+      }
+
+      std::vector<RegionInstanceImpl *> insts(num_layouts);
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+
+      // TODO(apryakhin): Handle redistricting from non-owner node
+      assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
+
+      for(size_t i = 0; i < num_layouts; i++) {
+        insts[i] = m_impl->new_instance(prs[i]);
+        // Check tof the case where we ran out of instance IDs
+        if(!insts[i]) {
+          for(unsigned idx = 0; idx < i; idx++)
+            insts[idx]->recycle_instance();
+          for(unsigned idx = 0; idx < num_layouts; idx++)
+            instances[idx] = RegionInstance::NO_INST;
+
+          // Generate a poisoned event for completion
+          Event after = GenEventImpl::create_genevent()->current_event();
+          GenEventImpl::trigger(after, true /*poisoned*/, TimeLimit::responsive());
+          return after;
+        }
+        instances[i] = insts[i]->me;
+        insts[i]->metadata.layout = layouts[i]->clone();
+        if(!prs[i].empty()) {
+          insts[i]->requests = prs[i];
+          insts[i]->measurements.import_requests(insts[i]->requests);
+          if(insts[i]
+                 ->measurements
+                 .wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+            insts[i]->timeline.record_create_time();
+          }
+          insts[i]->metadata.need_alloc_result =
+              insts[i]
+                  ->measurements
+                  .wants_measurement<ProfilingMeasurements::InstanceAllocResult>();
+        } else {
+          insts[i]->metadata.need_alloc_result = false;
+        }
+        insts[i]->metadata.need_notify_dealloc = false;
+        insts[i]->metadata.layout->compile_lookup_program(
+            insts[i]->metadata.lookup_program);
+      }
+
+      bool poisoned = false;
+      bool triggered = wait_on.has_triggered_faultaware(poisoned);
+
+      if(!triggered) {
+        Event after = GenEventImpl::create_genevent()->current_event();
+        deferred_redistrict.defer(this, insts, after, wait_on);
+        return after;
+      } else if(poisoned) {
+        for(RegionInstanceImpl *inst : insts)
+          inst->notify_allocation(MemoryImpl::AllocationResult::ALLOC_CANCELLED,
+                                  0 /*offset*/, TimeLimit::responsive());
+        Event after = GenEventImpl::create_genevent()->current_event();
+        GenEventImpl::trigger(after, true /*poisoned*/, TimeLimit::responsive());
+        return after;
+      } else {
+        m_impl->reuse_allocated_range(this, insts);
+        return Event::NO_EVENT;
+      }
     }
 
     void RegionInstanceImpl::send_metadata(const NodeSet& early_reqs)
@@ -1345,10 +1446,10 @@ namespace Realm {
                              affine->offset +
                              affine->strides.dot(affine->bounds.lo) +
                              it->second.rel_offset);
-      size_t total_bytes = (it->second.size_in_bytes + 
-                            affine->strides[0] * (affine->bounds.hi -
-                                                  affine->bounds.lo));
- 
+      size_t total_bytes =
+          (it->second.size_in_bytes +
+           affine->strides[0] * (affine->bounds.hi[0] - affine->bounds.lo[0]));
+
       base = mem->get_direct_ptr(start_offset, total_bytes);
       if (!base) return false;
 

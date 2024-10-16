@@ -6,9 +6,15 @@ set -x
 # job directory
 JOB_WORKDIR="${EXTERNAL_WORKDIR}_${CI_JOB_ID:-legion${TEST_LEGION_CXX:-1}_regent${TEST_REGENT:-1}}"
 rm -rf $JOB_WORKDIR
-cp -r $EXTERNAL_WORKDIR $JOB_WORKDIR
+cp -r $CI_PROJECT_DIR $JOB_WORKDIR
 cd $JOB_WORKDIR
 echo "Running tests in $JOB_WORKDIR"
+
+# copy files from shared environment
+if [[ "$REALM_NETWORKS" == gasnet* ]]; then
+    cp -r $EXTERNAL_WORKDIR/gasnet .
+fi
+ln -s $EXTERNAL_WORKDIR/terra language/terra
 
 # setup environment
 if [[ "$LMOD_SYSTEM_NAME" = frontier ]]; then
@@ -19,13 +25,14 @@ export CC=cc
 export CXX=CC
 if [[ "\$REALM_NETWORKS" != "" ]]; then
     RANKS_PER_NODE=4
-    export LAUNCHER="srun -n\$(( RANKS_PER_NODE * SLURM_JOB_NUM_NODES )) --cpus-per-task \$(( 56 / RANKS_PER_NODE )) --gpus-per-task 2 --cpu-bind cores"
+    export LAUNCHER="srun -n\$(( RANKS_PER_NODE * SLURM_JOB_NUM_NODES )) --cpus-per-task \$(( 56 / RANKS_PER_NODE )) --gpus-per-task \$(( 8 / RANKS_PER_NODE )) --cpu-bind cores"
     if [[ SLURM_JOB_NUM_NODES -eq 1 ]]; then
         export LAUNCHER+=" --network=single_node_vni"
     fi
 fi
-# Important: has to be \$EXTERNAL_WORKDIR or else CMake sees it in-source
+# Important: Thrust must be in \$EXTERNAL_WORKDIR or else CMake sees it in-source
 export THRUST_PATH=\$EXTERNAL_WORKDIR/Thrust
+export REGENT_LLVM_PATH="\$EXTERNAL_WORKDIR/llvm"
 EOF
 else
     echo "Don't know how to build on this system"
@@ -59,6 +66,9 @@ fi
 
 # required for machine_config test to pin NUMA memory
 ulimit -l $(( 1024 * 1024 )) # KB
+
+# get backtraces if necessary
+export REALM_BACKTRACE=1
 
 # run test script
 ./tools/add_github_host_key.sh
