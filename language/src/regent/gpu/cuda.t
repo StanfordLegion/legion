@@ -33,66 +33,8 @@ local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
--- #####################################
--- ## CUDA Device API
--- #################
-
-local struct CUctx_st
-local struct CUfunc_st
-local struct CUlinkState_st
-local struct CUmod_st
-local struct CUstream_st
-
-local CUcontext = &CUctx_st
-local CUfunction = &CUfunc_st
-local CUjit_option = uint32
-local CUlinkState = &CUlinkState_st
-local CUmodule = &CUmod_st
-local CUstream = &CUstream_st
-local CUdevice = int32
-local CUjit_option = uint32
-local CUresult = uint32
-
-local CU_JIT_ERROR_LOG_BUFFER = 5
-local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
-local CU_JIT_INPUT_PTX = 1
-local CU_JIT_TARGET = 9
-local DriverAPI = {
-  CU_JIT_ERROR_LOG_BUFFER = 5;
-  CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6;
-  CU_JIT_INPUT_PTX = 1;
-  CU_JIT_TARGET = 9;
-  CUDA_SUCCESS = 0;
-
-  CUcontext = CUcontext;
-  CUfunction = CUfunction;
-  CUjit_option = CUjit_option;
-  CUlinkState = CUlinkState;
-  CUmodule = CUmodule;
-  CUresult = CUresult;
-  CUstream = CUstream;
-
-  cuInit = ef("cuInit", {uint32} -> CUresult);
-  cuCtxGetCurrent = ef("cuCtxGetCurrent", {&CUcontext} -> CUresult);
-  cuCtxGetDevice = ef("cuCtxGetDevice",{&CUdevice} -> CUresult);
-  cuDeviceGet = ef("cuDeviceGet",{&CUdevice,int32} -> CUresult);
-  cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&CUcontext,uint32,int32} -> CUresult);
-  cuCtxDestroy = ef("cuCtxDestroy",{CUcontext} -> CUresult);
-  cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
-    {&int32,&int32,int32} -> CUresult);
-  cuGetErrorName = ef("cuGetErrorName", {CUresult, &&opaque} -> CUresult);
-  cuGetErrorString = ef("cuGetErrorString", {CUresult, &&opaque} -> CUresult);
-  cuLinkCreate_v2 = ef("cuLinkCreate_v2",{uint32,&uint32,&&opaque,&CUlinkState} -> CUresult);
-  cuLinkAddData_v2 = ef("cuLinkAddData_v2",
-    {CUlinkState,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> CUresult);
-  cuLinkComplete = ef("cuLinkComplete",{CUlinkState,&&opaque,&uint64} -> CUresult);
-  cuLinkDestroy = ef("cuLinkDestroy",{CUlinkState} -> CUresult);
-  cuModuleLoadData = ef("cuModuleLoadData",{&CUmodule,&opaque} -> CUresult);
-  cuModuleGetFunction = ef("cuModuleGetFunction",{&CUfunction,CUmodule,&opaque} -> CUresult);
-  cuLaunchKernel = ef("cuLaunchKernel",{CUfunction,uint32,uint32,uint32,uint32,uint32,uint32,uint32,CUstream,&&opaque,&&opaque} -> CUresult);
-}
-
 local RuntimeAPI = false
+local DriverAPI = false
 do
   local function detect_cuda()
     if not terralib.cudacompile then
@@ -107,6 +49,11 @@ do
     local ok = pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
     if not ok then
       return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
+    end
+
+    ok = pcall(function() DriverAPI = terralib.includec("cuda.h") end)
+    if not ok then
+      return false, "cuda.h does not exist in INCLUDE_PATH"
     end
 
     if base.config["offline"] or base.config["gpu-offline"] then
@@ -265,7 +212,7 @@ do
     base.assert(r == 0, "CUDA error in cuDeviceComputeCapability")
     var version = [uint64](major * 10 + minor)
     if cx_created then
-      DriverAPI.cuCtxDestroy(cx)
+      DriverAPI.cuCtxDestroy_v2(cx)
     end
     return version
   end
@@ -285,8 +232,8 @@ end
 
 local terra check(ok : DriverAPI.CUresult, location : rawstring)
   if ok ~= DriverAPI.CUDA_SUCCESS then
-    var error_name : &opaque = nil
-    var error_string : &opaque = nil
+    var error_name : rawstring = nil
+    var error_string : rawstring = nil
     DriverAPI.cuGetErrorName(ok, &error_name)
     DriverAPI.cuGetErrorString(ok, &error_string)
     base.c.printf("error in %s (%s): %s\n", location, error_name, error_string)
@@ -330,7 +277,7 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
   var cx_created = false
 
   check(DriverAPI.cuCtxGetCurrent(&cx), "cuCtxGetCurrent")
-  var device : CUdevice
+  var device : DriverAPI.CUdevice
   if cx ~= nil then
     check(DriverAPI.cuCtxGetDevice(&device), "cuCtxGetDevice")
   else
@@ -351,7 +298,7 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
 
   check(DriverAPI.cuLinkDestroy(linkState), "cuLinkDestroy")
   if cx_created then
-    check(DriverAPI.cuCtxDestroy(cx), "cuCtxDestroy")
+    check(DriverAPI.cuCtxDestroy_v2(cx), "cuCtxDestroy_v2")
   end
 
   return cubin_t { to_return, cubinSize }
