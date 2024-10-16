@@ -20,7 +20,8 @@
 bool
 regent_get_task_cuda_stream(void *stream)
 {
-  Realm::Cuda::CudaModule *module = Realm::Runtime::get_module<Realm::Cuda::CudaModule>();
+  Realm::Runtime runtime = Realm::Runtime::get_runtime();
+  Realm::Cuda::CudaModule *module = runtime.get_module<Realm::Cuda::CudaModule>("cuda");
   if (!module) {
     return false;
   }
@@ -30,10 +31,11 @@ regent_get_task_cuda_stream(void *stream)
   return true;
 }
 
-void
+bool
 regent_get_task_hip_stream(void *stream)
 {
-  Realm::Hip::HipModule *module = Realm::Runtime::get_module<Realm::Hip::HipModule>();
+  Realm::Runtime runtime = Realm::Runtime::get_runtime();
+  Realm::Hip::HipModule *module = runtime.get_module<Realm::Hip::HipModule>("hip");
   if (!module) {
     return false;
   }
