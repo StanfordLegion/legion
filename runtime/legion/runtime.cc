@@ -32353,7 +32353,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
+      log_run.fatal("LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32364,7 +32364,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
+      log_run.error("LEGION ERROR: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32376,7 +32376,7 @@ namespace Legion {
                                          const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
+      log_run.warning("LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
       if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
       {
