@@ -499,6 +499,19 @@ before_script:
   CUDA_HOME: "$CUDA"
   USE_NVTX: "1"
 
+.hip_cuda: &hip_cuda125
+  IS_NVIDIA_JOB: "1"
+  USE_HIP: "1"
+  HIP_TARGET: "CUDA"
+  # rocm 6.x requires cuda 12.x
+  CUDA: "/usr/local/cuda-12.5"
+  CUDA_PATH: "/usr/local/cuda-12.5"
+  # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
+  LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
+  WARN_AS_ERROR: "0"
+  ROCM_PATH: "/opt/rocm"
+  HIPCC_FLAGS: "-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80"
+
 ###
 ### Docker Image
 ###
@@ -1237,6 +1250,12 @@ clang14_cxx20_release_regent:
   <<: [*linux, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *release, *cxx20_normal, *regent]
+
+# HIP CUDA tests:
+nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion:
+  <<: [*nvidia, *tests]
+  variables:
+    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *short, *shared, *libdw]
 
 # CUDA tests:
 nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:

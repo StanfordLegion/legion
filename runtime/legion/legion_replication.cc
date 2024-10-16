@@ -13904,6 +13904,7 @@ namespace Legion {
     // Instantiate this for a common use case
     template class AllReduceCollective<SumReduction<bool>,false>;
     template class AllReduceCollective<ProdReduction<bool>,false>;
+    template class AllReduceCollective<MaxReduction<uint32_t>,false>;
     template class AllReduceCollective<MaxReduction<uint64_t>,false>;
 
     /////////////////////////////////////////////////////////////

@@ -796,13 +796,46 @@ namespace Legion {
           metadatasize, release_callback ? NULL : callback_functor, 
           executing_processor, owned);
       owner_task->complete_execution();
-      post_end_task();
-#ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
-#else
-      runtime_ptr->decrement_total_outstanding_tasks();
+      // If this is an implicit top-level task then we need to finish
+      // the implicit profiling of the execution of that top-level task
+      // now that everything else is done running
+      if (implicit_task_profiler != NULL)
+      {
+        // If we're an implicit top-level task then pull a bunch of
+        // data onto the stack before we do any of the cleanup because
+        // we might end up deleting this 
+        const UniqueID local_uid = get_unique_id();
+#ifndef DEBUG_LEGION
+        const TaskID owner_task_id = owner_task->task_id;
 #endif
+        const ApEvent local_completion = owner_task->get_completion_event();
+        ImplicitTaskProfiler *local_task_profiler = implicit_task_profiler;
+        implicit_task_profiler = NULL; // We take ownership
+        // Cannot invoke any local methods after this call
+        post_end_task();
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        // log this with the profiler 
+        implicit_profiler->process_implicit(local_uid, owner_task_id,
+            local_task_profiler->start_time, stop,
+            local_task_profiler->waits, local_completion);
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+        delete local_task_profiler;
+      }
+      else
+      {
+        post_end_task();
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+      }
       // See if we can release our callback down
       if (release_callback)
       {
@@ -10978,10 +11011,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InnerContext::has_interfering_shards(ProjectionSummary *one,
-                                              ProjectionSummary *two)
+        ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
-      return one->get_tree()->interferes(two->get_tree(), 0/*local shard*/);
+#ifdef DEBUG_LEGION
+      assert(dominates);
+#endif
+      return one->get_tree()->interferes(
+          two->get_tree(), 0/*local shard*/, dominates);
     }
 
     //--------------------------------------------------------------------------
@@ -11830,14 +11867,6 @@ namespace Legion {
           InnerContext::destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       } 
-      if (implicit_task_profiler != NULL)
-      {
-        const long long stop = Realm::Clock::current_time_in_nanoseconds();
-        // log this with the profiler 
-        implicit_profiler->process_implicit(get_unique_id(),owner_task->task_id,
-            executing_processor, implicit_task_profiler->start_time, stop,
-            implicit_task_profiler->waits, owner_task->get_completion_event());
-      }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
       {
@@ -20138,16 +20167,46 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::has_interfering_shards(ProjectionSummary *one,
-                                                  ProjectionSummary *two)
+                                      ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
-      bool result = one->get_tree()->interferes(two->get_tree(), 
-                                          owner_shard->shard_id);
+#ifdef DEBUG_LEGION
+      assert(dominates);
+#endif
+      const bool result = one->get_tree()->interferes(two->get_tree(),
+          owner_shard->shard_id, dominates);
+      // This is a bit tricky so pay attention: we're going to exchange both
+      // the interference result and the dominates result using a single 
+      // all-reduce collective. We can do this because the interfering shards
+      // result is a bool OR all-reduce and the result of dominates is a
+      // bool AND all-reduce. Therefore we can encode this as a single max
+      // all-reduce computation. The states will be:
+      // 0: not-interfering and dominating
+      // 1: not-interfering and not-dominating
+      // 2: interfering (dominate doesn't matter in this case)
+      // We can then do a max all-reduce and determine if all the shards
+      // are non-interfering and dominating
+      uint32_t code = (result ? 2 : (dominates ? 0 : 1));
       // Now we need to perform a collective to make sure that all the 
       // shards agree on the result of the interference
-      AllReduceCollective<SumReduction<bool>,false> any_interfering(this,
+      AllReduceCollective<MaxReduction<uint32_t>,false> any_interfering(this,
           get_next_collective_index(COLLECTIVE_LOC_105, true/*logical*/));
-      return any_interfering.sync_all_reduce(result);
+      code = any_interfering.sync_all_reduce(code);
+#ifdef DEBUG_LEGION
+      assert(code <= 2);
+#endif
+      if (code == 0)
+      {
+        dominates = true;
+        return false;
+      }
+      else if (code == 1)
+      {
+        dominates = false;
+        return false;
+      }
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------

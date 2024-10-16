@@ -60,6 +60,24 @@ namespace Realm {
     return b;
   }
 
+  Barrier Barrier::create_barrier(const Barrier::ParticipantInfo *expected_arrivals,
+                                  size_t num_participants, ReductionOpID redop_id,
+                                  const void *initial_value, size_t initial_value_size)
+  {
+    assert(0);
+    // TODO(apryakhin@): Implement me
+    return Barrier();
+  }
+
+  Barrier Barrier::set_arrival_pattern(const Barrier::ParticipantInfo *expected_arrivals,
+                                       size_t num_participants)
+  {
+    assert(0);
+    // TODO(apryakhin@): Implement me
+    BarrierImpl *impl = get_barrier_impl(*this);
+    return impl->current_barrier();
+  }
+
   void Barrier::destroy_barrier(void)
   {
     log_barrier.info() << "barrier destruction request: " << *this;

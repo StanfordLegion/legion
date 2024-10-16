@@ -1106,7 +1106,9 @@ namespace Legion {
     IndexSpaceOperationT<DIM,T>::IndexSpaceOperationT(OperationKind kind,
                                                       RegionTreeForest *ctx)
       : IndexSpaceOperation(NT_TemplateHelper::encode_tag<DIM,T>(),
-                            kind, ctx), is_index_space_tight(false)
+                            kind, ctx), 
+        realm_index_space(Realm::IndexSpace<DIM,T>::make_empty()),
+        is_index_space_tight(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2270,7 +2272,9 @@ namespace Legion {
         DistributedID did, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
         Provenance *prov, CollectiveMapping *mapping, bool tree_valid)
       : IndexSpaceNode(ctx, handle, parent, color, did, expr_id, init,
-          dep, prov, mapping, tree_valid), linearization(NULL)
+          dep, prov, mapping, tree_valid), 
+        realm_index_space(Realm::IndexSpace<DIM,T>::make_empty()),
+        linearization(NULL)
     //--------------------------------------------------------------------------
     {
     }
