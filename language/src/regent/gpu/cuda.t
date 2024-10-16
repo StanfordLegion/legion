@@ -568,7 +568,9 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
   return quote
     if [count] > 0 then
       var [grid], [block]
-      var [stream] = RuntimeAPI.cudaGetTaskStream()
+      var stream : DriverAPI.CUstream
+      var ok = base.c.regent_get_task_cuda_stream(&stream)
+      base.assert(ok, "unable to get task CUDA stream")
       var dev_id : int
       checkrt(RuntimeAPI.cudaGetDevice(&dev_id), "cudaGetDevice")
       [launch_domain_init]
