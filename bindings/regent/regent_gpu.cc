@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include "regent_gpu.h"
+
 #include "realm.h"
 #include "realm/cuda/cuda_module.h"
 #include "realm/hip/hip_module.h"
