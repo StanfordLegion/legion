@@ -20,6 +20,9 @@
 bool
 regent_get_task_cuda_stream(void *stream)
 {
+#ifndef REALM_USE_CUDA
+  return false;
+#else
   Realm::Runtime runtime = Realm::Runtime::get_runtime();
   Realm::Cuda::CudaModule *module = runtime.get_module<Realm::Cuda::CudaModule>("cuda");
   if (!module) {
@@ -29,11 +32,16 @@ regent_get_task_cuda_stream(void *stream)
   *static_cast<CUstream_st **>(stream) = module->get_task_cuda_stream();
   module->set_task_ctxsync_required(false);
   return true;
+
+#endif
 }
 
 bool
 regent_get_task_hip_stream(void *stream)
 {
+#ifndef REALM_USE_HIP
+  return false;
+#else
   Realm::Runtime runtime = Realm::Runtime::get_runtime();
   Realm::Hip::HipModule *module = runtime.get_module<Realm::Hip::HipModule>("hip");
   if (!module) {
@@ -43,5 +51,6 @@ regent_get_task_hip_stream(void *stream)
   *static_cast<unifiedHipStream_t **>(stream) = module->get_task_hip_stream();
   module->set_task_ctxsync_required(false);
   return true;
+#endif
 }
 
