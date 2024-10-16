@@ -47,12 +47,6 @@ do
 end
 
 function hiphelper.driver_library_link_flags()
-  -- If the hijack is turned off, we need extra dependencies to link
-  -- the generated HIP code correctly
-  if base.c.REGENT_USE_HIJACK == 0 then
-    local rocm_path = os.getenv("ROCM_PATH")
-    return terralib.newlist({"-L" .. rocm_path .. "/lib", "-lamdhip64"})
-  end
   return terralib.newlist()
 end
 
