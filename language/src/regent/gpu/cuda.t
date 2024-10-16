@@ -33,7 +33,6 @@ local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
-local RuntimeAPI = false
 local DriverAPI = false
 do
   local function detect_cuda()
@@ -45,13 +44,8 @@ do
       return false, "Legion is built without CUDA support"
     end
 
-    -- Try to load the CUDA runtime header
-    local ok = pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
-    if not ok then
-      return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
-    end
-
-    ok = pcall(function() DriverAPI = terralib.includec("cuda.h") end)
+    -- Try to load the CUDA driver header
+    local ok = pcall(function() DriverAPI = terralib.includec("cuda.h") end)
     if not ok then
       return false, "cuda.h does not exist in INCLUDE_PATH"
     end
@@ -241,13 +235,6 @@ local terra check(ok : DriverAPI.CUresult, location : rawstring)
     DriverAPI.cuGetErrorName(ok, &error_name)
     DriverAPI.cuGetErrorString(ok, &error_string)
     base.c.printf("error in %s (%s): %s\n", location, error_name, error_string)
-    base.c.abort()
-  end
-end
-
-local terra checkrt(ok : RuntimeAPI.cudaError_t, location : rawstring)
-  if ok ~= RuntimeAPI.cudaSuccess then
-    base.c.printf("error in %s (%s): %s\n", location, RuntimeAPI.cudaGetErrorName(ok), RuntimeAPI.cudaGetErrorString(ok))
     base.c.abort()
   end
 end
@@ -470,6 +457,12 @@ end
 -- ## Code generation for kernel launch
 -- #################
 
+local struct dim3 {
+  x : int64,
+  y : int64,
+  z : int64,
+}
+
 function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
@@ -483,8 +476,8 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
     idx = common.generate_arg_setup(setupArguments, arg_arr, arg, arg.type, idx)
   end
 
-  local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
-  local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
+  local grid = terralib.newsymbol(dim3, "grid")
+  local block = terralib.newsymbol(dim3, "block")
   local num_blocks = terralib.newsymbol(int64, "num_blocks")
 
   if not kernel.cuda_func then
@@ -537,8 +530,10 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
       var stream : DriverAPI.CUstream
       var ok = base.c.regent_get_task_cuda_stream(&stream)
       base.assert(ok, "unable to get task CUDA stream")
-      var dev_id : int
-      checkrt(RuntimeAPI.cudaGetDevice(&dev_id), "cudaGetDevice")
+      var dev : CUdevice
+      check(DriverAPI.cuCtxGetDevice(&dev), "cuCtxGetDevice")
+      -- Important: CUdevice is really a typedef for int
+      var dev_id : int = dev
 
       [launch_domain_init]
       [setupArguments]
