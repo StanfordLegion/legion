@@ -118,7 +118,6 @@ namespace Legion {
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-        uint64_t context_index;
         std::map<unsigned,bool> connect_to_next_points;
         std::map<unsigned,bool> connect_to_prev_points;
         std::map<unsigned,TracePointWisePreviousIndexTaskInfo> prev_ops;
@@ -253,14 +252,22 @@ namespace Legion {
       bool fixed;
       bool intermediate_fence;
     protected:
+      struct OpInfo {
+        Operation* op;
+        GenerationID gen;
+        uint64_t context_index;
+      };
       // Logical dependence analysis stage of the pipeline
       bool recording;
       size_t replay_index;
       std::deque<OperationInfo> replay_info;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
-      std::vector<std::pair<Operation*,GenerationID> > operations;
+      //std::vector<std::pair<Operation*,GenerationID> > operations;
+      std::vector<OpInfo > operations;
       // Only need this backwards lookup for trace capture
-      std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      //std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      std::map<std::pair<Operation*,GenerationID>,
+        std::pair<unsigned,unsigned>> op_map;
       FenceOp *trace_fence;
       GenerationID trace_fence_gen;
       StaticTranslator *static_translator;

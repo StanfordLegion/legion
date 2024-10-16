@@ -358,6 +358,7 @@ namespace Legion {
       current_uids[key] = op->get_unique_op_id();
       num_regions[key] = op->get_region_count();
 #endif
+      OpInfo op_info = {op, gen, op->get_context_index()};
       if (recording)
       {
         // Recording
@@ -366,8 +367,10 @@ namespace Legion {
           return SIZE_MAX;
         const size_t index = replay_info.size();
         const size_t op_index = operations.size();
-        op_map[key] = op_index;
-        operations.push_back(key);
+        //op_map[key] = op_index;
+        op_map[key] = std::make_pair(op_index,index);
+        //operations.push_back(key);
+        operations.push_back(op_info);
         replay_info.push_back(OperationInfo());
         if (static_translator != NULL)
         {
@@ -379,9 +382,6 @@ namespace Legion {
           static_translator->pop_dependences(to_translate);
           translate_dependence_records(op, op_index, to_translate);
         }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-        replay_info[index].context_index = op->get_context_index();
-#endif
         return index;
       }
       else
@@ -401,12 +401,12 @@ namespace Legion {
         // Check to see if the meta-data alignes
         OperationInfo &info = replay_info[index];
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-        info.context_index = op->get_context_index();
         set_point_wise_dependences(index, op);
 #endif
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
-        operations.push_back(key);
+        //operations.push_back(key);
+        operations.push_back(op_info);
         frontiers.insert(key);
         // First make any close operations needed for this operation and
         // register their dependences
@@ -423,8 +423,10 @@ namespace Legion {
           const GenerationID close_gen = close_op->get_generation();
           const std::pair<Operation*,GenerationID> close_key(close_op, 
                                                              close_gen);
+          OpInfo close_op_info = {close_op, close_gen, close_op->get_context_index()};
           close_op->add_mapping_reference(close_gen);
-          operations.push_back(close_key);
+          //operations.push_back(close_key);
+          operations.push_back(close_op_info);
 #ifdef LEGION_SPY
           current_uids[close_key] = close_op->get_unique_op_id();
           num_regions[close_key] = close_op->get_region_count();
@@ -453,7 +455,8 @@ namespace Legion {
       const std::pair<Operation*,GenerationID> key(op, op->get_generation());
       const std::pair<Operation*,GenerationID> creator_key(
           op->get_creator_op(), op->get_creator_gen());
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         finder = op_map.find(creator_key);
 #ifdef DEBUG_LEGION
       assert(finder != op_map.end());
@@ -478,9 +481,12 @@ namespace Legion {
       assert(!replay_info.empty());
 #endif
       std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      OpInfo op_info = {op, op->get_generation(), op->get_context_index()};
       const size_t index = operations.size();
-      operations.push_back(key);
-      op_map[key] = index;
+      //operations.push_back(key);
+      operations.push_back(op_info);
+      //op_map[key] = index;
+      op_map[key] = std::make_pair(index, replay_info.size());
       OperationInfo &info = replay_info.back();
       info.closes.emplace_back(CloseInfo(op, creator_idx,
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -502,8 +508,10 @@ namespace Legion {
         assert(((size_t)it->operation_idx) < operations.size());
         assert(it->dtype != LEGION_NO_DEPENDENCE);
 #endif
-        const std::pair<Operation*,GenerationID> &target = 
-                                              operations[it->operation_idx];
+        //const std::pair<Operation*,GenerationID> &target = 
+        //                                      operations[it->operation_idx];
+        std::pair<Operation*,GenerationID> target = std::make_pair(
+            operations[it->operation_idx].op, operations[it->operation_idx].gen);
         std::set<std::pair<Operation*,GenerationID> >::iterator finder =
           frontiers.find(target);
         if (finder != frontiers.end())
@@ -547,13 +555,15 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> target_key(target, target_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
         return false;
       const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
@@ -562,7 +572,8 @@ namespace Legion {
       // In the case of operations recording dependences on internal operations
       // such as refinement operations then we don't need to record those as
       // the refinement operations won't be in the replay
-      if (source_finder->second == target_finder->second)
+      //if (source_finder->second == target_finder->second)
+      if (source_finder->second.first == target_finder->second.first)
       {
 #ifdef DEBUG_LEGION
         assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
@@ -570,7 +581,8 @@ namespace Legion {
         return true;
       }
       OperationInfo &info = replay_info.back();
-      DependenceRecord record(target_finder->second);
+      //DependenceRecord record(target_finder->second);
+      DependenceRecord record(target_finder->second.first);
       if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
 #ifdef DEBUG_LEGION
@@ -622,10 +634,11 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> next_key(next->op, next->gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         next_finder = op_map.find(next_key);
       if (next_finder == op_map.end()) return;
-      OperationInfo &info = replay_info[source->get_trace_local_id().context_index];
+      OperationInfo &info = replay_info[next_finder->second.second];
       info.connect_to_next_points[region_idx] = true;
     }
 
@@ -639,11 +652,12 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> prev_key(prev->op, prev->gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         prev_finder = op_map.find(prev_key);
       if (prev_finder == op_map.end()) return;
 
-      OperationInfo &info = replay_info[source->get_trace_local_id().context_index];
+      OperationInfo &info = replay_info[prev_finder->second.second];
       info.prev_ops.insert({
                               region_idx,
                               TracePointWisePreviousIndexTaskInfo(
@@ -653,7 +667,7 @@ namespace Legion {
                                   prev->shard_proj->sharding_domain,
                                   static_cast<IndexTask*>(prev->op)->index_domain,
                                   prev->op->get_trace_local_id(),
-                                  prev_finder->second,
+                                  prev_finder->second.first,
                                   prev->gen, prev->ctx_index, dep_type,
                                   prev_region_idx)
                               });
@@ -684,8 +698,9 @@ namespace Legion {
             info.prev_ops.find(i);
           assert(prev_info_finder != info.prev_ops.end());
 
-          const std::pair<Operation*,GenerationID> &prev =
-                                                operations[prev_info_finder->second.op_idx];
+          //const std::pair<Operation*,GenerationID> &prev =
+          //                                      operations[prev_info_finder->second.op_idx];
+          OpInfo &op_info = operations[prev_info_finder->second.op_idx];
           static_cast<IndexTask*>(op)->prev_index_tasks.insert({
                               i,
                               PointWisePreviousIndexTaskInfo(
@@ -694,8 +709,9 @@ namespace Legion {
                                   prev_info_finder->second.sharding,
                                   prev_info_finder->second.sharding_domain,
                                   prev_info_finder->second.index_domain,
-                                  prev.first, prev.second,
-                                  replay_info[prev_info_finder->second.prev_op_trace_idx.context_index].context_index,
+                                  op_info.op, op_info.gen,
+                                  //replay_info[prev_info_finder->second.prev_op_trace_idx.context_index].context_index,
+                                  op_info.context_index,
                                   prev_info_finder->second.dep_type,
                                   prev_info_finder->second.region_idx)
                               });
@@ -721,7 +737,8 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> target_key(target, target_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
@@ -758,7 +775,8 @@ namespace Legion {
         return false;
       }
       const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
@@ -767,7 +785,8 @@ namespace Legion {
       // In the case of operations recording dependences on internal operations
       // such as refinement operations then we don't need to record those as
       // the refinement operations won't be in the replay
-      if (source_finder->second == target_finder->second)
+      //if (source_finder->second == target_finder->second)
+      if (source_finder->second.first == target_finder->second.first)
       {
 #ifdef DEBUG_LEGION
         assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
@@ -775,7 +794,8 @@ namespace Legion {
         return true;
       }
       OperationInfo &info = replay_info.back();
-      DependenceRecord record(target_finder->second, target_idx, source_idx,
+      //DependenceRecord record(target_finder->second, target_idx, source_idx,
+      DependenceRecord record(target_finder->second.first, target_idx, source_idx,
                               dtype, dep_mask);
       if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
@@ -889,9 +909,11 @@ namespace Legion {
           delete static_translator;
           static_translator = NULL;
           // Also remove the mapping references from all the operations
-          for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+          //for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+          for (std::vector<OpInfo>::const_iterator
                 it = operations.begin(); it != operations.end(); it++)
-            it->first->remove_mapping_reference(it->second);
+            //it->first->remove_mapping_reference(it->second);
+            it->op->remove_mapping_reference(it->gen);
           // Remove mapping fences on the frontiers which haven't been removed 
           for (std::set<std::pair<Operation*,GenerationID> >::const_iterator 
                 it = frontiers.begin(); it != frontiers.end(); it++)
@@ -912,7 +934,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(op_idx < operations.size());
-      const std::pair<Operation*,GenerationID> &key = operations[op_idx];
+      //const std::pair<Operation*,GenerationID> &key = operations[op_idx];
+      const std::pair<Operation*,GenerationID> key = std::make_pair(operations[op_idx].op, operations[op_idx].gen);
       std::map<std::pair<Operation*,GenerationID>,UniqueID>::const_iterator
         finder = current_uids.find(key);
       assert(finder != current_uids.end());
@@ -935,8 +958,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->previous_offset <= index);
 #endif
-        const std::pair<Operation*,GenerationID> &prev =
-            operations[index - it->previous_offset];
+        //const std::pair<Operation*,GenerationID> &prev =
+        std::pair<Operation*,GenerationID> prev = std::make_pair(
+            operations[index - it->previous_offset].op, operations[index - it->previous_offset].gen);
         unsigned parent_index = op->find_parent_index(it->current_req_index);
         LogicalRegion root_region = context->find_logical_region(parent_index);
         FieldSpaceNode *fs = forest->get_node(root_region.get_field_space());
