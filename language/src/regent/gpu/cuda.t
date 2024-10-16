@@ -41,12 +41,14 @@ local struct CUctx_st
 local struct CUfunc_st
 local struct CUlinkState_st
 local struct CUmod_st
+local struct CUstream_st
 
 local CUcontext = &CUctx_st
 local CUfunction = &CUfunc_st
 local CUjit_option = uint32
 local CUlinkState = &CUlinkState_st
 local CUmodule = &CUmod_st
+local CUstream = &CUstream_st
 local CUdevice = int32
 local CUjit_option = uint32
 local CUresult = uint32
@@ -60,6 +62,7 @@ local DriverAPI = {
   CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6;
   CU_JIT_INPUT_PTX = 1;
   CU_JIT_TARGET = 9;
+  CUDA_SUCCESS = 0;
 
   CUcontext = CUcontext;
   CUfunction = CUfunction;
@@ -67,6 +70,7 @@ local DriverAPI = {
   CUlinkState = CUlinkState;
   CUmodule = CUmodule;
   CUresult = CUresult;
+  CUstream = CUstream;
 
   cuInit = ef("cuInit", {uint32} -> CUresult);
   cuCtxGetCurrent = ef("cuCtxGetCurrent", {&CUcontext} -> CUresult);
@@ -84,6 +88,8 @@ local DriverAPI = {
   cuLinkComplete = ef("cuLinkComplete",{CUlinkState,&&opaque,&uint64} -> CUresult);
   cuLinkDestroy = ef("cuLinkDestroy",{CUlinkState} -> CUresult);
   cuModuleLoadData = ef("cuModuleLoadData",{&CUmodule,&opaque} -> CUresult);
+  cuModuleGetFunction = ef("cuModuleGetFunction",{&CUfunction,CUmodule,&opaque} -> CUresult);
+  cuLaunchKernel = ef("cuLaunchKernel",{CUfunction,uint32,uint32,uint32,uint32,uint32,uint32,uint32,CUstream,&&opaque,&&opaque} -> CUresult);
 }
 
 local RuntimeAPI = false
@@ -288,7 +294,7 @@ local terra check(ok : DriverAPI.CUresult, location : rawstring)
   end
 end
 
-local terra checkrt(ok : RuntimeAPI.cuda_Error_t, location : rawstring)
+local terra checkrt(ok : RuntimeAPI.cudaError_t, location : rawstring)
   if ok ~= RuntimeAPI.cudaSuccess then
     base.c.printf("error in %s (%s): %s\n", location, RuntimeAPI.cudaGetErrorName(ok), RuntimeAPI.cudaGetErrorString(ok))
     base.c.abort()
@@ -587,7 +593,7 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
 end
 
 terra cudahelper.device_synchronize()
-  checkrt(RuntimeAPI.cudaDeviceSynchronize())
+  checkrt(RuntimeAPI.cudaDeviceSynchronize(), "cudaDeviceSynchronize")
 end
 
 local function get_nv_fn_name(name, type)
