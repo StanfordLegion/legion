@@ -110,6 +110,10 @@ function cudahelper.driver_library_link_flags()
       "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
       "-lpthread", "-lrt"
     })
+  else
+    return terralib.newlist({
+      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
+    })
   end
   return terralib.newlist()
 end
@@ -327,6 +331,8 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   local image = cubin or ptx
 
   local register = quote
+    check(DriverAPI.cuInit(0), "cuInit")
+
     var num_devices: int = -1
     checkrt(RuntimeAPI.cudaGetDeviceCount(&num_devices), "cudaGetDeviceCount")
     escape
