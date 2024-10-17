@@ -815,15 +815,15 @@ namespace Legion {
           const RegionRequirement &req = regions[*it];
           if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
             continue;
-          if (IS_WRITE(req))
+          if (!IS_WRITE(req))
+            check_collective_regions.push_back(*it);
+          else if (!IS_COLLECTIVE(req))
             REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
                 "Ignoring request by mapper %s to check for collective usage "
                 "for region requirement %d of task %s (UID %lld) because "
                 "region requirement has writing privileges.",
                 mapper->get_mapper_name(), *it, 
                 get_task_name(), unique_op_id)
-          else
-            check_collective_regions.push_back(*it);
         }
         if (!check_collective_regions.empty())
         {
