@@ -16621,16 +16621,18 @@ namespace Legion {
                           bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
                           if(parent_dominates)
                           {
-                            //printf("FOUND POINT-WISE ANCESTOR: %d prev_uid: %lld prev_region_idx: %d  user_uid: %lld user_region_idx: %d\n", context->runtime->address_space, prev.uid, prev.idx, user.uid, user.idx);
+                            //printf("FOUND POINT-WISE ANCESTOR: %d prev_context_index: %lld prev_uid: %lld name: %s prev_region_idx: %d  user_context_index: %lld  user_uid: %lld name: %s user_region_idx: %d\n", context->runtime->address_space, prev.ctx_index, prev.uid, static_cast<IndexTask*>(prev.op)->get_task_name(), prev.idx, user.ctx_index, user.uid, static_cast<IndexTask*>(user.op)->get_task_name(), user.idx);
+                            //printf("FOUND POINT-WISE ANCESTOR\n");
                             skip_registering_region_dependence = true;
                             if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
-                                &user, prev.gen, prev.idx))
+                                user.op, user.gen, prev.gen, prev.idx))
                             {
                               static_cast<IndexTask*>(user.op)->record_point_wise_dependence_completed_points_prev_task(
                                   prev.shard_proj, prev.ctx_index);
                             }
                             static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
-                                &prev, user.idx, dtype, prev.idx);
+                                prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
+                                user.idx, dtype, prev.idx);
                           }
                         }
                       }

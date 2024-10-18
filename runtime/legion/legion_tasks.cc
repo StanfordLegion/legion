@@ -10304,13 +10304,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::set_prev_point_wise_user(const LogicalUser *prev,
+    bool IndexTask::set_prev_point_wise_user(Operation *prev_op,
+        GenerationID prev_gen, uint64_t prev_ctx_index,
+        ProjectionSummary *shard_proj,
         unsigned region_idx, unsigned dep_type, unsigned prev_region_idx)
     //--------------------------------------------------------------------------
     {
       if ((trace != NULL) && trace->is_recording())
       {
-        trace->set_prev_point_wise_user(prev, region_idx, dep_type, prev_region_idx,
+        trace->set_prev_point_wise_user(prev_op, prev_gen, prev_ctx_index,
+            shard_proj,
+            region_idx, dep_type, prev_region_idx,
             this);
       }
       AutoLock o_lock(op_lock);
@@ -10318,12 +10322,12 @@ namespace Legion {
       prev_index_tasks.insert({
                               region_idx,
                               PointWisePreviousIndexTaskInfo(
-                                  prev->shard_proj->domain,
-                                  prev->shard_proj->projection,
-                                  prev->shard_proj->sharding,
-                                  prev->shard_proj->sharding_domain,
-                                  static_cast<IndexTask*>(prev->op)->index_domain,
-                                  prev->op, prev->gen, prev->ctx_index, dep_type,
+                                  shard_proj->domain,
+                                  shard_proj->projection,
+                                  shard_proj->sharding,
+                                  shard_proj->sharding_domain,
+                                  static_cast<IndexTask*>(prev_op)->index_domain,
+                                  prev_op, prev_gen, prev_ctx_index, dep_type,
                                   prev_region_idx)
                               });
       set_connect_to_prev_point(region_idx);
@@ -10400,13 +10404,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::set_next_point_wise_user(const LogicalUser *next,
-        GenerationID user_gen, unsigned region_idx)
+    bool IndexTask::set_next_point_wise_user(Operation *next_op,
+        GenerationID next_gen, GenerationID user_gen, unsigned region_idx)
     //--------------------------------------------------------------------------
     {
       if ((trace != NULL) && trace->is_recording())
       {
-        trace->set_next_point_wise_user(next, region_idx, this);
+        trace->set_next_point_wise_user(next_op, next_gen, user_gen, region_idx, this);
       }
 
       AutoLock o_lock(op_lock);

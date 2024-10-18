@@ -87,22 +87,19 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
       struct TracePointWisePreviousIndexTaskInfo : public LegionHeapify<TracePointWisePreviousIndexTaskInfo> {
       public:
-        TracePointWisePreviousIndexTaskInfo(IndexSpaceNode *domain, ProjectionFunction *projection,
-            ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
+        TracePointWisePreviousIndexTaskInfo(ProjectionSummary *shard_proj,
+            Domain &index_domain,
             TraceLocalID prev_op_trace_idx, unsigned op_idx,
             GenerationID prev_op_gen, size_t ctx_index, unsigned dep_type,
             unsigned region_idx)
-          : domain(domain), projection(projection), sharding(sharding), sharding_domain(sharding_domain),
-          index_domain(index_domain),
+          : shard_proj(shard_proj),
+            index_domain(index_domain),
           prev_op_trace_idx(prev_op_trace_idx), op_idx(op_idx),
           prev_op_gen(prev_op_gen),
           ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
       {}
       public:
-        IndexSpaceNode *domain;
-        ProjectionFunction *projection;
-        ShardingFunction *sharding;
-        IndexSpaceNode *sharding_domain;
+        ProjectionSummary *shard_proj;
         Domain index_domain;
         TraceLocalID prev_op_trace_idx;
         unsigned op_idx;
@@ -194,9 +191,12 @@ namespace Legion {
                                     DependenceType dtype,
                                     const FieldMask &dependent_mask);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      void set_next_point_wise_user(const LogicalUser *next,
+      void set_next_point_wise_user(Operation *next_op,
+          GenerationID next_gen, GenerationID source_gen,
           unsigned region_idx, Operation *source);
-      void set_prev_point_wise_user(const LogicalUser *prev,
+      void set_prev_point_wise_user(Operation *prev_op,
+          GenerationID prev_gen, uint64_t prev_ctx_index,
+          ProjectionSummary *shard_proj,
           unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
           Operation *source);
       void set_point_wise_dependences(size_t index, Operation *op);

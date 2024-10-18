@@ -1419,10 +1419,12 @@ namespace Legion {
           unsigned region_idx);
       static void process_slice_find_point_wise_dependence(Deserializer &derez);
       static void process_slice_record_point_wise_dependence(Deserializer &derez);
-      bool set_prev_point_wise_user(const LogicalUser *prev, unsigned region_idx,
-          unsigned dtype, unsigned prev_region_idx);
-      bool set_next_point_wise_user(const LogicalUser *next,
-          GenerationID user_gen, unsigned region_idx);
+      bool set_prev_point_wise_user(Operation *prev_op,
+          GenerationID prev_gen, uint64_t prev_ctx_index,
+          ProjectionSummary *shard_proj,
+          unsigned region_idx, unsigned dtype, unsigned prev_region_idx);
+      bool set_next_point_wise_user(Operation *next_op,
+          GenerationID next_gen, GenerationID user_gen, unsigned region_idx);
       void add_point_to_completed_list(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
       static void process_slice_add_point_to_completed_list(Deserializer &derez);

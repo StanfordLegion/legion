@@ -361,13 +361,16 @@ namespace Legion {
       OpInfo op_info = {op, gen, op->get_context_index()};
       if (recording)
       {
+        //printf("RECORD: %lld\n", op->get_context_index());
         // Recording
         if (op->is_internal_op())
           // We don't need to register internal operations
           return SIZE_MAX;
         const size_t index = replay_info.size();
         const size_t op_index = operations.size();
-        //op_map[key] = op_index;
+#ifdef DEBUG_LEGION
+      assert(op_index == index);
+#endif
         op_map[key] = std::make_pair(op_index,index);
         //operations.push_back(key);
         operations.push_back(op_info);
@@ -398,6 +401,8 @@ namespace Legion {
                         "now been issued!", replay_info.size(), tid,
                         context->get_task_name(), 
                         context->get_unique_id(), index+1)
+
+        //printf("REPLAY: %lld\n", op->get_context_index());
         // Check to see if the meta-data alignes
         OperationInfo &info = replay_info[index];
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
@@ -626,24 +631,35 @@ namespace Legion {
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
-    void LogicalTrace::set_next_point_wise_user(const LogicalUser *next,
+    void LogicalTrace::set_next_point_wise_user(Operation *next_op,
+        GenerationID next_gen, GenerationID source_gen,
         unsigned region_idx, Operation* source)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(recording);
 #endif
-      const std::pair<Operation*,GenerationID> next_key(next->op, next->gen);
+      const std::pair<Operation*,GenerationID> next_key(next_op, next_gen);
       //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         next_finder = op_map.find(next_key);
-      if (next_finder == op_map.end()) return;
-      OperationInfo &info = replay_info[next_finder->second.second];
+      if (next_finder == op_map.end())
+      {
+        return;
+      }
+
+      const std::pair<Operation*,GenerationID> key(source, source_gen);
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
+        finder = op_map.find(key);
+      assert(finder != op_map.end());
+      OperationInfo &info = replay_info[finder->second.second];
       info.connect_to_next_points[region_idx] = true;
     }
 
     //--------------------------------------------------------------------------
-    void LogicalTrace::set_prev_point_wise_user(const LogicalUser *prev,
+    void LogicalTrace::set_prev_point_wise_user(Operation *prev_op,
+        GenerationID prev_gen, uint64_t prev_ctx_index,
+        ProjectionSummary *shard_proj,
         unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
         Operation *source)
     //--------------------------------------------------------------------------
@@ -651,24 +667,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(recording);
 #endif
-      const std::pair<Operation*,GenerationID> prev_key(prev->op, prev->gen);
+      const std::pair<Operation*,GenerationID> prev_key(prev_op, prev_gen);
       //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         prev_finder = op_map.find(prev_key);
-      if (prev_finder == op_map.end()) return;
+      if (prev_finder == op_map.end()) {
+        return;
+      }
 
-      OperationInfo &info = replay_info[prev_finder->second.second];
+      const std::pair<Operation*,GenerationID> key(source, source->get_generation());
+      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
+        finder = op_map.find(key);
+      assert(finder != op_map.end());
+      OperationInfo &info = replay_info[finder->second.second];
       info.prev_ops.insert({
                               region_idx,
                               TracePointWisePreviousIndexTaskInfo(
-                                  prev->shard_proj->domain,
-                                  prev->shard_proj->projection,
-                                  prev->shard_proj->sharding,
-                                  prev->shard_proj->sharding_domain,
-                                  static_cast<IndexTask*>(prev->op)->index_domain,
-                                  prev->op->get_trace_local_id(),
+                                  shard_proj,
+                                  static_cast<IndexTask*>(prev_op)->index_domain,
+                                  prev_op->get_trace_local_id(),
                                   prev_finder->second.first,
-                                  prev->gen, prev->ctx_index, dep_type,
+                                  prev_gen, prev_ctx_index, dep_type,
                                   prev_region_idx)
                               });
 
@@ -687,7 +706,9 @@ namespace Legion {
           info.connect_to_next_points.find(i);
         if (next_finder != info.connect_to_next_points.end())
         {
-          static_cast<IndexTask*>(op)->set_connect_to_next_point(i);
+          //printf("REplaying connecting to next point for task: %lld region_idx: %d context_index: %lld name: %s\n", op->get_unique_op_id(), i, op->get_context_index(), static_cast<IndexTask*>(op)->get_task_name());
+          bool rc = static_cast<IndexTask*>(op)->set_next_point_wise_user(NULL, -1, op->get_generation(), i);
+          assert(rc != false);
         }
         std::map<unsigned,bool>::iterator prev_finder =
           info.connect_to_prev_points.find(i);
@@ -698,25 +719,15 @@ namespace Legion {
             info.prev_ops.find(i);
           assert(prev_info_finder != info.prev_ops.end());
 
-          //const std::pair<Operation*,GenerationID> &prev =
-          //                                      operations[prev_info_finder->second.op_idx];
           OpInfo &op_info = operations[prev_info_finder->second.op_idx];
-          static_cast<IndexTask*>(op)->prev_index_tasks.insert({
-                              i,
-                              PointWisePreviousIndexTaskInfo(
-                                  prev_info_finder->second.domain,
-                                  prev_info_finder->second.projection,
-                                  prev_info_finder->second.sharding,
-                                  prev_info_finder->second.sharding_domain,
-                                  prev_info_finder->second.index_domain,
-                                  op_info.op, op_info.gen,
-                                  //replay_info[prev_info_finder->second.prev_op_trace_idx.context_index].context_index,
-                                  op_info.context_index,
-                                  prev_info_finder->second.dep_type,
-                                  prev_info_finder->second.region_idx)
-                              });
 
-          static_cast<IndexTask*>(op)->set_connect_to_prev_point(i);
+          //printf("REplaying connecting to prev point for task: %lld region_idx: %d context_index: %lld prev_context_index: %lld name: %s\n", op->get_unique_op_id(), i, op->get_context_index(), op_info.context_index, static_cast<IndexTask*>(op)->get_task_name());
+
+          static_cast<IndexTask*>(op)->set_prev_point_wise_user(
+              op_info.op, op_info.gen, op_info.context_index,
+              prev_info_finder->second.shard_proj,
+              i, prev_info_finder->second.dep_type,
+              prev_info_finder->second.region_idx);
         }
       }
     }
