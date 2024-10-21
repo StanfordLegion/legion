@@ -1440,7 +1440,7 @@ namespace Legion {
           std::vector<DomainPoint> &points);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
-      std::vector<DomainPoint> completed_point_list;
+      std::vector<std::pair<DomainPoint,RtEvent>> completed_point_list;
     public:
       // Map of previous index task for a region id. This will
       // be maintained in the next task to lookup the event

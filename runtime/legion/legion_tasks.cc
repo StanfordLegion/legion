@@ -10287,7 +10287,7 @@ namespace Legion {
       AutoLock o_lock(op_lock);
       if (!should_connect_to_next_point(region_idx))
       {
-        completed_point_list.push_back(point);
+        completed_point_list.push_back(std::make_pair(point, point_mapped));
       }
       else
       {
@@ -10424,13 +10424,13 @@ namespace Legion {
       {
         printf("======COMPLEX CASE====!!!!\n");
 
-        for(std::vector<DomainPoint>::iterator it =
+        for(std::vector<std::pair<DomainPoint,RtEvent>>::iterator it =
             completed_point_list.begin(); it !=
             completed_point_list.end(); it++)
         {
 
           parent_ctx->record_point_wise_dependence(context_index,
-              (*it), RtEvent::NO_RT_EVENT);
+              (*it).first, (*it).second);
         }
       }
 

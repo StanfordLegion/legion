@@ -703,7 +703,7 @@ namespace Legion {
         if (next_finder != info.connect_to_next_points.end())
         {
           //printf("REplaying connecting to next point for task: %lld region_idx: %d context_index: %lld name: %s\n", op->get_unique_op_id(), i, op->get_context_index(), static_cast<IndexTask*>(op)->get_task_name());
-          bool rc = static_cast<IndexTask*>(op)->set_next_point_wise_user(NULL, -1, op->get_generation(), i);
+          bool rc = static_cast<IndexTask*>(op)->set_next_point_wise_user(NULL, 0, op->get_generation(), i);
           assert(rc != false);
         }
         std::map<unsigned,bool>::iterator prev_finder =
