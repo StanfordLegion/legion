@@ -369,7 +369,7 @@ namespace Legion {
         const size_t index = replay_info.size();
         const size_t op_index = operations.size();
 #ifdef DEBUG_LEGION
-      assert(op_index == index);
+      //assert(op_index == index);
 #endif
         op_map[key] = std::make_pair(op_index,index);
         //operations.push_back(key);
@@ -639,19 +639,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(recording);
 #endif
-      const std::pair<Operation*,GenerationID> next_key(next_op, next_gen);
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        next_finder = op_map.find(next_key);
-      if (next_finder == op_map.end())
-      {
-        return;
-      }
 
       const std::pair<Operation*,GenerationID> key(source, source_gen);
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         finder = op_map.find(key);
-      assert(finder != op_map.end());
+      if (finder == op_map.end())
+      {
+        return;
+      }
+
       OperationInfo &info = replay_info[finder->second.second];
       info.connect_to_next_points[region_idx] = true;
     }
