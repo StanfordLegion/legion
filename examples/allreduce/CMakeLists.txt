@@ -36,7 +36,3 @@ target_compile_options(intra_task_ordering PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${C
 add_executable(disjoint_index_space_launch disjoint_index_space_launch.cc)
 target_link_libraries(disjoint_index_space_launch Legion::Legion)
 target_compile_options(disjoint_index_space_launch PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
-
-add_executable(uninit_reproducer uninit_reproducer.cc)
-target_link_libraries(uninit_reproducer Legion::Legion)
-target_compile_options(uninit_reproducer PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
