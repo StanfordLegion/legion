@@ -63,7 +63,7 @@ task main()
   var p_grid = partition(equal, grid, tiles)
   var p_grid_copy = partition(equal, grid_copy, tiles)
   fill(grid.vel, VALUE)
-  --dump(tiles, grid, grid_copy, p_grid, p_grid_copy)
+  dump(tiles, grid, grid_copy, p_grid, p_grid_copy)
   check(tiles, grid_copy, p_grid_copy)
 end
 
