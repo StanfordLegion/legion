@@ -177,7 +177,6 @@ impl Proc {
         };
 
         let level = self.max_levels(device) - base.level.unwrap();
-        let level_ready = base.level_ready.map(|l| self.max_levels_ready(device) - l);
 
         let instances = {
             // ProfTask has no op_id
@@ -194,7 +193,7 @@ impl Proc {
 
         let default = DataRecord {
             level,
-            level_ready,
+            level_ready: Some(level),
             ready: None,
             start: TimestampFormat(Timestamp::ZERO),
             end: TimestampFormat(Timestamp::ZERO),
