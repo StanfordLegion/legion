@@ -33,58 +33,7 @@ local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
                     Linux =  "libcuda.so";
                     Windows = "nvcuda.dll"; }
 
--- #####################################
--- ## CUDA Hijack API
--- #################
-
-local HijackAPI = terralib.includec("regent_cudart_hijack.h")
-
-struct fat_bin_t {
-  magic : int,
-  seq : int,
-  data : &opaque,
-  filename : &opaque,
-}
-
--- #####################################
--- ## CUDA Device API
--- #################
-
-local struct CUctx_st
-local struct CUmod_st
-local struct CUlinkState_st
-local struct CUfunc_st
-local CUdevice = int32
-local CUjit_option = uint32
-local CU_JIT_ERROR_LOG_BUFFER = 5
-local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
-local CU_JIT_INPUT_PTX = 1
-local CU_JIT_TARGET = 9
-local DriverAPI = {
-  CU_JIT_ERROR_LOG_BUFFER = 5;
-  CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6;
-  CU_JIT_INPUT_PTX = 1;
-  CU_JIT_TARGET = 9;
-
-  CUlinkState = &CUlinkState_st;
-  CUjit_option = uint32;
-
-  cuInit = ef("cuInit", {uint32} -> uint32);
-  cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
-  cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
-  cuDeviceGet = ef("cuDeviceGet",{&int32,int32} -> uint32);
-  cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&&CUctx_st,uint32,int32} -> uint32);
-  cuCtxDestroy = ef("cuCtxDestroy",{&CUctx_st} -> uint32);
-  cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
-    {&int32,&int32,int32} -> uint32);
-  cuLinkCreate_v2 = ef("cuLinkCreate_v2",{uint32,&uint32,&&opaque,&&CUlinkState_st} -> uint32);
-  cuLinkAddData_v2 = ef("cuLinkAddData_v2",
-    {&CUlinkState_st,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> uint32);
-  cuLinkComplete = ef("cuLinkComplete",{&CUlinkState_st,&&opaque,&uint64} -> uint32);
-  cuLinkDestroy = ef("cuLinkDestroy",{&CUlinkState_st} -> uint32);
-}
-
-local RuntimeAPI = false
+local DriverAPI = false
 do
   local function detect_cuda()
     if not terralib.cudacompile then
@@ -95,10 +44,10 @@ do
       return false, "Legion is built without CUDA support"
     end
 
-    -- Try to load the CUDA runtime header
-    local ok = pcall(function() RuntimeAPI = terralib.includec("cuda_runtime.h") end)
+    -- Try to load the CUDA driver header
+    local ok = pcall(function() DriverAPI = terralib.includec("cuda.h") end)
     if not ok then
-      return false, "cuda_runtime.h does not exist in INCLUDE_PATH"
+      return false, "cuda.h does not exist in INCLUDE_PATH"
     end
 
     if base.config["offline"] or base.config["gpu-offline"] then
@@ -147,16 +96,9 @@ do
 end
 
 function cudahelper.driver_library_link_flags()
-  -- If the hijack is turned off, we need extra dependencies to link
-  -- the generated CUDA code correctly
-  if base.c.REGENT_USE_HIJACK == 0 then
-    return terralib.newlist({
-      "-L" .. terralib.cudahome .. "/lib64", "-lcudart",
-      "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
-      "-lpthread", "-lrt"
-    })
-  end
-  return terralib.newlist()
+  return terralib.newlist({
+    "-L" .. terralib.cudahome .. "/lib64/stubs", "-lcuda",
+  })
 end
 
 -- #####################################
@@ -232,39 +174,11 @@ end
 -- ## Registration functions
 -- #################
 
-local terra register_ptx(ptxc : rawstring) : &&opaque
-  var fat_bin : &fat_bin_t
-  var fat_size = sizeof(fat_bin_t)
-  -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](c.malloc(fat_size))
-  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
-  fat_bin.magic = 0x466243b1
-  fat_bin.seq = 1
-  fat_bin.data = ptxc
-  fat_bin.filename = nil
-  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
-  return handle
-end
-
-local terra register_cubin(cubin : rawstring) : &&opaque
-  var fat_bin : &fat_bin_t
-  var fat_size = sizeof(fat_bin_t)
-  -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](c.malloc(fat_size))
-  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_cubin")
-  fat_bin.magic = 0x466243b1
-  fat_bin.seq = 1
-  fat_bin.data = cubin
-  fat_bin.filename = nil
-  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
-  return handle
-end
-
 local get_cuda_version
 do
   local cached_cuda_version = nil
   local terra get_cuda_version_terra() : uint64
-    var cx : &CUctx_st
+    var cx : DriverAPI.CUcontext
     var cx_created = false
     var r = DriverAPI.cuCtxGetCurrent(&cx)
     base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
@@ -285,7 +199,7 @@ do
     base.assert(r == 0, "CUDA error in cuDeviceComputeCapability")
     var version = [uint64](major * 10 + minor)
     if cx_created then
-      DriverAPI.cuCtxDestroy(cx)
+      DriverAPI.cuCtxDestroy_v2(cx)
     end
     return version
   end
@@ -300,6 +214,17 @@ do
       cached_cuda_version = parse_cuda_arch(base.config["gpu-arch"])
     end
     return cached_cuda_version
+  end
+end
+
+local terra check(ok : DriverAPI.CUresult, location : rawstring)
+  if ok ~= DriverAPI.CUDA_SUCCESS then
+    var error_name : rawstring = nil
+    var error_string : rawstring = nil
+    DriverAPI.cuGetErrorName(ok, &error_name)
+    DriverAPI.cuGetErrorString(ok, &error_string)
+    base.c.printf("error in %s (%s): %s\n", location, error_name, error_string)
+    base.c.abort()
   end
 end
 
@@ -328,29 +253,22 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
     [&opaque](&error_sz)
   );
 
-  var cx : &CUctx_st
+  var cx : DriverAPI.CUcontext
   var cx_created = false
 
-  var r = DriverAPI.cuCtxGetCurrent(&cx)
-  base.assert(r == 0, "CUDA error in cuCtxGetCurrent")
-  var device : int32
+  check(DriverAPI.cuCtxGetCurrent(&cx), "cuCtxGetCurrent")
+  var device : DriverAPI.CUdevice
   if cx ~= nil then
-    r = DriverAPI.cuCtxGetDevice(&device)
-    base.assert(r == 0, "CUDA error in cuCtxGetDevice")
+    check(DriverAPI.cuCtxGetDevice(&device), "cuCtxGetDevice")
   else
-    r = DriverAPI.cuDeviceGet(&device, 0)
-    base.assert(r == 0, "CUDA error in cuDeviceGet")
-    r = DriverAPI.cuCtxCreate_v2(&cx, 0, device)
-    base.assert(r == 0, "CUDA error in cuCtxCreate_v2")
+    check(DriverAPI.cuDeviceGet(&device, 0), "cuDeviceGet")
+    check(DriverAPI.cuCtxCreate_v2(&cx, 0, device), "cuCtxCreate_v2")
     cx_created = true
   end
 
-  r = DriverAPI.cuLinkCreate_v2(1, options, option_values, &linkState)
-  base.assert(r == 0, "CUDA error in cuLinkCreate_v2")
-  r = DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil)
-  base.assert(r == 0, "CUDA error in cuLinkAddData_v2")
-  r = DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize)
-  base.assert(r == 0, "CUDA error in cuLinkComplete")
+  check(DriverAPI.cuLinkCreate_v2(1, options, option_values, &linkState), "cuLinkCreate_v2")
+  check(DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil), "cuLinkAddData_v2")
+  check(DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize), "cuLinkComplete")
 
   -- Make a copy of the returned cubin before we destroy the linker and cuda context,
   -- which may deallocate the cubin
@@ -358,10 +276,9 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
   to_return[cubinSize] = 0
   c.memcpy([&opaque](to_return), cubin, cubinSize)
 
-  r = DriverAPI.cuLinkDestroy(linkState)
-  base.assert(r == 0, "CUDA error in cuLinkDestroy")
+  check(DriverAPI.cuLinkDestroy(linkState), "cuLinkDestroy")
   if cx_created then
-    DriverAPI.cuCtxDestroy(cx)
+    check(DriverAPI.cuCtxDestroy_v2(cx), "cuCtxDestroy_v2")
   end
 
   return cubin_t { to_return, cubinSize }
@@ -387,35 +304,51 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     end)()
   end
 
-  local handle = terralib.newsymbol(&&opaque, "handle")
-  local register = nil
-  if cubin == nil then
-    local ptxc = terralib.constant(ptx)
-    register = quote
-      var [handle] = register_ptx(ptxc)
-    end
-  else
-    local cubin = terralib.constant(cubin)
-    register = quote
-      var [handle] = register_cubin(cubin)
-    end
-  end
+  local image = cubin or ptx
 
-  register = quote
-    [register]
-    [kernels:map(function(kernel)
-      return quote
-        var kernel_id : int64 = 0
-        [c.murmur_hash3_32]([kernel.name], [string.len(kernel.name)], 0, &kernel_id)
-        [c.regent_register_kernel_id](kernel_id)
-        [HijackAPI.hijackCudaRegisterFunction]([handle], [&opaque](kernel_id), [kernel.name])
+  local register = quote
+    check(DriverAPI.cuInit(0), "cuInit")
+
+    var num_devices: int = -1
+    check(DriverAPI.cuDeviceGetCount(&num_devices), "cuDeviceGetCount")
+    escape
+      for _, k in ipairs(kernels) do
+        local kernel = k.kernel
+
+        local func = kernel.cuda_func
+        assert(func) -- Hopefully this is always true. If not, then it means we're generating kernels that we don't call anywhere.
+        emit quote
+          -- FIXME (Elliott): leaks
+          func = [&DriverAPI.CUfunction](base.c.malloc(sizeof(DriverAPI.CUfunction) * num_devices))
+          base.assert(func ~= nil, "allocating space for CUDA functions failed")
+        end
       end
-    end)]
-  end
+    end
 
-  register = quote
-    [register]
-    [HijackAPI.hijackCudaRegisterFatBinaryEnd]([handle])
+    for dev_id = 0, num_devices do
+      var dev : DriverAPI.CUdevice
+      check(DriverAPI.cuDeviceGet(&dev, dev_id), "cuDeviceGet")
+      var ctx : DriverAPI.CUcontext
+      check(DriverAPI.cuDevicePrimaryCtxRetain(&ctx, dev), "cuDevicePrimaryCtxRetain")
+      check(DriverAPI.cuCtxPushCurrent_v2(ctx), "cuCtxPushCurrent_v2")
+      var module : DriverAPI.CUmodule
+      check(DriverAPI.cuModuleLoadData(&module, image), "cuModuleLoadData")
+      escape
+        for _, k in ipairs(kernels) do
+          local kernel = k.kernel
+
+          local func = kernel.cuda_func
+          assert(func) -- Hopefully this is always true. If not, then it means we're generating kernels that we don't call anywhere.
+
+          emit quote
+            check(DriverAPI.cuModuleGetFunction(&(func[dev_id]), module, k.name), "cuModuleGetFunction")
+          end
+        end
+      end
+      check(DriverAPI.cuCtxPopCurrent_v2(&ctx), "cuCtxPopCurrent_v2")
+      -- Hack: leak the context because otherwise the module/function handles will be invalidated
+      -- check(DriverAPI.cuDevicePrimaryCtxRelease_v2(dev), "cuDevicePrimaryCtxRelease_v2")
+    end
   end
 
   return register
@@ -513,6 +446,12 @@ end
 -- ## Code generation for kernel launch
 -- #################
 
+local struct dim3 {
+  x : int64,
+  y : int64,
+  z : int64,
+}
+
 function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
@@ -526,9 +465,14 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
     idx = common.generate_arg_setup(setupArguments, arg_arr, arg, arg.type, idx)
   end
 
-  local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
-  local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
+  local grid = terralib.newsymbol(dim3, "grid")
+  local block = terralib.newsymbol(dim3, "block")
   local num_blocks = terralib.newsymbol(int64, "num_blocks")
+
+  if not kernel.cuda_func then
+    kernel.cuda_func = terralib.global(&DriverAPI.CUfunction, nil, kernel.name .. "_func")
+  end
+  local func = kernel.cuda_func
 
   local function round_exp(v, n)
     return `((v + (n - 1)) / n)
@@ -572,19 +516,29 @@ function cudahelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size
   return quote
     if [count] > 0 then
       var [grid], [block]
+      var stream : DriverAPI.CUstream
+      var ok = base.c.regent_get_task_cuda_stream(&stream)
+      base.assert(ok, "unable to get task CUDA stream")
+      var dev : DriverAPI.CUdevice
+      check(DriverAPI.cuCtxGetDevice(&dev), "cuCtxGetDevice")
+      -- Important: CUdevice is really a typedef for int
+      var dev_id : int = dev
+
       [launch_domain_init]
       [setupArguments]
-      var kid : int64 = 0
-      [c.murmur_hash3_32]([kernel.name], [string.len(kernel.name)], 0, &kid)
-      var result = [RuntimeAPI.cudaLaunchKernel](
-        [&int8](kid), [grid], [block], [arg_arr], [shared_mem_size], nil)
-      base.assert(result == 0, "kernel launch failed")
+      check(
+        DriverAPI.cuLaunchKernel(
+          [func][dev_id],
+          [grid].x, [grid].y, [grid].z,
+          [block].x, [block].y, [block].z,
+          [shared_mem_size], stream, [arg_arr], nil),
+        "cuLaunchKernel")
     end
   end
 end
 
 terra cudahelper.device_synchronize()
-  RuntimeAPI.cudaDeviceSynchronize()
+  check(DriverAPI.cuCtxSynchronize(), "cuCtxSynchronize")
 end
 
 local function get_nv_fn_name(name, type)

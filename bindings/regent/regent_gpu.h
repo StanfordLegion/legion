@@ -1,4 +1,4 @@
-/* Copyright 2024 Stanford University, NVIDIA Corporation
+/* Copyright 2024 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,21 +14,19 @@
  */
 
 
-#ifndef __LEGION_TERRA_CUDART_HIJACK_H__
-#define __LEGION_TERRA_CUDART_HIJACK_H__
+#ifndef __REGENT_GPU_H__
+#define __REGENT_GPU_H__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void** hijackCudaRegisterFatBinary(const void*);
+bool regent_get_task_cuda_stream(void *stream);
 
-void hijackCudaRegisterFunction(void**, const void*, char*);
-
-void hijackCudaRegisterFatBinaryEnd(void**);
+bool regent_get_task_hip_stream(void *stream);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // __LEGION_TERRA_CUDART_HIJACK_H__
+#endif // __REGENT_GPU_H__
