@@ -10465,10 +10465,6 @@ namespace Legion {
                                                  RtEvent point_mapped)
     //--------------------------------------------------------------------------
     {
-        if (get_unique_id() == 60)
-        {
-          //printf("BLAA context_index: %ld, current task: %lld, region_idx: %d, point: %lld\n", context_index, get_unique_id(), region_idx, point.point_data[0]);
-        }
       parent_ctx->record_point_wise_dependence(context_index, point, point_mapped);
     }
 
@@ -12149,6 +12145,8 @@ namespace Legion {
       for (Domain::DomainPointIterator itr(internal_domain); 
             itr; itr++, point_idx++)
         points[point_idx] = clone_as_point_task(itr.p, inline_task);
+      if(index_owner->get_context_index() == 83)
+        printf("WHAT!!!!asdsadasd\n");
       // Compute any projection region requirements
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
@@ -13079,13 +13077,13 @@ namespace Legion {
     {
       {
         AutoLock o_lock(op_lock);
-#ifndef LEGION_SPY
+/*#ifndef LEGION_SPY
         std::map<DomainPoint,RtEvent>::const_iterator finder =
           point_wise_dependences.find(point);
         // If we've already got it then we're done
         if (finder != point_wise_dependences.end())
           return finder->second;
-#endif
+#endif*/
         // If we're remote, make up an event and send a message to index_owner.
         if (is_remote())
         {
