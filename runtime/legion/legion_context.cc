@@ -793,13 +793,46 @@ namespace Legion {
           metadatasize, release_callback ? NULL : callback_functor, 
           executing_processor, owned);
       owner_task->complete_execution();
-      post_end_task();
-#ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
-#else
-      runtime_ptr->decrement_total_outstanding_tasks();
+      // If this is an implicit top-level task then we need to finish
+      // the implicit profiling of the execution of that top-level task
+      // now that everything else is done running
+      if (implicit_task_profiler != NULL)
+      {
+        // If we're an implicit top-level task then pull a bunch of
+        // data onto the stack before we do any of the cleanup because
+        // we might end up deleting this 
+        const UniqueID local_uid = get_unique_id();
+#ifndef DEBUG_LEGION
+        const TaskID owner_task_id = owner_task->task_id;
 #endif
+        const ApEvent local_completion = owner_task->get_completion_event();
+        ImplicitTaskProfiler *local_task_profiler = implicit_task_profiler;
+        implicit_task_profiler = NULL; // We take ownership
+        // Cannot invoke any local methods after this call
+        post_end_task();
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        // log this with the profiler 
+        implicit_profiler->process_implicit(local_uid, owner_task_id,
+            local_task_profiler->start_time, stop,
+            local_task_profiler->waits, local_completion);
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+        delete local_task_profiler;
+      }
+      else
+      {
+        post_end_task();
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+      }
       // See if we can release our callback down
       if (release_callback)
       {
@@ -12089,14 +12122,6 @@ namespace Legion {
           InnerContext::destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       } 
-      if (implicit_task_profiler != NULL)
-      {
-        const long long stop = Realm::Clock::current_time_in_nanoseconds();
-        // log this with the profiler 
-        implicit_profiler->process_implicit(get_unique_id(),owner_task->task_id,
-            implicit_task_profiler->start_time, stop,
-            implicit_task_profiler->waits, owner_task->get_completion_event());
-      }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
       {

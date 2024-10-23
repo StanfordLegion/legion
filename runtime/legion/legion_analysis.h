@@ -3337,7 +3337,8 @@ namespace Legion {
                             FieldMaskSet<CopyFillGuard> &reduction_fill_updates,
                             TraceViewSet *precondition_updates,
                             TraceViewSet *anticondition_updates,
-                            TraceViewSet *postcondition_updates);
+                            TraceViewSet *postcondition_updates,
+                            FieldMaskSet<IndexSpaceExpression> *dirty_updates);
         void release_references(void) const;
       public:
         EquivalenceSet *const set;
@@ -3352,6 +3353,7 @@ namespace Legion {
         TraceViewSet *precondition_updates;
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
+        FieldMaskSet<IndexSpaceExpression> *dirty_updates;
         std::set<IndexSpaceExpression*> *const expr_references;
         const RtUserEvent done_event;
         const bool forward_to_owner;
@@ -3726,6 +3728,7 @@ namespace Legion {
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
             TraceViewSet *&postcondition_updates, 
+            FieldMaskSet<IndexSpaceExpression> *&dirty_updates,
             DistributedID target, IndexSpaceExpression *target_expr) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
@@ -3740,6 +3743,7 @@ namespace Legion {
             TraceViewSet *precondition_updates,
             TraceViewSet *anticondition_updates,
             TraceViewSet *postcondition_updates,
+            FieldMaskSet<IndexSpaceExpression> *dirty_updates,
             FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             std::vector<RtEvent> &applied_events,
@@ -3761,6 +3765,7 @@ namespace Legion {
             const TraceViewSet *precondition_updates,
             const TraceViewSet *anticondition_updates,
             const TraceViewSet *postcondition_updates,
+            const FieldMaskSet<IndexSpaceExpression> *dirty_updates,
             const bool pack_references);
     public:
       static void handle_make_owner(const void *args);
@@ -3835,6 +3840,7 @@ namespace Legion {
       TraceViewSet                                      *tracing_preconditions;
       TraceViewSet                                      *tracing_anticonditions;
       TraceViewSet                                      *tracing_postconditions;
+      FieldMaskSet<IndexSpaceExpression>                *tracing_dirty_fields;
     protected:
       // This tracks the most recent copy-fill aggregator for each field in 
       // read-only cases so that reads the depend on each other are ordered

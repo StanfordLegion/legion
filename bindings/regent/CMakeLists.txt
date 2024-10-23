@@ -25,6 +25,7 @@ endif()
 # Regent bindings
 list(APPEND REGENT_SRC
   regent.h                regent.cc
+  regent_gpu.h            regent_gpu.cc
   regent_partitions.h     regent_partitions.cc
   regent_partitions_cxx.h
   regent_util.h           regent_redop.h
@@ -32,7 +33,6 @@ list(APPEND REGENT_SRC
 
 if(Legion_USE_CUDA)
   list(APPEND REGENT_SRC
-    regent_cudart_hijack.h regent_cudart_hijack.cc
     regent_cuda.cu
   )
 elseif(Legion_USE_HIP)
