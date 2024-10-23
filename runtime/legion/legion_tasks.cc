@@ -12145,8 +12145,6 @@ namespace Legion {
       for (Domain::DomainPointIterator itr(internal_domain); 
             itr; itr++, point_idx++)
         points[point_idx] = clone_as_point_task(itr.p, inline_task);
-      if(index_owner->get_context_index() == 83)
-        printf("WHAT!!!!asdsadasd\n");
       // Compute any projection region requirements
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
