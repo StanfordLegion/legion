@@ -748,14 +748,10 @@ namespace Legion {
         std::map<DomainPoint,RtEvent> point_wise_dependences;
         // Flag to indicate if we have a previous task for which
         // we can map point-task-wise instead of whole index-task-wise.
-        //bool connect_to_prev_point = false;
-        //TODO: SET should be enough
-        std::map<unsigned,bool> connect_to_prev_points;
+        std::vector<bool> connect_to_prev_points;
         // Flag to indicate if we have a next task for which
         // we can map point-task-wise instead of whole index-task-wise.
-        //bool connect_to_next_point = false;
-        //TODO: SET should be enough
-        std::map<unsigned,bool> connect_to_next_points;
+        std::vector<bool> connect_to_next_points;
       public:
         /*
         void set_connect_to_prev_point (void) { connect_to_prev_point = true; }
@@ -773,17 +769,11 @@ namespace Legion {
         }
         bool should_connect_to_prev_point (unsigned region_idx)
         {
-          std::map<unsigned,bool>::iterator finder =
-            connect_to_prev_points.find(region_idx);
-          //return connect_to_prev_point;
-          return finder != connect_to_prev_points.end();
+          return connect_to_prev_points[region_idx];
         }
         bool should_connect_to_next_point (unsigned region_idx)
         {
-          std::map<unsigned,bool>::iterator finder =
-            connect_to_next_points.find(region_idx);
-          return finder != connect_to_next_points.end();
-          //return connect_to_next_point;
+          return connect_to_next_points[region_idx];
         }
 
 #endif

@@ -2446,6 +2446,13 @@ namespace Legion {
         for (unsigned idx = 0;
               idx < intra_space_mapping_dependences.size(); idx++)
           rez.serialize(intra_space_mapping_dependences[idx]);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        printf("PACK SIZE: %lld context_index %lld\n", point_wise_mapping_dependences.size(), get_context_index());
+        rez.serialize<size_t>(point_wise_mapping_dependences.size());
+        for (unsigned idx = 0;
+              idx < point_wise_mapping_dependences.size(); idx++)
+          rez.serialize(point_wise_mapping_dependences[idx]);
+#endif
       }
     }
 
@@ -2534,6 +2541,13 @@ namespace Legion {
         intra_space_mapping_dependences.resize(num_intra_space_dependences);
         for (unsigned idx = 0; idx < num_intra_space_dependences; idx++)
           derez.deserialize(intra_space_mapping_dependences[idx]);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        size_t num_point_wise_mapping_dependences;
+        derez.deserialize(num_point_wise_mapping_dependences);
+        point_wise_mapping_dependences.resize(num_point_wise_mapping_dependences);
+        for (unsigned idx = 0; idx < num_point_wise_mapping_dependences; idx++)
+          derez.deserialize(point_wise_mapping_dependences[idx]);
+#endif
       }
       update_no_access_regions();
     } 
@@ -5699,6 +5713,17 @@ namespace Legion {
         else
           rez.serialize(concurrent_precondition.interpreted);
       }
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      rez.serialize<size_t>(connect_to_prev_points.size());
+      for (unsigned idx = 0;
+            idx < connect_to_prev_points.size(); idx++)
+        rez.serialize<bool>(connect_to_prev_points[idx]);
+
+      rez.serialize<size_t>(connect_to_next_points.size());
+      for (unsigned idx = 0;
+            idx < connect_to_next_points.size(); idx++)
+        rez.serialize<bool>(connect_to_next_points[idx]);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5767,6 +5792,28 @@ namespace Legion {
         else
           derez.deserialize(concurrent_precondition.interpreted);
       }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+        size_t num_connect_to_prev_points;
+        derez.deserialize(num_connect_to_prev_points);
+        connect_to_prev_points.resize(num_connect_to_prev_points);
+        for (unsigned idx = 0; idx < num_connect_to_prev_points; idx++)
+        {
+          bool result;
+          derez.deserialize(result);
+          connect_to_prev_points[idx] = result;
+        }
+
+        size_t num_connect_to_next_points;
+        derez.deserialize(num_connect_to_next_points);
+        connect_to_next_points.resize(num_connect_to_next_points);
+        for (unsigned idx = 0; idx < num_connect_to_next_points; idx++)
+        {
+          bool result;
+          derez.deserialize(result);
+          connect_to_next_points[idx];
+        }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8875,6 +8922,16 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       initialize_regions(launcher.region_requirements);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      size_t region_count = get_region_count();
+      connect_to_prev_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+        connect_to_prev_points[idx] = false;
+      connect_to_next_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+        connect_to_next_points[idx] = false;
+#endif
+
       futures = launcher.futures;
       // If the task has any output requirements, we create fresh region and
       // partition names and return them back to the user
@@ -9005,6 +9062,15 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       initialize_regions(launcher.region_requirements);
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      size_t region_count = get_region_count();
+      connect_to_prev_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+        connect_to_prev_points[idx] = false;
+      connect_to_next_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+        connect_to_next_points[idx] = false;
+#endif
       futures = launcher.futures;
       // If the task has any output requirements, we create fresh region and
       // partition names and return them back to the user
