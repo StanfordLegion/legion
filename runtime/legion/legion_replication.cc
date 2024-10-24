@@ -17149,6 +17149,17 @@ namespace Legion {
         Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
+      if (!participating)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
+#endif
+        // When the bulk of these are being sent back to a non-participating
+        // shard then we need to clear them so we don't duplicate
+        concurrent_processors.clear();
+        nonempty_shards.clear();
+        preconditions.clear();
+      }
       RtEvent precondition;
       derez.deserialize(precondition);
       if (precondition.exists())
@@ -17228,7 +17239,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ConcurrentAllreduce::ConcurrentAllreduce(ReplicateContext *ctx,
         CollectiveID id, const std::vector<ShardID> &parts)
-      : AllGatherCollective<true>(ctx, id, parts)
+      : AllGatherCollective<false>(ctx, id, parts)
     //--------------------------------------------------------------------------
     {
     }
