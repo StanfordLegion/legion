@@ -1120,14 +1120,6 @@ namespace Realm {
 
     bool GenEventImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter)
     {
-#ifdef EVENT_TRACING
-      {
-        EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-        item.event_id = me->id;
-        item.event_gen = needed_gen;
-        item.action = EventTraceItem::ACT_WAIT;
-      }
-#endif
       // no early check here as the caller will generally have tried has_triggered()
       //  before allocating its EventWaiter object
 
@@ -1140,13 +1132,12 @@ namespace Realm {
 	AutoLock<> a(mutex);
 
 	// three cases below
-
-	if(needed_gen <= generation.load()) {
-	  // 1) the event has triggered and any poison information is in the poisoned generation list
+        if(needed_gen <= generation.load()) {
+          // 1) the event has triggered and any poison information is in the poisoned generation list
 	  trigger_now = true; // actually do trigger outside of mutex
 	  trigger_poisoned = is_generation_poisoned(needed_gen);
-	} else {
-	  std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+        } else {
+          std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
 	  if(it != local_triggers.end()) {
 	    // 2) we're not the owner node, but we've locally triggered this and have correct poison info
 	    assert(owner != Network::my_node_id);
@@ -1164,8 +1155,8 @@ namespace Realm {
 	      current_local_waiters.push_back(waiter);
 	    } else {
 	      // no, put it in an appropriate future waiter list - only allowed for non-owners
-	      assert(owner != Network::my_node_id);
-	      future_local_waiters[needed_gen].push_back(waiter);
+              assert(owner != Network::my_node_id);
+              future_local_waiters[needed_gen].push_back(waiter);
 	    }
 
 	    // do we need to subscribe to this event?
@@ -1176,7 +1167,7 @@ namespace Realm {
 	      subscribe_owner = owner;
 	    }
 	  }
-	}
+        }
       }
 
       if((subscribe_owner != -1)) {
@@ -1215,8 +1206,7 @@ namespace Realm {
 	return true;
       } else {
 	bool ok = future_local_waiters[needed_gen].erase(waiter) > 0;
-	assert(ok);
-	return true;
+        return ok;
       }
     }
 
@@ -1503,14 +1493,6 @@ namespace Realm {
 
   bool GenEventImpl::has_triggered(gen_t needed_gen, bool &poisoned)
   {
-#ifdef EVENT_TRACING
-      {
-        EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-        item.event_id = me.id;
-        item.event_gen = needed_gen;
-        item.action = EventTraceItem::ACT_QUERY;
-      }
-#endif
       // lock-free check
       if(needed_gen <= generation.load_acquire()) {
 	// it is safe to call is_generation_poisoned after just a load_acquire
@@ -1648,15 +1630,6 @@ namespace Realm {
       Event e = make_event(gen_triggered);
       log_event.debug() << "event triggered: event=" << e << " by node " << trigger_node
 			<< " (poisoned=" << poisoned << ")";
-
-#ifdef EVENT_TRACING
-      {
-        EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-        item.event_id = me.id;
-        item.event_gen = gen_triggered;
-        item.action = EventTraceItem::ACT_TRIGGER;
-      }
-#endif
 
       EventWaiter::EventWaiterList to_wake;
 
