@@ -5,9 +5,7 @@
 
 using namespace Realm;
 
-struct EventTestCase {};
-
-class EventTest : public ::testing::TestWithParam<EventTestCase> {};
+class EventTest : public ::testing::Test {};
 
 class DeferredOperation : public EventWaiter {
 public:
@@ -28,7 +26,7 @@ public:
   int subscription_count = 0;
 };
 
-TEST_P(EventTest, GetCurrentEvent)
+TEST_F(EventTest, GetCurrentEvent)
 {
   GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
@@ -36,7 +34,7 @@ TEST_P(EventTest, GetCurrentEvent)
             ID::make_event(0, 0, 1).event_generation());
 }
 
-TEST_P(EventTest, AddRemoveWaiterSameGen)
+TEST_F(EventTest, AddRemoveWaiterSameGen)
 {
   DeferredOperation waiter;
   GenEventImpl event(nullptr, nullptr);
@@ -48,7 +46,7 @@ TEST_P(EventTest, AddRemoveWaiterSameGen)
   EXPECT_TRUE(event.current_local_waiters.empty());
 }
 
-TEST_P(EventTest, ProcessUpdateNonOwner)
+TEST_F(EventTest, ProcessUpdateNonOwner)
 {
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
@@ -65,7 +63,7 @@ TEST_P(EventTest, ProcessUpdateNonOwner)
   EXPECT_TRUE(waiter_two.triggered);
 }
 
-TEST_P(EventTest, AddRemoveWaiterDifferentGens)
+TEST_F(EventTest, AddRemoveWaiterDifferentGens)
 {
   DeferredOperation waiter;
   GenEventImpl event(nullptr, nullptr);
@@ -77,7 +75,7 @@ TEST_P(EventTest, AddRemoveWaiterDifferentGens)
   EXPECT_FALSE(event.current_local_waiters.empty());
 }
 
-TEST_P(EventTest, Subscribe)
+TEST_F(EventTest, Subscribe)
 {
   MockEventCommunicator *event_comm = new MockEventCommunicator();
   GenEventImpl event(nullptr, nullptr, event_comm);
@@ -88,7 +86,7 @@ TEST_P(EventTest, Subscribe)
   EXPECT_EQ(event_comm->subscription_count, 1);
 }
 
-TEST_P(EventTest, BasicPoisonedTest)
+TEST_F(EventTest, BasicPoisonedTest)
 {
   GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
@@ -96,7 +94,7 @@ TEST_P(EventTest, BasicPoisonedTest)
   EXPECT_FALSE(event.is_generation_poisoned(1));
 }
 
-TEST_P(EventTest, BasicHasTriggerdTest)
+TEST_F(EventTest, BasicHasTriggerdTest)
 {
   GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
@@ -106,25 +104,40 @@ TEST_P(EventTest, BasicHasTriggerdTest)
   EXPECT_FALSE(poisoned);
 }
 
-TEST_P(EventTest, BasicTriggerTest)
+TEST_F(EventTest, LocalTrigger)
 {
-  GenEventImpl event(nullptr, nullptr);
+  DynamicTable<LocalEventTableAllocator> local_events;
+  LocalEventTableAllocator::FreeList *local_event_free_list =
+      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
+  GenEventImpl event(nullptr, local_event_free_list);
   event.init(ID::make_event(0, 0, 0), 0);
 
-  // TODO: free_event hitting get_runtime
-  // event->trigger(1, 0, 0, TimeLimit::responsive());
+  event.trigger(1, 0, 0, TimeLimit::responsive());
+
+  bool poisoned = false;
+  EXPECT_TRUE(event.has_triggered(1, poisoned));
+  EXPECT_FALSE(poisoned);
 }
 
-TEST_P(EventTest, EventMergerIsActive)
+TEST_F(EventTest, LocalTriggerPoisoned)
+{
+  DynamicTable<LocalEventTableAllocator> local_events;
+  LocalEventTableAllocator::FreeList *local_event_free_list =
+      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
+  GenEventImpl event(nullptr, local_event_free_list);
+  event.init(ID::make_event(0, 0, 0), 0);
+
+  event.trigger(1, 0, /*poisoned=*/true, TimeLimit::responsive());
+
+  bool poisoned = false;
+  EXPECT_TRUE(event.has_triggered(1, poisoned));
+  EXPECT_TRUE(poisoned);
+}
+
+TEST_F(EventTest, EventMergerIsActive)
 {
   GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
   EventMerger merger(&event);
   EXPECT_FALSE(merger.is_active());
 }
-
-const static EventTestCase kEventTestCases[] = {
-    EventTestCase{},
-};
-
-INSTANTIATE_TEST_SUITE_P(Foo, EventTest, testing::ValuesIn(kEventTestCases));
