@@ -5259,12 +5259,6 @@ namespace Legion {
       concurrent_lamport_clock = 0;
       concurrent_variant = 0;
       concurrent_poisoned = false;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      //connect_to_prev_point = false;
-      //connect_to_next_point = false;
-      connect_to_prev_points.clear();
-      connect_to_next_points.clear();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5316,6 +5310,8 @@ namespace Legion {
       intra_space_dependences.clear();
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
       point_wise_dependences.clear();
+      connect_to_prev_points.clear();
+      connect_to_next_points.clear();
 #endif
     }
 
@@ -8921,6 +8917,15 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       initialize_regions(launcher.region_requirements);
+      futures = launcher.futures;
+      // If the task has any output requirements, we create fresh region and
+      // partition names and return them back to the user
+      if (outputs != NULL)
+        create_output_regions(*outputs, launch_sp);
+      update_grants(launcher.grants);
+      wait_barriers = launcher.wait_barriers;
+      update_arrival_barriers(launcher.arrive_barriers);
+
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
       size_t region_count = get_region_count();
       connect_to_prev_points.resize(region_count);
@@ -8931,14 +8936,6 @@ namespace Legion {
         connect_to_next_points[idx] = false;
 #endif
 
-      futures = launcher.futures;
-      // If the task has any output requirements, we create fresh region and
-      // partition names and return them back to the user
-      if (outputs != NULL)
-        create_output_regions(*outputs, launch_sp);
-      update_grants(launcher.grants);
-      wait_barriers = launcher.wait_barriers;
-      update_arrival_barriers(launcher.arrive_barriers);
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
@@ -9061,6 +9058,15 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       initialize_regions(launcher.region_requirements);
+      futures = launcher.futures;
+      // If the task has any output requirements, we create fresh region and
+      // partition names and return them back to the user
+      if (outputs != NULL)
+        create_output_regions(*outputs, launch_sp);
+      update_grants(launcher.grants);
+      wait_barriers = launcher.wait_barriers;
+      update_arrival_barriers(launcher.arrive_barriers);
+
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
       size_t region_count = get_region_count();
       connect_to_prev_points.resize(region_count);
@@ -9070,14 +9076,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
         connect_to_next_points[idx] = false;
 #endif
-      futures = launcher.futures;
-      // If the task has any output requirements, we create fresh region and
-      // partition names and return them back to the user
-      if (outputs != NULL)
-        create_output_regions(*outputs, launch_sp);
-      update_grants(launcher.grants);
-      wait_barriers = launcher.wait_barriers;
-      update_arrival_barriers(launcher.arrive_barriers);
+
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
