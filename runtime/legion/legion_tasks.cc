@@ -2447,7 +2447,6 @@ namespace Legion {
               idx < intra_space_mapping_dependences.size(); idx++)
           rez.serialize(intra_space_mapping_dependences[idx]);
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-        printf("PACK SIZE: %lld context_index %lld\n", point_wise_mapping_dependences.size(), get_context_index());
         rez.serialize<size_t>(point_wise_mapping_dependences.size());
         for (unsigned idx = 0;
               idx < point_wise_mapping_dependences.size(); idx++)
