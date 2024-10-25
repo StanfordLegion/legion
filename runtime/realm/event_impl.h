@@ -24,6 +24,7 @@
 #include "realm/faults.h"
 
 #include "realm/network.h"
+#include <realm/activemsg.h>
 
 #include "realm/lists.h"
 #include "realm/threads.h"
@@ -177,13 +178,34 @@ namespace Realm {
       unsigned num_preconditions, max_preconditions;
     };
 
+    struct EventSubscribeMessage {
+      Event event;
+      EventImpl::gen_t previous_subscribe_gen;
+
+      static void handle_message(NodeID sender, const EventSubscribeMessage &msg,
+                                 const void *data, size_t datalen);
+    };
+
+    class EventCommunicator {
+    public:
+      virtual void subscribe(Event event, NodeID owner,
+                             EventImpl::gen_t previous_subscribe_gen)
+      {
+        ActiveMessage<EventSubscribeMessage> amsg(owner);
+        amsg->event = event;
+        amsg->previous_subscribe_gen = previous_subscribe_gen;
+        amsg.commit();
+      }
+    };
+
     class GenEventImpl : public EventImpl {
     public:
       static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
       GenEventImpl(void);
       GenEventImpl(EventTriggerNotifier *_event_triggerer,
-                   LocalEventTableAllocator::FreeList *_local_event_free_list);
+                   LocalEventTableAllocator::FreeList *_local_event_free_list,
+                   EventCommunicator *event_comm = nullptr);
       ~GenEventImpl(void);
 
       void init(ID _me, unsigned _init_owner);
@@ -261,8 +283,8 @@ namespace Realm {
       EventMerger merger;
 
       EventTriggerNotifier *event_triggerer;
-
       LocalEventTableAllocator::FreeList *local_event_free_list;
+      EventCommunicator *event_comm;
 
       // everything below here protected by this mutex
       Mutex mutex;
@@ -412,15 +434,6 @@ namespace Realm {
     };
 
   // active messages
-
-  struct EventSubscribeMessage {
-    Event event;
-    EventImpl::gen_t previous_subscribe_gen;
-
-    static void handle_message(NodeID sender, const EventSubscribeMessage &msg,
-			       const void *data, size_t datalen);
-
-  };
 
   struct EventTriggerMessage {
     Event event;

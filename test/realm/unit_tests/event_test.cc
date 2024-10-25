@@ -18,6 +18,16 @@ public:
   bool triggered = false;
 };
 
+class MockEventCommunicator : public EventCommunicator {
+public:
+  virtual void subscribe(Event event, NodeID owner,
+                         EventImpl::gen_t previous_subscribe_gen)
+  {
+    subscription_count++;
+  }
+  int subscription_count = 0;
+};
+
 TEST_P(EventTest, GetCurrentEvent)
 {
   GenEventImpl event(nullptr, nullptr);
@@ -69,13 +79,13 @@ TEST_P(EventTest, AddRemoveWaiterDifferentGens)
 
 TEST_P(EventTest, Subscribe)
 {
-  GenEventImpl event(nullptr, nullptr);
+  MockEventCommunicator *event_comm = new MockEventCommunicator();
+  GenEventImpl event(nullptr, nullptr, event_comm);
   event.init(ID::make_event(0, 0, 0), 1);
 
-  // activemsg_handler_table.construct_handler_table();
+  event.subscribe(2);
 
-  // TODO: needs active messages
-  // event.subscribe(2);
+  EXPECT_EQ(event_comm->subscription_count, 1);
 }
 
 TEST_P(EventTest, BasicPoisonedTest)

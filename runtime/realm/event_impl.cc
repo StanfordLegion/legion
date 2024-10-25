@@ -880,6 +880,7 @@ namespace Realm {
     , merger(this)
     , event_triggerer(&get_runtime()->event_triggerer)
     , local_event_free_list(get_runtime()->local_event_free_list)
+    , event_comm(new EventCommunicator())
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
@@ -891,17 +892,23 @@ namespace Realm {
   }
 
   GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer,
-                             LocalEventTableAllocator::FreeList *_local_event_free_list)
+                             LocalEventTableAllocator::FreeList *_local_event_free_list,
+                             EventCommunicator *_event_comm)
     : generation(0)
     , gen_subscribed(0)
     , num_poisoned_generations(0)
     , merger(this)
     , event_triggerer(_event_triggerer)
     , local_event_free_list(_local_event_free_list)
+    , event_comm(_event_comm)
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
-  {}
+  {
+    if(event_comm == nullptr) {
+      event_comm = new EventCommunicator();
+    }
+  }
 
   GenEventImpl::~GenEventImpl(void)
   {
@@ -930,8 +937,14 @@ namespace Realm {
       }
     }
 #endif
-    if(poisoned_generations)
+
+    if(poisoned_generations) {
       delete[] poisoned_generations;
+    }
+
+    if(event_comm != nullptr) {
+      delete event_comm;
+    }
   }
 
   void GenEventImpl::init(ID _me, unsigned _init_owner)
@@ -1564,13 +1577,11 @@ namespace Realm {
       }
 
       if(subscribe_needed) {
-	ActiveMessage<EventSubscribeMessage> amsg(owner);
-	amsg->event = make_event(subscribe_gen);
-	amsg->previous_subscribe_gen = previous_subscribe_gen;
-	amsg.commit();
+        assert(event_comm != nullptr);
+        event_comm->subscribe(make_event(subscribe_gen), owner, previous_subscribe_gen);
       }
     }
-  
+
     void GenEventImpl::external_wait(gen_t gen_needed, bool& poisoned)
     {
       // if the event is remote, make sure we've subscribed
