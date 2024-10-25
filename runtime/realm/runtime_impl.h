@@ -64,7 +64,6 @@ namespace Realm {
   class Channel; // from transfer/channel.h
 
     // use a wide tree for local events - max depth will be 2
-    typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
     // use a narrow tree for remote events - depth is 3, leaves have 128 events
     typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;

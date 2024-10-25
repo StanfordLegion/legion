@@ -1,4 +1,5 @@
 #include "realm/event_impl.h"
+#include "realm/activemsg.h"
 #include <tuple>
 #include <gtest/gtest.h>
 
@@ -19,7 +20,7 @@ public:
 
 TEST_P(EventTest, GetCurrentEvent)
 {
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
   EXPECT_EQ(ID(event.current_event()).event_generation(),
             ID::make_event(0, 0, 1).event_generation());
@@ -28,7 +29,7 @@ TEST_P(EventTest, GetCurrentEvent)
 TEST_P(EventTest, AddRemoveWaiterSameGen)
 {
   DeferredOperation waiter;
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
 
   event.add_waiter(1, &waiter);
@@ -42,7 +43,7 @@ TEST_P(EventTest, ProcessUpdateNonOwner)
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
 
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 1);
 
   event.process_update(1, 0, 0, TimeLimit::responsive());
@@ -57,7 +58,7 @@ TEST_P(EventTest, ProcessUpdateNonOwner)
 TEST_P(EventTest, AddRemoveWaiterDifferentGens)
 {
   DeferredOperation waiter;
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
 
   EXPECT_TRUE(event.add_waiter(1, &waiter));
@@ -68,16 +69,18 @@ TEST_P(EventTest, AddRemoveWaiterDifferentGens)
 
 TEST_P(EventTest, Subscribe)
 {
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 1);
 
+  // activemsg_handler_table.construct_handler_table();
+
   // TODO: needs active messages
-  // event->subscribe(2);
+  // event.subscribe(2);
 }
 
 TEST_P(EventTest, BasicPoisonedTest)
 {
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
 
   EXPECT_FALSE(event.is_generation_poisoned(1));
@@ -85,7 +88,7 @@ TEST_P(EventTest, BasicPoisonedTest)
 
 TEST_P(EventTest, BasicHasTriggerdTest)
 {
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
 
   bool poisoned = false;
@@ -95,7 +98,7 @@ TEST_P(EventTest, BasicHasTriggerdTest)
 
 TEST_P(EventTest, BasicTriggerTest)
 {
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
 
   // TODO: free_event hitting get_runtime
@@ -104,7 +107,7 @@ TEST_P(EventTest, BasicTriggerTest)
 
 TEST_P(EventTest, EventMergerIsActive)
 {
-  GenEventImpl event;
+  GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
   EventMerger merger(&event);
   EXPECT_FALSE(merger.is_active());

@@ -30,11 +30,15 @@
 #include "realm/logging.h"
 #include "realm/redop.h"
 #include "realm/bgwork.h"
+#include "realm/dynamic_table.h"
 
 #include <vector>
 #include <map>
 
 namespace Realm {
+
+  class GenEventImpl;
+  typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
 
 #ifdef EVENT_TRACING
     // For event tracing
@@ -178,13 +182,15 @@ namespace Realm {
       static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
       GenEventImpl(void);
-      GenEventImpl(EventTriggerNotifier *_event_triggerer);
+      GenEventImpl(EventTriggerNotifier *_event_triggerer,
+                   LocalEventTableAllocator::FreeList *_local_event_free_list);
       ~GenEventImpl(void);
 
       void init(ID _me, unsigned _init_owner);
 
       static GenEventImpl *create_genevent(void);
       static void free_genevent(GenEventImpl *);
+      void free_genevent();
 
       static ID make_id(const GenEventImpl &dummy, int owner, ID::IDType index)
       {
@@ -255,6 +261,8 @@ namespace Realm {
       EventMerger merger;
 
       EventTriggerNotifier *event_triggerer;
+
+      LocalEventTableAllocator::FreeList *local_event_free_list;
 
       // everything below here protected by this mutex
       Mutex mutex;

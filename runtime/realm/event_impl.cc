@@ -879,6 +879,7 @@ namespace Realm {
     , num_poisoned_generations(0)
     , merger(this)
     , event_triggerer(&get_runtime()->event_triggerer)
+    , local_event_free_list(get_runtime()->local_event_free_list)
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
@@ -889,12 +890,14 @@ namespace Realm {
     free_list_insertion_delayed = false;
   }
 
-  GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer)
+  GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer,
+                             LocalEventTableAllocator::FreeList *_local_event_free_list)
     : generation(0)
     , gen_subscribed(0)
     , num_poisoned_generations(0)
     , merger(this)
     , event_triggerer(_event_triggerer)
+    , local_event_free_list(_local_event_free_list)
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
@@ -1119,6 +1122,15 @@ namespace Realm {
       }
       else {
         get_runtime()->local_event_free_list->free_entry(impl);
+      }
+    }
+
+    void GenEventImpl::free_genevent()
+    {
+      if(owning_processor != nullptr) {
+        owning_processor->free_genevent(this);
+      } else {
+        local_event_free_list->free_entry(this);
       }
     }
 
@@ -1704,8 +1716,9 @@ namespace Realm {
 	}
 
 	// free event?
-	if(free_event)
-          GenEventImpl::free_genevent(this);
+        if(free_event) {
+          free_genevent();
+        }
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
 	assert(trigger_node == (int)Network::my_node_id);
@@ -1816,8 +1829,9 @@ namespace Realm {
         }
       }
 
-      if(free_event)
-        GenEventImpl::free_genevent(this);
+      if(free_event) {
+        free_genevent();
+      }
     }
 
     ////////////////////////////////////////////////////////////////////////
