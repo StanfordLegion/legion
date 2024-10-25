@@ -1236,15 +1236,6 @@ namespace Realm {
 
       GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
 
-#ifdef EVENT_TRACING
-      {
-        EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-        item.event_id = args.event.id; 
-        item.event_gen = args.event.gen;
-        item.action = EventTraceItem::ACT_WAIT;
-      }
-#endif
-
       // we may send a trigger message in response to the subscription
       EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
       EventImpl::gen_t trigger_gen = 0;
