@@ -878,6 +878,7 @@ namespace Realm {
     , gen_subscribed(0)
     , num_poisoned_generations(0)
     , merger(this)
+    , event_triggerer(&get_runtime()->event_triggerer)
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
@@ -887,6 +888,17 @@ namespace Realm {
     has_local_triggers = false;
     free_list_insertion_delayed = false;
   }
+
+  GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer)
+    : generation(0)
+    , gen_subscribed(0)
+    , num_poisoned_generations(0)
+    , merger(this)
+    , event_triggerer(_event_triggerer)
+    , current_trigger_op(nullptr)
+    , has_external_waiters(false)
+    , external_waiter_condvar(external_waiter_mutex)
+  {}
 
   GenEventImpl::~GenEventImpl(void)
   {
@@ -1095,14 +1107,6 @@ namespace Realm {
 
       log_event.spew() << "event created: event=" << impl->current_event();
 
-#ifdef EVENT_TRACING
-      {
-	EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-	item.event_id = impl->me.id();
-	item.event_gen = impl->me.gen;
-	item.action = EventTraceItem::ACT_CREATE;
-      }
-#endif
       return impl;
     }
 
@@ -1420,9 +1424,7 @@ namespace Realm {
 	  it != to_wake.end();
 	  it++) {
 	bool poisoned = is_generation_poisoned(it->first);
-	get_runtime()->event_triggerer.trigger_event_waiters(it->second,
-							     poisoned,
-							     work_until);
+        event_triggerer->trigger_event_waiters(it->second, poisoned, work_until);
       }
     }
   }
@@ -1797,10 +1799,9 @@ namespace Realm {
       }
 
       // finally, trigger any local waiters
-      if(!to_wake.empty())
-	get_runtime()->event_triggerer.trigger_event_waiters(to_wake,
-							     poisoned,
-							     work_until);
+      if(!to_wake.empty()) {
+        event_triggerer->trigger_event_waiters(to_wake, poisoned, work_until);
+      }
     }
 
     void GenEventImpl::perform_delayed_free_list_insertion(void)

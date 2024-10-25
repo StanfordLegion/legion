@@ -102,6 +102,14 @@ TEST_P(EventTest, BasicTriggerTest)
   // event->trigger(1, 0, 0, TimeLimit::responsive());
 }
 
+TEST_P(EventTest, EventMergerIsActive)
+{
+  GenEventImpl event;
+  event.init(ID::make_event(0, 0, 0), 0);
+  EventMerger merger(&event);
+  EXPECT_FALSE(merger.is_active());
+}
+
 const static EventTestCase kEventTestCases[] = {
     EventTestCase{},
 };

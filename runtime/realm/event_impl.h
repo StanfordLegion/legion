@@ -178,6 +178,7 @@ namespace Realm {
       static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
       GenEventImpl(void);
+      GenEventImpl(EventTriggerNotifier *_event_triggerer);
       ~GenEventImpl(void);
 
       void init(ID _me, unsigned _init_owner);
@@ -252,6 +253,8 @@ namespace Realm {
 
       // used for merge_events and delayed UserEvent triggers
       EventMerger merger;
+
+      EventTriggerNotifier *event_triggerer;
 
       // everything below here protected by this mutex
       Mutex mutex;
