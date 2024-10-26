@@ -1252,70 +1252,75 @@ namespace Realm {
       return false;
     }
 
-
-    ///////////////////////////////////////////////////
-    // Events
-
-
-    // only called for generational events
-    /*static*/ void EventSubscribeMessage::handle_message(NodeID sender, const EventSubscribeMessage &args,
-							  const void *data, size_t datalen)
+    void GenEventImpl::handle_remote_subscription(NodeID sender, gen_t subscribe_gen,
+                                                  gen_t previous_subscribe_gen)
     {
-      log_event.debug() << "event subscription: node=" << sender << " event=" << args.event;
-
-      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-
-      // we may send a trigger message in response to the subscription
-      EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
       EventImpl::gen_t trigger_gen = 0;
       bool subscription_recorded = false;
 
       // early-out case: if we can see the generation needed has already
       //  triggered, signal without taking the mutex
-      EventImpl::gen_t stale_gen = impl->generation.load_acquire();
+      EventImpl::gen_t stale_gen = generation.load_acquire();
       if(stale_gen >= subscribe_gen) {
-	trigger_gen = stale_gen;
+        trigger_gen = stale_gen;
       } else {
-	AutoLock<> a(impl->mutex);
+        AutoLock<> a(mutex);
 
-	// look at the previously-subscribed generation from the requestor - we'll send
-	//  a trigger message if anything newer has triggered
-	EventImpl::gen_t cur_gen = impl->generation.load();
-        if(cur_gen > args.previous_subscribe_gen)
-	  trigger_gen = cur_gen;
+        // look at the previously-subscribed generation from the requestor - we'll send
+        //  a trigger message if anything nwer has triggered
+        EventImpl::gen_t cur_gen = generation.load();
+        if(cur_gen > previous_subscribe_gen)
+          trigger_gen = cur_gen;
 
-	// are they subscribing to the current generation?
-	if(subscribe_gen == (cur_gen + 1)) {
-	  impl->remote_waiters.add(sender);
-	  subscription_recorded = true;
-	} else {
-	  // should never get subscriptions newer than our current
-	  assert(subscribe_gen <= cur_gen);
-	}
+        // are they subscribing to the current generation?
+        if(subscribe_gen == (cur_gen + 1)) {
+          remote_waiters.add(sender);
+          subscription_recorded = true;
+        } else {
+          // should never get subscriptions newer than our current
+          assert(subscribe_gen <= cur_gen);
+        }
       }
 
       if(subscription_recorded)
-	log_event.debug() << "event subscription recorded: node=" << sender
-			  << " event=" << args.event << " (> " << stale_gen << ")";
+        log_event.debug() << "event subscription recorded: node=" << sender;
 
       if(trigger_gen > 0) {
-	log_event.debug() << "event subscription immediate trigger: node=" << sender
-			  << " event=" << args.event << " (<= " << trigger_gen << ")";
-	ID trig_id(args.event);
-	trig_id.event_generation() = trigger_gen;
-	Event triggered = trig_id.convert<Event>();
+        log_event.debug() << "event subscription immediate trigger: node=" << sender
+                          << " trigger_gen=" << trigger_gen;
+        ID trig_id(me);
+        trig_id.event_generation() = trigger_gen;
+        Event triggered = trig_id.convert<Event>();
 
-	// it is legal to use poisoned generation info like this because it is
-	// always updated before the generation - the load_acquire above makes
-	// sure we read in the correct order
-	int npg_cached = impl->num_poisoned_generations.load_acquire();
-	ActiveMessage<EventUpdateMessage> amsg(sender,
-                                               impl->poisoned_generations,
-                                               npg_cached*sizeof(EventImpl::gen_t));
-	amsg->event = triggered;
-	amsg.commit();
+        // it is legal to use poisoned generation info like this because it is
+        // always updated before the generation - the load_acquire above makes
+        // sure we read in the correct order
+        int npg_cached = num_poisoned_generations.load_acquire();
+        event_comm->update(triggered, sender, poisoned_generations,
+                           npg_cached * sizeof(EventImpl::gen_t));
       }
-    } 
+    }
+
+    ///////////////////////////////////////////////////
+    // Events
+
+    // only called for generational events
+    /*static*/ void
+    EventSubscribeMessage::handle_message(NodeID sender,
+                                          const EventSubscribeMessage &args,
+                                          const void *data, size_t datalen)
+    {
+      log_event.debug() << "event subscription: node=" << sender
+                        << " event=" << args.event;
+
+      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+
+      // we may send a trigger message in response to the subscription
+      EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
+
+      impl->handle_remote_subscription(sender, subscribe_gen,
+                                       args.previous_subscribe_gen);
+    }
 
     /*static*/ void EventTriggerMessage::handle_message(NodeID sender, const EventTriggerMessage &args,
 							const void *data, size_t datalen,
@@ -1577,7 +1582,6 @@ namespace Realm {
       }
 
       if(subscribe_needed) {
-        assert(event_comm != nullptr);
         event_comm->subscribe(make_event(subscribe_gen), owner, previous_subscribe_gen);
       }
     }

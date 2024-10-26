@@ -18,12 +18,19 @@ public:
 
 class MockEventCommunicator : public EventCommunicator {
 public:
+  virtual void update(Event event, NodeID to_update,
+                      EventImpl::gen_t *poisoned_generations, size_t size)
+  {
+    recv_subscription_count++;
+  }
+
   virtual void subscribe(Event event, NodeID owner,
                          EventImpl::gen_t previous_subscribe_gen)
   {
-    subscription_count++;
+    sent_subscription_count++;
   }
-  int subscription_count = 0;
+  int sent_subscription_count = 0;
+  int recv_subscription_count = 0;
 };
 
 TEST_F(EventTest, GetCurrentEvent)
@@ -83,7 +90,22 @@ TEST_F(EventTest, Subscribe)
 
   event.subscribe(2);
 
-  EXPECT_EQ(event_comm->subscription_count, 1);
+  EXPECT_EQ(event_comm->sent_subscription_count, 1);
+}
+
+TEST_F(EventTest, HandleRemoteSubscription)
+{
+  MockEventCommunicator *event_comm = new MockEventCommunicator();
+  DynamicTable<LocalEventTableAllocator> local_events;
+  LocalEventTableAllocator::FreeList *local_event_free_list =
+      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+
+  event.init(ID::make_event(0, 0, 0), 0);
+  event.trigger(1, 0, 0, TimeLimit::responsive());
+  event.handle_remote_subscription(1, 1, 0);
+
+  EXPECT_EQ(event_comm->recv_subscription_count, 1);
 }
 
 TEST_F(EventTest, BasicPoisonedTest)
@@ -117,6 +139,19 @@ TEST_F(EventTest, LocalTrigger)
   bool poisoned = false;
   EXPECT_TRUE(event.has_triggered(1, poisoned));
   EXPECT_FALSE(poisoned);
+}
+
+TEST_F(EventTest, LocalTriggerNotify)
+{
+  DynamicTable<LocalEventTableAllocator> local_events;
+  LocalEventTableAllocator::FreeList *local_event_free_list =
+      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
+  DeferredOperation waiter;
+  GenEventImpl event(nullptr, local_event_free_list);
+
+  event.init(ID::make_event(0, 0, 0), 0);
+  EXPECT_TRUE(event.add_waiter(1, &waiter));
+  event.trigger(1, 0, 0, TimeLimit::responsive());
 }
 
 TEST_F(EventTest, LocalTriggerPoisoned)

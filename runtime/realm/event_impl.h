@@ -186,8 +186,23 @@ namespace Realm {
                                  const void *data, size_t datalen);
     };
 
+    struct EventUpdateMessage {
+      Event event;
+
+      static void handle_message(NodeID sender, const EventUpdateMessage &msg,
+                                 const void *data, size_t datalen, TimeLimit work_until);
+    };
+
     class EventCommunicator {
     public:
+      virtual void update(Event event, NodeID to_update,
+                          EventImpl::gen_t *poisoned_generations, size_t size)
+      {
+        ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations, size);
+        amsg->event = event;
+        amsg.commit();
+      }
+
       virtual void subscribe(Event event, NodeID owner,
                              EventImpl::gen_t previous_subscribe_gen)
       {
@@ -226,6 +241,8 @@ namespace Realm {
       virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
 
       virtual void subscribe(gen_t subscribe_gen);
+      void handle_remote_subscription(NodeID sender, gen_t subscribe_gen,
+                                      gen_t previous_subscribe_gen);
 
       virtual void external_wait(gen_t needed_gen, bool& poisoned);
       virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
@@ -440,15 +457,6 @@ namespace Realm {
     bool poisoned;
 
     static void handle_message(NodeID sender, const EventTriggerMessage &msg,
-			       const void *data, size_t datalen,
-			       TimeLimit work_until);
-
-  };
-
-  struct EventUpdateMessage {
-    Event event;
-
-    static void handle_message(NodeID sender, const EventUpdateMessage &msg,
 			       const void *data, size_t datalen,
 			       TimeLimit work_until);
 
