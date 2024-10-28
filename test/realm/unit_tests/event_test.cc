@@ -5,7 +5,7 @@
 
 using namespace Realm;
 
-class EventTest : public ::testing::Test {};
+class GenEventTest : public ::testing::Test {};
 
 class DeferredOperation : public EventWaiter {
 public:
@@ -37,7 +37,7 @@ public:
   int sent_notification_count = 0;
 };
 
-TEST_F(EventTest, GetCurrentEvent)
+TEST_F(GenEventTest, GetCurrentEvent)
 {
   GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), 0);
@@ -45,7 +45,7 @@ TEST_F(EventTest, GetCurrentEvent)
             ID::make_event(0, 0, 1).event_generation());
 }
 
-TEST_F(EventTest, LocalAddRemoveWaiterSameGen)
+TEST_F(GenEventTest, LocalAddRemoveWaiterSameGen)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t needed_gen = 1;
@@ -59,7 +59,7 @@ TEST_F(EventTest, LocalAddRemoveWaiterSameGen)
   EXPECT_TRUE(event.current_local_waiters.empty());
 }
 
-TEST_F(EventTest, RemoteAddRemoveWaiterDifferentGens)
+TEST_F(GenEventTest, RemoteAddRemoveWaiterDifferentGens)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t needed_gen_add = 1;
@@ -79,7 +79,7 @@ TEST_F(EventTest, RemoteAddRemoveWaiterDifferentGens)
   EXPECT_EQ(event_comm->sent_subscription_count, 1);
 }
 
-TEST_F(EventTest, ProcessUpdateNonOwner)
+TEST_F(GenEventTest, ProcessUpdateNonOwner)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t needed_gen = 1;
@@ -97,7 +97,7 @@ TEST_F(EventTest, ProcessUpdateNonOwner)
   EXPECT_TRUE(waiter_two.triggered);
 }
 
-TEST_F(EventTest, Subscribe)
+TEST_F(GenEventTest, Subscribe)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t subscribe_gen = 2;
@@ -110,7 +110,7 @@ TEST_F(EventTest, Subscribe)
   EXPECT_EQ(event_comm->sent_subscription_count, 1);
 }
 
-TEST_F(EventTest, HandleRemoteSubscriptionUntriggered)
+TEST_F(GenEventTest, HandleRemoteSubscriptionUntriggered)
 {
   const NodeID owner = 0;
   const NodeID sender = 1;
@@ -128,7 +128,7 @@ TEST_F(EventTest, HandleRemoteSubscriptionUntriggered)
   EXPECT_TRUE(event.remote_waiters.contains(sender));
 }
 
-TEST_F(EventTest, HandleRemoteSubscriptionTriggered)
+TEST_F(GenEventTest, HandleRemoteSubscriptionTriggered)
 {
   const NodeID owner = 0;
   const NodeID sender = 1;
@@ -146,7 +146,7 @@ TEST_F(EventTest, HandleRemoteSubscriptionTriggered)
   EXPECT_EQ(event_comm->sent_notification_count, 1);
 }
 
-TEST_F(EventTest, BasicPoisonedTest)
+TEST_F(GenEventTest, BasicPoisonedTest)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t gen = 1;
@@ -157,7 +157,7 @@ TEST_F(EventTest, BasicPoisonedTest)
   EXPECT_FALSE(event.is_generation_poisoned(gen));
 }
 
-TEST_F(EventTest, BasicHasTriggerdTest)
+TEST_F(GenEventTest, BasicHasTriggerdTest)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t gen = 1;
@@ -170,7 +170,7 @@ TEST_F(EventTest, BasicHasTriggerdTest)
   EXPECT_FALSE(poisoned);
 }
 
-TEST_F(EventTest, LocalTrigger)
+TEST_F(GenEventTest, LocalTrigger)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
@@ -187,7 +187,7 @@ TEST_F(EventTest, LocalTrigger)
   EXPECT_FALSE(poisoned);
 }
 
-TEST_F(EventTest, LocalTriggerPoisoned)
+TEST_F(GenEventTest, LocalTriggerPoisoned)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
@@ -204,7 +204,7 @@ TEST_F(EventTest, LocalTriggerPoisoned)
   EXPECT_TRUE(poisoned);
 }
 
-TEST_F(EventTest, RemoteTriggerWithWaiter)
+TEST_F(GenEventTest, RemoteTriggerWithWaiter)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 1;
@@ -225,7 +225,7 @@ TEST_F(EventTest, RemoteTriggerWithWaiter)
   EXPECT_FALSE(waiter_two.triggered);
 }
 
-TEST_F(EventTest, TriggerWithRemoteSubscription)
+TEST_F(GenEventTest, TriggerWithRemoteSubscription)
 {
   const NodeID owner = 0;
   const NodeID sender = 1;
@@ -243,11 +243,10 @@ TEST_F(EventTest, TriggerWithRemoteSubscription)
   EXPECT_EQ(event_comm->sent_notification_count, 1);
 }
 
-TEST_F(EventTest, RemoteTriggerCurrentGen)
+TEST_F(GenEventTest, RemoteTriggerCurrentGen)
 {
   const NodeID owner = 1;
-  const NodeID sender = 1;
-  const GenEventImpl::gen_t subscribe_gen = 1;
+  const GenEventImpl::gen_t trigger_gen = 1;
   MockEventCommunicator *event_comm = new MockEventCommunicator();
   DynamicTable<LocalEventTableAllocator> local_events;
   LocalEventTableAllocator::FreeList *local_event_free_list =
@@ -255,16 +254,14 @@ TEST_F(EventTest, RemoteTriggerCurrentGen)
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(1, 0, 0, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
 
   EXPECT_EQ(event_comm->sent_trigger_count, 1);
 }
 
-TEST_F(EventTest, RemoteTriggerFutureGen)
+TEST_F(GenEventTest, RemoteTriggerFutureGen)
 {
   const NodeID owner = 1;
-  const NodeID sender = 1;
-  const GenEventImpl::gen_t subscribe_gen = 1;
   const GenEventImpl::gen_t trigger_gen = 2;
   MockEventCommunicator *event_comm = new MockEventCommunicator();
   DynamicTable<LocalEventTableAllocator> local_events;
@@ -279,7 +276,7 @@ TEST_F(EventTest, RemoteTriggerFutureGen)
   EXPECT_EQ(event_comm->sent_subscription_count, 1);
 }
 
-TEST_F(EventTest, EventMergerIsActive)
+TEST_F(GenEventTest, EventMergerIsActive)
 {
   const NodeID owner = 0;
   GenEventImpl event(nullptr, nullptr);
