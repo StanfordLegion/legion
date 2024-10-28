@@ -1282,8 +1282,9 @@ namespace Realm {
         }
       }
 
-      if(subscription_recorded)
+      if(subscription_recorded) {
         log_event.debug() << "event subscription recorded: node=" << sender;
+      }
 
       if(trigger_gen > 0) {
         log_event.debug() << "event subscription immediate trigger: node=" << sender
@@ -1720,39 +1721,33 @@ namespace Realm {
 	  }
 	}
 
-	// any remote nodes to notify?
-	if(!to_update.empty()) {
-	  int npg_cached = num_poisoned_generations.load_acquire();
-	  ActiveMessage<EventUpdateMessage> amsg(to_update,
-						 poisoned_generations,
-						 npg_cached*sizeof(EventImpl::gen_t));
-	  amsg->event = make_event(update_gen);
-	  amsg.commit();
-	}
+        // any remote nodes to notify?
+        if(!to_update.empty()) {
+          int npg_cached = num_poisoned_generations.load_acquire();
+          event_comm->update(make_event(update_gen), to_update, poisoned_generations,
+                             npg_cached * sizeof(EventImpl::gen_t));
+        }
 
-	// free event?
+        // free event?
         if(free_event) {
           free_genevent();
         }
       } else {
-	// we're triggering somebody else's event, so the first thing to do is tell them
-	assert(trigger_node == (int)Network::my_node_id);
-	// once we send this message, it's possible we get an update from the owner before
-	//  we take the lock a few lines below here (assuming somebody on this node had 
-	//  already subscribed), so check here that we're triggering a new generation
-	// (the alternative is to not send the message until after we update local state, but
-	// that adds latency for everybody else)
-	assert(gen_triggered > generation.load());
-	ActiveMessage<EventTriggerMessage> amsg(owner);
-	amsg->event = make_event(gen_triggered);
-	amsg->poisoned = poisoned;
-	amsg.commit();
-	// we might need to subscribe to intermediate generations
-	bool subscribe_needed = false;
-	gen_t previous_subscribe_gen = 0;
+        // we're triggering somebody else's event, so the first thing to do is tell them
+        assert(trigger_node == (int)Network::my_node_id);
+        // once we send this message, it's possible we get an update from the owner before
+        //  we take the lock a few lines below here (assuming somebody on this node had
+        //  already subscribed), so check here that we're triggering a new generation
+        // (the alternative is to not send the message until after we update local state,
+        // but that adds latency for everybody else)
+        assert(gen_triggered > generation.load());
+        event_comm->trigger(make_event(gen_triggered), owner, poisoned);
+        // we might need to subscribe to intermediate generations
+        bool subscribe_needed = false;
+        gen_t previous_subscribe_gen = 0;
 
-	// now update our version of the data structure
-	{
+        // now update our version of the data structure
+        {
 	  AutoLock<> a(mutex);
 
 	  gen_t cur_gen = generation.load();
@@ -1818,12 +1813,9 @@ namespace Realm {
 	  }
 	}
 
-	if(subscribe_needed) {
-	  ActiveMessage<EventSubscribeMessage> amsg(owner);
-	  amsg->event = make_event(gen_triggered);
-	  amsg->previous_subscribe_gen = previous_subscribe_gen;
-	  amsg.commit();
-	}
+        if(subscribe_needed) {
+          event_comm->subscribe(make_event(gen_triggered), owner, previous_subscribe_gen);
+        }
       }
 
       // finally, trigger any local waiters

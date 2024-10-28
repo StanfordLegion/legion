@@ -178,6 +178,14 @@ namespace Realm {
       unsigned num_preconditions, max_preconditions;
     };
 
+    struct EventTriggerMessage {
+      Event event;
+      bool poisoned;
+
+      static void handle_message(NodeID sender, const EventTriggerMessage &msg,
+                                 const void *data, size_t datalen, TimeLimit work_until);
+    };
+
     struct EventSubscribeMessage {
       Event event;
       EventImpl::gen_t previous_subscribe_gen;
@@ -195,6 +203,24 @@ namespace Realm {
 
     class EventCommunicator {
     public:
+      virtual ~EventCommunicator() = default;
+
+      virtual void trigger(Event event, NodeID owner, bool poisoned)
+      {
+        ActiveMessage<EventTriggerMessage> amsg(owner);
+        amsg->event = event;
+        amsg->poisoned = poisoned;
+        amsg.commit();
+      }
+
+      virtual void update(Event event, NodeSet to_update,
+                          EventImpl::gen_t *poisoned_generations, size_t size)
+      {
+        for(const NodeID node : to_update) {
+          update(event, node, poisoned_generations, size);
+        }
+      }
+
       virtual void update(Event event, NodeID to_update,
                           EventImpl::gen_t *poisoned_generations, size_t size)
       {
@@ -451,16 +477,6 @@ namespace Realm {
     };
 
   // active messages
-
-  struct EventTriggerMessage {
-    Event event;
-    bool poisoned;
-
-    static void handle_message(NodeID sender, const EventTriggerMessage &msg,
-			       const void *data, size_t datalen,
-			       TimeLimit work_until);
-
-  };
 
   struct CompQueueDestroyMessage {
     CompletionQueue comp_queue;
