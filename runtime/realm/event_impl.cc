@@ -1750,7 +1750,7 @@ namespace Realm {
           gen_t cur_gen = generation.load();
           // is this the "next" version?
           if(gen_triggered == (cur_gen + 1)) {
-	    // yes, so we have complete information and can update the state directly
+            // yes, so we have complete information and can update the state directly
 	    to_wake.swap(current_local_waiters);
 	    // any future waiters?
 	    if(!future_local_waiters.empty()) {
@@ -1776,32 +1776,32 @@ namespace Realm {
 	    // update generation last, with a store_release to make sure poisoned generation
 	    // list is valid to any observer of this update
 	    generation.store_release(gen_triggered);
-	  } else 
-	    if(gen_triggered > (cur_gen + 1)) {
-	      // we can't update the main state because there are generations that we know
-	      //  have triggered, but we do not know if they are poisoned, so look in the
-	      //  future waiter list to see who we can wake, and update the local trigger
-	      //  list
+          } else if(gen_triggered > (cur_gen + 1)) {
+            // we can't update the main state because there are generations that we know
+            //  have triggered, but we do not know if they are poisoned, so look in the
+            //  future waiter list to see who we can wake, and update the local trigger
+            //  list
 
-	      std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.find(gen_triggered);
-	      if(it != future_local_waiters.end()) {
-		to_wake.swap(it->second);
-		future_local_waiters.erase(it);
-	      }
+            std::map<gen_t, EventWaiter::EventWaiterList>::iterator it =
+                future_local_waiters.find(gen_triggered);
+            if(it != future_local_waiters.end()) {
+              to_wake.swap(it->second);
+              future_local_waiters.erase(it);
+            }
 
-	      local_triggers[gen_triggered] = poisoned;
-	      has_local_triggers = true;
+            local_triggers[gen_triggered] = poisoned;
+            has_local_triggers = true;
 
-	      // TODO: this might still cause shutdown races - do we really
-	      //  need to do this at all?
-	      if(gen_triggered > (gen_subscribed.load() + 1)) {
-		subscribe_needed = true;
-		previous_subscribe_gen = gen_subscribed.load();
-		gen_subscribed.store(gen_triggered);
-	      }
-	    }
+            // TODO: this might still cause shutdown races - do we really
+            //  need to do this at all?
+            if(gen_triggered > (gen_subscribed.load() + 1)) {
+              subscribe_needed = true;
+              previous_subscribe_gen = gen_subscribed.load();
+              gen_subscribed.store(gen_triggered);
+            }
+          }
 
-	  // external waiters need to be signalled inside the lock
+          // external waiters need to be signalled inside the lock
 	  if(has_external_waiters) {
 	    has_external_waiters = false;
             // also need external waiter mutex
