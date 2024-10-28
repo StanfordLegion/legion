@@ -1747,7 +1747,7 @@ namespace Realm {
         {
           AutoLock<> a(mutex);
 
-	  gen_t cur_gen = generation.load();
+          gen_t cur_gen = generation.load();
 	  // is this the "next" version?
 	  if(gen_triggered == (cur_gen + 1)) {
 	    // yes, so we have complete information and can update the state directly

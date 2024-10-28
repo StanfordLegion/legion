@@ -173,48 +173,56 @@ TEST_F(EventTest, BasicHasTriggerdTest)
 TEST_F(EventTest, LocalTrigger)
 {
   const NodeID owner = 0;
-  const GenEventImpl::gen_t gen = 1;
+  const GenEventImpl::gen_t trigger_gen = 1;
   DynamicTable<LocalEventTableAllocator> local_events;
   LocalEventTableAllocator::FreeList *local_event_free_list =
       new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(gen, 0, 0, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
 
   bool poisoned = false;
-  EXPECT_TRUE(event.has_triggered(1, poisoned));
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
   EXPECT_FALSE(poisoned);
-}
-
-TEST_F(EventTest, LocalTriggerNotify)
-{
-  const NodeID owner = 0;
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
-  DeferredOperation waiter;
-  GenEventImpl event(nullptr, local_event_free_list);
-
-  event.init(ID::make_event(0, 0, 0), owner);
-  EXPECT_TRUE(event.add_waiter(1, &waiter));
-  event.trigger(1, 0, 0, TimeLimit::responsive());
 }
 
 TEST_F(EventTest, LocalTriggerPoisoned)
 {
   const NodeID owner = 0;
+  const GenEventImpl::gen_t trigger_gen = 1;
   DynamicTable<LocalEventTableAllocator> local_events;
   LocalEventTableAllocator::FreeList *local_event_free_list =
       new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list);
   event.init(ID::make_event(0, 0, 0), owner);
 
-  event.trigger(1, 0, /*poisoned=*/true, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, /*poisoned=*/true, TimeLimit::responsive());
 
   bool poisoned = false;
-  EXPECT_TRUE(event.has_triggered(1, poisoned));
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
   EXPECT_TRUE(poisoned);
+}
+
+TEST_F(EventTest, RemoteTriggerWithWaiter)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t trigger_gen = 1;
+  MockEventCommunicator *event_comm = new MockEventCommunicator();
+  DynamicTable<LocalEventTableAllocator> local_events;
+  LocalEventTableAllocator::FreeList *local_event_free_list =
+      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  EXPECT_TRUE(event.add_waiter(trigger_gen, &waiter_one));
+  EXPECT_TRUE(event.add_waiter(trigger_gen + 1, &waiter_two));
+  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
+
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_FALSE(waiter_two.triggered);
 }
 
 TEST_F(EventTest, TriggerWithRemoteSubscription)
