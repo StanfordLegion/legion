@@ -1200,10 +1200,7 @@ namespace Realm {
       }
 
       if((subscribe_owner != -1)) {
-	ActiveMessage<EventSubscribeMessage> amsg(owner);
-	amsg->event = make_event(needed_gen);
-	amsg->previous_subscribe_gen = previous_subscribe_gen;
-	amsg.commit();
+        event_comm->subscribe(make_event(needed_gen), owner, previous_subscribe_gen);
       }
 
       if(trigger_now)
@@ -1748,7 +1745,7 @@ namespace Realm {
 
         // now update our version of the data structure
         {
-	  AutoLock<> a(mutex);
+          AutoLock<> a(mutex);
 
 	  gen_t cur_gen = generation.load();
 	  // is this the "next" version?
@@ -1811,7 +1808,7 @@ namespace Realm {
             AutoLock<KernelMutex> al2(external_waiter_mutex);
 	    external_waiter_condvar.broadcast();
 	  }
-	}
+        }
 
         if(subscribe_needed) {
           event_comm->subscribe(make_event(gen_triggered), owner, previous_subscribe_gen);
