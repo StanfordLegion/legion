@@ -1749,7 +1749,7 @@ namespace Realm {
 
           gen_t cur_gen = generation.load();
           // is this the "next" version?
-	  if(gen_triggered == (cur_gen + 1)) {
+          if(gen_triggered == (cur_gen + 1)) {
 	    // yes, so we have complete information and can update the state directly
 	    to_wake.swap(current_local_waiters);
 	    // any future waiters?

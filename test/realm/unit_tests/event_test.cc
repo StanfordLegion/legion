@@ -5,8 +5,6 @@
 
 using namespace Realm;
 
-class GenEventTest : public ::testing::Test {};
-
 class DeferredOperation : public EventWaiter {
 public:
   void defer(Event wait_on) {}
@@ -37,6 +35,22 @@ public:
   int sent_notification_count = 0;
 };
 
+class GenEventTest : public ::testing::Test {
+protected:
+  void SetUp() override
+  {
+    event_comm = new MockEventCommunicator();
+    local_event_free_list =
+        new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
+  }
+
+  void TearDown() override { delete local_event_free_list; }
+
+  LocalEventTableAllocator::FreeList *local_event_free_list;
+  MockEventCommunicator *event_comm;
+  DynamicTable<LocalEventTableAllocator> local_events;
+};
+
 TEST_F(GenEventTest, GetCurrentEvent)
 {
   GenEventImpl event(nullptr, nullptr);
@@ -64,10 +78,6 @@ TEST_F(GenEventTest, RemoteAddRemoveWaiterDifferentGens)
   const NodeID owner = 1;
   const GenEventImpl::gen_t needed_gen_add = 1;
   const GenEventImpl::gen_t needed_gen_rem = 2;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
   DeferredOperation waiter;
 
@@ -115,10 +125,6 @@ TEST_F(GenEventTest, HandleRemoteSubscriptionUntriggered)
   const NodeID owner = 0;
   const NodeID sender = 1;
   const GenEventImpl::gen_t subscribe_gen = 1;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -133,10 +139,6 @@ TEST_F(GenEventTest, HandleRemoteSubscriptionTriggered)
   const NodeID owner = 0;
   const NodeID sender = 1;
   const GenEventImpl::gen_t subscribe_gen = 1;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -174,9 +176,6 @@ TEST_F(GenEventTest, LocalTrigger)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -191,9 +190,6 @@ TEST_F(GenEventTest, LocalTriggerPoisoned)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list);
   event.init(ID::make_event(0, 0, 0), owner);
 
@@ -208,10 +204,6 @@ TEST_F(GenEventTest, RemoteTriggerWithWaiter)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 1;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
@@ -230,10 +222,6 @@ TEST_F(GenEventTest, TriggerWithRemoteSubscription)
   const NodeID owner = 0;
   const NodeID sender = 1;
   const GenEventImpl::gen_t subscribe_gen = 1;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -247,10 +235,6 @@ TEST_F(GenEventTest, RemoteTriggerCurrentGen)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 1;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -263,10 +247,6 @@ TEST_F(GenEventTest, RemoteTriggerFutureGen)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 2;
-  MockEventCommunicator *event_comm = new MockEventCommunicator();
-  DynamicTable<LocalEventTableAllocator> local_events;
-  LocalEventTableAllocator::FreeList *local_event_free_list =
-      new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
