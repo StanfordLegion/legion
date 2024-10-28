@@ -4026,37 +4026,6 @@ class LogicalVerificationState(object):
                 # all of their local points are
                 need_fence = False
 
-            '''
-            if op.has_point_wise_dependence(req.index):
-                state_bad_graph_on_error = op.state.bad_graph_on_error
-                state_assert = op.state.assert_on_error
-                op.state.bad_graph_on_error = False
-                op.state.assert_on_error = False
-
-                has_mapping_dependence = op.has_mapping_dependence(req, prev_op, prev_req, dep_type, self.field,
-                        show_error=False)
-
-                op.state.bad_graph_on_error = state_bad_graph_on_error
-                op.state.assert_on_error = state_assert
-                if has_mapping_dependence:
-                    return dominates, True
-
-                if logical_op.uid == 7:
-                    breakpoint()
-                if not op.has_verification_point_wise_mapping_dependence(
-                    op.reqs[req.index], prev_op,
-                    prev_op.reqs[prev_req.index], dep_type,
-                    self.field, previous_deps):
-                    breakpoint()
-                else:
-                    brakpoint()
-
-            if not logical_op.has_verification_mapping_dependence(
-                    logical_op.reqs[req.index], prev_logical, 
-                    prev_logical.reqs[prev_req.index], dep_type, 
-                    self.field, need_fence, previous_deps):
-                return dominates,False
-            '''
             f = io.StringIO()
             with redirect_stdout(f):
                 try:
@@ -4069,16 +4038,20 @@ class LogicalVerificationState(object):
                         return dominates,True
                 except AssertionError:
                     if op.state.has_point_wise_dependeces:
-                        if op.has_point_wise_dependence(req.index):
-                            has_mapping_dependence = op.has_mapping_dependence(req,
-                                    prev_op, prev_req, dep_type, self.field)
-                            if has_mapping_dependence:
+                        try:
+                            if op.has_point_wise_dependence(req.index):
+                                has_mapping_dependence = op.has_mapping_dependence(req,
+                                        prev_op, prev_req, dep_type, self.field)
+                                if has_mapping_dependence:
+                                    return dominates, True
+                        except AssertionError:
+                            if not op.has_verification_point_wise_mapping_dependence(
+                                    op.reqs[req.index], prev_op,
+                                    prev_op.reqs[prev_req.index], dep_type,
+                                self.field, previous_deps):
+                                return dominates, False
+                            else:
                                 return dominates, True
-                        if not op.has_verification_point_wise_mapping_dependence(
-                                op.reqs[req.index], prev_op,
-                                prev_op.reqs[prev_req.index], dep_type,
-                            self.field, previous_deps):
-                            return dominates, False
                     else:
                         print(f.getvalue())
                         if op.state.assert_on_error:
@@ -7595,6 +7568,7 @@ class Operation(object):
                                                     field, tree_id, previous_deps)
         # Did not find it so issue the error and return false
         if prev_op not in previous_deps:
+            breakpoint()
             print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
                   "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
@@ -7609,36 +7583,39 @@ class Operation(object):
 
     def has_verification_transitive_point_wise_mapping_dependence(self, prev_op,
                                                     field, tree_id, previous_deps):
-        # Equal is for stupid must epoch launches
-        #assert prev_op.get_context_index() <= self.get_context_index()
-        if True:
-            # If we don't need a close then we can do BFS which is much more efficient
-            # at finding dependences of things nearby in the graph
-            queue = collections.deque()
-            queue.append(self)
-            if len(previous_deps) > 0:
-                # We already started BFS-ing so we can restart from all
-                # the operations that we already visited
-                for op in iterkeys(previous_deps):
-                    #if prev_op.get_context_index() <= op.get_context_index():
-                    queue.append(op)
-            while queue:
-                current = queue.popleft()
-                if not current.logical_incoming:
-                    continue
-                # If this operation comes earlier in the program than the
-                # previous operation that we're searching for then there
-                # is no need to search past it for now
-                #if current.get_context_index() < prev_op.get_context_index():
-                #    continue
-                for next_op in current.logical_incoming:
-                    if next_op in previous_deps:
-                        continue
-                    previous_deps[next_op] = None
-                    if next_op is prev_op:
-                        return True
-                    queue.append(next_op)
 
+        # If we don't need a close then we can do BFS which is much more efficient
+        # at finding dependences of things nearby in the graph
+        queue = collections.deque()
+        queue.append(self)
+        if len(previous_deps) > 0:
+            # We already started BFS-ing so we can restart from all
+            # the operations that we already visited
+            for op in iterkeys(previous_deps):
+                queue.append(op)
+
+        queue.append(self.index_owner)
+
+        while queue:
+            current = queue.popleft()
+            if current.is_index_op():
+                for point in current.points.values():
+                    if point.op in previous_deps:
+                        continue
+                    queue.append(point.op)
+            else:
+                if current.index_owner and current.index_owner not in previous_deps:
+                    queue.append(current.index_owner)
+
+            if not current.logical_incoming:
+                continue
+            for next_op in current.logical_incoming:
+                if next_op in previous_deps:
+                    continue
+                previous_deps[next_op] = None
+                if next_op is prev_op:
+                    return True
+                queue.append(next_op)
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
                                             field, need_fence, previous_deps):
