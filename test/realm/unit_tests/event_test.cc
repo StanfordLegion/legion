@@ -133,18 +133,22 @@ TEST_F(GenEventTest, ProcessUpdateNonOwner)
   const GenEventImpl::gen_t current_gen = 1;
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
+  std::vector<GenEventImpl::gen_t> poisoned_gens{1, 2};
   GenEventImpl event(nullptr, nullptr);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.process_update(current_gen, 0, 0, TimeLimit::responsive());
+  event.process_update(current_gen, poisoned_gens.data(), poisoned_gens.size(),
+                       TimeLimit::responsive());
   event.add_waiter(needed_gen, &waiter_one);
   event.add_waiter(needed_gen, &waiter_two);
 
   EXPECT_TRUE(waiter_one.triggered);
   EXPECT_TRUE(waiter_two.triggered);
+  EXPECT_EQ(event.generation.load(), current_gen);
+  EXPECT_EQ(event.num_poisoned_generations.load(), 2);
 }
 
-TEST_F(GenEventTest, RemoteSubscribe)
+TEST_F(GenEventTest, RemoteSubscribeNextGen)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t subscribe_gen = 2;
@@ -155,6 +159,20 @@ TEST_F(GenEventTest, RemoteSubscribe)
   event.subscribe(subscribe_gen);
 
   EXPECT_EQ(event_comm->sent_subscription_count, 1);
+}
+
+TEST_F(GenEventTest, RemoteSubscribeCurrGen)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t subscribe_gen = 1;
+  MockEventCommunicator *event_comm = new MockEventCommunicator();
+  GenEventImpl event(nullptr, nullptr, event_comm);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.process_update(subscribe_gen, 0, 0, TimeLimit::responsive());
+  event.subscribe(subscribe_gen);
+
+  EXPECT_EQ(event_comm->sent_subscription_count, 0);
 }
 
 TEST_F(GenEventTest, HasTriggeredOnUntriggered)
