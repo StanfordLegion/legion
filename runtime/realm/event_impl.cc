@@ -1514,370 +1514,374 @@ namespace Realm {
 
   bool GenEventImpl::has_triggered(gen_t needed_gen, bool &poisoned)
   {
-      // lock-free check
-      if(needed_gen <= generation.load_acquire()) {
-	// it is safe to call is_generation_poisoned after just a load_acquire
-	poisoned = is_generation_poisoned(needed_gen);
-	return true;
-      }
-
-      // if the above check fails, we have to see if we have performed any local triggers -
-      // if not, we can internally-consistently say that the event hasn't triggered from our
-      // perspective yet
-      if(!has_local_triggers) {
-	poisoned = false;
-	return false;
-      }
-
-      // both easy cases failed, so take the lock that lets us see which local triggers exist
-      // this prevents us from ever answering "no" on the current node if the trigger occurred here
-      AutoLock<> a(mutex);
-      // In order to avoid cases where has_triggered gives non-monotonic results
-      // you also have to retest the generation condition above while holding the lock
-      if(needed_gen <= generation.load()) {
-        poisoned = is_generation_poisoned(needed_gen);
-        return true;
-      }
-      std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
-      if(it != local_triggers.end()) {
-        poisoned = it->second;
-        return true;
-      }
-      return false;
-  }
-
-    void GenEventImpl::subscribe(gen_t subscribe_gen)
-    {
-      // should never be called on a local event
-      assert(owner != Network::my_node_id);
-      
-      // lock-free check on previous subscriptions or known triggers
-      if((subscribe_gen <= gen_subscribed.load_acquire()) ||
-	 (subscribe_gen <= generation.load_acquire()))
-	return;
-
-      bool subscribe_needed = false;
-      gen_t previous_subscribe_gen = 0;
-      {
-	AutoLock<> a(mutex);
-
-	// if the requested generation is already known to be triggered
-	bool already_triggered = false;
-	if(subscribe_gen <= generation.load()) {
-	  already_triggered = true;
-	} else 
-	  if(has_local_triggers) {
-	    // if we have a local trigger (poisoned or not), that counts too
-	    if(local_triggers.count(subscribe_gen))
-	      already_triggered = true;
-	  }
-
-	if(!already_triggered && (subscribe_gen > gen_subscribed.load())) {
-	  subscribe_needed = true;
-	  previous_subscribe_gen = gen_subscribed.load();
-	  gen_subscribed.store(subscribe_gen);
-	}
-      }
-
-      if(subscribe_needed) {
-        event_comm->subscribe(make_event(subscribe_gen), owner, previous_subscribe_gen);
-      }
-    }
-
-    void GenEventImpl::external_wait(gen_t gen_needed, bool& poisoned)
-    {
-      // if the event is remote, make sure we've subscribed
-      if(this->owner != Network::my_node_id)
-	this->subscribe(gen_needed);
-
-      {
-	AutoLock<> a(mutex);
-
-	// wait until the generation has advanced far enough
-	while(gen_needed > generation.load_acquire()) {
-	  has_external_waiters = true;
-          // must wait on external_waiter_condvar with external_waiter_mutex
-          //  but NOT with base mutex - hand-over-hand lock on the way in,
-          //  and then release external_waiter mutex before retaking main
-          //  mutex
-          external_waiter_mutex.lock();
-          mutex.unlock();
-	  external_waiter_condvar.wait();
-          external_waiter_mutex.unlock();
-          mutex.lock();
-	}
-
-	poisoned = is_generation_poisoned(gen_needed);
-      }
-    }
-
-    bool GenEventImpl::external_timedwait(gen_t gen_needed, bool& poisoned,
-					  long long max_ns)
-    {
-      long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
-      {
-	AutoLock<> a(mutex);
-
-	// wait until the generation has advanced far enough
-	while(gen_needed > generation.load_acquire()) {
-	  long long now = Clock::current_time_in_nanoseconds();
-	  if(now >= deadline)
-	    return false;  // trigger has not occurred
-	  has_external_waiters = true;
-	  // we don't actually care what timedwait returns - we'll recheck
-	  //  the generation ourselves
-          // must wait on external_waiter_condvar with external_waiter_mutex
-          //  but NOT with base mutex - hand-over-hand lock on the way in,
-          //  and then release external_waiter mutex before retaking main
-          //  mutex
-          external_waiter_mutex.lock();
-          mutex.unlock();
-	  external_waiter_condvar.timedwait(deadline - now);
-          external_waiter_mutex.unlock();
-          mutex.lock();
-	}
-
-	poisoned = is_generation_poisoned(gen_needed);
-      }
+    // lock-free check
+    if(needed_gen <= generation.load_acquire()) {
+      // it is safe to call is_generation_poisoned after just a load_acquire
+      poisoned = is_generation_poisoned(needed_gen);
       return true;
     }
 
-    void GenEventImpl::trigger(gen_t gen_triggered, int trigger_node,
-			       bool poisoned, TimeLimit work_until)
-    {
-      Event e = make_event(gen_triggered);
-      log_event.debug() << "event triggered: event=" << e << " by node " << trigger_node
-			<< " (poisoned=" << poisoned << ")";
-
-      EventWaiter::EventWaiterList to_wake;
-
-      if(Network::my_node_id == owner) {
-	// we own this event
-
-	NodeSet to_update;
-	gen_t update_gen;
-	bool free_event = false;
-
-	{
-	  AutoLock<> a(mutex);
-
-	  // must always be the next generation
-	  assert(gen_triggered == (generation.load() + 1));
-
-	  to_wake.swap(current_local_waiters);
-	  assert(future_local_waiters.empty()); // no future waiters here
-
-	  to_update.swap(remote_waiters);
-	  update_gen = gen_triggered;
-
-	  // update poisoned generation list
-	  bool max_poisons = false;
-	  if(poisoned) {
-	    if(!poisoned_generations)
-	      poisoned_generations = new gen_t[POISONED_GENERATION_LIMIT];
-	    int npg_cached = num_poisoned_generations.load();
-	    assert(npg_cached < POISONED_GENERATION_LIMIT);
-	    poisoned_generations[npg_cached] = gen_triggered;
-	    num_poisoned_generations.store_release(npg_cached + 1);
-	    if((npg_cached + 1) == POISONED_GENERATION_LIMIT)
-	      max_poisons = true;
-	  }
-
-    // Drop the trigger operation now that this event has been triggered
-    if (current_trigger_op != nullptr) {
-#ifdef REALM_USE_OPERATION_TABLE
-      // If the operation table is not in play, the operation will hold it's own reference and clean it up
-      // Otherwise, this is a local operation and the event owns the reference, so clean it up.
-      current_trigger_op->remove_reference();
-#endif // REALM_USE_OPERATION_TABLE
-      current_trigger_op = nullptr;
-      get_runtime()->num_untriggered_events.fetch_sub(1);
+    // if the above check fails, we have to see if we have performed any local triggers -
+    // if not, we can internally-consistently say that the event hasn't triggered from our
+    // perspective yet
+    if(!has_local_triggers) {
+      poisoned = false;
+      return false;
     }
 
-	  // update generation last, with a synchronization to make sure poisoned generation
-	  // list is valid to any observer of this update
-	  generation.store_release(gen_triggered);
+    // both easy cases failed, so take the lock that lets us see which local triggers
+    // exist this prevents us from ever answering "no" on the current node if the trigger
+    // occurred here
+    AutoLock<> a(mutex);
+    // In order to avoid cases where has_triggered gives non-monotonic results
+    // you also have to retest the generation condition above while holding the lock
+    if(needed_gen <= generation.load()) {
+      poisoned = is_generation_poisoned(needed_gen);
+      return true;
+    }
+    std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+    if(it != local_triggers.end()) {
+      poisoned = it->second;
+      return true;
+    }
+    return false;
+  }
 
-	  // we'll free the event unless it's maxed out on poisoned generations
-	  //  or generation count
-	  free_event = ((gen_triggered < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)) &&
-			!max_poisons);
-	  // special case: if the merger is still active, defer the
-	  //  re-insertion until all the preconditions have triggered
-	  if(free_event && merger.is_active()) {
-	    free_list_insertion_delayed = true;
-	    free_event = false;
-	  }
+  void GenEventImpl::subscribe(gen_t subscribe_gen)
+  {
+    // should never be called on a local event
+    assert(owner != Network::my_node_id);
 
-	  // external waiters need to be signalled inside the lock
-	  if(has_external_waiters) {
-	    has_external_waiters = false;
-            // also need external waiter mutex
-            AutoLock<KernelMutex> al2(external_waiter_mutex);
-	    external_waiter_condvar.broadcast();
-	  }
-	}
+    // lock-free check on previous subscriptions or known triggers
+    if((subscribe_gen <= gen_subscribed.load_acquire()) ||
+       (subscribe_gen <= generation.load_acquire()))
+      return;
 
-        // any remote nodes to notify?
-        if(!to_update.empty()) {
-          int npg_cached = num_poisoned_generations.load_acquire();
-          event_comm->update(make_event(update_gen), to_update, poisoned_generations,
-                             npg_cached * sizeof(EventImpl::gen_t));
+    bool subscribe_needed = false;
+    gen_t previous_subscribe_gen = 0;
+    {
+      AutoLock<> a(mutex);
+
+      // if the requested generation is already known to be triggered
+      bool already_triggered = false;
+      if(subscribe_gen <= generation.load()) {
+        already_triggered = true;
+      } else if(has_local_triggers) {
+        // if we have a local trigger (poisoned or not), that counts too
+        if(local_triggers.count(subscribe_gen))
+          already_triggered = true;
+      }
+
+      if(!already_triggered && (subscribe_gen > gen_subscribed.load())) {
+        subscribe_needed = true;
+        previous_subscribe_gen = gen_subscribed.load();
+        gen_subscribed.store(subscribe_gen);
+      }
+    }
+
+    if(subscribe_needed) {
+      event_comm->subscribe(make_event(subscribe_gen), owner, previous_subscribe_gen);
+    }
+  }
+
+  void GenEventImpl::external_wait(gen_t gen_needed, bool &poisoned)
+  {
+    // if the event is remote, make sure we've subscribed
+    if(this->owner != Network::my_node_id)
+      this->subscribe(gen_needed);
+
+    {
+      AutoLock<> a(mutex);
+
+      // wait until the generation has advanced far enough
+      while(gen_needed > generation.load_acquire()) {
+        has_external_waiters = true;
+        // must wait on external_waiter_condvar with external_waiter_mutex
+        //  but NOT with base mutex - hand-over-hand lock on the way in,
+        //  and then release external_waiter mutex before retaking main
+        //  mutex
+        external_waiter_mutex.lock();
+        mutex.unlock();
+        external_waiter_condvar.wait();
+        external_waiter_mutex.unlock();
+        mutex.lock();
+      }
+
+      poisoned = is_generation_poisoned(gen_needed);
+    }
+  }
+
+  bool GenEventImpl::external_timedwait(gen_t gen_needed, bool &poisoned,
+                                        long long max_ns)
+  {
+    long long deadline = Clock::current_time_in_nanoseconds() + max_ns;
+    {
+      AutoLock<> a(mutex);
+
+      // wait until the generation has advanced far enough
+      while(gen_needed > generation.load_acquire()) {
+        long long now = Clock::current_time_in_nanoseconds();
+        if(now >= deadline)
+          return false; // trigger has not occurred
+        has_external_waiters = true;
+        // we don't actually care what timedwait returns - we'll recheck
+        //  the generation ourselves
+        // must wait on external_waiter_condvar with external_waiter_mutex
+        //  but NOT with base mutex - hand-over-hand lock on the way in,
+        //  and then release external_waiter mutex before retaking main
+        //  mutex
+        external_waiter_mutex.lock();
+        mutex.unlock();
+        external_waiter_condvar.timedwait(deadline - now);
+        external_waiter_mutex.unlock();
+        mutex.lock();
+      }
+
+      poisoned = is_generation_poisoned(gen_needed);
+    }
+    return true;
+  }
+
+  void GenEventImpl::trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
+                             TimeLimit work_until)
+  {
+    Event e = make_event(gen_triggered);
+    log_event.debug() << "event triggered: event=" << e << " by node " << trigger_node
+                      << " (poisoned=" << poisoned << ")";
+
+    EventWaiter::EventWaiterList to_wake;
+
+    if(Network::my_node_id == owner) {
+      // we own this event
+
+      NodeSet to_update;
+      gen_t update_gen;
+      bool free_event = false;
+
+      {
+        AutoLock<> a(mutex);
+
+        // must always be the next generation
+        assert(gen_triggered == (generation.load() + 1));
+
+        to_wake.swap(current_local_waiters);
+        assert(future_local_waiters.empty()); // no future waiters here
+
+        to_update.swap(remote_waiters);
+        update_gen = gen_triggered;
+
+        // update poisoned generation list
+        bool max_poisons = false;
+        if(poisoned) {
+          if(!poisoned_generations)
+            poisoned_generations = new gen_t[POISONED_GENERATION_LIMIT];
+          int npg_cached = num_poisoned_generations.load();
+          assert(npg_cached < POISONED_GENERATION_LIMIT);
+          poisoned_generations[npg_cached] = gen_triggered;
+          num_poisoned_generations.store_release(npg_cached + 1);
+          if((npg_cached + 1) == POISONED_GENERATION_LIMIT)
+            max_poisons = true;
         }
 
-        // free event?
-        if(free_event) {
-          free_genevent();
+        // Drop the trigger operation now that this event has been triggered
+        if(current_trigger_op != nullptr) {
+#ifdef REALM_USE_OPERATION_TABLE
+          // If the operation table is not in play, the operation will hold it's own
+          // reference and clean it up Otherwise, this is a local operation and the event
+          // owns the reference, so clean it up.
+          current_trigger_op->remove_reference();
+#endif // REALM_USE_OPERATION_TABLE
+          current_trigger_op = nullptr;
+          get_runtime()->num_untriggered_events.fetch_sub(1);
         }
-      } else {
-        // we're triggering somebody else's event, so the first thing to do is tell them
-        assert(trigger_node == (int)Network::my_node_id);
-        // once we send this message, it's possible we get an update from the owner before
-        //  we take the lock a few lines below here (assuming somebody on this node had
-        //  already subscribed), so check here that we're triggering a new generation
-        // (the alternative is to not send the message until after we update local state,
-        // but that adds latency for everybody else)
-        assert(gen_triggered > generation.load());
-        event_comm->trigger(make_event(gen_triggered), owner, poisoned);
-        // we might need to subscribe to intermediate generations
-        bool subscribe_needed = false;
-        gen_t previous_subscribe_gen = 0;
 
-        // now update our version of the data structure
-        {
-          AutoLock<> a(mutex);
+        // update generation last, with a synchronization to make sure poisoned generation
+        // list is valid to any observer of this update
+        generation.store_release(gen_triggered);
 
-          gen_t cur_gen = generation.load();
-          // is this the "next" version?
-          if(gen_triggered == (cur_gen + 1)) {
-            // yes, so we have complete information and can update the state directly
-	    to_wake.swap(current_local_waiters);
-	    // any future waiters?
-	    if(!future_local_waiters.empty()) {
-	      std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
-	      log_event.debug() << "future waiters non-empty: first=" << it->first << " (= " << (gen_triggered + 1) << "?)";
-	      if(it->first == (gen_triggered + 1)) {
-		current_local_waiters.swap(it->second);
-		future_local_waiters.erase(it);
-	      }
-	    }
-	    // if this event was poisoned, record it in the local triggers since we only
-	    //  update the official poison list on owner update messages
-	    if(poisoned) {
-	      local_triggers[gen_triggered] = true;
-	      has_local_triggers = true;
-	      if(gen_triggered > gen_subscribed.load()) {
-		subscribe_needed = true; // make sure we get that update
-		previous_subscribe_gen = gen_subscribed.load();
-		gen_subscribed.store(gen_triggered);
-	      }
-	    }
+        // we'll free the event unless it's maxed out on poisoned generations
+        //  or generation count
+        free_event =
+            ((gen_triggered < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)) && !max_poisons);
+        // special case: if the merger is still active, defer the
+        //  re-insertion until all the preconditions have triggered
+        if(free_event && merger.is_active()) {
+          free_list_insertion_delayed = true;
+          free_event = false;
+        }
 
-	    // update generation last, with a store_release to make sure poisoned generation
-	    // list is valid to any observer of this update
-	    generation.store_release(gen_triggered);
-          } else if(gen_triggered > (cur_gen + 1)) {
-            // we can't update the main state because there are generations that we know
-            //  have triggered, but we do not know if they are poisoned, so look in the
-            //  future waiter list to see who we can wake, and update the local trigger
-            //  list
+        // external waiters need to be signalled inside the lock
+        if(has_external_waiters) {
+          has_external_waiters = false;
+          // also need external waiter mutex
+          AutoLock<KernelMutex> al2(external_waiter_mutex);
+          external_waiter_condvar.broadcast();
+        }
+      }
 
+      // any remote nodes to notify?
+      if(!to_update.empty()) {
+        int npg_cached = num_poisoned_generations.load_acquire();
+        event_comm->update(make_event(update_gen), to_update, poisoned_generations,
+                           npg_cached * sizeof(EventImpl::gen_t));
+      }
+
+      // free event?
+      if(free_event) {
+        free_genevent();
+      }
+    } else {
+      // we're triggering somebody else's event, so the first thing to do is tell them
+      assert(trigger_node == (int)Network::my_node_id);
+      // once we send this message, it's possible we get an update from the owner before
+      //  we take the lock a few lines below here (assuming somebody on this node had
+      //  already subscribed), so check here that we're triggering a new generation
+      // (the alternative is to not send the message until after we update local state,
+      // but that adds latency for everybody else)
+      assert(gen_triggered > generation.load());
+      event_comm->trigger(make_event(gen_triggered), owner, poisoned);
+      // we might need to subscribe to intermediate generations
+      bool subscribe_needed = false;
+      gen_t previous_subscribe_gen = 0;
+
+      // now update our version of the data structure
+      {
+        AutoLock<> a(mutex);
+
+        gen_t cur_gen = generation.load();
+        // is this the "next" version?
+        if(gen_triggered == (cur_gen + 1)) {
+          // yes, so we have complete information and can update the state directly
+          to_wake.swap(current_local_waiters);
+          // any future waiters?
+          if(!future_local_waiters.empty()) {
             std::map<gen_t, EventWaiter::EventWaiterList>::iterator it =
-                future_local_waiters.find(gen_triggered);
-            if(it != future_local_waiters.end()) {
-              to_wake.swap(it->second);
+                future_local_waiters.begin();
+            log_event.debug() << "future waiters non-empty: first=" << it->first
+                              << " (= " << (gen_triggered + 1) << "?)";
+            if(it->first == (gen_triggered + 1)) {
+              current_local_waiters.swap(it->second);
               future_local_waiters.erase(it);
             }
-
-            local_triggers[gen_triggered] = poisoned;
+          }
+          // if this event was poisoned, record it in the local triggers since we only
+          //  update the official poison list on owner update messages
+          if(poisoned) {
+            local_triggers[gen_triggered] = true;
             has_local_triggers = true;
-
-            // TODO: this might still cause shutdown races - do we really
-            //  need to do this at all?
-            if(gen_triggered > (gen_subscribed.load() + 1)) {
-              subscribe_needed = true;
+            if(gen_triggered > gen_subscribed.load()) {
+              subscribe_needed = true; // make sure we get that update
               previous_subscribe_gen = gen_subscribed.load();
               gen_subscribed.store(gen_triggered);
             }
           }
 
-          // external waiters need to be signalled inside the lock
-	  if(has_external_waiters) {
-	    has_external_waiters = false;
-            // also need external waiter mutex
-            AutoLock<KernelMutex> al2(external_waiter_mutex);
-	    external_waiter_condvar.broadcast();
-	  }
+          // update generation last, with a store_release to make sure poisoned generation
+          // list is valid to any observer of this update
+          generation.store_release(gen_triggered);
+        } else if(gen_triggered > (cur_gen + 1)) {
+          // we can't update the main state because there are generations that we know
+          //  have triggered, but we do not know if they are poisoned, so look in the
+          //  future waiter list to see who we can wake, and update the local trigger
+          //  list
+
+          std::map<gen_t, EventWaiter::EventWaiterList>::iterator it =
+              future_local_waiters.find(gen_triggered);
+          if(it != future_local_waiters.end()) {
+            to_wake.swap(it->second);
+            future_local_waiters.erase(it);
+          }
+
+          local_triggers[gen_triggered] = poisoned;
+          has_local_triggers = true;
+
+          // TODO: this might still cause shutdown races - do we really
+          //  need to do this at all?
+          if(gen_triggered > (gen_subscribed.load() + 1)) {
+            subscribe_needed = true;
+            previous_subscribe_gen = gen_subscribed.load();
+            gen_subscribed.store(gen_triggered);
+          }
         }
 
-        if(subscribe_needed) {
-          event_comm->subscribe(make_event(gen_triggered), owner, previous_subscribe_gen);
+        // external waiters need to be signalled inside the lock
+        if(has_external_waiters) {
+          has_external_waiters = false;
+          // also need external waiter mutex
+          AutoLock<KernelMutex> al2(external_waiter_mutex);
+          external_waiter_condvar.broadcast();
         }
       }
 
-      // finally, trigger any local waiters
-      if(!to_wake.empty()) {
-        event_triggerer->trigger_event_waiters(to_wake, poisoned, work_until);
+      if(subscribe_needed) {
+        event_comm->subscribe(make_event(gen_triggered), owner, previous_subscribe_gen);
       }
     }
 
-    void GenEventImpl::perform_delayed_free_list_insertion(void)
+    // finally, trigger any local waiters
+    if(!to_wake.empty()) {
+      event_triggerer->trigger_event_waiters(to_wake, poisoned, work_until);
+    }
+  }
+
+  void GenEventImpl::perform_delayed_free_list_insertion(void)
+  {
+    bool free_event = false;
+
     {
-      bool free_event = false;
-
-      {
-        AutoLock<> a(mutex);
-        if(free_list_insertion_delayed) {
-          free_event = true;
-          free_list_insertion_delayed = false;
-        }
-      }
-
-      if(free_event) {
-        free_genevent();
+      AutoLock<> a(mutex);
+      if(free_list_insertion_delayed) {
+        free_event = true;
+        free_list_insertion_delayed = false;
       }
     }
 
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class CompletionQueue
-    //
-
-    /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = {
-        /* zero-initialization */};
-
-    /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
-    {
-      CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
-      // sanity-check that we haven't exhausted the space of cq IDs
-      if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
-        log_compqueue.fatal() << "completion queue ID space exhausted!";
-        abort();
-      }
-      if(max_size > 0)
-        cq->set_capacity(max_size, false /*!resizable*/);
-      else
-        cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
-
-      log_compqueue.info() << "created completion queue: cq=" << cq->me
-                           << " size=" << max_size;
-      return cq->me;
+    if(free_event) {
+      free_genevent();
     }
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class CompletionQueue
+  //
+
+  /*static*/ const CompletionQueue CompletionQueue::NO_QUEUE = {
+      /* zero-initialization */};
+
+  /*static*/ CompletionQueue CompletionQueue::create_completion_queue(size_t max_size)
+  {
+    CompQueueImpl *cq = get_runtime()->local_compqueue_free_list->alloc_entry();
+    // sanity-check that we haven't exhausted the space of cq IDs
+    if(get_runtime()->get_compqueue_impl(cq->me) != cq) {
+      log_compqueue.fatal() << "completion queue ID space exhausted!";
+      abort();
+    }
+    if(max_size > 0)
+      cq->set_capacity(max_size, false /*!resizable*/);
+    else
+      cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
+
+    log_compqueue.info() << "created completion queue: cq=" << cq->me
+                         << " size=" << max_size;
+    return cq->me;
+  }
 
   // destroy a completion queue
   void CompletionQueue::destroy(Event wait_on /*= Event::NO_EVENT*/)
   {
     NodeID owner = ID(*this).compqueue_owner_node();
 
-    log_compqueue.info() << "destroying completion queue: cq=" << *this << " wait_on=" << wait_on;
+    log_compqueue.info() << "destroying completion queue: cq=" << *this
+                         << " wait_on=" << wait_on;
 
     if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
       if(wait_on.has_triggered())
-	cq->destroy();
+        cq->destroy();
       else
-	cq->deferred_destroy.defer(cq, wait_on);
+        cq->deferred_destroy.defer(cq, wait_on);
     } else {
       ActiveMessage<CompQueueDestroyMessage> amsg(owner);
       amsg->comp_queue = *this;

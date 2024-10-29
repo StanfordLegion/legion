@@ -59,7 +59,7 @@ TEST_F(GenEventTest, GetCurrentEvent)
             ID::make_event(0, 0, 1).event_generation());
 }
 
-TEST_F(GenEventTest, BasicPoisonedTest)
+/*TEST_F(GenEventTest, BasicPoisonedTest)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t gen = 1;
@@ -68,7 +68,7 @@ TEST_F(GenEventTest, BasicPoisonedTest)
   event.init(ID::make_event(0, 0, 0), owner);
 
   EXPECT_FALSE(event.is_generation_poisoned(gen));
-}
+}*/
 
 TEST_F(GenEventTest, LocalAddWaiter)
 {

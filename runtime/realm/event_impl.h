@@ -41,34 +41,21 @@ namespace Realm {
   class GenEventImpl;
   typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
 
-#ifdef EVENT_TRACING
-    // For event tracing
-    struct EventTraceItem {
-    public:
-      enum Action {
-        ACT_CREATE = 0,
-        ACT_QUERY = 1,
-        ACT_TRIGGER = 2,
-        ACT_WAIT = 3,
-      };
-    public:
-      unsigned time_units, event_id, event_gen, action;
-    };
-#endif
+  extern Logger log_poison; // defined in event_impl.cc
+  class ProcessorImpl;      // defined in proc_impl.h
 
-    extern Logger log_poison; // defined in event_impl.cc
-    class ProcessorImpl;      // defined in proc_impl.h
+  class EventWaiter {
+  public:
+    virtual ~EventWaiter(void) {}
+    virtual void event_triggered(bool poisoned, TimeLimit work_until) = 0;
+    virtual void print(std::ostream &os) const = 0;
+    virtual Event get_finish_event(void) const = 0;
 
-    class EventWaiter {
-    public:
-      virtual ~EventWaiter(void) {}
-      virtual void event_triggered(bool poisoned, TimeLimit work_until) = 0;
-      virtual void print(std::ostream& os) const = 0;
-      virtual Event get_finish_event(void) const = 0;
-
-      IntrusiveListLink<EventWaiter> ew_list_link;
-      REALM_PMTA_DEFN(EventWaiter,IntrusiveListLink<EventWaiter>,ew_list_link);
-      typedef IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter,ew_list_link), DummyLock> EventWaiterList;
+    IntrusiveListLink<EventWaiter> ew_list_link;
+    REALM_PMTA_DEFN(EventWaiter, IntrusiveListLink<EventWaiter>, ew_list_link);
+    typedef IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter, ew_list_link),
+                          DummyLock>
+        EventWaiterList;
     };
 
     // triggering events can often result in recursive expansion of work -
