@@ -27,6 +27,9 @@ namespace Realm {
     extern Logger log_gpu;
     extern Logger log_stream;
     extern Logger log_gpudma;
+    namespace ThreadLocal {
+      extern REALM_THREAD_LOCAL GPUStream *current_gpu_stream;
+    }
 
     typedef int (*PFN_cudaLaunchKernel)(const void *func, dim3 gridDim,
                                         dim3 blockDim, void **args,
@@ -2233,21 +2236,20 @@ namespace Realm {
       }
 
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
+      stream = gpu->get_next_d2d_stream();
 
       // select reduction kernel now - translate to CUfunction if possible
       void *host_proxy =
-          (redop_info.is_fold
-               ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
-                                          : redop->cuda_fold_nonexcl_fn)
-               : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
-                                          : redop->cuda_apply_nonexcl_fn));
-#ifdef REALM_USE_CUDART_HIJACK
-      // we have the host->device mapping table for functions
-      kernel = gpu->lookup_function(host_proxy);
-#else
+          (redop_info.is_fold ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
+                                                         : redop->cuda_fold_nonexcl_fn)
+                              : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
+                                                         : redop->cuda_apply_nonexcl_fn));
       if (redop->cudaGetFuncBySymbol_fn != 0) {
         // we can ask the runtime to perform the mapping for us
         gpu->push_context();
+#ifdef REALM_USE_CUDART_HIJACK
+        ThreadLocal::current_gpu_stream = stream;
+#endif
         CHECK_CUDART(reinterpret_cast<PFN_cudaGetFuncBySymbol>(
             redop->cudaGetFuncBySymbol_fn)((void **)&kernel, host_proxy));
         gpu->pop_context();
@@ -2258,9 +2260,6 @@ namespace Realm {
         kernel_host_proxy = host_proxy;
         assert(redop->cudaLaunchKernel_fn != 0);
       }
-#endif
-
-      stream = gpu->get_next_d2d_stream();
     }
 
     long GPUreduceXferDes::get_requests(Request** requests, long nr)

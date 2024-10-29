@@ -516,6 +516,7 @@ if(Legion_USE_CUDA)
     else()
       # without Kokkos interop, we can just add the hijack directly
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
+      target_sources(RealmStatic PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
   else()
     if(REALM_CUDA_DYNAMIC_LOAD)
