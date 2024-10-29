@@ -867,7 +867,44 @@ namespace Realm {
   EventImpl::~EventImpl(void)
   {}
 
-  
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventCommunicator
+  //
+
+  void EventCommunicator::trigger(Event event, NodeID owner, bool poisoned)
+  {
+    ActiveMessage<EventTriggerMessage> amsg(owner);
+    amsg->event = event;
+    amsg->poisoned = poisoned;
+    amsg.commit();
+  }
+
+  void EventCommunicator::update(Event event, NodeSet to_update,
+                                 EventImpl::gen_t *poisoned_generations, size_t size)
+  {
+    for(const NodeID node : to_update) {
+      update(event, node, poisoned_generations, size);
+    }
+  }
+
+  void EventCommunicator::update(Event event, NodeID to_update,
+                                 EventImpl::gen_t *poisoned_generations, size_t size)
+  {
+    ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations, size);
+    amsg->event = event;
+    amsg.commit();
+  }
+
+  void EventCommunicator::subscribe(Event event, NodeID owner,
+                                    EventImpl::gen_t previous_subscribe_gen)
+  {
+    ActiveMessage<EventSubscribeMessage> amsg(owner);
+    amsg->event = event;
+    amsg->previous_subscribe_gen = previous_subscribe_gen;
+    amsg.commit();
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class GenEventImpl
@@ -1303,37 +1340,6 @@ namespace Realm {
       }
     }
 
-    ///////////////////////////////////////////////////
-    // Events
-
-    // only called for generational events
-    /*static*/ void
-    EventSubscribeMessage::handle_message(NodeID sender,
-                                          const EventSubscribeMessage &args,
-                                          const void *data, size_t datalen)
-    {
-      log_event.debug() << "event subscription: node=" << sender
-                        << " event=" << args.event;
-
-      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-
-      // we may send a trigger message in response to the subscription
-      EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
-
-      impl->handle_remote_subscription(sender, subscribe_gen,
-                                       args.previous_subscribe_gen);
-    }
-
-    /*static*/ void EventTriggerMessage::handle_message(NodeID sender, const EventTriggerMessage &args,
-							const void *data, size_t datalen,
-							TimeLimit work_until)
-    {
-      log_event.debug() << "remote trigger of event " << args.event << " from node " << sender;
-      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-      impl->trigger(ID(args.event).event_generation(), sender, args.poisoned,
-		    work_until);
-    }
-
   template <typename T>
   struct ArrayOstreamHelper {
     ArrayOstreamHelper(const T *_base, size_t _count)
@@ -1358,7 +1364,6 @@ namespace Realm {
       return os;
     }
   }
-
 
   void GenEventImpl::process_update(gen_t current_gen,
 				    const gen_t *new_poisoned_generations,
@@ -1495,25 +1500,6 @@ namespace Realm {
       }
     }
     return op;
-  }
-
-  /*static*/ void EventUpdateMessage::handle_message(NodeID sender,
-                                                     const EventUpdateMessage &args,
-                                                     const void *data, size_t datalen,
-                                                     TimeLimit work_until)
-  {
-    const EventImpl::gen_t *new_poisoned_gens = (const EventImpl::gen_t *)data;
-    int new_poisoned_count = datalen / sizeof(EventImpl::gen_t);
-    assert((new_poisoned_count * sizeof(EventImpl::gen_t)) ==
-           datalen); // no remainders or overflow please
-
-    log_event.debug() << "event update: event=" << args.event << " poisoned="
-                      << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens,
-                                                              new_poisoned_count);
-
-    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-    impl->process_update(ID(args.event).event_generation(), new_poisoned_gens,
-                         new_poisoned_count, work_until);
   }
 
   bool GenEventImpl::has_triggered(gen_t needed_gen, bool &poisoned)
@@ -1843,6 +1829,50 @@ namespace Realm {
     if(free_event) {
       free_genevent();
     }
+  }
+
+  /*static*/ void EventSubscribeMessage::handle_message(NodeID sender,
+                                                        const EventSubscribeMessage &args,
+                                                        const void *data, size_t datalen)
+  {
+    log_event.debug() << "event subscription: node=" << sender << " event=" << args.event;
+
+    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+
+    // we may send a trigger message in response to the subscription
+    EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
+
+    impl->handle_remote_subscription(sender, subscribe_gen, args.previous_subscribe_gen);
+  }
+
+  /*static*/ void EventTriggerMessage::handle_message(NodeID sender,
+                                                      const EventTriggerMessage &args,
+                                                      const void *data, size_t datalen,
+                                                      TimeLimit work_until)
+  {
+    log_event.debug() << "remote trigger of event " << args.event << " from node "
+                      << sender;
+    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+    impl->trigger(ID(args.event).event_generation(), sender, args.poisoned, work_until);
+  }
+
+  /*static*/ void EventUpdateMessage::handle_message(NodeID sender,
+                                                     const EventUpdateMessage &args,
+                                                     const void *data, size_t datalen,
+                                                     TimeLimit work_until)
+  {
+    const EventImpl::gen_t *new_poisoned_gens = (const EventImpl::gen_t *)data;
+    int new_poisoned_count = datalen / sizeof(EventImpl::gen_t);
+    assert((new_poisoned_count * sizeof(EventImpl::gen_t)) ==
+           datalen); // no remainders or overflow please
+
+    log_event.debug() << "event update: event=" << args.event << " poisoned="
+                      << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens,
+                                                              new_poisoned_count);
+
+    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+    impl->process_update(ID(args.event).event_generation(), new_poisoned_gens,
+                         new_poisoned_count, work_until);
   }
 
   ////////////////////////////////////////////////////////////////////////

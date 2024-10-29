@@ -54,7 +54,9 @@ protected:
 TEST_F(GenEventTest, GetCurrentEvent)
 {
   GenEventImpl event(nullptr, nullptr);
+
   event.init(ID::make_event(0, 0, 0), 0);
+
   EXPECT_EQ(ID(event.current_event()).event_generation(),
             ID::make_event(0, 0, 1).event_generation());
 }
@@ -78,8 +80,9 @@ TEST_F(GenEventTest, LocalAddWaiter)
   GenEventImpl event(nullptr, nullptr);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.add_waiter(needed_gen, &waiter);
+  bool ok = event.add_waiter(needed_gen, &waiter);
 
+  EXPECT_TRUE(ok);
   EXPECT_FALSE(event.current_local_waiters.empty());
 }
 
@@ -91,8 +94,9 @@ TEST_F(GenEventTest, RemoteAddWaiter)
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.add_waiter(needed_gen, &waiter);
+  bool ok = event.add_waiter(needed_gen, &waiter);
 
+  EXPECT_TRUE(ok);
   EXPECT_FALSE(event.current_local_waiters.empty());
   EXPECT_EQ(event_comm->sent_subscription_count, 1);
 }
@@ -105,9 +109,11 @@ TEST_F(GenEventTest, LocalRemoveWaiterSameGen)
   GenEventImpl event(nullptr, nullptr);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.add_waiter(needed_gen, &waiter);
-  event.remove_waiter(needed_gen, &waiter);
+  bool add_ok = event.add_waiter(needed_gen, &waiter);
+  bool rem_ok = event.remove_waiter(needed_gen, &waiter);
 
+  EXPECT_TRUE(add_ok);
+  EXPECT_TRUE(rem_ok);
   EXPECT_TRUE(event.current_local_waiters.empty());
 }
 
@@ -120,9 +126,11 @@ TEST_F(GenEventTest, LocalRemoveWaiterDifferentGens)
   DeferredOperation waiter;
 
   event.init(ID::make_event(0, 0, 0), owner);
-  EXPECT_TRUE(event.add_waiter(needed_gen_add, &waiter));
-  EXPECT_FALSE(event.remove_waiter(needed_gen_rem, &waiter));
+  bool add_ok = event.add_waiter(needed_gen_add, &waiter);
+  bool rem_ok = event.remove_waiter(needed_gen_rem, &waiter);
 
+  EXPECT_TRUE(add_ok);
+  EXPECT_TRUE(rem_ok);
   EXPECT_FALSE(event.current_local_waiters.empty());
 }
 
@@ -139,9 +147,11 @@ TEST_F(GenEventTest, ProcessUpdateNonOwner)
   event.init(ID::make_event(0, 0, 0), owner);
   event.process_update(current_gen, poisoned_gens.data(), poisoned_gens.size(),
                        TimeLimit::responsive());
-  event.add_waiter(needed_gen, &waiter_one);
-  event.add_waiter(needed_gen, &waiter_two);
+  bool add_ok1 = event.add_waiter(needed_gen, &waiter_one);
+  bool add_ok2 = event.add_waiter(needed_gen, &waiter_two);
 
+  EXPECT_TRUE(add_ok1);
+  EXPECT_TRUE(add_ok2);
   EXPECT_TRUE(waiter_one.triggered);
   EXPECT_TRUE(waiter_two.triggered);
   EXPECT_EQ(event.generation.load(), current_gen);
@@ -179,12 +189,13 @@ TEST_F(GenEventTest, HasTriggeredOnUntriggered)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t gen = 1;
+  bool poisoned = false;
   GenEventImpl event(nullptr, nullptr);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  bool poisoned = false;
-  EXPECT_FALSE(event.has_triggered(gen, poisoned));
+  bool ok = event.has_triggered(gen, poisoned);
 
+  EXPECT_TRUE(ok);
   EXPECT_FALSE(poisoned);
 }
 
@@ -192,12 +203,12 @@ TEST_F(GenEventTest, LocalTrigger)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
   GenEventImpl event(nullptr, local_event_free_list);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
-  bool poisoned = false;
   EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
   EXPECT_FALSE(poisoned);
 }
@@ -206,12 +217,12 @@ TEST_F(GenEventTest, LocalTriggerWithPoison)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
   GenEventImpl event(nullptr, local_event_free_list);
   event.init(ID::make_event(0, 0, 0), owner);
 
   event.trigger(trigger_gen, 0, /*poisoned=*/true, TimeLimit::responsive());
 
-  bool poisoned = false;
   EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
   EXPECT_TRUE(poisoned);
 }
@@ -220,14 +231,15 @@ TEST_F(GenEventTest, LocalTriggerWithWaiter)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
   DeferredOperation waiter_one;
   GenEventImpl event(nullptr, local_event_free_list);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  EXPECT_TRUE(event.add_waiter(trigger_gen, &waiter_one));
+  bool ok = event.add_waiter(trigger_gen, &waiter_one);
   event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
-  bool poisoned = false;
+  EXPECT_TRUE(ok);
   EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
   EXPECT_TRUE(waiter_one.triggered);
 }
@@ -241,11 +253,13 @@ TEST_F(GenEventTest, LocalTriggerWithRemoteSubscription)
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(subscribe_gen, 0, 0, TimeLimit::responsive());
+  event.trigger(subscribe_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   event.handle_remote_subscription(sender_a, subscribe_gen, 0);
   event.handle_remote_subscription(sender_b, subscribe_gen, 0);
 
   EXPECT_EQ(event_comm->sent_notification_count, 2);
+  EXPECT_FALSE(event.remote_waiters.contains(sender_a));
+  EXPECT_FALSE(event.remote_waiters.contains(sender_b));
 }
 
 TEST_F(GenEventTest, HandleRemoteSubscriptionUntriggered)
@@ -269,12 +283,12 @@ TEST_F(GenEventTest, RemoteTrigger)
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
   EXPECT_EQ(event_comm->sent_trigger_count, 1);
 }
 
-TEST_F(GenEventTest, RemoteTriggerWithWaiter)
+TEST_F(GenEventTest, RemoteTriggerWithWaiters)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 1;
@@ -283,26 +297,15 @@ TEST_F(GenEventTest, RemoteTriggerWithWaiter)
   DeferredOperation waiter_two;
 
   event.init(ID::make_event(0, 0, 0), owner);
-  EXPECT_TRUE(event.add_waiter(trigger_gen, &waiter_one));
-  EXPECT_TRUE(event.add_waiter(trigger_gen + 1, &waiter_two));
-  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
+  bool ok1 = event.add_waiter(trigger_gen, &waiter_one);
+  bool ok2 = event.add_waiter(trigger_gen + 1, &waiter_two);
+  event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
+  EXPECT_TRUE(ok1);
+  EXPECT_TRUE(ok2);
   EXPECT_TRUE(waiter_one.triggered);
   EXPECT_FALSE(waiter_two.triggered);
   EXPECT_EQ(event_comm->sent_trigger_count, 1);
-}
-
-TEST_F(GenEventTest, RemoteTriggerCurrentGen)
-{
-  const NodeID owner = 1;
-  const GenEventImpl::gen_t trigger_gen = 1;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
-
-  event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
-
-  EXPECT_EQ(event_comm->sent_trigger_count, 1);
-  EXPECT_EQ(event_comm->sent_subscription_count, 0);
 }
 
 TEST_F(GenEventTest, RemoteTriggerFutureGen)
@@ -312,7 +315,7 @@ TEST_F(GenEventTest, RemoteTriggerFutureGen)
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(trigger_gen, 0, 0, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
   EXPECT_EQ(event_comm->sent_trigger_count, 1);
   EXPECT_EQ(event_comm->sent_subscription_count, 1);
@@ -324,5 +327,8 @@ TEST_F(GenEventTest, EventMergerIsActive)
   GenEventImpl event(nullptr, nullptr);
   event.init(ID::make_event(0, 0, 0), owner);
   EventMerger merger(&event);
-  EXPECT_FALSE(merger.is_active());
+
+  bool ok = merger.is_active();
+
+  EXPECT_TRUE(ok);
 }

@@ -192,38 +192,16 @@ namespace Realm {
     public:
       virtual ~EventCommunicator() = default;
 
-      virtual void trigger(Event event, NodeID owner, bool poisoned)
-      {
-        ActiveMessage<EventTriggerMessage> amsg(owner);
-        amsg->event = event;
-        amsg->poisoned = poisoned;
-        amsg.commit();
-      }
+      virtual void trigger(Event event, NodeID owner, bool poisoned);
 
       virtual void update(Event event, NodeSet to_update,
-                          EventImpl::gen_t *poisoned_generations, size_t size)
-      {
-        for(const NodeID node : to_update) {
-          update(event, node, poisoned_generations, size);
-        }
-      }
+                          EventImpl::gen_t *poisoned_generations, size_t size);
 
       virtual void update(Event event, NodeID to_update,
-                          EventImpl::gen_t *poisoned_generations, size_t size)
-      {
-        ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations, size);
-        amsg->event = event;
-        amsg.commit();
-      }
+                          EventImpl::gen_t *poisoned_generations, size_t size);
 
       virtual void subscribe(Event event, NodeID owner,
-                             EventImpl::gen_t previous_subscribe_gen)
-      {
-        ActiveMessage<EventSubscribeMessage> amsg(owner);
-        amsg->event = event;
-        amsg->previous_subscribe_gen = previous_subscribe_gen;
-        amsg.commit();
-      }
+                             EventImpl::gen_t previous_subscribe_gen);
     };
 
     class GenEventImpl : public EventImpl {
