@@ -6541,6 +6541,7 @@ class Operation(object):
         point.op.set_name(self.name)
         index_point = point.point
         point.op.set_index_owner(self, index_point)
+        point.op.point_wise_dependences = self.point_wise_dependences
         if index_point in self.points:
             self.points[index_point] = self.state.alias_index_points(point,
                                                   self.points[index_point])
@@ -7568,7 +7569,6 @@ class Operation(object):
                                                     field, tree_id, previous_deps)
         # Did not find it so issue the error and return false
         if prev_op not in previous_deps:
-            breakpoint()
             print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
                   "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
