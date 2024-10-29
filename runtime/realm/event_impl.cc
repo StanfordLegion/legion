@@ -1158,44 +1158,48 @@ namespace Realm {
       int subscribe_owner = -1;
       gen_t previous_subscribe_gen = 0;
       {
-	AutoLock<> a(mutex);
+        AutoLock<> a(mutex);
 
-	// three cases below
+        // three cases below
         if(needed_gen <= generation.load()) {
-          // 1) the event has triggered and any poison information is in the poisoned generation list
-	  trigger_now = true; // actually do trigger outside of mutex
-	  trigger_poisoned = is_generation_poisoned(needed_gen);
+          // 1) the event has triggered and any poison information is in the poisoned
+          // generation list
+          trigger_now = true; // actually do trigger outside of mutex
+          trigger_poisoned = is_generation_poisoned(needed_gen);
         } else {
           std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
-	  if(it != local_triggers.end()) {
-	    // 2) we're not the owner node, but we've locally triggered this and have correct poison info
-	    assert(owner != Network::my_node_id);
-	    trigger_now = true;
-	    trigger_poisoned = it->second;
-	  } else {
-	    // 3) we don't know of a trigger of this event, so record the waiter and subscribe if needed
-	    gen_t cur_gen = generation.load();
-	    log_event.debug() << "event not ready: event=" << me << "/" << needed_gen
-			      << " owner=" << owner << " gen=" << cur_gen << " subscr=" << gen_subscribed.load();
+          if(it != local_triggers.end()) {
+            // 2) we're not the owner node, but we've locally triggered this and have
+            // correct poison info
+            assert(owner != Network::my_node_id);
+            trigger_now = true;
+            trigger_poisoned = it->second;
+          } else {
+            // 3) we don't know of a trigger of this event, so record the waiter and
+            // subscribe if needed
+            gen_t cur_gen = generation.load();
+            log_event.debug() << "event not ready: event=" << me << "/" << needed_gen
+                              << " owner=" << owner << " gen=" << cur_gen
+                              << " subscr=" << gen_subscribed.load();
 
-	    // is this for the "current" next generation?
-	    if(needed_gen == (cur_gen + 1)) {
-	      // yes, put in the current waiter list
-	      current_local_waiters.push_back(waiter);
-	    } else {
-	      // no, put it in an appropriate future waiter list - only allowed for non-owners
+            // is this for the "current" next generation?
+            if(needed_gen == (cur_gen + 1)) {
+              // yes, put in the current waiter list
+              current_local_waiters.push_back(waiter);
+            } else {
+              // no, put it in an appropriate future waiter list - only allowed for
+              // non-owners
               assert(owner != Network::my_node_id);
               future_local_waiters[needed_gen].push_back(waiter);
-	    }
+            }
 
-	    // do we need to subscribe to this event?
-	    if((owner != Network::my_node_id) &&
-	       (gen_subscribed.load() < needed_gen)) {
-	      previous_subscribe_gen = gen_subscribed.load();
-	      gen_subscribed.store(needed_gen);
-	      subscribe_owner = owner;
-	    }
-	  }
+            // do we need to subscribe to this event?
+            if((owner != Network::my_node_id) && (gen_subscribed.load() < needed_gen)) {
+              previous_subscribe_gen = gen_subscribed.load();
+              gen_subscribed.store(needed_gen);
+              subscribe_owner = owner;
+            }
+          }
         }
       }
 
@@ -1204,9 +1208,9 @@ namespace Realm {
       }
 
       if(trigger_now)
-	waiter->event_triggered(trigger_poisoned, TimeLimit::responsive());
+        waiter->event_triggered(trigger_poisoned, TimeLimit::responsive());
 
-      return true;  // waiter is always either enqueued or triggered right now
+      return true; // waiter is always either enqueued or triggered right now
     }
 
     bool GenEventImpl::remove_waiter(gen_t needed_gen, EventWaiter *waiter)

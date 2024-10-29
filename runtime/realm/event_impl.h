@@ -56,7 +56,7 @@ namespace Realm {
     typedef IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter, ew_list_link),
                           DummyLock>
         EventWaiterList;
-    };
+  };
 
     // triggering events can often result in recursive expansion of work -
     //  this widget flattens the call stack and defers excessive triggers
@@ -96,9 +96,9 @@ namespace Realm {
       // causes calling thread to block until event has occurred
       //void wait(Event::gen_t needed_gen);
 
-      virtual void external_wait(gen_t needed_gen, bool& poisoned) = 0;
-      virtual bool external_timedwait(gen_t needed_gen, bool& poisoned,
-				      long long max_ns) = 0;
+      virtual void external_wait(gen_t needed_gen, bool &poisoned) = 0;
+      virtual bool external_timedwait(gen_t needed_gen, bool &poisoned,
+                                      long long max_ns) = 0;
 
       // helper to create the Event for an arbitrary generation
       Event make_event(gen_t gen) const;
