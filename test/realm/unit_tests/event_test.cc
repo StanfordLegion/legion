@@ -130,7 +130,7 @@ TEST_F(GenEventTest, LocalRemoveWaiterDifferentGens)
   bool rem_ok = event.remove_waiter(needed_gen_rem, &waiter);
 
   EXPECT_TRUE(add_ok);
-  EXPECT_TRUE(rem_ok);
+  EXPECT_FALSE(rem_ok);
   EXPECT_FALSE(event.current_local_waiters.empty());
 }
 
@@ -195,7 +195,7 @@ TEST_F(GenEventTest, HasTriggeredOnUntriggered)
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok = event.has_triggered(gen, poisoned);
 
-  EXPECT_TRUE(ok);
+  EXPECT_FALSE(ok);
   EXPECT_FALSE(poisoned);
 }
 
@@ -330,5 +330,5 @@ TEST_F(GenEventTest, EventMergerIsActive)
 
   bool ok = merger.is_active();
 
-  EXPECT_TRUE(ok);
+  EXPECT_FALSE(ok);
 }
