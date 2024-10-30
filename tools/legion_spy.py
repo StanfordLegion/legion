@@ -6236,6 +6236,14 @@ class MappingDependence(object):
             printer.println(self.op1.node_name+' -> '+self.op2.node_name+
                             ' [style=solid,color=black,penwidth=2];')
             previous_pairs.add(pair)
+
+    def print_point_wise_dataflow_edge(self, printer, previous_pairs):
+        pair = (self.op1,self.op2)
+        if pair not in previous_pairs:
+            printer.println(self.op1.node_name+' -> '+self.op2.node_name+
+                            ' [style=dotted,color=black,penwidth=2];')
+            previous_pairs.add(pair)
+
         
 class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
@@ -6251,7 +6259,9 @@ class Operation(object):
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance',
-                 'collective_rendezvous', 'equivalence_set_uses', 'point_wise_dependences']
+                 'collective_rendezvous', 'equivalence_set_uses', 'point_wise_dependences',
+                 'point_wise_incoming', 'point_wise_outgoing',
+                 'logical_point_wise_incoming', 'logical_point_wise_outgoing']
                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -6333,6 +6343,10 @@ class Operation(object):
         self.equivalence_set_uses = None
         # Flags to indicate existence of point-wise dependences
         self.point_wise_dependences = None
+        self.logical_point_wise_incoming = None # Point-wise Operation dependences
+        self.logical_point_wise_outgoing = None # Point-wise Operation dependences
+        self.point_wise_incoming = None # Point-wise Mapping dependences
+        self.point_wise_outgoing = None # Point-wise Mapping dependences
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -6640,6 +6654,24 @@ class Operation(object):
         if self.logical_outgoing is None:
             self.logical_outgoing = set()
         self.logical_outgoing.add(dep.op2)
+
+    def add_point_wise_incoming(self, dep):
+        assert dep.op2 == self
+        if self.point_wise_incoming is None:
+            self.point_wise_incoming = set()
+        self.point_wise_incoming.add(dep)
+        if self.logical_point_wise_incoming is None:
+            self.logical_point_wise_incoming = set()
+        self.logical_point_wise_incoming.add(dep.op1)
+
+    def add_point_wise_outgoing(self, dep):
+        assert dep.op1 == self
+        if self.point_wise_outgoing is None:
+            self.point_wise_outgoing = set()
+        self.point_wise_outgoing.add(dep)
+        if self.logical_point_wise_outgoing is None:
+            self.logical_point_wise_outgoing = set()
+        self.logical_point_wise_outgoing.add(dep.op2)
 
     def add_equivalence_incoming(self, eq, src):
         assert eq in self.eq_privileges
@@ -8781,6 +8813,9 @@ class Operation(object):
         if self.incoming:
             for dep in self.incoming:
                 dep.print_dataflow_edge(printer, previous)
+        if self.point_wise_incoming:
+            for dep in self.point_wise_incoming:
+                dep.print_point_wise_dataflow_edge(printer, previous)
         # Handle any phase barriers
         if self.state.detailed_graphs:
             self.print_phase_barrier_edges(printer) 
@@ -9720,12 +9755,20 @@ class Task(object):
                 index_map[src] = src_index
                 our_reachable = NodeSet(total_nodes)
                 reachable[src] = our_reachable
-                if src.logical_outgoing is None or len(src.logical_outgoing) == 0:
+                if ((src.logical_outgoing is None or len(src.logical_outgoing) == 0) and
+                        (src.logical_point_wise_outgoing is None or
+                        len(src.logical_point_wise_outgoing) == 0)):
                     print_progress_bar(count, total_nodes, length=50)
                     continue
+                if src.logical_point_wise_outgoing is not None and src.logical_outgoing is not None:
+                    all_outgoing = src.logical_outgoing.union(src.logical_point_wise_outgoing)
+                elif src.logical_outgoing is not None:
+                    all_outgoing = src.logical_outgoing
+                else:
+                    all_outgoing = src.logical_point_wise_outgoing
                 # Otherwise iterate through our outgoing edges and get the set of 
                 # nodes reachable from all of them
-                for dst in src.logical_outgoing:
+                for dst in all_outgoing:
                     # Some nodes won't appear in the list of all operations
                     # such as must epoch operations which we can safely skip
                     if dst not in reachable:
@@ -9734,7 +9777,7 @@ class Task(object):
                     our_reachable.union(reachable[dst])
                 # Now see which of our nodes can be reached indirectly
                 to_remove = None
-                for dst in src.logical_outgoing:
+                for dst in all_outgoing:
                     # See comment above for why we can skip some edges
                     if dst not in index_map:
                         assert dst not in all_ops
@@ -9749,17 +9792,31 @@ class Task(object):
                         our_reachable.add(dst_index)
                 if to_remove:
                     for dst in to_remove:
-                        src.logical_outgoing.remove(dst)
-                        dst.logical_incoming.remove(src)
+                        if src.logical_outgoing and dst in src.logical_outgoing:
+                            src.logical_outgoing.remove(dst)
+                            dst.logical_incoming.remove(src)
+                        if src.logical_point_wise_outgoing and dst in src.logical_point_wise_outgoing:
+                            src.logical_point_wise_outgoing.remove(dst)
+                            dst.logical_point_wise_incoming.remove(src)
                 # We should never remove everything
-                assert len(src.logical_outgoing) > 0
-                for dst in src.logical_outgoing:
-                    # Skip any edges to nodes not in the reachable list
-                    # (e.g. must epoch operations)
-                    if dst not in reachable:
-                        continue
-                    printer.println(src.node_name+' -> '+dst.node_name+
-                                    ' [style=solid,color=black,penwidth=2];')
+                if src.logical_outgoing:
+                    assert len(src.logical_outgoing) > 0
+                    for dst in src.logical_outgoing:
+                        # Skip any edges to nodes not in the reachable list
+                        # (e.g. must epoch operations)
+                        if dst not in reachable:
+                            continue
+                        printer.println(src.node_name+' -> '+dst.node_name+
+                                        ' [style=solid,color=black,penwidth=2];')
+                if src.logical_point_wise_outgoing:
+                    assert len(src.logical_point_wise_outgoing) > 0
+                    for dst in src.logical_point_wise_outgoing:
+                        # Skip any edges to nodes not in the reachable list
+                        # (e.g. must epoch operations)
+                        if dst not in reachable:
+                            continue
+                        printer.println(src.node_name+' -> '+dst.node_name+
+                                    ' [style=dotted,color=black,penwidth=2];')
                 print_progress_bar(count, total_nodes, length=50)
             print("Done")
         else:
@@ -13548,9 +13605,14 @@ class State(object):
             next_point_task = next_op.get_point_task(next_point)
             dep = MappingDependence(prev_point_task.op, next_point_task.op,
                 prev_region_idx, next_region_idx, dep_type)
+            owner_dep = MappingDependence(prev_op, next_op, prev_region_idx,
+                    next_region_idx, dep_type)
 
             prev_point_task.op.add_outgoing(dep)
             next_point_task.op.add_incoming(dep)
+
+            prev_op.add_point_wise_outgoing(owner_dep)
+            next_op.add_point_wise_incoming(owner_dep)
             next_point_task.op.add_point_wise_dependences_flag(next_region_idx)
 
         # We can delete some of these data structures now that we
