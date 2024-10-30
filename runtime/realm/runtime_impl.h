@@ -100,7 +100,7 @@ namespace Realm {
     std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *>> sparsity_maps;
     std::vector<atomic<DynamicTable<SubgraphTableAllocator> *>> subgraphs;
     std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *>> proc_groups;
-    };
+  };
 
     // the "core" module provides the basic memories and processors used by Realm
     class CoreModuleConfig : public ModuleConfig {
