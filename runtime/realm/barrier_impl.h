@@ -36,6 +36,35 @@
 
 namespace Realm {
 
+  struct BarrierSubscribeMessage {
+    NodeID subscriber;
+    ID::IDType barrier_id;
+    EventImpl::gen_t subscribe_gen;
+    bool forwarded;
+
+    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
+                               const void *data, size_t datalen);
+
+    static void send_request(NodeID target, ID::IDType barrier_id,
+                             EventImpl::gen_t subscribe_gen, NodeID subscriber,
+                             bool forwarded);
+  };
+
+  class BarrierCommunicator {
+  public:
+    virtual ~BarrierCommunicator() = default;
+
+    virtual void trigger(Event event, NodeID owner, bool poisoned) {}
+
+    virtual void subscribe(NodeID target, ID::IDType barrier_id,
+                           EventImpl::gen_t subscribe_gen, NodeID subscriber,
+                           bool forwarded)
+    {
+      BarrierSubscribeMessage::send_request(target, barrier_id, subscribe_gen, subscriber,
+                                            forwarded);
+    }
+  };
+
   class BarrierImpl : public EventImpl {
   public:
     static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
@@ -44,6 +73,7 @@ namespace Realm {
     static atomic<Barrier::timestamp_t> barrier_adjustment_timestamp;
 
     BarrierImpl(void);
+    BarrierImpl(BarrierCommunicator *_barrier_comm);
     ~BarrierImpl(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -66,6 +96,10 @@ namespace Realm {
     // test whether an event has triggered without waiting
     virtual bool has_triggered(gen_t needed_gen, bool &poisoned);
 
+    virtual void handle_remote_subscription(NodeID subscriber,
+                                            EventImpl::gen_t subscribe_gen,
+                                            bool forwarded, const void *data,
+                                            size_t datalen);
     virtual void subscribe(gen_t subscribe_gen);
 
     virtual void external_wait(gen_t needed_gen, bool &poisoned);
@@ -93,6 +127,8 @@ namespace Realm {
     atomic<gen_t> gen_subscribed;
     gen_t first_generation;
     BarrierImpl *next_free;
+
+    BarrierCommunicator *barrier_comm;
 
     Mutex mutex; // controls which local thread has access to internal data (not
                  // runtime-visible event)
@@ -152,20 +188,6 @@ namespace Realm {
     static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
                              NodeID sender, bool forwarded, const void *data,
                              size_t datalen);
-  };
-
-  struct BarrierSubscribeMessage {
-    NodeID subscriber;
-    ID::IDType barrier_id;
-    EventImpl::gen_t subscribe_gen;
-    bool forwarded;
-
-    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
-                               const void *data, size_t datalen);
-
-    static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t subscribe_gen, NodeID subscriber,
-                             bool forwarded);
   };
 
   struct BarrierTriggerMessage {
