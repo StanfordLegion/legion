@@ -134,28 +134,105 @@ TEST_F(GenEventTest, LocalRemoveWaiterDifferentGens)
   EXPECT_FALSE(event.current_local_waiters.empty());
 }
 
-TEST_F(GenEventTest, ProcessUpdateNonOwner)
+TEST_F(GenEventTest, ProcessFutureGenerationNoPoisonTest)
 {
   const NodeID owner = 1;
-  const GenEventImpl::gen_t needed_gen = 1;
-  const GenEventImpl::gen_t current_gen = 1;
-  DeferredOperation waiter_one;
-  DeferredOperation waiter_two;
-  std::vector<GenEventImpl::gen_t> poisoned_gens{1, 2};
-  GenEventImpl event(nullptr, nullptr);
+  const GenEventImpl::gen_t current_gen = 5;
+  DeferredOperation waiter;
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.process_update(current_gen, poisoned_gens.data(), poisoned_gens.size(),
-                       TimeLimit::responsive());
-  bool add_ok1 = event.add_waiter(needed_gen, &waiter_one);
-  bool add_ok2 = event.add_waiter(needed_gen, &waiter_two);
+  event.add_waiter(current_gen, &waiter);
+  event.process_update(current_gen, nullptr, 0, TimeLimit::responsive());
 
-  EXPECT_TRUE(add_ok1);
-  EXPECT_TRUE(add_ok2);
+  EXPECT_TRUE(waiter.triggered);
+  EXPECT_EQ(event.num_poisoned_generations.load(), 0);
+  EXPECT_FALSE(event.is_generation_poisoned(current_gen));
+}
+
+TEST_F(GenEventTest, ProcessPoisonedGenerationsTest)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t current_gen = 3;
+  const GenEventImpl::gen_t poisoned_gens[] = {2, 3};
+  DeferredOperation waiter_one, waiter_two;
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.add_waiter(2, &waiter_one);
+  event.add_waiter(3, &waiter_two);
+  event.process_update(current_gen, poisoned_gens, 2, TimeLimit::responsive());
+
   EXPECT_TRUE(waiter_one.triggered);
   EXPECT_TRUE(waiter_two.triggered);
-  EXPECT_EQ(event.generation.load(), current_gen);
-  EXPECT_EQ(event.num_poisoned_generations.load(), 2);
+  EXPECT_TRUE(event.is_generation_poisoned(2));
+  EXPECT_TRUE(event.is_generation_poisoned(3));
+}
+
+TEST_F(GenEventTest, ProcessOutdatedGenerationUpdateTest)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t current_gen = 4;
+  DeferredOperation waiter;
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.add_waiter(5, &waiter);
+  // Processing an older generation (current event generation is higher)
+  event.process_update(3, nullptr, 0, TimeLimit::responsive());
+
+  EXPECT_FALSE(waiter.triggered);
+}
+
+TEST_F(GenEventTest, ProcessOrderedFutureGenerationsTriggeringTest)
+{
+  const NodeID owner = 1;
+  DeferredOperation waiter_one, waiter_two;
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.add_waiter(1, &waiter_one);
+  event.add_waiter(2, &waiter_two);
+  event.process_update(2, nullptr, 0, TimeLimit::responsive());
+
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_TRUE(waiter_two.triggered);
+}
+
+// TODO(apryakhin@): Fix handling of this test case
+TEST_F(GenEventTest, DISABLED_ExceedPoisonedGenerationLimitTest)
+{
+  const NodeID owner = 1;
+  const int poisoned_generation_limit = GenEventImpl::POISONED_GENERATION_LIMIT;
+  GenEventImpl::gen_t poisoned_gens[poisoned_generation_limit + 1];
+  for(int i = 0; i < poisoned_generation_limit + 1; ++i) {
+    poisoned_gens[i] = i + 1;
+  }
+  GenEventImpl event(nullptr, local_event_free_list, nullptr);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  // Process update with excess poisoned generations
+  event.process_update(poisoned_generation_limit + 1, poisoned_gens,
+                       poisoned_generation_limit + 1, TimeLimit::responsive());
+
+  // Ensure only POISONED_GENERATION_LIMIT generations were recorded
+  EXPECT_EQ(event.num_poisoned_generations.load(), poisoned_generation_limit);
+}
+
+TEST_F(GenEventTest, ProcessUpdateWithGenerationalGapsTest)
+{
+  const NodeID owner = 1;
+  const GenEventImpl::gen_t current_gen = 5;
+  DeferredOperation waiter_one, waiter_two;
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  event.add_waiter(3, &waiter_one);
+  event.add_waiter(5, &waiter_two);
+  event.process_update(current_gen, nullptr, 0, TimeLimit::responsive());
+
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_TRUE(waiter_two.triggered);
 }
 
 TEST_F(GenEventTest, RemoteSubscribeNextGen)
@@ -244,7 +321,29 @@ TEST_F(GenEventTest, LocalTriggerWithWaiter)
   EXPECT_TRUE(waiter_one.triggered);
 }
 
-TEST_F(GenEventTest, LocalTriggerWithRemoteSubscription)
+TEST_F(GenEventTest, LocalTriggerWithMultipleWaitersPoisoned)
+{
+  const NodeID owner = 0;
+  const GenEventImpl::gen_t trigger_gen = 1;
+  bool poisoned = false;
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+  GenEventImpl event(nullptr, local_event_free_list);
+
+  event.init(ID::make_event(0, 0, 0), owner);
+  bool ok1 = event.add_waiter(trigger_gen, &waiter_one);
+  bool ok2 = event.add_waiter(trigger_gen, &waiter_two);
+  event.trigger(trigger_gen, 0, /*poisoned=*/true, TimeLimit::responsive());
+
+  EXPECT_TRUE(ok1);
+  EXPECT_TRUE(ok2);
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_TRUE(waiter_two.triggered);
+  EXPECT_TRUE(event.is_generation_poisoned(trigger_gen));
+  EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
+}
+
+TEST_F(GenEventTest, LocalTriggerWithMultipleRemoteSubscriptions)
 {
   const NodeID owner = 0;
   const NodeID sender_a = 1;
@@ -253,9 +352,9 @@ TEST_F(GenEventTest, LocalTriggerWithRemoteSubscription)
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(subscribe_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   event.handle_remote_subscription(sender_a, subscribe_gen, 0);
   event.handle_remote_subscription(sender_b, subscribe_gen, 0);
+  event.trigger(subscribe_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
   EXPECT_EQ(event_comm->sent_notification_count, 2);
   EXPECT_FALSE(event.remote_waiters.contains(sender_a));
