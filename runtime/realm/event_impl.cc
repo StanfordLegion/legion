@@ -941,11 +941,7 @@ namespace Realm {
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
-  {
-    if(event_comm == nullptr) {
-      event_comm = new EventCommunicator();
-    }
-  }
+  {}
 
   GenEventImpl::~GenEventImpl(void)
   {
