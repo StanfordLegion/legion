@@ -172,7 +172,6 @@ TEST_F(GenEventTest, ProcessPoisonedGenerationsTest)
 TEST_F(GenEventTest, ProcessOutdatedGenerationUpdateTest)
 {
   const NodeID owner = 1;
-  const GenEventImpl::gen_t current_gen = 4;
   DeferredOperation waiter;
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
