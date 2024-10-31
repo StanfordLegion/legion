@@ -16,7 +16,6 @@
 #include "realm/event_impl.h"
 
 #include "realm/proc_impl.h"
-#include "realm/runtime_impl.h"
 #include "realm/logging.h"
 #include "realm/threads.h"
 #include "realm/profiling.h"
@@ -917,7 +916,7 @@ namespace Realm {
     , merger(this)
     , event_triggerer(&get_runtime()->event_triggerer)
     , local_event_free_list(get_runtime()->local_event_free_list)
-    , event_comm(new EventCommunicator())
+    , event_comm(std::make_unique<EventCommunicator>())
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
@@ -973,10 +972,6 @@ namespace Realm {
 
     if(poisoned_generations) {
       delete[] poisoned_generations;
-    }
-
-    if(event_comm != nullptr) {
-      delete event_comm;
     }
   }
 

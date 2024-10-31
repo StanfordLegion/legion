@@ -35,12 +35,12 @@
 
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace Realm {
 
   class GenEventImpl;
   typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
-
   extern Logger log_poison; // defined in event_impl.cc
   class ProcessorImpl;      // defined in proc_impl.h
 
@@ -292,7 +292,7 @@ namespace Realm {
 
       EventTriggerNotifier *event_triggerer;
       LocalEventTableAllocator::FreeList *local_event_free_list;
-      EventCommunicator *event_comm;
+      std::unique_ptr<EventCommunicator> event_comm;
 
       // everything below here protected by this mutex
       Mutex mutex;

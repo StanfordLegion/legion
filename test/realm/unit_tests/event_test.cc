@@ -16,6 +16,8 @@ public:
 
 class MockEventCommunicator : public EventCommunicator {
 public:
+  virtual ~MockEventCommunicator();
+
   virtual void trigger(Event event, NodeID owner, bool poisoned) { sent_trigger_count++; }
 
   virtual void update(Event event, NodeID to_update,
@@ -60,17 +62,6 @@ TEST_F(GenEventTest, GetCurrentEvent)
   EXPECT_EQ(ID(event.current_event()).event_generation(),
             ID::make_event(0, 0, 1).event_generation());
 }
-
-/*TEST_F(GenEventTest, BasicPoisonedTest)
-{
-  const NodeID owner = 0;
-  const GenEventImpl::gen_t gen = 1;
-  GenEventImpl event(nullptr, nullptr);
-
-  event.init(ID::make_event(0, 0, 0), owner);
-
-  EXPECT_FALSE(event.is_generation_poisoned(gen));
-}*/
 
 TEST_F(GenEventTest, LocalAddWaiter)
 {
@@ -134,7 +125,7 @@ TEST_F(GenEventTest, LocalRemoveWaiterDifferentGens)
   EXPECT_FALSE(event.current_local_waiters.empty());
 }
 
-TEST_F(GenEventTest, ProcessFutureGenerationNoPoisonTest)
+TEST_F(GenEventTest, ProcessFutureGenerationTest)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t current_gen = 5;
@@ -327,7 +318,7 @@ TEST_F(GenEventTest, LocalTriggerWithMultipleWaitersPoisoned)
   bool poisoned = false;
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
-  GenEventImpl event(nullptr, local_event_free_list);
+  GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok1 = event.add_waiter(trigger_gen, &waiter_one);
