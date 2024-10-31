@@ -16,8 +16,6 @@ public:
 
 class MockEventCommunicator : public EventCommunicator {
 public:
-  virtual ~MockEventCommunicator();
-
   virtual void trigger(Event event, NodeID owner, bool poisoned) { sent_trigger_count++; }
 
   virtual void update(Event event, NodeID to_update,
