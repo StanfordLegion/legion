@@ -65,6 +65,7 @@ TEST_F(BarrierTest, RemoteSubscribe)
   const NodeID owner = 1;
   const EventImpl::gen_t subscribe_gen = 1;
   BarrierImpl barrier(barrier_comm);
+
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.subscribe(subscribe_gen);
 
@@ -74,27 +75,148 @@ TEST_F(BarrierTest, RemoteSubscribe)
 TEST_F(BarrierTest, LocalArrive)
 {
   const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 1;
+  bool poisoned = false;
   BarrierImpl barrier;
+
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
-  barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
-  barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+  bool ok = barrier.has_triggered(arrival_gen, poisoned);
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+  EXPECT_TRUE(ok);
+  EXPECT_FALSE(poisoned);
 }
 
-TEST_F(BarrierTest, LocalArriveWithRemoteSubscriber)
+// TODO(apryakhin@): This crases on assert and should be handled more
+// gracefully.
+TEST_F(BarrierTest, DISABLED_LocalArriveOnTriggered)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 1;
+  BarrierImpl barrier;
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/3, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+}
+
+TEST_F(BarrierTest, LocalArriveWithWaiter)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 1;
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+  BarrierImpl barrier;
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.add_waiter(arrival_gen, &waiter_one);
+  barrier.add_waiter(arrival_gen + 1, &waiter_two);
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_FALSE(waiter_two.triggered);
+}
+
+TEST_F(BarrierTest, LocalArriveFutureGen)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 2;
+  BarrierImpl barrier;
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), 0);
+}
+
+TEST_F(BarrierTest, LocalOutOfOrderArrive)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 2;
+  const int delta = -1;
+  BarrierImpl barrier;
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, delta, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, delta, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen - 1, delta, 0, Event::NO_EVENT, /*sender=*/3, 0, 0,
+                         0, TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen - 1, delta, 0, Event::NO_EVENT, /*sender=*/4, 0, 0,
+                         0, TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+}
+
+TEST_F(BarrierTest, LocalArriveWithRemoteSubscribers)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t subscribe_gen = 1;
+  const EventImpl::gen_t arrival_gen = 1;
   BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
-  barrier.handle_remote_subscription(1, subscribe_gen, 0, 0, 0);
-  // barrier.subscribe(subscribe_gen);
-  barrier.base_arrival_count = 2;
-  barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
-  barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
+  barrier.handle_remote_subscription(/*subscriber=*/1, subscribe_gen, 0, 0, 0);
+  barrier.handle_remote_subscription(/*subscriber=*/2, subscribe_gen, 0, 0, 0);
+  barrier.handle_remote_subscription(/*subscriber=*/3, subscribe_gen, 0, 0, 0);
 
-  EXPECT_EQ(barrier_comm->sent_trigger_count, 1);
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 3);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+}
+
+TEST_F(BarrierTest, LocalArriveRemoteFutureSubscription)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t subscribe_gen = 1;
+  const EventImpl::gen_t arrival_gen = 1;
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.handle_remote_subscription(/*subscriber=*/1, subscribe_gen, 0, 0, 0);
+  barrier.handle_remote_subscription(/*subscriber=*/2, subscribe_gen, 0, 0, 0);
+  barrier.handle_remote_subscription(/*subscriber=*/3, (subscribe_gen + 1), 0, 0, 0);
+
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 3);
 }
 
 TEST_F(BarrierTest, RemoteArrive)
@@ -103,7 +225,7 @@ TEST_F(BarrierTest, RemoteArrive)
   BarrierImpl barrier(barrier_comm);
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
-  barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, /*sender*/ 0, 0, 0, 0,
+  barrier.adjust_arrival(/*arrival_gen=*/1, -1, 0, Event::NO_EVENT, /*sender=*/0, 0, 0, 0,
                          TimeLimit::responsive());
 
   EXPECT_EQ(barrier_comm->sent_adjust_arrivals, 1);

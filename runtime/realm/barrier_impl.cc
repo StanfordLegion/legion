@@ -582,8 +582,9 @@ namespace Realm {
                 remote_trigger_gens[rn.node] = rn.trigger_gen;
               }
             }
-            if(remote_notifications.empty() || (rn.previous_gen < oldest_previous))
+            if(remote_notifications.empty() || (rn.previous_gen < oldest_previous)) {
               oldest_previous = rn.previous_gen;
+            }
             remote_notifications.push_back(rn);
           }
         }
