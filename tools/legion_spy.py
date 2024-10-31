@@ -4026,36 +4026,29 @@ class LogicalVerificationState(object):
                 # all of their local points are
                 need_fence = False
 
-            f = io.StringIO()
-            with redirect_stdout(f):
-                try:
-                    has_verification_mapping_dependence = logical_op.has_verification_mapping_dependence(
-                            logical_op.reqs[req.index], prev_logical,
-                            prev_logical.reqs[prev_req.index], dep_type,
-                            self.field, need_fence, previous_deps)
-
-                    if has_verification_mapping_dependence:
-                        return dominates,True
-                except AssertionError:
-                    if op.state.has_point_wise_dependeces:
-                        try:
-                            if op.has_point_wise_dependence(req.index):
-                                has_mapping_dependence = op.has_mapping_dependence(req,
-                                        prev_op, prev_req, dep_type, self.field)
-                                if has_mapping_dependence:
-                                    return dominates, True
-                        except AssertionError:
-                            if not op.has_verification_point_wise_mapping_dependence(
-                                    op.reqs[req.index], prev_op,
-                                    prev_op.reqs[prev_req.index], dep_type,
-                                self.field, previous_deps):
-                                return dominates, False
-                            else:
-                                return dominates, True
+            has_verification_mapping_dependence = logical_op.has_verification_mapping_dependence(
+                    logical_op.reqs[req.index], prev_logical,
+                    prev_logical.reqs[prev_req.index], dep_type,
+                    self.field, need_fence, previous_deps,
+                    op.state.has_point_wise_dependence(req.index))
+            if has_verification_mapping_dependence:
+                return dominates,True
+            elif op.has_point_wise_dependence(req.index):
+                has_mapping_dependence = op.has_mapping_dependence(req,
+                        prev_op, prev_req, dep_type, self.field,
+                        op.state.has_point_wise_dependence(req.index))
+                if has_mapping_dependence:
+                    return dominates, True
+                else:
+                    if not op.has_verification_point_wise_mapping_dependence(
+                            op.reqs[req.index], prev_op,
+                            prev_op.reqs[prev_req.index], dep_type,
+                            self.field, previous_deps):
+                        return dominates, False
                     else:
-                        print(f.getvalue())
-                        if op.state.assert_on_error:
-                            assert False
+                        return dominates, True
+            else:
+                return dominates, False
 
         return dominates,True
 
@@ -7535,7 +7528,7 @@ class Operation(object):
                     return False
         return True
 
-    def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field):
+    def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field, pointwise=False):
         if self.incoming:
             for dep in self.incoming:
                 if dep.op1 is not prev_op:
@@ -7548,20 +7541,21 @@ class Operation(object):
                     continue
                 # We found a good mapping dependence, so all is good
                 return True
-        # Look for the dependence transitively
-        if self.has_transitive_mapping_dependence(prev_op):
-            return True
-        # No need to look for it transitively since this analysis should exactly
-        # match the analysis done by the runtime
-        # Issue the error and return false
-        print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
-              "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
-              str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
-              str(self)+" (UID "+str(self.uid)+")")
-        if self.state.bad_graph_on_error:
-            self.state.dump_bad_graph(prev_op.context, req.logical_node.tree_id, field)
-        if self.state.assert_on_error:
-            assert False
+        if not pointwise:
+            # Look for the dependence transitively
+            if self.has_transitive_mapping_dependence(prev_op):
+                return True
+            # No need to look for it transitively since this analysis should exactly
+            # match the analysis done by the runtime
+            # Issue the error and return false
+            print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
+                  "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
+                  str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
+                  str(self)+" (UID "+str(self.uid)+")")
+            if self.state.bad_graph_on_error:
+                self.state.dump_bad_graph(prev_op.context, req.logical_node.tree_id, field)
+            if self.state.assert_on_error:
+                assert False
         return False
 
     def has_transitive_mapping_dependence(self, prev_op):
@@ -7650,7 +7644,8 @@ class Operation(object):
                 queue.append(next_op)
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
-                                            field, need_fence, previous_deps):
+                                            field, need_fence, previous_deps,
+                                            has_point_wise_dependence):
         tree_id = req.logical_node.tree_id
         # Do a quick check to see if it is in the previous deps
         if prev_op in previous_deps:
@@ -7664,29 +7659,30 @@ class Operation(object):
                 return True
         self.has_verification_transitive_mapping_dependence(prev_op, need_fence, 
                                                     field, tree_id, previous_deps)
-        # Did not find it so issue the error and return false
-        if prev_op not in previous_deps:
-            print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
-                  "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
-                  str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
-                  str(self)+" (UID "+str(self.uid)+")")
-            if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, field)
-            if self.state.assert_on_error:
-                assert False
-        elif need_fence and (previous_deps[prev_op] is None or
-                (field,tree_id) not in previous_deps[prev_op]):
-            print("ERROR: Missing internal fence operation on "+str(field)+" of tree "+
-                    str(tree_id)+" between region requirement "+str(prev_req.index)+
-                    " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
-                    "requriement "+str(req.index)+" of "+str(self)+" (UID "+
-                    str(self.uid)+")")
-            if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, field)
-            if self.state.assert_on_error:
-                assert False
-        else:
-            return True
+        if not has_point_wise_dependence:
+            # Did not find it so issue the error and return false
+            if prev_op not in previous_deps:
+                print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
+                      "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
+                      str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
+                      str(self)+" (UID "+str(self.uid)+")")
+                if self.state.bad_graph_on_error:
+                    self.state.dump_bad_graph(self.context, tree_id, field)
+                if self.state.assert_on_error:
+                    assert False
+            elif need_fence and (previous_deps[prev_op] is None or
+                    (field,tree_id) not in previous_deps[prev_op]):
+                print("ERROR: Missing internal fence operation on "+str(field)+" of tree "+
+                        str(tree_id)+" between region requirement "+str(prev_req.index)+
+                        " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
+                        "requriement "+str(req.index)+" of "+str(self)+" (UID "+
+                        str(self.uid)+")")
+                if self.state.bad_graph_on_error:
+                    self.state.dump_bad_graph(self.context, tree_id, field)
+                if self.state.assert_on_error:
+                    assert False
+            else:
+                return True
         return False
 
     def has_verification_transitive_mapping_dependence(self, prev_op, need_fence, 
@@ -9833,7 +9829,7 @@ class Task(object):
                 op.print_incoming_dataflow_edges(printer, previous_pairs)
         printer.print_pdf_after_close(False, zoom_graphs)
         # We printed our dataflow graph
-        return 1   
+        return 1
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
@@ -12616,7 +12612,6 @@ def parse_legion_spy_line(line, state):
             dep_type))
         if not state.has_point_wise_dependeces:
             state.has_point_wise_dependeces = True
-        #print("ctx %d, repl_id %d, max_dim %d, prev_ctx_idx %d, prev_region_idx: %d, prev_dim:%d, prev_shard: %d, next_ctx_idx: %d, next_region_idx: %d, next_dim: %d, next_shard: %d, dep_type: %d values: %s" % (ctx, repl_id, max_dim, prev_ctx_idx, prev_region_idx, prev_dim, prev_shard, next_ctx_idx, next_region_idx, next_dim, next_shard, dep_type, values))
         return True
     m = future_create_pat.match(line)
     if m is not None:
