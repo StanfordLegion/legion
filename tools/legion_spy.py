@@ -4030,13 +4030,13 @@ class LogicalVerificationState(object):
                     logical_op.reqs[req.index], prev_logical,
                     prev_logical.reqs[prev_req.index], dep_type,
                     self.field, need_fence, previous_deps,
-                    op.state.has_point_wise_dependence(req.index))
+                    op.has_point_wise_dependence(req.index))
             if has_verification_mapping_dependence:
                 return dominates,True
             elif op.has_point_wise_dependence(req.index):
                 has_mapping_dependence = op.has_mapping_dependence(req,
                         prev_op, prev_req, dep_type, self.field,
-                        op.state.has_point_wise_dependence(req.index))
+                        op.has_point_wise_dependence(req.index))
                 if has_mapping_dependence:
                     return dominates, True
                 else:
@@ -12610,8 +12610,8 @@ def parse_legion_spy_line(line, state):
             prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
             next_ctx_idx, next_region_idx, next_point, next_shard,
             dep_type))
-        if not state.has_point_wise_dependeces:
-            state.has_point_wise_dependeces = True
+        if not state.has_point_wise_dependences:
+            state.has_point_wise_dependences = True
         return True
     m = future_create_pat.match(line)
     if m is not None:
@@ -13355,7 +13355,7 @@ class State(object):
                  'next_realm_num', 'next_indirections_num', 'detailed_graphs',  
                  'assert_on_error', 'assert_on_warning', 'bad_graph_on_error', 
                  'eq_graph_on_error', 'config', 'detailed_logging', 'replicants', 'eq_sets',
-                 'has_point_wise_dependeces']
+                 'has_point_wise_dependences']
     def __init__(self, temp_dir, verbose, details, assert_on_error, 
                  assert_on_warning, bad_graph_on_error, eq_graph_on_error):
         self.temp_dir = temp_dir
@@ -13415,7 +13415,7 @@ class State(object):
         self.next_realm_num = 1
         self.next_indirections_num = 1
         # For point-wise dependencies
-        self.has_point_wise_dependeces = False
+        self.has_point_wise_dependences = False
 
     def set_config(self, detailed):
         self.config = True
