@@ -345,9 +345,17 @@ namespace Realm {
 
     op = e->get_trigger_op(gen);
     if(op != nullptr) {
-      // Fast path, triggering operation is local!
-      op->attempt_cancellation(Realm::Faults::ERROR_CANCELLED, reason_data, reason_len);
-      op->remove_reference();
+      // Check for self-cancellation
+      Thread *thread = Thread::self();
+      if((thread != nullptr) && (op == thread->get_operation())) {
+        op->remove_reference();
+        Processor::report_execution_fault(Realm::Faults::ERROR_CANCELLED, reason_data,
+                                          reason_len);
+      } else {
+        // Fast path, triggering operation is local!
+        op->attempt_cancellation(Realm::Faults::ERROR_CANCELLED, reason_data, reason_len);
+        op->remove_reference();
+      }
     } else {
       // Slow path, triggering operation is remote
       get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
