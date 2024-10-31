@@ -130,57 +130,10 @@ namespace Realm {
     atomic<bool> has_progress_events;
     GenEventImpl *local_progress_event;
     EventImpl::gen_t local_progress_event_gen;
-    // TODO: small vector
     std::vector<Event> remote_progress_events;
     atomic<CompQueueWaiter *> first_free_waiter;
     CompQueueWaiterBatch *batches;
   };
-
-  // active messages
-
-  struct CompQueueDestroyMessage {
-    CompletionQueue comp_queue;
-    Event wait_on;
-
-    static void handle_message(NodeID sender, const CompQueueDestroyMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
-  struct CompQueueAddEventMessage {
-    CompletionQueue comp_queue;
-    Event event;
-    bool faultaware;
-
-    static void handle_message(NodeID sender, const CompQueueAddEventMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
-  struct CompQueueRemoteProgressMessage {
-    CompletionQueue comp_queue;
-    Event progress;
-
-    static void handle_message(NodeID sender, const CompQueueRemoteProgressMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
-  struct CompQueuePopRequestMessage {
-    CompletionQueue comp_queue;
-    size_t max_to_pop;
-    bool discard_events;
-    intptr_t request;
-
-    static void handle_message(NodeID sender, const CompQueuePopRequestMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
-  struct CompQueuePopResponseMessage {
-    size_t count;
-    intptr_t request;
-
-    static void handle_message(NodeID sender, const CompQueuePopResponseMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
 }; // namespace Realm
 
 #endif // ifndef REALM_COMP_QUEUE_IMPL_H

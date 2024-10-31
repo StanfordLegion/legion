@@ -25,6 +25,51 @@ namespace Realm {
 
   Logger log_compqueue("compqueue");
 
+  // active messages
+
+  struct CompQueueDestroyMessage {
+    CompletionQueue comp_queue;
+    Event wait_on;
+
+    static void handle_message(NodeID sender, const CompQueueDestroyMessage &msg,
+                               const void *data, size_t datalen);
+  };
+
+  struct CompQueueAddEventMessage {
+    CompletionQueue comp_queue;
+    Event event;
+    bool faultaware;
+
+    static void handle_message(NodeID sender, const CompQueueAddEventMessage &msg,
+                               const void *data, size_t datalen);
+  };
+
+  struct CompQueueRemoteProgressMessage {
+    CompletionQueue comp_queue;
+    Event progress;
+
+    static void handle_message(NodeID sender, const CompQueueRemoteProgressMessage &msg,
+                               const void *data, size_t datalen);
+  };
+
+  struct CompQueuePopRequestMessage {
+    CompletionQueue comp_queue;
+    size_t max_to_pop;
+    bool discard_events;
+    intptr_t request;
+
+    static void handle_message(NodeID sender, const CompQueuePopRequestMessage &msg,
+                               const void *data, size_t datalen);
+  };
+
+  struct CompQueuePopResponseMessage {
+    size_t count;
+    intptr_t request;
+
+    static void handle_message(NodeID sender, const CompQueuePopResponseMessage &msg,
+                               const void *data, size_t datalen);
+  };
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class CompletionQueue
