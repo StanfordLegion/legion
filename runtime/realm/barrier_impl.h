@@ -33,6 +33,7 @@
 
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace Realm {
 
@@ -50,11 +51,60 @@ namespace Realm {
                              bool forwarded);
   };
 
+  struct BarrierTriggerMessage {
+    ID::IDType barrier_id;
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
+
+    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
+                               const void *data, size_t datalen, TimeLimit work_until);
+
+    static void send_request(NodeID target, ID::IDType barrier_id,
+                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
+                             NodeID migration_target, unsigned base_arrival_count,
+                             const void *data, size_t datalen);
+  };
+
+  struct BarrierAdjustMessage {
+    NodeID sender;
+    int forwarded;
+    int delta;
+    Barrier barrier;
+    Event wait_on;
+
+    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
+                               const void *data, size_t datalen, TimeLimit work_until);
+    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
+                             NodeID sender, bool forwarded, const void *data,
+                             size_t datalen);
+  };
+
   class BarrierCommunicator {
   public:
     virtual ~BarrierCommunicator() = default;
 
-    virtual void trigger(Event event, NodeID owner, bool poisoned) {}
+    virtual void adjust(NodeID target, Barrier barrier, int delta, Event wait_on,
+                        NodeID sender, bool forwarded, const void *data, size_t datalen)
+    {
+      BarrierAdjustMessage::send_request(target, barrier, delta, wait_on, sender,
+                                         forwarded, data, datalen);
+    }
+
+    virtual void trigger(NodeID target, ID::IDType barrier_id,
+                         EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+                         EventImpl::gen_t first_gen, ReductionOpID redop_id,
+                         NodeID migration_target, int base_arrival_count,
+                         const void *data, size_t datalen)
+    {
+      BarrierTriggerMessage::send_request(target, barrier_id, trigger_gen, previous_gen,
+                                          first_gen, redop_id, migration_target,
+                                          base_arrival_count, data, datalen);
+    }
 
     virtual void subscribe(NodeID target, ID::IDType barrier_id,
                            EventImpl::gen_t subscribe_gen, NodeID subscriber,
@@ -128,7 +178,7 @@ namespace Realm {
     gen_t first_generation;
     BarrierImpl *next_free;
 
-    BarrierCommunicator *barrier_comm;
+    std::unique_ptr<BarrierCommunicator> barrier_comm;
 
     Mutex mutex; // controls which local thread has access to internal data (not
                  // runtime-visible event)
@@ -175,39 +225,6 @@ namespace Realm {
   };
 
   // active messages
-
-  struct BarrierAdjustMessage {
-    NodeID sender;
-    int forwarded;
-    int delta;
-    Barrier barrier;
-    Event wait_on;
-
-    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
-                             NodeID sender, bool forwarded, const void *data,
-                             size_t datalen);
-  };
-
-  struct BarrierTriggerMessage {
-    ID::IDType barrier_id;
-    EventImpl::gen_t trigger_gen;
-    EventImpl::gen_t previous_gen;
-    EventImpl::gen_t first_generation;
-    ReductionOpID redop_id;
-    NodeID migration_target;
-    unsigned base_arrival_count;
-
-    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-
-    static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
-                             NodeID migration_target, unsigned base_arrival_count,
-                             const void *data, size_t datalen);
-  };
 
   struct BarrierMigrationMessage {
     Barrier barrier;

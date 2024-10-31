@@ -189,9 +189,9 @@ namespace Realm {
   BarrierImpl::BarrierImpl(void)
     : generation(0)
     , gen_subscribed(0)
+    , barrier_comm(std::make_unique<BarrierCommunicator>())
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
-    , barrier_comm(new BarrierCommunicator())
   {
     first_generation = /*free_generation =*/0;
     next_free = 0;
@@ -207,9 +207,9 @@ namespace Realm {
   BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm)
     : generation(0)
     , gen_subscribed(0)
+    , barrier_comm(_barrier_comm)
     , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
-    , barrier_comm(_barrier_comm)
   {
     first_generation = /*free_generation =*/0;
     next_free = 0;
@@ -230,10 +230,6 @@ namespace Realm {
 
     if(final_values) {
       free(final_values);
-    }
-
-    if(barrier_comm) {
-      delete barrier_comm;
     }
   }
 
@@ -665,9 +661,9 @@ namespace Realm {
 
     if(forward_to_node != (NodeID)-1) {
       Barrier b = make_barrier(barrier_gen, timestamp);
-      BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
-                                         sender, (sender != Network::my_node_id),
-                                         reduce_value, reduce_value_size);
+      barrier_comm->adjust(forward_to_node, b, delta, Event::NO_EVENT, sender,
+                           (sender != Network::my_node_id), reduce_value,
+                           reduce_value_size);
       return;
     }
 
@@ -704,9 +700,10 @@ namespace Realm {
                  (((*it).previous_gen - oldest_previous) * redop->sizeof_lhs);
           datalen = (tgt_trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
         }
-        BarrierTriggerMessage::send_request(
-            (*it).node, me.id, tgt_trigger_gen, (*it).previous_gen, first_generation,
-            redop_id, migration_target, base_arrival_count, data, datalen);
+
+        barrier_comm->trigger((*it).node, me.id, tgt_trigger_gen, (*it).previous_gen,
+                              first_generation, redop_id, migration_target,
+                              base_arrival_count, data, datalen);
       }
     }
 

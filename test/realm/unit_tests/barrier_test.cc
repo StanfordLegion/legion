@@ -17,7 +17,19 @@ public:
 
 class MockBarrierCommunicator : public BarrierCommunicator {
 public:
-  virtual void trigger(Event event, NodeID owner, bool poisoned) { sent_trigger_count++; }
+  virtual void adjust(NodeID target, Barrier barrier, int delta, Event wait_on,
+                      NodeID sender, bool forwarded, const void *data, size_t datalen)
+  {
+    sent_adjust_arrivals++;
+  }
+
+  virtual void trigger(NodeID target, ID::IDType barrier_id, EventImpl::gen_t trigger_gen,
+                       EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
+                       ReductionOpID redop_id, NodeID migration_target,
+                       int base_arrival_count, const void *data, size_t datalen)
+  {
+    sent_trigger_count++;
+  }
 
   virtual void subscribe(NodeID target, ID::IDType barrier_id,
                          EventImpl::gen_t subscribe_gen, NodeID subscriber,
@@ -26,12 +38,13 @@ public:
     sent_subscription_count++;
   }
 
+  int sent_adjust_arrivals = 0;
   int sent_trigger_count = 0;
   int sent_subscription_count = 0;
   int sent_notification_count = 0;
 };
 
-class GenEventTest : public ::testing::Test {
+class BarrierTest : public ::testing::Test {
 protected:
   void SetUp() override
   {
@@ -47,7 +60,7 @@ protected:
   // DynamicTable<LocalEventTableAllocator> local_events;
 };
 
-TEST_F(GenEventTest, RemoteSubscribe)
+TEST_F(BarrierTest, RemoteSubscribe)
 {
   const NodeID owner = 1;
   const EventImpl::gen_t subscribe_gen = 1;
@@ -56,13 +69,9 @@ TEST_F(GenEventTest, RemoteSubscribe)
   barrier.subscribe(subscribe_gen);
 
   EXPECT_EQ(barrier_comm->sent_subscription_count, 1);
-  // barrier.base_arrival_count = 2;
-  // barrier.adjust_arrival(1, 1, 0, Event::NO_EVENT, 1, 0, 0, 0,
-  // TimeLimit::responsive()); barrier.adjust_arrival(1, 1, 0, Event::NO_EVENT, 1, 0, 0,
-  // 0, TimeLimit::responsive());
 }
 
-TEST_F(GenEventTest, LocalArrive)
+TEST_F(BarrierTest, LocalArrive)
 {
   const NodeID owner = 0;
   BarrierImpl barrier;
@@ -70,13 +79,9 @@ TEST_F(GenEventTest, LocalArrive)
   barrier.base_arrival_count = 2;
   barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
   barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
-  // GenEventImpl event(nullptr, nullptr);
-  // event.init(ID::make_event(0, 0, 0), 0);
-  // EXPECT_EQ(ID(event.current_event()).event_generation(),
-  //        ID::make_event(0, 0, 1).event_generation());
 }
 
-TEST_F(GenEventTest, LocalArriveWithRemoteSubscriber)
+TEST_F(BarrierTest, LocalArriveWithRemoteSubscriber)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t subscribe_gen = 1;
@@ -88,5 +93,18 @@ TEST_F(GenEventTest, LocalArriveWithRemoteSubscriber)
   barrier.base_arrival_count = 2;
   barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
   barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, 1, 0, 0, 0, TimeLimit::responsive());
-  // TODO need to overload trigger
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 1);
+}
+
+TEST_F(BarrierTest, RemoteArrive)
+{
+  const NodeID owner = 1;
+  BarrierImpl barrier(barrier_comm);
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(1, -1, 0, Event::NO_EVENT, /*sender*/ 0, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_adjust_arrivals, 1);
 }
