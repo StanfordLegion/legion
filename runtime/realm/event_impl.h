@@ -175,10 +175,10 @@ namespace Realm {
     virtual void trigger(Event event, NodeID owner, bool poisoned);
 
     virtual void update(Event event, NodeSet to_update,
-                        EventImpl::gen_t *poisoned_generations, size_t size);
+                        span<EventImpl::gen_t> poisoned_generations);
 
     virtual void update(Event event, NodeID to_update,
-                        EventImpl::gen_t *poisoned_generations, size_t size);
+                        span<EventImpl::gen_t> poisoned_generations);
 
     virtual void subscribe(Event event, NodeID owner,
                            EventImpl::gen_t previous_subscribe_gen);

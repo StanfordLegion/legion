@@ -910,17 +910,18 @@ namespace Realm {
   }
 
   void EventCommunicator::update(Event event, NodeSet to_update,
-                                 EventImpl::gen_t *poisoned_generations, size_t size)
+                                 span<EventImpl::gen_t> poisoned_generations)
   {
     for(const NodeID node : to_update) {
-      update(event, node, poisoned_generations, size);
+      update(event, node, poisoned_generations);
     }
   }
 
   void EventCommunicator::update(Event event, NodeID to_update,
-                                 EventImpl::gen_t *poisoned_generations, size_t size)
+                                 span<EventImpl::gen_t> poisoned_generations)
   {
-    ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations, size);
+    ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations.data(),
+                                           poisoned_generations.size());
     amsg->event = event;
     amsg.commit();
   }
@@ -981,9 +982,7 @@ namespace Realm {
     }
 #endif
 
-    if(poisoned_generations) {
-      delete[] poisoned_generations;
-    }
+    delete[] poisoned_generations;
   }
 
   void GenEventImpl::init(ID _me, unsigned _init_owner)
@@ -1326,8 +1325,9 @@ namespace Realm {
       // always updated before the generation - the load_acquire above makes
       // sure we read in the correct order
       const int npg_cached = num_poisoned_generations.load_acquire();
-      event_comm->update(triggered, sender, poisoned_generations,
-                         npg_cached * sizeof(EventImpl::gen_t));
+      event_comm->update(triggered, sender,
+                         span<EventImpl::gen_t>(poisoned_generations,
+                                                npg_cached * sizeof(EventImpl::gen_t)));
     }
   }
 
@@ -1707,8 +1707,9 @@ namespace Realm {
       // any remote nodes to notify?
       if(!to_update.empty()) {
         int npg_cached = num_poisoned_generations.load_acquire();
-        event_comm->update(make_event(update_gen), to_update, poisoned_generations,
-                           npg_cached * sizeof(EventImpl::gen_t));
+        event_comm->update(make_event(update_gen), to_update,
+                           span<EventImpl::gen_t>(poisoned_generations,
+                                                  npg_cached * sizeof(EventImpl::gen_t)));
       }
     } else {
       // we're triggering somebody else's event, so the first thing to do is tell them
