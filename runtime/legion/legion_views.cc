@@ -3809,7 +3809,10 @@ namespace Legion {
               registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
+      {
+        manager->record_instance_user(term_event, applied_events);
         return manager->get_use_event(term_event);
+      }
       if (!is_logical_owner())
       {
         ApUserEvent ready_event;
@@ -5757,7 +5760,10 @@ namespace Legion {
               registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
+      {
+        manager->record_instance_user(term_event, applied_events);
         return manager->get_use_event(term_event);
+      }
       if (!is_logical_owner())
       {
         // If we're not the logical owner send a message there 

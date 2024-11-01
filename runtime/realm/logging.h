@@ -44,8 +44,6 @@ namespace Realm {
   }; // namespace Config
 
   class LoggerMessage;
-  typedef int LoggerMessageID;
-  static const LoggerMessageID RESERVED_LOGGER_MESSAGE_ID = 0;
   class LoggerConfig;
   class LoggerOutputStream;
   struct DelayedMessage;
@@ -90,18 +88,10 @@ namespace Realm {
     LoggerMessage warning(void);
     LoggerMessage error(void);
     LoggerMessage fatal(void);
-    
-    LoggerMessage spew(LoggerMessageID);
-    LoggerMessage debug(LoggerMessageID);
-    LoggerMessage info(LoggerMessageID);
-    LoggerMessage print(LoggerMessageID);
-    LoggerMessage warning(LoggerMessageID);
-    LoggerMessage error(LoggerMessageID);
-    LoggerMessage fatal(LoggerMessageID);
-    
+
     // use this only if you want a dynamic level for some reason
     LoggerMessage newmsg(LoggingLevel level);
-    
+
     // old printf-style interface
     REALM_ATTR_PRINTF_FORMAT(void spew(const char *fmt, ...), 2, 3);
     REALM_ATTR_PRINTF_FORMAT(void debug(const char *fmt, ...), 2, 3);
@@ -110,16 +100,7 @@ namespace Realm {
     REALM_ATTR_PRINTF_FORMAT(void warning(const char *fmt, ...), 2, 3);
     REALM_ATTR_PRINTF_FORMAT(void error(const char *fmt, ...), 2, 3);
     REALM_ATTR_PRINTF_FORMAT(void fatal(const char *fmt, ...), 2, 3);
-    
-    // newer collated messages
-    REALM_ATTR_PRINTF_FORMAT(void spew(LoggerMessageID, const char *fmt, ...), 3, 4);
-    REALM_ATTR_PRINTF_FORMAT(void debug(LoggerMessageID, const char *fmt, ...), 3, 4);
-    REALM_ATTR_PRINTF_FORMAT(void info(LoggerMessageID, const char *fmt, ...), 3, 4);
-    REALM_ATTR_PRINTF_FORMAT(void print(LoggerMessageID, const char *fmt, ...), 3, 4);
-    REALM_ATTR_PRINTF_FORMAT(void warning(LoggerMessageID, const char *fmt, ...), 3, 4);
-    REALM_ATTR_PRINTF_FORMAT(void error(LoggerMessageID, const char *fmt, ...), 3, 4);
-    REALM_ATTR_PRINTF_FORMAT(void fatal(LoggerMessageID, const char *fmt, ...), 3, 4);
-    
+
   protected:
     friend class LoggerMessage;
 
@@ -154,31 +135,27 @@ namespace Realm {
   protected:
     // can only be created by a Logger
     friend class Logger;
-    
+
     LoggerMessage(void);  // default constructor makes an inactive message
     LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level);
-    LoggerMessage(LoggerMessageID messageID, Logger *_logger, bool _active, Logger::LoggingLevel _level);
-    
-    
+
   public:
     LoggerMessage(const LoggerMessage& to_copy);
     ~LoggerMessage(void);
-    
+
     template <typename T>
     LoggerMessage& operator<<(const T& val);
-    
+
     // vprintf-style
     LoggerMessage& vprintf(const char *fmt, va_list ap);
-    LoggerMessage& vprintf(const char *typeName, LoggerMessageID messageID, const char *fmt, va_list ap);
-    
+
     bool is_active(void) const;
 
     void deactivate(void);
 
     std::ostream& get_stream(void);
-    
+
   protected:
-    LoggerMessageID messageID;
     Logger *logger;
     bool active;
     Logger::LoggingLevel level;

@@ -28,19 +28,307 @@ namespace Realm {
     extern Logger log_cudart;
     extern Logger log_gpu;
 
-    static GPUProcessor *get_gpu_or_die(const char *funcname)
+    struct CallConfig {
+      dim3 grid;
+      dim3 block;
+      size_t shared;
+      CUstream stream;
+    };
+    namespace ThreadLocal {
+      extern REALM_THREAD_LOCAL GPUStream *current_gpu_stream;
+      extern REALM_THREAD_LOCAL bool block_on_synchronize;
+      extern REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams;
+      static thread_local std::vector<CallConfig> call_config_stack;
+    } // namespace ThreadLocal
+
+    class GPUPreemptionWaiter : public GPUCompletionNotification {
+    public:
+      GPUPreemptionWaiter(GPU *gpu);
+      virtual ~GPUPreemptionWaiter(void) {}
+
+    public:
+      virtual void request_completed(void);
+
+    public:
+      void preempt(void);
+
+    private:
+      GPU *const gpu;
+      Event wait_event;
+    };
+
+    GPUPreemptionWaiter::GPUPreemptionWaiter(GPU *g)
+      : gpu(g)
+    {
+      GenEventImpl *impl = GenEventImpl::create_genevent();
+      wait_event = impl->current_event();
+    }
+
+    void GPUPreemptionWaiter::request_completed(void)
+    {
+      GenEventImpl::trigger(wait_event, false /*poisoned*/);
+    }
+
+    void GPUPreemptionWaiter::preempt(void)
+    {
+      // Realm threads don't obey a stack discipline for
+      // preemption so we can't leave our context on the stack
+      gpu->pop_context();
+      wait_event.wait();
+      // When we wake back up, we have to push our context again
+      gpu->push_context();
+    }
+
+    static CUstream translate_stream(CUstream stream)
+    {
+      if(IS_DEFAULT_STREAM(stream)) {
+        return ThreadLocal::current_gpu_stream->get_stream();
+      }
+      return stream;
+    }
+
+    static GPUStream *get_stream_or_die(const char *funcname)
     {
       // mark that the hijack code is active - this covers the calls below
       cudart_hijack_active = true;
 
-      GPUProcessor *p = GPUProcessor::get_current_gpu_proc();
-      if (!p) {
+      GPUStream *s = ThreadLocal::current_gpu_stream;
+      if(s == nullptr) {
         log_cudart.fatal() << funcname << "() called outside CUDA task";
         assert(false);
       }
-      return p;
+      return s;
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct RegisteredFunction
+
+    RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
+                                           const char *_device_fun)
+      : fat_bin(_fat_bin)
+      , host_fun(_host_fun)
+      , device_fun(_device_fun)
+    {}
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct RegisteredVariable
+
+    RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
+                                           const char *_device_name, bool _external,
+                                           int _size, bool _constant, bool _global,
+                                           bool _managed)
+      : fat_bin(_fat_bin)
+      , host_var(_host_var)
+      , device_name(_device_name)
+      , external(_external)
+      , size(_size)
+      , constant(_constant)
+      , global(_global)
+      , managed(_managed)
+    {}
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GlobalRegistrations
+
+    GlobalRegistrations::GlobalRegistrations(void) {}
+
+    GlobalRegistrations::~GlobalRegistrations(void)
+    {
+      variables.clear();
+      functions.clear();
+      modules.clear();
+    }
+
+    /*static*/ GlobalRegistrations &GlobalRegistrations::get_global_registrations(void)
+    {
+      static GlobalRegistrations reg;
+      return reg;
+    }
+
+    // called by a GPU when it has created its context - will result in calls back
+    //  into the GPU for any modules/variables/whatever already registered
+    /*static*/ void GlobalRegistrations::add_gpu_context(GPU *gpu)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+
+      RWLock::AutoWriterLock al(g.rwlock);
+
+      // add this gpu to the list
+      assert(g.active_gpus.count(gpu) == 0);
+
+      for(auto &[fat_bin, mod] : g.modules) {
+        g.load_module_under_lock(mod, gpu);
+      }
+
+      for(auto &[sym, var] : g.variables) {
+        g.register_variable_under_lock(var, gpu);
+      }
+      for(auto &[sym, func] : g.functions) {
+        g.register_function_under_lock(func, gpu);
+      }
+
+      g.active_gpus.insert(gpu);
+    }
+
+    /*static*/ void GlobalRegistrations::remove_gpu_context(GPU *gpu)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+
+      RWLock::AutoWriterLock al(g.rwlock);
+
+      assert(g.active_gpus.count(gpu) > 0);
+      g.active_gpus.erase(gpu);
+    }
+
+    // called by __cuda(un)RegisterFatBinary
+    /*static*/ void GlobalRegistrations::register_fat_binary(const FatBin *fat_bin)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+
+      RWLock::AutoWriterLock al(g.rwlock);
+
+      if(g.modules.find(fat_bin) != g.modules.end()) {
+        return;
+      }
+
+      RegisteredModule mod;
+      mod.fat_bin = fat_bin;
+
+      for(GPU *gpu : g.active_gpus) {
+        g.load_module_under_lock(mod, gpu);
+      }
+
+      g.modules.insert(std::make_pair(fat_bin, mod));
+    }
+
+    /*static*/ void GlobalRegistrations::unregister_fat_binary(const FatBin *fat_bin)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+
+      RWLock::AutoWriterLock al(g.rwlock);
+      // Shouldn't we unload the module from all the gpus?
+      g.modules.erase(fat_bin);
+    }
+
+    // called by __cudaRegisterVar
+    /*static*/ void GlobalRegistrations::register_variable(const RegisteredVariable &v)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+
+      RWLock::AutoWriterLock al(g.rwlock);
+      RegisteredVariable &var = (g.variables[v.host_var] = v);
+      assert(g.modules.count(var.fat_bin) > 0);
+      for(GPU *gpu : g.active_gpus) {
+        g.register_variable_under_lock(var, gpu);
+      }
+    }
+
+    // called by __cudaRegisterFunction
+    /*static*/ void GlobalRegistrations::register_function(const RegisteredFunction &f)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+
+      RWLock::AutoWriterLock al(g.rwlock);
+      RegisteredFunction &func = (g.functions[f.host_fun] = f);
+      assert(g.modules.count(func.fat_bin) > 0);
+      for(GPU *gpu : g.active_gpus) {
+        g.register_function_under_lock(func, gpu);
+      }
+    }
+
+    /*static*/ CUfunc_st *GlobalRegistrations::lookup_function(const void *func, GPU *gpu)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+      RWLock::AutoReaderLock al(g.rwlock);
+      RegisteredFunction &rf = g.functions[func];
+      assert(static_cast<size_t>(gpu->info->index) < rf.gpu_functions.size());
+      return rf.gpu_functions[gpu->info->index];
+    }
+
+    /*static*/ uintptr_t GlobalRegistrations::lookup_variable(const void *var, GPU *gpu)
+    {
+      GlobalRegistrations &g = get_global_registrations();
+      RWLock::AutoReaderLock al(g.rwlock);
+      RegisteredVariable &rv = g.variables[var];
+      assert(static_cast<size_t>(gpu->info->index) < rv.gpu_addresses.size());
+      return rv.gpu_addresses[gpu->info->index];
+    }
+
+    void GlobalRegistrations::register_variable_under_lock(RegisteredVariable &var,
+                                                           GPU *gpu)
+    {
+      CUresult result = CUDA_SUCCESS;
+      RegisteredModule &mod = modules[var.fat_bin];
+
+      if(var.gpu_addresses.size() <= static_cast<size_t>(gpu->info->index)) {
+        var.gpu_addresses.resize(gpu->info->index + 1);
+      }
+      AutoGPUContext agc(gpu);
+      size_t size = 0;
+      CUdeviceptr ptr = 0;
+      // TODO(cperry): error handling
+      result = CUDA_DRIVER_FNPTR(cuModuleGetGlobal)(
+          &ptr, &size, mod.gpu_modules[gpu->info->index], var.device_name);
+      assert(result == CUDA_SUCCESS);
+      var.gpu_addresses[gpu->info->index] = ptr;
+      // if this is a managed variable, the "host_var" is actually a pointer
+      //  we need to fill in, so do that now
+      if(var.managed) {
+        CUdeviceptr *indirect =
+            const_cast<CUdeviceptr *>(static_cast<const CUdeviceptr *>(var.host_var));
+        if((*indirect != 0) && (*indirect != ptr)) {
+          log_cudart.fatal() << "__managed__ variables are not supported when using "
+                                "multiple devices with CUDART hijack enabled";
+          abort();
+        }
+        *indirect = ptr;
+      }
+    }
+
+    void GlobalRegistrations::register_function_under_lock(RegisteredFunction &func,
+                                                           GPU *gpu)
+    {
+      CUresult result = CUDA_SUCCESS;
+      RegisteredModule &mod = modules[func.fat_bin];
+
+      if(func.gpu_functions.size() <= static_cast<size_t>(gpu->info->index)) {
+        func.gpu_functions.resize(gpu->info->index + 1);
+      }
+      AutoGPUContext agc(gpu);
+      // TODO(cperry): error handling
+      result = CUDA_DRIVER_FNPTR(cuModuleGetFunction)(
+          &func.gpu_functions[gpu->info->index], mod.gpu_modules[gpu->info->index],
+          func.device_fun);
+      assert(result == CUDA_SUCCESS);
+    }
+
+    void GlobalRegistrations::load_module_under_lock(RegisteredModule &mod, GPU *gpu)
+    {
+      CUresult result = CUDA_SUCCESS;
+      const size_t buffer_size = 16384;
+      static char log_info_buffer[buffer_size];
+      static char log_error_buffer[buffer_size];
+      CUjit_option jit_options[] = {
+          CU_JIT_INFO_LOG_BUFFER, CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+          CU_JIT_INFO_LOG_BUFFER, CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES};
+      void *option_vals[] = {log_info_buffer, (void *)buffer_size, log_error_buffer,
+                             (void *)buffer_size};
+      static_assert((sizeof(jit_options) / sizeof(jit_options[0])) ==
+                    (sizeof(option_vals) / sizeof(option_vals[0])));
+
+      if(mod.gpu_modules.size() <= static_cast<size_t>(gpu->info->index)) {
+        mod.gpu_modules.resize(gpu->info->index + 1);
+      }
+      // TODO(cperry): error handling
+      AutoGPUContext agc(gpu);
+      result = CUDA_DRIVER_FNPTR(cuModuleLoadDataEx)(
+          &mod.gpu_modules[gpu->info->index], mod.fat_bin->data,
+          sizeof(jit_options) / sizeof(jit_options[0]), jit_options, option_vals);
+      assert(result == CUDA_SUCCESS);
+    }
   }; // namespace Cuda
 }; // namespace Realm
 
@@ -60,16 +348,13 @@ extern "C" {
     // mark that the hijack code is active
     cudart_hijack_active = true;
 
-    // we make a "handle" that just holds the pointer
-    void **handle = new void *;
-    *handle = (void *)fat_bin;
 //define DEBUG_CUDART_REGISTRATION
 #ifdef DEBUG_CUDART_REGISTRATION
     // can't use logger here - this happens at startup
-    std::cout << "registering fat binary " << fat_bin << ", handle = " << handle << std::endl;
+    std::cout << "registering fat binary " << fat_bin << std::endl;
 #endif
-    GlobalRegistrations::register_fat_binary((FatBin *)fat_bin);
-    return handle;
+    GlobalRegistrations::register_fat_binary(reinterpret_cast<const FatBin *>(fat_bin));
+    return reinterpret_cast<void **>(const_cast<void *>(fat_bin));
   }
 
   // This method was added with CUDA 10, not sure what it does yet
@@ -90,13 +375,10 @@ extern "C" {
     // mark that the hijack code is active
     cudart_hijack_active = true;
 
-    FatBin *fat_bin = *(FatBin **)handle;
 #ifdef DEBUG_CUDART_REGISTRATION
-    std::cout << "unregistering fat binary " << fat_bin << ", handle = " << handle << std::endl;
+    std::cout << "unregistering fat binary handle = " << handle << std::endl;
 #endif
-    GlobalRegistrations::unregister_fat_binary(fat_bin);
-
-    delete handle;
+    GlobalRegistrations::unregister_fat_binary(reinterpret_cast<const FatBin *>(handle));
   }
 
   REALM_PUBLIC_API
@@ -112,15 +394,10 @@ extern "C" {
 #ifdef DEBUG_CUDART_REGISTRATION
     std::cout << "registering variable " << device_name << std::endl;
 #endif
-    const FatBin *fat_bin = *(const FatBin **)handle;
-    GlobalRegistrations::register_variable(new RegisteredVariable(fat_bin,
-								  host_var,
-								  device_name,
-								  ext != 0,
-								  size,
-								  constant != 0,
-								  global != 0,
-                                                                  false /*unmanaged*/));
+    const FatBin *fat_bin = reinterpret_cast<const FatBin *>(handle);
+    GlobalRegistrations::register_variable(
+        RegisteredVariable(fat_bin, host_var, device_name, ext != 0, size, constant != 0,
+                           global != 0, false /*unmanaged*/));
   }
 
   REALM_PUBLIC_API
@@ -136,15 +413,10 @@ extern "C" {
 #ifdef DEBUG_CUDART_REGISTRATION
     std::cout << "registering managed variable " << device_name << std::endl;
 #endif
-    const FatBin *fat_bin = *(const FatBin **)handle;
-    GlobalRegistrations::register_variable(new RegisteredVariable(fat_bin,
-								  host_var,
-								  device_name,
-								  ext != 0,
-								  size,
-								  constant != 0,
-								  global != 0,
-                                                                  true /*managed*/));
+    const FatBin *fat_bin = reinterpret_cast<const FatBin *>(handle);
+    GlobalRegistrations::register_variable(
+        RegisteredVariable(fat_bin, host_var, device_name, ext != 0, size, constant != 0,
+                           global != 0, true /*managed*/));
   }
       
   REALM_PUBLIC_API
@@ -163,10 +435,9 @@ extern "C" {
 #ifdef DEBUG_CUDART_REGISTRATION
     std::cout << "registering function " << device_fun << ", handle = " << handle << std::endl;
 #endif
-    const FatBin *fat_bin = *(const FatBin **)handle;
-    GlobalRegistrations::register_function(new RegisteredFunction(fat_bin,
-								  host_fun,
-								  device_fun));
+    const FatBin *fat_bin = reinterpret_cast<const FatBin *>(handle);
+    GlobalRegistrations::register_function(
+        RegisteredFunction(fat_bin, host_fun, device_fun));
   }
       
   REALM_PUBLIC_API
@@ -184,17 +455,14 @@ extern "C" {
   // modify in ways that are important to Legion.
 
   REALM_PUBLIC_API
-  unsigned __cudaPushCallConfiguration(dim3 gridDim,
-				       dim3 blockDim,
-				       size_t sharedSize = 0,
-				       void *stream = 0)
+  unsigned __cudaPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedSize = 0,
+                                       void *stream = nullptr)
   {
-    // mark that the hijack code is active
-    cudart_hijack_active = true;
 
-    GPUProcessor *p = get_gpu_or_die("__cudaPushCallConfigration");
-    p->push_call_configuration(gridDim, blockDim, sharedSize, stream);
-    // This should always succeed so return 0
+    (void)get_stream_or_die(__FUNCTION__);
+    Realm::Cuda::ThreadLocal::call_config_stack.push_back(
+        {gridDim, blockDim, sharedSize, (CUstream)stream});
+
     return 0;
   }
 
@@ -204,84 +472,81 @@ extern "C" {
 					 size_t *sharedSize,
 					 void *stream)
   {
-    // mark that the hijack code is active
-    cudart_hijack_active = true;
+    (void)get_stream_or_die(__FUNCTION__);
+    Realm::Cuda::CallConfig &config = Realm::Cuda::ThreadLocal::call_config_stack.back();
+    *gridDim = config.grid;
+    *blockDim = config.block;
+    *sharedSize = config.shared;
+    *((CUstream *)stream) = config.stream;
 
-    GPUProcessor *p = get_gpu_or_die("__cudaPopCallConfigration");
-    p->pop_call_configuration(gridDim, blockDim, sharedSize, stream);
-    // If this failed it would have died with an assertion internally
+    Realm::Cuda::ThreadLocal::call_config_stack.pop_back();
+
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventCreate(cudaEvent_t *event)
   {
-    get_gpu_or_die("cudaEventCreate");
-    CHECK_CU( cuEventCreate(event, CU_EVENT_DEFAULT) );
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuEventCreate)(event, CU_EVENT_DEFAULT);
   }
 	
   REALM_PUBLIC_API
   cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,
 				       unsigned int flags)
   {
-    get_gpu_or_die("cudaEventCreateWithFlags");
-    CHECK_CU( cuEventCreate(event, flags) );
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuEventCreate)(event, flags);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream /*= 0*/)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaEventRecord");
-    p->event_record(event, stream);
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuEventRecord)(event, translate_stream(stream));
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventSynchronize(cudaEvent_t event)
   {
-    get_gpu_or_die("cudaEventSynchronize");
-    CHECK_CU( cuEventSynchronize(event) );
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuEventSynchronize)(event);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventDestroy(cudaEvent_t event)
   {
-    get_gpu_or_die("cudaEventDestroy");
-    CHECK_CU( cuEventDestroy(event) );
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuEventDestroy)(event);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end)
   {
-    get_gpu_or_die("cudaEventElapsedTime");
-    CHECK_CU( cuEventElapsedTime(ms, start, end) );
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuEventElapsedTime)(ms, start, end);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaStreamCreate(cudaStream_t *stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaStreamCreate");
     // This needs to be a blocking stream that serializes with the
     // "NULL" stream, which in this case is the original stream
     // for the task, so the only way to enforce that currently is 
     // with exactly the same stream
-    *stream = p->gpu->get_null_task_stream()->get_stream();
+    *stream = get_stream_or_die(__FUNCTION__)->get_stream();
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaStreamCreateWithFlags(cudaStream_t *stream, unsigned int flags)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaStreamCreateWithFlags");
-    if (flags == cudaStreamNonBlocking)
-      *stream = p->gpu->get_next_task_stream(true/*create*/)->get_stream();
-    else
-      *stream = p->gpu->get_null_task_stream()->get_stream();
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    if(flags == cudaStreamNonBlocking) {
+      *stream = s->get_gpu()->get_next_task_stream(true)->get_stream();
+    } else {
+      *stream = s->get_stream();
+    }
     return cudaSuccess;
   }
 
@@ -296,16 +561,42 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaStreamDestroy(cudaStream_t stream)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamDestroy");
-    // Ignore this for now because we know our streams are not being created on the fly
+    /*GPUProcessor *p =*/get_stream_or_die(__FUNCTION__);
+    // Ignore this for now because we know we can reuse streams as needed
     return cudaSuccess;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaStreamSynchronize(cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaStreamSynchronize");
-    p->stream_synchronize(stream);
+    GPUStream *current = get_stream_or_die(__FUNCTION__);
+    if(IS_DEFAULT_STREAM(stream)) {
+      return cudaDeviceSynchronize();
+    }
+    if(Realm::Cuda::ThreadLocal::block_on_synchronize) {
+      return (cudaError_t)CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream);
+    }
+    GPUStream *s = current->get_gpu()->find_stream(stream);
+    if(s == nullptr) {
+      log_gpu.warning() << "WARNING: Detected unknown CUDA stream " << stream
+                        << " that Realm did not create which suggests "
+                        << "that there is another copy of the CUDA runtime "
+                        << "somewhere making its own streams... be VERY careful.";
+      return (cudaError_t)CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream);
+    }
+
+    // We don't actually want to block the GPU processor
+    // when synchronizing, so we instead register a cuda
+    // event on the stream and then use it triggering to
+    // indicate that the stream is caught up
+    // Make a completion notification to be notified when
+    // the event has actually triggered
+    GPUPreemptionWaiter waiter(current->get_gpu());
+    // Register the waiter with the stream
+    s->add_notification(&waiter);
+    // Perform the wait, this will preempt the thread
+    waiter.preempt();
+
     return cudaSuccess;
   }
 
@@ -314,38 +605,9 @@ extern "C" {
 				  cudaEvent_t event,
 				  unsigned int flags)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaStreamWaitEvent");
-    p->stream_wait_on_event(stream, event);
-    return cudaSuccess;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaConfigureCall(dim3 grid_dim,
-				dim3 block_dim,
-				size_t shared_memory,
-				cudaStream_t stream)
-  {
-    GPUProcessor *p = get_gpu_or_die("cudaConfigureCall");
-    p->configure_call(grid_dim, block_dim, shared_memory, stream);
-    return cudaSuccess;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaSetupArgument(const void *arg,
-				size_t size,
-				size_t offset)
-  {
-    GPUProcessor *p = get_gpu_or_die("cudaSetupArgument");
-    p->setup_argument(arg, size, offset);
-    return cudaSuccess;
-  }
-
-  REALM_PUBLIC_API
-  cudaError_t cudaLaunch(const void *func)
-  {
-    GPUProcessor *p = get_gpu_or_die("cudaLaunch");
-    p->launch(func);
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(translate_stream(stream),
+                                                             event, flags);
   }
 
   REALM_PUBLIC_API
@@ -356,9 +618,11 @@ extern "C" {
 			       size_t shared_memory,
 			       cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaLaunchKernel");
-    p->launch_kernel(func, grid_dim, block_dim, args, shared_memory, stream);
-    return cudaSuccess;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    CUfunction f = GlobalRegistrations::lookup_function(func, s->get_gpu());
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuLaunchKernel)(
+        f, grid_dim.x, grid_dim.y, grid_dim.z, block_dim.x, block_dim.y, block_dim.z,
+        shared_memory, translate_stream(stream), args, nullptr);
   }
 
 #if CUDA_VERSION >= 9000
@@ -370,76 +634,57 @@ extern "C" {
 					  size_t shared_memory,
 					  cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaLaunchCooperativeKernel");
-    p->launch_kernel(func, grid_dim, block_dim, args, 
-		     shared_memory, stream, true/*cooperative*/);
-    return cudaSuccess;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    CUfunction f = GlobalRegistrations::lookup_function(func, s->get_gpu());
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuLaunchCooperativeKernel)(
+        f, grid_dim.x, grid_dim.y, grid_dim.z, block_dim.x, block_dim.y, block_dim.z,
+        shared_memory, translate_stream(stream), args);
   }
 #endif
 
   REALM_PUBLIC_API
   cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMemGetInfo");
-
-    CUresult ret = cuMemGetInfo(free, total);
-    if(ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_INVALID_VALUE);
-    return cudaErrorInvalidValue;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemGetInfo)(free, total);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMalloc(void **ptr, size_t size)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMalloc");
+    (void)get_stream_or_die(__FUNCTION__);
 
     // CUDART tolerates size=0, returning nullptr, but the driver API
     //  does not, so catch that here
     if(size == 0) {
       *ptr = 0;
       return cudaSuccess;
-    } else {
-      CUresult ret = cuMemAlloc((CUdeviceptr *)ptr, size);
-      if(ret == CUDA_SUCCESS) return cudaSuccess;
-      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-      return cudaErrorMemoryAllocation;
     }
+
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemAlloc)(
+        reinterpret_cast<CUdeviceptr *>(ptr), size);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMallocHost(void **ptr, size_t size)
   {
-    get_gpu_or_die("cudaMallocHost");
-
-    // size=0 is allowed, but the runtime doesn't always do a good job of
-    //  setting *ptr to nullptr, so do it ourselves
-    if(size == 0) {
-      *ptr = 0;
-      return cudaSuccess;
-    } else {
-      CUresult ret = cuMemAllocHost(ptr, size);
-      if (ret == CUDA_SUCCESS) return cudaSuccess;
-      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-      return cudaErrorMemoryAllocation;
-    }
+    (void)get_stream_or_die(__FUNCTION__);
+    return cudaHostAlloc(ptr, size, 0);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags)
   {
-    get_gpu_or_die("cudaHostAlloc");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    // size=0 is allowed, but the runtime doesn't always do a good job of
-    //  setting *ptr to nullptr, so do it ourselves
+    // CUDART tolerates size=0, returning nullptr, but the driver API
+    //  does not, so catch that here
     if(size == 0) {
       *ptr = 0;
       return cudaSuccess;
-    } else {
-      CUresult ret = cuMemHostAlloc(ptr, size, flags);
-      if (ret == CUDA_SUCCESS) return cudaSuccess;
-      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-      return cudaErrorMemoryAllocation;
     }
+
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemHostAlloc)(ptr, size, flags);
   }
 
 #if CUDART_VERSION >= 8000
@@ -448,146 +693,54 @@ extern "C" {
   cudaError_t cudaMallocManaged(void **ptr, size_t size,
 				unsigned flags /*= cudaMemAttachGlobal*/)
   {
-    get_gpu_or_die("cudaMallocManaged");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    // size=0 is disallowed by the runtime api, and we need to return
-    //  cudaErrorInvalidValue instead of calling into the driver and having it
-    //  get mad
+    // CUDART tolerates size=0, returning nullptr, but the driver API
+    //  does not, so catch that here
     if(size == 0) {
-      // the cuda runtime actually clears this pointer as well
       *ptr = 0;
-      return cudaErrorInvalidValue;
-    } else {
-      assert((flags == cudaMemAttachGlobal) || (flags == cudaMemAttachHost));
-      CUresult ret = cuMemAllocManaged((CUdeviceptr*)ptr, size,
-				       ((flags == cudaMemAttachGlobal) ?
-					  CU_MEM_ATTACH_GLOBAL :
-					  CU_MEM_ATTACH_HOST));
-      if (ret == CUDA_SUCCESS) return cudaSuccess;
-      assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
-      return cudaErrorMemoryAllocation;
+      return cudaSuccess;
     }
+
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemAllocManaged)(
+        reinterpret_cast<CUdeviceptr *>(ptr), size, flags);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaPointerGetAttributes(cudaPointerAttributes *attr,
 				       const void *ptr)
   {
-    get_gpu_or_die("cudaPointerGetAttributes");
+    CUresult ret = CUDA_SUCCESS;
+    (void)get_stream_or_die(__FUNCTION__);
 
-    unsigned mtype = 0;
+    unsigned mem_type = 0;
     CUdeviceptr dptr = 0;
-    void *hptr = 0;
-    int ordinal = 0;
-    // the docs say 'managed' is a bool, but the driver treats it as a
-    //  32-bit integer
-    int managed = 0;
+    void *hptr = nullptr;
+    int dev = 0;
 
-    CUcontext ctx;
-    {
-      CUresult res = cuPointerGetAttribute(&ctx,
-					   CU_POINTER_ATTRIBUTE_CONTEXT,
-					   (CUdeviceptr)ptr);
-      if(res == CUDA_ERROR_INVALID_VALUE) {
-#if CUDART_VERSION >= 11000
-	// starting with 11.0, cudart returns success for an unknown host pointer
-	attr->type = cudaMemoryTypeUnregistered;
-	attr->device = 0;
-	attr->devicePointer = 0;
-	attr->hostPointer = const_cast<void *>(ptr);
-	return cudaSuccess;
-#else
-	return cudaErrorInvalidValue;
-#endif
+    CUpointer_attribute attrs[] = {
+        CU_POINTER_ATTRIBUTE_MEMORY_TYPE, CU_POINTER_ATTRIBUTE_DEVICE_POINTER,
+        CU_POINTER_ATTRIBUTE_HOST_POINTER, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
+
+    void *data[] = {&mem_type, &dptr, &hptr, &dev};
+
+    if(CUDA_SUCCESS != (ret = CUDA_DRIVER_FNPTR(cuPointerGetAttributes)(
+                            sizeof(attrs) / sizeof(attrs[0]), attrs, data,
+                            reinterpret_cast<CUdeviceptr>(ptr)))) {
+      if(ret == CUDA_ERROR_INVALID_VALUE) {
+        attr->type = cudaMemoryTypeUnregistered;
+        attr->device = 0;
+        attr->devicePointer = 0;
+        attr->hostPointer = const_cast<void *>(ptr);
+        return cudaSuccess;
       }
-      assert(res == CUDA_SUCCESS);
+      return (cudaError_t)ret;
     }
 
-    CHECK_CU( cuPointerGetAttribute(&mtype,
-				    CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
-				    (CUdeviceptr)ptr) );
-
-    // requests for device and host pointers are allowed to fail if they're
-    //  not accessible from device/host respectively
-    {
-      CUresult res = cuPointerGetAttribute(&dptr,
-					   CU_POINTER_ATTRIBUTE_DEVICE_POINTER,
-					   (CUdeviceptr)ptr);
-      if(res == CUDA_ERROR_INVALID_VALUE) {
-	// we'll sanity check the pointers below
-	dptr = 0;
-      } else
-	assert(res == CUDA_SUCCESS);
-    }
-    {
-      CUresult res = cuPointerGetAttribute(&hptr,
-					   CU_POINTER_ATTRIBUTE_HOST_POINTER,
-					   (CUdeviceptr)ptr);
-      if(res == CUDA_ERROR_INVALID_VALUE) {
-	// we'll sanity check the pointers below
-	hptr = 0;
-      } else
-	assert(res == CUDA_SUCCESS);
-    }
-
-#if CUDART_VERSION >= 9200
-    CHECK_CU( cuPointerGetAttribute(&ordinal,
-				    CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
-				    (CUdeviceptr)ptr) );
-#else
-    // have to get the device ordinal from the context
-    CHECK_CU( cuCtxPushCurrent(ctx) );
-    CHECK_CU( cuCtxGetDevice(&ordinal) );
-    CHECK_CU( cuCtxPopCurrent(&ctx) );
-#endif
-
-    CHECK_CU( cuPointerGetAttribute(&managed,
-				    CU_POINTER_ATTRIBUTE_IS_MANAGED,
-				    (CUdeviceptr)ptr) );
-
-    if(managed) {
-#if CUDART_VERSION < 11000
-      attr->memoryType = cudaMemoryTypeDevice;
-      attr->isManaged = 1;
-#endif
-#if CUDART_VERSION >= 10000
-      attr->type = cudaMemoryTypeManaged;
-#endif
-      // should have both host and device pointers
-      assert((dptr != 0) && (hptr != 0));
-    } else {
-#if CUDART_VERSION < 11000
-      attr->isManaged = 0;
-#endif
-      switch(mtype) {
-      case CU_MEMORYTYPE_HOST: {
-#if CUDART_VERSION < 11000
-	attr->memoryType = cudaMemoryTypeHost;
-#endif
-#if CUDART_VERSION >= 10000
-	attr->type = cudaMemoryTypeHost;
-#endif
-	assert(hptr != 0);
-	break;
-      }
-      case CU_MEMORYTYPE_DEVICE: {
-#if CUDART_VERSION < 11000
-	attr->memoryType = cudaMemoryTypeDevice;
-#endif
-#if CUDART_VERSION >= 10000
-	attr->type = cudaMemoryTypeDevice;
-#endif
-	assert(dptr != 0);
-	break;
-      }
-      default:
-	assert(0);
-      }
-    }
-
-    attr->device = ordinal;
-    attr->devicePointer = (void *)dptr;
+    attr->device = dev;
+    attr->devicePointer = reinterpret_cast<void *>(dptr);
     attr->hostPointer = hptr;
+    attr->type = (cudaMemoryType)mem_type;
 
     return cudaSuccess;
   }
@@ -598,14 +751,10 @@ extern "C" {
 				   int dst_device,
 				   cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemPrefetchAsync");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    if(stream == 0)
-      stream = p->gpu->get_null_task_stream()->get_stream();
-
-    CHECK_CU( cuMemPrefetchAsync((CUdeviceptr)dev_ptr, count,
-				 dst_device, stream) );
-    return cudaSuccess;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemPrefetchAsync)(
+        (CUdeviceptr)dev_ptr, count, dst_device, translate_stream(stream));
   }
 
   REALM_PUBLIC_API
@@ -614,44 +763,39 @@ extern "C" {
                             cudaMemoryAdvise advice,
                             int device)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaMemAdvise");
+    (void)get_stream_or_die(__FUNCTION__);
 
     // NOTE: we assume the enums for cudaMeoryAdvise match the ones for
     //  CUmem_advise
-    CHECK_CU( cuMemAdvise((CUdeviceptr)dev_ptr, count,
-                          (CUmem_advise)advice, (CUdevice)device) );
-    return cudaSuccess;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemAdvise)(
+        (CUdeviceptr)dev_ptr, count, (CUmem_advise)advice, (CUdevice)device);
   }
 #endif
 
   REALM_PUBLIC_API
   cudaError_t cudaFree(void *ptr)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaFree");
-
-    CUresult ret = cuMemFree((CUdeviceptr)ptr);
-    if(ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_INVALID_VALUE);
-    return cudaErrorInvalidDevicePointer;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemFree)((CUdeviceptr)ptr);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaFreeHost(void *ptr)
   {
-    get_gpu_or_die("cudaFreeHost");
-    CUresult ret = cuMemFreeHost(ptr);
-    if (ret == CUDA_SUCCESS) return cudaSuccess;
-    assert(ret == CUDA_ERROR_INVALID_VALUE);
-    return cudaErrorInvalidHostPointer;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemFree)((CUdeviceptr)ptr);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMemcpy(void *dst, const void *src, 
 			 size_t size, cudaMemcpyKind kind)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpy");
-    p->gpu_memcpy(dst, src, size);
-    return cudaSuccess;
+    cudaError_t ret = cudaSuccess;
+    ret = cudaMemcpyAsync(dst, src, size, kind, 0);
+    if(ret == cudaSuccess) {
+      ret = cudaStreamSynchronize(0);
+    }
+    return ret;
   }
 
   REALM_PUBLIC_API
@@ -659,18 +803,21 @@ extern "C" {
 			      size_t size, cudaMemcpyKind kind,
 			      cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpyAsync");
-    p->gpu_memcpy_async(dst, src, size, stream);
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemcpyAsync)(
+        (CUdeviceptr)dst, (CUdeviceptr)src, size, translate_stream(stream));
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMemcpy2D(void *dst, size_t dpitch, const void *src, size_t spitch,
 			   size_t width, size_t height, cudaMemcpyKind kind)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpy2D");
-    p->gpu_memcpy2d(dst, dpitch, src, spitch, width, height);
-    return cudaSuccess;
+    cudaError_t ret = cudaSuccess;
+    ret = cudaMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, 0);
+    if(ret == cudaSuccess) {
+      ret = cudaStreamSynchronize(0);
+    }
+    return ret;
   }
 
   REALM_PUBLIC_API
@@ -678,26 +825,43 @@ extern "C" {
 				size_t spitch, size_t width, size_t height, 
 				cudaMemcpyKind kind, cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpy2DAsync");
-    p->gpu_memcpy2d_async(dst, dpitch, src, spitch, width, height, stream);
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    CUDA_MEMCPY2D copy_info;
+    copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+    copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+    copy_info.srcDevice = (CUdeviceptr)src;
+    copy_info.srcHost = src;
+    copy_info.srcPitch = spitch;
+    copy_info.srcY = 0;
+    copy_info.srcXInBytes = 0;
+    copy_info.dstDevice = (CUdeviceptr)dst;
+    copy_info.dstHost = dst;
+    copy_info.dstPitch = dpitch;
+    copy_info.dstY = 0;
+    copy_info.dstXInBytes = 0;
+    copy_info.WidthInBytes = width;
+    copy_info.Height = height;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(&copy_info,
+                                                           translate_stream(stream));
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMemset(void *dst, int value, size_t count)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemset");
-    p->gpu_memset(dst, value, count);
-    return cudaSuccess;
+    cudaError_t ret = cudaSuccess;
+    ret = cudaMemsetAsync(dst, value, count, 0);
+    if(ret == cudaSuccess) {
+      ret = cudaStreamSynchronize(0);
+    }
+    return ret;
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaMemsetAsync(void *dst, int value, 
 			      size_t count, cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemsetAsync");
-    p->gpu_memset_async(dst, value, count, stream);
-    return cudaSuccess;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemsetD8Async)(
+        (CUdeviceptr)dst, (unsigned char)value, count, translate_stream(stream));
   }
 
   REALM_PUBLIC_API
@@ -705,38 +869,35 @@ extern "C" {
   {
     cudart_hijack_active = true;
 
-    // instead of get_gpu_or_die, we can allow poorly written code to
-    //  call cudaDeviceSynchronize from non-GPU tasks based on the
-    //  '-cuda:nongpusync' command-line parameter
-    //GPUProcessor *p = get_gpu_or_die("cudaDeviceSynchronize");
-    GPUProcessor *p = GPUProcessor::get_current_gpu_proc();
-    if(!p) {
-      switch(cudart_hijack_nongpu_sync) {
-      case 0: // ignore
-	{
-	  // don't complain, but there's nothing to synchronize against
-	  //  either
-	  return cudaSuccess;
-	}
-
-      case 1: // warn
-	{
-	  Backtrace bt;
-	  bt.capture_backtrace();
-	  bt.lookup_symbols();
-	  log_cudart.warning() << "cudaDeviceSynchronize() called outside CUDA task at " << bt;
-	  return cudaSuccess;
-	}
-
-      case 2: // fatal error
-      default:
-	{
-	  log_cudart.fatal() << "cudaDeviceSynchronize() called outside CUDA task";
-	  abort();
-	}
+    GPUStream *current = Realm::Cuda::ThreadLocal::current_gpu_stream;
+    if(current != nullptr) {
+      if(Realm::Cuda::ThreadLocal::created_gpu_streams != nullptr) {
+        current->wait_on_streams(*Realm::Cuda::ThreadLocal::created_gpu_streams);
+        delete Realm::Cuda::ThreadLocal::created_gpu_streams;
+        Realm::Cuda::ThreadLocal::created_gpu_streams = 0;
       }
+      return cudaStreamSynchronize(current->get_stream());
     }
-    p->device_synchronize();
+
+    switch(cudart_hijack_nongpu_sync) {
+    case 2:
+    default:
+      log_cudart.fatal() << "cudaDeviceSynchronize() called outside CUDA task";
+      abort();
+      break;
+    case 1: // warn
+    {
+      Backtrace bt;
+      bt.capture_backtrace();
+      bt.lookup_symbols();
+      log_cudart.warning() << "cudaDeviceSynchronize() called outside CUDA task at "
+                           << bt;
+      break;
+    }
+    case 0: // ignore
+      break;
+    }
+
     return cudaSuccess;
   }
 
@@ -745,9 +906,11 @@ extern "C" {
 				 size_t size, size_t offset,
 				 cudaMemcpyKind kind)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpyToSymbol");
-    p->gpu_memcpy_to_symbol(dst, src, size, offset);
-    return cudaSuccess;
+    cudaError_t ret = cudaMemcpyToSymbolAsync(dst, src, size, offset, kind, 0);
+    if(ret == cudaSuccess) {
+      ret = cudaStreamSynchronize(0);
+    }
+    return ret;
   }
 
   REALM_PUBLIC_API
@@ -755,9 +918,10 @@ extern "C" {
 				      size_t size, size_t offset,
 				      cudaMemcpyKind kind, cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpyToSymbolAsync");
-    p->gpu_memcpy_to_symbol_async(dst, src, size, offset, stream);
-    return cudaSuccess;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemcpyAsync)(
+        GlobalRegistrations::lookup_variable(dst, s->get_gpu()) + offset,
+        (CUdeviceptr)src, size, translate_stream(stream));
   }
 
   REALM_PUBLIC_API
@@ -765,9 +929,11 @@ extern "C" {
 				   size_t size, size_t offset,
 				   cudaMemcpyKind kind)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpyFromSymbol");
-    p->gpu_memcpy_from_symbol(dst, src, size, offset);
-    return cudaSuccess;
+    cudaError_t ret = cudaMemcpyFromSymbolAsync(dst, src, size, offset, kind, 0);
+    if(ret == cudaSuccess) {
+      ret = cudaStreamSynchronize(0);
+    }
+    return ret;
   }
       
   REALM_PUBLIC_API
@@ -775,32 +941,27 @@ extern "C" {
 					size_t size, size_t offset,
 					cudaMemcpyKind kind, cudaStream_t stream)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaMemcpyFromSymbolAsync");
-    p->gpu_memcpy_from_symbol_async(dst, src, size, offset, stream);
-    return cudaSuccess;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuMemcpyAsync)(
+        (CUdeviceptr)dst,
+        GlobalRegistrations::lookup_variable(src, s->get_gpu()) + offset, size,
+        translate_stream(stream));
   }
       
   REALM_PUBLIC_API
   cudaError_t cudaDeviceSetSharedMemConfig(cudaSharedMemConfig config)
   {
-    /*GPUProcessor *p =*/ get_gpu_or_die("cudaDeviceSetSharedMemConfig");
 
-    CUsharedconfig cfg = CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE;
-    if(config == cudaSharedMemBankSizeFourByte)
-      cfg = CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE;
-    if(config == cudaSharedMemBankSizeEightByte)
-      cfg = CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE;
-    CHECK_CU( cuCtxSetSharedMemConfig(cfg) );
-    return cudaSuccess;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuCtxSetSharedMemConfig)(
+        (CUsharedconfig)config);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaGetDevice(int *device)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaGetDevice");
-	
-    // this wants the integer index, not the CUdevice
-    *device = p->gpu->info->index;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    *device = s->get_gpu()->info->index;
     return cudaSuccess;
   }
 
@@ -906,21 +1067,21 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int index)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaGetDeviceProperties");
-    const std::vector<GPUInfo*> &infos = p->gpu->module->gpu_info;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    const std::vector<GPUInfo *> &infos = s->get_gpu()->module->gpu_info;
     for (GPUInfo* info : infos) {
       if (info->index != index)
         continue;
 
       if (info->prop.totalGlobalMem != info->totalGlobalMem) {
         // TODO: Replace with cuDeviceGetAttributes to batch
-        #define CUDA_GET_DEVICE_PROP(name, attr)                     \
-          do {								                                       \
-            int val = 0;                                             \
-            CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)        \
-                      (&val, CU_DEVICE_ATTRIBUTE_##attr, info->device) );     \
-            info->prop.name = val;                                           \
-          } while(0);
+#define CUDA_GET_DEVICE_PROP(name, attr)                                                 \
+  do {                                                                                   \
+    int val = 0;                                                                         \
+    (void)CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(&val, CU_DEVICE_ATTRIBUTE_##attr,      \
+                                                  info->device);                         \
+    info->prop.name = val;                                                               \
+  } while(0);
         CUDA_DEVICE_ATTRIBUTES(CUDA_GET_DEVICE_PROP);
 
         strncpy(info->prop.name, info->name, sizeof(info->prop.name));
@@ -938,29 +1099,29 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attr, int index)
   {
-    // doesn't need a current device - the index is supplied
+    CUresult ret = CUDA_SUCCESS;
     CUdevice device;
-    CHECK_CU( cuDeviceGet(&device, index) );
-    // the runtime and device APIs appear to agree on attribute IDs, so just send it through
-    //  and hope for the best
-    CUdevice_attribute cu_attr = (CUdevice_attribute)attr;
-    CHECK_CU( cuDeviceGetAttribute(value, cu_attr, device) );
-    return cudaSuccess;
-  } 
+    ret = CUDA_DRIVER_FNPTR(cuDeviceGet)(&device, index);
+    if(ret == CUDA_SUCCESS) {
+      ret = CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(value, (CUdevice_attribute)attr,
+                                                    device);
+    }
+    return (cudaError_t)ret;
+  }
 
   REALM_PUBLIC_API
   cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attr, const void *func)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaFuncGetAttributes");
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
 
-    CUfunction handle = p->gpu->lookup_function(func);
+    CUfunction handle = GlobalRegistrations::lookup_function(func, s->get_gpu());
 
-#define GET_FUNC_ATTR(member, name)					\
-    do {								\
-      int tmp;								\
-      CHECK_CU( cuFuncGetAttribute(&tmp, CU_FUNC_ATTRIBUTE_##name, handle) ); \
-      attr->member = tmp;						\
-    } while(0)
+#define GET_FUNC_ATTR(member, name)                                                      \
+  do {                                                                                   \
+    int tmp;                                                                             \
+    (void)CUDA_DRIVER_FNPTR(cuFuncGetAttribute)(&tmp, CU_FUNC_ATTRIBUTE_##name, handle); \
+    attr->member = tmp;                                                                  \
+  } while(0)
 
     GET_FUNC_ATTR(binaryVersion, BINARY_VERSION);
     GET_FUNC_ATTR(cacheModeCA, CACHE_MODE_CA);
@@ -977,6 +1138,7 @@ extern "C" {
     GET_FUNC_ATTR(ptxVersion, PTX_VERSION);
     GET_FUNC_ATTR(sharedSizeBytes, SHARED_SIZE_BYTES);
 #undef GET_FUNC_ATTR
+
     return cudaSuccess;
   }
 
@@ -984,130 +1146,46 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaFuncSetAttribute(const void *func, cudaFuncAttribute attr, int value)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaFuncSetAttribute");
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
 
-    CUfunction handle = p->gpu->lookup_function(func);
-    switch (attr)
-    {
-      case cudaFuncAttributeMaxDynamicSharedMemorySize:
-        {
-          CHECK_CU( cuFuncSetAttribute(handle, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, value) );
-          return cudaSuccess;
-        }
-      case cudaFuncAttributePreferredSharedMemoryCarveout:
-        {
-          CHECK_CU( cuFuncSetAttribute(handle, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, value) );
-          return cudaSuccess;
-        }
-      default:
-        break;
-    }
-    return cudaErrorInvalidValue;
+    CUfunction handle = GlobalRegistrations::lookup_function(func, s->get_gpu());
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuFuncSetAttribute)(
+        handle, (CUfunction_attribute)attr, value);
   }
 #endif
 
   REALM_PUBLIC_API
   cudaError_t cudaFuncSetCacheConfig(const void *func, cudaFuncCache cacheConfig)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaFuncSetCacheConfig");
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
 
-    CUfunction handle = p->gpu->lookup_function(func);
-    switch (cacheConfig)
-    {
-      case cudaFuncCachePreferNone:
-        {
-          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_NONE) ); 
-          return cudaSuccess;
-        }
-      case cudaFuncCachePreferShared:
-        {
-          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_SHARED) ); 
-          return cudaSuccess;
-        }
-      case cudaFuncCachePreferL1:
-        {
-          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_L1) ); 
-          return cudaSuccess;
-        }
-      case cudaFuncCachePreferEqual:
-        {
-          CHECK_CU( cuFuncSetCacheConfig(handle, CU_FUNC_CACHE_PREFER_EQUAL) ); 
-          return cudaSuccess;
-        }
-      default:
-        break;
-    }
-    return cudaErrorInvalidValue;
+    CUfunction handle = GlobalRegistrations::lookup_function(func, s->get_gpu());
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuFuncSetCacheConfig)(
+        handle, (CUfunc_cache)cacheConfig);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaDeviceSetCacheConfig(cudaFuncCache config)
   {
-    get_gpu_or_die("cudaDeviceSetCacheConfig");
-    switch (config)
-    {
-      case cudaFuncCachePreferNone:
-        {
-          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_NONE) ); 
-          return cudaSuccess;
-        }
-      case cudaFuncCachePreferShared:
-        {
-          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_SHARED) ); 
-          return cudaSuccess;
-        }
-      case cudaFuncCachePreferL1:
-        {
-          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_L1) ); 
-          return cudaSuccess;
-        }
-      case cudaFuncCachePreferEqual:
-        {
-          CHECK_CU( cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_EQUAL) ); 
-          return cudaSuccess;
-        }
-      default:
-        break;
-    }
-    return cudaErrorInvalidValue;
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuCtxSetCacheConfig)((CUfunc_cache)config);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaFuncSetSharedMemConfig(const void *func, cudaSharedMemConfig config)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaFuncSetSharedMemConfig");
-
-    CUfunction handle = p->gpu->lookup_function(func);
-    switch (config)
-    {
-      case cudaSharedMemBankSizeDefault:
-        {
-          CHECK_CU( cuFuncSetSharedMemConfig(handle, CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE) );
-          return cudaSuccess;
-        }
-      case cudaSharedMemBankSizeFourByte:
-        {
-          CHECK_CU( cuFuncSetSharedMemConfig(handle, CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE) );
-          return cudaSuccess;
-        }
-      case cudaSharedMemBankSizeEightByte:
-        {
-          CHECK_CU( cuFuncSetSharedMemConfig(handle, CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE) );
-          return cudaSuccess;
-        }
-      default:
-        break;
-    }
-    return cudaErrorInvalidValue;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    CUfunction handle = GlobalRegistrations::lookup_function(func, s->get_gpu());
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuFuncSetSharedMemConfig)(
+        handle, (CUsharedconfig)config);
   }
 
 #if CUDA_VERSION >= 11000
   REALM_PUBLIC_API
   cudaError_t cudaGetFuncBySymbol(cudaFunction_t *funcPtr, const void *symbolPtr)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaGetFuncBySymbol");
-    CUfunction handle = p->gpu->lookup_function(symbolPtr);
-    *funcPtr = handle;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    *funcPtr = GlobalRegistrations::lookup_function(symbolPtr, s->get_gpu());
     return cudaSuccess;
   }
 #endif
@@ -1118,11 +1196,8 @@ extern "C" {
 							    int blockSize,
 							    size_t dynamicSMemSize)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaOccupancyMaxActiveBlocksPerMultiprocessor");
-    CUfunction handle = p->gpu->lookup_function(func);
-    CHECK_CU( cuOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, handle,
-							  blockSize, dynamicSMemSize) );
-    return cudaSuccess;
+    return cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+        numBlocks, func, blockSize, dynamicSMemSize, 0);
   }
 
   REALM_PUBLIC_API
@@ -1132,17 +1207,17 @@ extern "C" {
 								     size_t dynamicSMemSize,
 								     unsigned int flags)
   {
-    GPUProcessor *p = get_gpu_or_die("cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags");
-    CUfunction handle = p->gpu->lookup_function(func);
-    CHECK_CU( cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, handle,
-								   blockSize, dynamicSMemSize, flags) );
-    return cudaSuccess;
+    GPUStream *s = get_stream_or_die(__FUNCTION__);
+    CUfunction handle = GlobalRegistrations::lookup_function(func, s->get_gpu());
+    return (cudaError_t)CUDA_DRIVER_FNPTR(
+        cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)(
+        numBlocks, handle, blockSize, dynamicSMemSize, flags);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaGetLastError(void)
   {
-    get_gpu_or_die("cudaGetLastError");
+    get_stream_or_die(__FUNCTION__);
     // For now we're not tracking this so if we were
     // going to die we already would have
     return cudaSuccess;
@@ -1151,7 +1226,7 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaPeekAtLastError(void)
   {
-    get_gpu_or_die("cudaPeekAtLastError");
+    get_stream_or_die(__FUNCTION__);
     // For now we're not tracking this so if we were
     // going to die we already would have
     return cudaSuccess;
@@ -1160,22 +1235,22 @@ extern "C" {
   REALM_PUBLIC_API
   const char* cudaGetErrorName(cudaError_t error)
   {
-    const char *result = NULL;
-    // It wasn't always the case the cuda runtime errors
-    // and cuda driver errors had the same enum scheme
-    // but it appears that they do now
-    CHECK_CU( cuGetErrorName((CUresult)error, &result) );
+    static const char unknown_str[] = "Unknown";
+    const char *result = nullptr;
+    if(CUDA_DRIVER_FNPTR(cuGetErrorName)((CUresult)error, &result) != CUDA_SUCCESS) {
+      result = unknown_str;
+    }
     return result;
   }
 
   REALM_PUBLIC_API
   const char* cudaGetErrorString(cudaError_t error)
   {
-    const char *result = NULL;
-    // It wasn't always the case the cuda runtime errors
-    // and cuda driver errors had the same enum scheme
-    // but it appears that they do now
-    CHECK_CU( cuGetErrorString((CUresult)error, &result) );
+    static const char unknown_str[] = "Unknown";
+    const char *result = nullptr;
+    if(CUDA_DRIVER_FNPTR(cuGetErrorString)((CUresult)error, &result) != CUDA_SUCCESS) {
+      result = unknown_str;
+    }
     return result;
   }
 
@@ -1183,17 +1258,13 @@ extern "C" {
   cudaError_t cudaGetDeviceCount(int *count)
   {
     // TODO: lie here and report just one device?
-    CUresult res = cuDeviceGetCount(count);
-    if(res == CUDA_SUCCESS)
-      return cudaSuccess;
-    else
-      return cudaErrorInvalidValue;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuDeviceGetCount)(count);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaSetDevice(int device)
   {
-    get_gpu_or_die("cudaSetDevice");
+    (void)get_stream_or_die(__FUNCTION__);
     // Ignore calls to set the device here since we already
     // know which device we are running on
     return cudaSuccess;
@@ -1232,77 +1303,21 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaDeviceSetLimit(cudaLimit limit, size_t value)
   {
-    get_gpu_or_die("cudaDeviceSetLimit");
-    switch(limit) {
-    case cudaLimitStackSize:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_STACK_SIZE, value);
-
-    case cudaLimitPrintfFifoSize:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_PRINTF_FIFO_SIZE, value);
-
-    case cudaLimitMallocHeapSize:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_MALLOC_HEAP_SIZE, value);
-
-    case cudaLimitDevRuntimeSyncDepth:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH, value);
-
-    case cudaLimitDevRuntimePendingLaunchCount:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT, value);
-
-#if CUDA_VERSION >= 10000
-    case cudaLimitMaxL2FetchGranularity:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_MAX_L2_FETCH_GRANULARITY, value);
-#endif
-
-#if CUDA_VERSION >= 11000
-    case cudaLimitPersistingL2CacheSize:
-      return (cudaError_t)cuCtxSetLimit(CU_LIMIT_PERSISTING_L2_CACHE_SIZE, value);
-#endif
-
-    default:
-      return cudaErrorInvalidValue;
-    }
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuCtxSetLimit)((CUlimit)limit, value);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaDeviceGetLimit(size_t *value, cudaLimit limit)
   {
-    get_gpu_or_die("cudaDeviceGetLimit");
-    switch(limit) {
-    case cudaLimitStackSize:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_STACK_SIZE);
-
-    case cudaLimitPrintfFifoSize:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_PRINTF_FIFO_SIZE);
-
-    case cudaLimitMallocHeapSize:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_MALLOC_HEAP_SIZE);
-
-    case cudaLimitDevRuntimeSyncDepth:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH);
-
-    case cudaLimitDevRuntimePendingLaunchCount:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT);
-
-#if CUDA_VERSION >= 10000
-    case cudaLimitMaxL2FetchGranularity:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_MAX_L2_FETCH_GRANULARITY);
-#endif
-
-#if CUDA_VERSION >= 11000
-    case cudaLimitPersistingL2CacheSize:
-      return (cudaError_t)cuCtxGetLimit(value, CU_LIMIT_PERSISTING_L2_CACHE_SIZE);
-#endif
-
-    default:
-      return cudaErrorInvalidValue;
-    }
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuCtxGetLimit)(value, (CUlimit)limit);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaSetDeviceFlags(unsigned flags)
   {
-    get_gpu_or_die("cudaSetDeviceFlags");
+    (void)get_stream_or_die(__FUNCTION__);
 
     // flags must be set before contexts are created, which is before any
     //  task can run in Realm, so we know it's too late
@@ -1312,17 +1327,8 @@ extern "C" {
   REALM_PUBLIC_API
   cudaError_t cudaGetDeviceFlags(unsigned *flags)
   {
-    get_gpu_or_die("cudaGetDeviceFlags");
-
-    // we're going to pass back the flags from the driver API, so assert
-    //  the bits are in the same places
-    assert((cudaDeviceScheduleAuto == CU_CTX_SCHED_AUTO) &&
-           (cudaDeviceScheduleSpin == CU_CTX_SCHED_SPIN) &&
-           (cudaDeviceScheduleYield == CU_CTX_SCHED_YIELD) &&
-           (cudaDeviceScheduleBlockingSync == CU_CTX_SCHED_BLOCKING_SYNC) &&
-           (cudaDeviceMapHost == CU_CTX_MAP_HOST) &&
-           (cudaDeviceLmemResizeToMax == CU_CTX_LMEM_RESIZE_TO_MAX));
-    return (cudaError_t)cuCtxGetFlags(flags);
+    (void)get_stream_or_die(__FUNCTION__);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuCtxGetFlags)(flags);
   }
 
   REALM_PUBLIC_API
@@ -1330,9 +1336,8 @@ extern "C" {
                                 const cudaChannelFormatDesc *desc,
                                 cudaExtent extent, unsigned flags)
   {
-    get_gpu_or_die("cudaMalloc3DArray");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    CUarray handle;
     CUDA_ARRAY3D_DESCRIPTOR d;
     d.Width = extent.width;
     d.Height = extent.height;
@@ -1410,30 +1415,26 @@ extern "C" {
       d.Flags |= CUDA_ARRAY3D_TEXTURE_GATHER;
     // ignore flags we don't understand and hope for the best
 
-    CUresult ret = cuArray3DCreate(&handle, &d);
-    if(ret == CUDA_SUCCESS) {
-      *array = (struct cudaArray *)handle;
-      return cudaSuccess;
-    } else
-      return (cudaError_t)ret;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuArray3DCreate)((CUarray *)array, &d);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaFreeArray(cudaArray_t array)
   {
-    get_gpu_or_die("cudaFreeArray");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    return (cudaError_t)cuArrayDestroy((CUarray)array);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuArrayDestroy)((CUarray)array);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaCreateSurfaceObject(cudaSurfaceObject_t *object,
                                       const cudaResourceDesc *desc)
   {
-    get_gpu_or_die("cudaCreateSurfaceObject");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    if(desc->resType != cudaResourceTypeArray)
+    if(desc->resType != cudaResourceTypeArray) {
       return cudaErrorInvalidValue;
+    }
 
     CUDA_RESOURCE_DESC d;
     memset(&d, 0, sizeof(d));
@@ -1441,21 +1442,15 @@ extern "C" {
     d.res.array.hArray = (CUarray)(desc->res.array.array);
     d.flags = 0;
 
-    CUsurfObject surf;
-    CUresult ret = cuSurfObjectCreate(&surf, &d);
-    if(ret == CUDA_SUCCESS) {
-      *object = (cudaSurfaceObject_t)surf;
-      return cudaSuccess;
-    } else
-      return (cudaError_t)ret;
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuSurfObjectCreate)((CUsurfObject *)object, &d);
   }
 
   REALM_PUBLIC_API
   cudaError_t cudaDestroySurfaceObject(cudaSurfaceObject_t object)
   {
-    get_gpu_or_die("cudaDestroySurfaceObject");
+    (void)get_stream_or_die(__FUNCTION__);
 
-    return (cudaError_t)cuSurfObjectDestroy((CUsurfObject)object);
+    return (cudaError_t)CUDA_DRIVER_FNPTR(cuSurfObjectDestroy)((CUsurfObject)object);
   }
 
 }; // extern "C"
