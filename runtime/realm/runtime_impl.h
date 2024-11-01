@@ -31,6 +31,7 @@
 
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)
+#include "realm/comp_queue_impl.h"
 #include "realm/event_impl.h"
 #include "realm/barrier_impl.h"
 #include "realm/rsrv_impl.h"

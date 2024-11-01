@@ -46,8 +46,12 @@ namespace Realm {
     public:
       OpenMPContextManager(LocalOpenMPProcessor *_proc);
 
-      virtual void *create_context(Task *task) const;
-      virtual void destroy_context(Task *task, void *context) const;
+      void lazy_init_affinity() const;
+
+      void *create_context(InternalTask *task) const override;
+      void *create_context(Task *task) const override;
+      void destroy_context(Task *task, void *context) const override;
+      void destroy_context(InternalTask *task, void *context) const override;
 
     protected:
       LocalOpenMPProcessor *proc;

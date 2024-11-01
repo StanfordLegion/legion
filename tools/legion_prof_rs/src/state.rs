@@ -24,8 +24,6 @@ use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizeP
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
 
-const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
-
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(i32)]
@@ -371,7 +369,6 @@ pub trait Container {
 
     fn name(&self, state: &State) -> String;
     fn max_levels(&self, device: Option<DeviceKind>) -> u32;
-    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32;
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
     fn time_points_stacked(
         &self,
@@ -638,12 +635,10 @@ pub struct Proc {
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     event_waits: BTreeMap<ProfUID, BTreeMap<EventID, BacktraceID>>,
     max_levels: u32,
-    max_levels_ready: u32,
     time_points: Vec<ProcPoint>,
     time_points_stacked: Vec<Vec<ProcPoint>>,
     util_time_points: Vec<ProcPoint>,
     max_levels_device: u32,
-    max_levels_ready_device: u32,
     time_points_device: Vec<ProcPoint>,
     time_points_stacked_device: Vec<Vec<ProcPoint>>,
     util_time_points_device: Vec<ProcPoint>,
@@ -660,12 +655,10 @@ impl Proc {
             meta_tasks: BTreeMap::new(),
             event_waits: BTreeMap::new(),
             max_levels: 0,
-            max_levels_ready: 0,
             time_points: Vec::new(),
             time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_levels_device: 0,
-            max_levels_ready_device: 0,
             time_points_device: Vec::new(),
             time_points_stacked_device: Vec::new(),
             util_time_points_device: Vec::new(),
@@ -908,20 +901,11 @@ impl Proc {
         fn add(
             time: &TimeRange,
             prof_uid: ProfUID,
-            all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
         ) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            let ready = time.ready;
-            if stop - start > TASK_GRANULARITY_THRESHOLD && ready.is_some() {
-                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
-            } else {
-                all_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
-            }
 
             points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
             points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
@@ -944,11 +928,9 @@ impl Proc {
         // Before we do anything sort the runtime/mapper calls and waiters
         self.sort_calls_and_waits();
 
-        let mut all_points = Vec::new();
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        let mut all_points_device = Vec::new();
         let mut points_device = Vec::new();
         let mut util_points_device = Vec::new();
 
@@ -960,17 +942,11 @@ impl Proc {
                 let time = &entry.time_range;
                 match entry.kind {
                     ProcEntryKind::GPUKernel(_, _) => {
-                        add(
-                            time,
-                            *uid,
-                            &mut all_points_device,
-                            &mut points_device,
-                            &mut util_points_device,
-                        );
+                        add(time, *uid, &mut points_device, &mut util_points_device);
                         add_waiters(&entry.waiters, *uid, &mut util_points_device);
                     }
                     _ => {
-                        add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                        add(time, *uid, &mut points, &mut util_points);
                         add_waiters(&entry.waiters, *uid, &mut util_points);
                     }
                 }
@@ -978,15 +954,13 @@ impl Proc {
         } else {
             for (uid, entry) in &self.entries {
                 let time = &entry.time_range;
-                add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                add(time, *uid, &mut points, &mut util_points);
                 add_waiters(&entry.waiters, *uid, &mut util_points);
             }
         }
 
         let mut sort_and_stack =
             |max_levels: &mut u32,
-             max_levels_ready: &mut u32,
-             all_points: &mut Vec<ProcPoint>,
              points: &mut Vec<ProcPoint>,
              util_points: &mut Vec<ProcPoint>| {
                 points.sort_by_key(|a| a.time_key());
@@ -1008,55 +982,25 @@ impl Proc {
                     }
                 }
 
-                all_points.sort_by_key(|a| a.time_key());
-
-                // Hack: This is a max heap so reverse the values as they go in.
-                let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
-                for point in all_points {
-                    if point.first {
-                        let level = if let Some(level) = free_levels_ready.pop() {
-                            level.0
-                        } else {
-                            max_levels_ready.postincrement()
-                        };
-                        self.entry_mut(point.entry).base.set_level_ready(level);
-                    } else {
-                        let level = self.entry(point.entry).base.level_ready.unwrap();
-                        free_levels_ready.push(Reverse(level));
-                    }
-                }
-
                 // Rendering of the profile will never use non-first points, so we can
                 // throw those away now.
                 points.retain(|p| p.first);
             };
 
         let mut max_levels = 0;
-        let mut max_levels_ready = 0;
         let mut max_levels_device = 0;
-        let mut max_levels_ready_device = 0;
-        sort_and_stack(
-            &mut max_levels,
-            &mut max_levels_ready,
-            &mut all_points,
-            &mut points,
-            &mut util_points,
-        );
+        sort_and_stack(&mut max_levels, &mut points, &mut util_points);
         sort_and_stack(
             &mut max_levels_device,
-            &mut max_levels_ready_device,
-            &mut all_points_device,
             &mut points_device,
             &mut util_points_device,
         );
 
         self.max_levels = max_levels;
-        self.max_levels_ready = max_levels_ready;
         self.time_points = points;
         self.util_time_points = util_points;
 
         self.max_levels_device = max_levels_device;
-        self.max_levels_ready_device = max_levels_ready_device;
         self.time_points_device = points_device;
         self.util_time_points_device = util_points_device;
     }
@@ -1124,14 +1068,6 @@ impl Container for Proc {
             Some(DeviceKind::Device) => self.max_levels_device,
             Some(DeviceKind::Host) => self.max_levels,
             None => self.max_levels,
-        }
-    }
-
-    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32 {
-        match device {
-            Some(DeviceKind::Device) => self.max_levels_ready_device,
-            Some(DeviceKind::Host) => self.max_levels_ready,
-            None => self.max_levels_ready,
         }
     }
 
@@ -1395,10 +1331,6 @@ impl Container for Mem {
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
         assert!(device.is_none());
         self.max_live_insts
-    }
-
-    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
-        unreachable!()
     }
 
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
@@ -1774,10 +1706,6 @@ impl Container for Chan {
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
         assert!(device.is_none());
         self.max_levels
-    }
-
-    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
-        unreachable!()
     }
 
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
@@ -2449,7 +2377,6 @@ pub struct ProfUID(pub u64);
 pub struct Base {
     pub prof_uid: ProfUID,
     pub level: Option<u32>,
-    pub level_ready: Option<u32>,
 }
 
 impl Base {
@@ -2457,24 +2384,17 @@ impl Base {
         Base {
             prof_uid: allocator.create_fresh(),
             level: None,
-            level_ready: None,
         }
     }
     fn from_fevent(allocator: &mut ProfUIDAllocator, fevent: EventID) -> Self {
         Base {
             prof_uid: allocator.create_object(fevent),
             level: None,
-            level_ready: None,
         }
     }
     fn set_level(&mut self, level: u32) -> &mut Self {
         assert!(self.level.is_none());
         self.level = Some(level);
-        self
-    }
-    fn set_level_ready(&mut self, level_ready: u32) -> &mut Self {
-        assert!(self.level_ready.is_none());
-        self.level_ready = Some(level_ready);
         self
     }
 }

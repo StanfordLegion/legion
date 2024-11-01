@@ -1085,14 +1085,14 @@ namespace Realm {
 	  std::vector<void *> contexts(context_managers.size(), 0);
 	  if(!context_managers.empty())
 	    for(size_t i = 0; i < context_managers.size(); i++)
-	      contexts[i] = context_managers[i]->create_context(0 /*task*/);
+              contexts[i] = context_managers[i]->create_context(itask);
 
-	  execute_internal_task(itask);
+          execute_internal_task(itask);
 
           // destroy contexts in reverse order
 	  if(!context_managers.empty())
 	    for(size_t i = context_managers.size(); i > 0; i--)
-	      context_managers[i-1]->destroy_context(0 /*task*/, contexts[i-1]);
+              context_managers[i - 1]->destroy_context(itask, contexts[i - 1]);
 
           ThreadLocal::scheduler_lock--;
 

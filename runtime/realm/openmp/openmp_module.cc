@@ -129,7 +129,7 @@ namespace Realm {
     : proc(_proc)
   {}
 
-  void *LocalOpenMPProcessor::OpenMPContextManager::create_context(Task *task) const
+  void LocalOpenMPProcessor::OpenMPContextManager::lazy_init_affinity() const
   {
 #ifdef REALM_OPENMP_SYSTEM_RUNTIME
     // this must be set on the right thread
@@ -167,9 +167,18 @@ namespace Realm {
 #else
     proc->pool->associate_as_master();
 #endif
+  }
 
-    // we don't need to remember anything
-    return 0;
+  void *
+  LocalOpenMPProcessor::OpenMPContextManager::create_context(InternalTask *task) const
+  {
+    lazy_init_affinity();
+    return nullptr;
+  }
+  void *LocalOpenMPProcessor::OpenMPContextManager::create_context(Task *task) const
+  {
+    lazy_init_affinity();
+    return nullptr;
   }
 
   void LocalOpenMPProcessor::OpenMPContextManager::destroy_context(Task *task, void *context) const
@@ -177,6 +186,11 @@ namespace Realm {
     // nothing to clean up
   }
 
+  void LocalOpenMPProcessor::OpenMPContextManager::destroy_context(InternalTask *task,
+                                                                   void *context) const
+  {
+    // nothing to clean up
+  }
 
   namespace OpenMP {
 
