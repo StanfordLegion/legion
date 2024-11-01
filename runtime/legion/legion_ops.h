@@ -3524,7 +3524,7 @@ namespace Legion {
       std::vector<FieldDataDescriptor>  instances;
       std::vector<ApEvent>              index_preconditions;
       std::vector<PointDepPartOp*>      points; 
-      std::atomic<unsigned>             points_completed;
+      std::atomic<int>                  points_completed;
       unsigned                          points_committed;
       bool                              commit_request;
       std::set<RtEvent>                 commit_preconditions;
