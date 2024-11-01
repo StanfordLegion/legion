@@ -40,13 +40,10 @@ protected:
   void SetUp() override
   {
     event_comm = new MockEventCommunicator();
-    local_event_free_list =
-        new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   }
 
-  void TearDown() override { delete local_event_free_list; }
+  void TearDown() override {}
 
-  LocalEventTableAllocator::FreeList *local_event_free_list;
   MockEventCommunicator *event_comm;
   DynamicTable<LocalEventTableAllocator> local_events;
 };
@@ -55,7 +52,7 @@ TEST_F(GenEventTest, GetCurrentEvent)
 {
   const NodeID creator_node = 2;
   const int event_index = 7;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(creator_node, event_index, 0), 0);
 
@@ -70,7 +67,7 @@ TEST_F(GenEventTest, LocalAddWaiter)
   const NodeID owner = 0;
   const GenEventImpl::gen_t needed_gen = 1;
   DeferredOperation waiter;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok = event.add_waiter(needed_gen, &waiter);
@@ -84,7 +81,7 @@ TEST_F(GenEventTest, RemoteAddWaiter)
   const NodeID owner = 1;
   const GenEventImpl::gen_t needed_gen = 1;
   DeferredOperation waiter;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok = event.add_waiter(needed_gen, &waiter);
@@ -99,7 +96,7 @@ TEST_F(GenEventTest, LocalRemoveWaiterSameGen)
   const NodeID owner = 0;
   const GenEventImpl::gen_t needed_gen = 1;
   DeferredOperation waiter;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool add_ok = event.add_waiter(needed_gen, &waiter);
@@ -115,7 +112,7 @@ TEST_F(GenEventTest, LocalRemoveWaiterDifferentGens)
   const NodeID owner = 0;
   const GenEventImpl::gen_t needed_gen_add = 1;
   const GenEventImpl::gen_t needed_gen_rem = 2;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
   DeferredOperation waiter;
 
   event.init(ID::make_event(0, 0, 0), owner);
@@ -132,7 +129,7 @@ TEST_F(GenEventTest, ProcessFutureGenerationTest)
   const NodeID owner = 1;
   const GenEventImpl::gen_t current_gen = 5;
   DeferredOperation waiter;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.add_waiter(current_gen, &waiter);
@@ -149,7 +146,7 @@ TEST_F(GenEventTest, ProcessPoisonedGenerationsTest)
   const GenEventImpl::gen_t current_gen = 3;
   const GenEventImpl::gen_t poisoned_gens[] = {2, 3};
   DeferredOperation waiter_one, waiter_two;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.add_waiter(2, &waiter_one);
@@ -166,7 +163,7 @@ TEST_F(GenEventTest, ProcessOutdatedGenerationUpdateTest)
 {
   const NodeID owner = 1;
   DeferredOperation waiter;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.add_waiter(5, &waiter);
@@ -180,7 +177,7 @@ TEST_F(GenEventTest, ProcessOrderedFutureGenerationsTriggeringTest)
 {
   const NodeID owner = 1;
   DeferredOperation waiter_one, waiter_two;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.add_waiter(1, &waiter_one);
@@ -200,7 +197,7 @@ TEST_F(GenEventTest, DISABLED_ExceedPoisonedGenerationLimitTest)
   for(int i = 0; i < poisoned_generation_limit + 1; ++i) {
     poisoned_gens[i] = i + 1;
   }
-  GenEventImpl event(nullptr, local_event_free_list, nullptr);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   // Process update with excess poisoned generations
@@ -216,7 +213,7 @@ TEST_F(GenEventTest, ProcessUpdateWithGenerationalGapsTest)
   const NodeID owner = 1;
   const GenEventImpl::gen_t current_gen = 5;
   DeferredOperation waiter_one, waiter_two;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.add_waiter(3, &waiter_one);
@@ -232,7 +229,7 @@ TEST_F(GenEventTest, RemoteSubscribeNextGen)
   const NodeID owner = 1;
   const GenEventImpl::gen_t subscribe_gen = 2;
   MockEventCommunicator *event_comm = new MockEventCommunicator();
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.subscribe(subscribe_gen);
@@ -245,7 +242,7 @@ TEST_F(GenEventTest, RemoteSubscribeCurrGen)
   const NodeID owner = 1;
   const GenEventImpl::gen_t subscribe_gen = 1;
   MockEventCommunicator *event_comm = new MockEventCommunicator();
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.process_update(subscribe_gen, 0, 0, TimeLimit::responsive());
@@ -259,7 +256,7 @@ TEST_F(GenEventTest, HasTriggeredOnUntriggered)
   const NodeID owner = 0;
   const GenEventImpl::gen_t gen = 1;
   bool poisoned = false;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok = event.has_triggered(gen, poisoned);
@@ -273,13 +270,15 @@ TEST_F(GenEventTest, LocalTrigger)
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
   bool poisoned = false;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
-  event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
+  bool free_event =
+      event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
 
   EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
   EXPECT_FALSE(poisoned);
+  EXPECT_TRUE(free_event);
 }
 
 TEST_F(GenEventTest, LocalTriggerWithPoison)
@@ -287,7 +286,7 @@ TEST_F(GenEventTest, LocalTriggerWithPoison)
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
   bool poisoned = false;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
   event.init(ID::make_event(0, 0, 0), owner);
 
   event.trigger(trigger_gen, 0, /*poisoned=*/true, TimeLimit::responsive());
@@ -302,7 +301,7 @@ TEST_F(GenEventTest, LocalTriggerWithWaiter)
   const GenEventImpl::gen_t trigger_gen = 1;
   bool poisoned = false;
   DeferredOperation waiter_one;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok = event.add_waiter(trigger_gen, &waiter_one);
@@ -320,7 +319,7 @@ TEST_F(GenEventTest, LocalTriggerWithMultipleWaitersPoisoned)
   bool poisoned = false;
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok1 = event.add_waiter(trigger_gen, &waiter_one);
@@ -341,7 +340,7 @@ TEST_F(GenEventTest, LocalTriggerWithMultipleRemoteSubscriptions)
   const NodeID sender_a = 1;
   const NodeID sender_b = 2;
   const GenEventImpl::gen_t subscribe_gen = 1;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.handle_remote_subscription(sender_a, subscribe_gen, 0);
@@ -358,7 +357,7 @@ TEST_F(GenEventTest, HandleRemoteSubscriptionUntriggered)
   const NodeID owner = 0;
   const NodeID sender = 1;
   const GenEventImpl::gen_t subscribe_gen = 1;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.handle_remote_subscription(sender, subscribe_gen, 0);
@@ -371,7 +370,7 @@ TEST_F(GenEventTest, RemoteTrigger)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 1;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
@@ -383,7 +382,7 @@ TEST_F(GenEventTest, RemoteTriggerWithWaiters)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 1;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
 
@@ -403,7 +402,7 @@ TEST_F(GenEventTest, RemoteTriggerFutureGen)
 {
   const NodeID owner = 1;
   const GenEventImpl::gen_t trigger_gen = 2;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
 
   event.init(ID::make_event(0, 0, 0), owner);
   event.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
@@ -415,7 +414,7 @@ TEST_F(GenEventTest, RemoteTriggerFutureGen)
 TEST_F(GenEventTest, EventMergerIsActive)
 {
   const NodeID owner = 0;
-  GenEventImpl event(nullptr, local_event_free_list, event_comm);
+  GenEventImpl event(nullptr, event_comm);
   event.init(ID::make_event(0, 0, 0), owner);
   EventMerger merger(&event);
 

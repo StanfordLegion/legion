@@ -190,15 +190,12 @@ namespace Realm {
 
     GenEventImpl(void);
     GenEventImpl(EventTriggerNotifier *_event_triggerer,
-                 LocalEventTableAllocator::FreeList *_local_event_free_list,
                  EventCommunicator *_event_comm);
     ~GenEventImpl(void);
 
     void init(ID _me, unsigned _init_owner);
 
     static GenEventImpl *create_genevent(void);
-    void free_genevent(void);
-    static void free_genevent(GenEventImpl *);
 
     static ID make_id(const GenEventImpl &dummy, int owner, ID::IDType index)
     {
@@ -232,7 +229,7 @@ namespace Realm {
     static Event ignorefaults(Event wait_for);
 
     // record that the event has triggered and notify anybody who cares
-    void trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
+    bool trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
                  TimeLimit work_until);
 
     // helper for triggering with an Event (which must be backed by a GenEventImpl)
@@ -267,7 +264,6 @@ namespace Realm {
     EventMerger merger;
 
     EventTriggerNotifier *event_triggerer;
-    LocalEventTableAllocator::FreeList *local_event_free_list;
     std::unique_ptr<EventCommunicator> event_comm;
 
     // everything below here protected by this mutex
@@ -315,7 +311,6 @@ namespace Realm {
     //  poisoned merge and the last precondition
     bool free_list_insertion_delayed;
     friend class EventMerger;
-    void perform_delayed_free_list_insertion(void);
   };
 
   // active messages

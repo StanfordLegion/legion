@@ -778,8 +778,12 @@ namespace Realm {
         if(first_fault && !ignore_faults) {
           log_poison.info() << "event merger early poison: after="
                             << event_impl->make_event(finish_gen);
-          event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/,
-                              TimeLimit::responsive());
+          bool free_event =
+              event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/,
+                                  TimeLimit::responsive());
+          if(free_event) {
+            get_runtime()->local_event_free_list->free_entry(event_impl);
+          }
         }
       }
       // either way we return to the caller without updating the count_needed
@@ -821,15 +825,19 @@ namespace Realm {
       if(first_fault && !ignore_faults) {
         log_poison.info() << "event merger poisoned: after="
                           << event_impl->make_event(finish_gen);
-        event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/,
-                            work_until);
+        bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
+                                              true /*poisoned*/, work_until);
+        if(free_event) {
+          get_runtime()->local_event_free_list->free_entry(event_impl);
+        }
       }
     }
 
     // used below, but after we're allowed to look at the object
     Event e = Event::NO_EVENT;
-    if(log_event.want_debug())
+    if(log_event.want_debug()) {
       e = event_impl->make_event(finish_gen);
+    }
 
     // once we decrement this, if we aren't the last trigger, we can't
     //  look at *this again
@@ -853,14 +861,25 @@ namespace Realm {
       }
 
       // trigger on the last input event, unless we did an early poison propagation
-      if(ignore_faults || (faults_observed.load() == 0))
-        event_impl->trigger(finish_gen, Network::my_node_id, false /*!poisoned*/,
-                            work_until);
+      if(ignore_faults || (faults_observed.load() == 0)) {
+        bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
+                                              false /*!poisoned*/, work_until);
+        if(free_event) {
+          get_runtime()->local_event_free_list->free_entry(event_impl);
+        }
+      }
 
-      // if the event was triggered early due to poison, its insertion on
-      //  the free list is delayed until we know that the event merger is
-      //  inactive (i.e. when last_trigger is true)
-      event_impl->perform_delayed_free_list_insertion();
+      {
+        AutoLock<> a(event_impl->mutex);
+        if(event_impl->free_list_insertion_delayed) {
+          event_impl->free_list_insertion_delayed = false;
+          if(event_impl->owning_processor) {
+            event_impl->owning_processor->free_genevent(event_impl);
+          } else {
+            get_runtime()->local_event_free_list->free_entry(event_impl);
+          }
+        }
+      }
     }
   }
 
@@ -926,7 +945,6 @@ namespace Realm {
     , num_poisoned_generations(0)
     , merger(this)
     , event_triggerer(&get_runtime()->event_triggerer)
-    , local_event_free_list(get_runtime()->local_event_free_list)
     , event_comm(std::make_unique<EventCommunicator>())
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
@@ -939,14 +957,12 @@ namespace Realm {
   }
 
   GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer,
-                             LocalEventTableAllocator::FreeList *_local_event_free_list,
                              EventCommunicator *_event_comm)
     : generation(0)
     , gen_subscribed(0)
     , num_poisoned_generations(0)
     , merger(this)
     , event_triggerer(_event_triggerer)
-    , local_event_free_list(_local_event_free_list)
     , event_comm(_event_comm)
     , current_trigger_op(nullptr)
     , has_external_waiters(false)
@@ -1168,15 +1184,6 @@ namespace Realm {
     log_event.spew() << "event created: event=" << impl->current_event();
 
     return impl;
-  }
-
-  void GenEventImpl::free_genevent()
-  {
-    if(owning_processor != nullptr) {
-      owning_processor->free_genevent(this);
-    } else {
-      local_event_free_list->free_entry(this);
-    }
   }
 
   bool GenEventImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter)
@@ -1635,9 +1642,10 @@ namespace Realm {
     return true;
   }
 
-  void GenEventImpl::trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
+  bool GenEventImpl::trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
                              TimeLimit work_until)
   {
+    bool free_event = false;
     Event e = make_event(gen_triggered);
     log_event.debug() << "event triggered: event=" << e << " by node " << trigger_node
                       << " (poisoned=" << poisoned << ")";
@@ -1649,7 +1657,6 @@ namespace Realm {
 
       NodeSet to_update;
       gen_t update_gen;
-      bool free_event = false;
 
       {
         AutoLock<> a(mutex);
@@ -1717,11 +1724,6 @@ namespace Realm {
         int npg_cached = num_poisoned_generations.load_acquire();
         event_comm->update(make_event(update_gen), to_update, poisoned_generations,
                            npg_cached * sizeof(EventImpl::gen_t));
-      }
-
-      // free event?
-      if(free_event) {
-        free_genevent();
       }
     } else {
       // we're triggering somebody else's event, so the first thing to do is tell them
@@ -1815,23 +1817,13 @@ namespace Realm {
     if(!to_wake.empty()) {
       event_triggerer->trigger_event_waiters(to_wake, poisoned, work_until);
     }
-  }
 
-  void GenEventImpl::perform_delayed_free_list_insertion(void)
-  {
-    bool free_event = false;
-
-    {
-      AutoLock<> a(mutex);
-      if(free_list_insertion_delayed) {
-        free_event = true;
-        free_list_insertion_delayed = false;
-      }
+    if(free_event && owning_processor != nullptr) {
+      owning_processor->free_genevent(this);
+      free_event = false;
     }
 
-    if(free_event) {
-      free_genevent();
-    }
+    return free_event;
   }
 
   /*static*/ void EventSubscribeMessage::handle_message(NodeID sender,
@@ -1855,7 +1847,11 @@ namespace Realm {
     log_event.debug() << "remote trigger of event " << args.event << " from node "
                       << sender;
     GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-    impl->trigger(ID(args.event).event_generation(), sender, args.poisoned, work_until);
+    bool free_event = impl->trigger(ID(args.event).event_generation(), sender,
+                                    args.poisoned, work_until);
+    if(free_event) {
+      get_runtime()->local_event_free_list->free_entry(impl);
+    }
   }
 
   /*static*/ void EventUpdateMessage::handle_message(NodeID sender,
