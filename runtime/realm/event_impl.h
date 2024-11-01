@@ -312,31 +312,6 @@ namespace Realm {
     bool free_list_insertion_delayed = false;
     friend class EventMerger;
   };
-
-  // active messages
-
-  struct EventSubscribeMessage {
-    Event event;
-    EventImpl::gen_t previous_subscribe_gen;
-
-    static void handle_message(NodeID sender, const EventSubscribeMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
-  struct EventTriggerMessage {
-    Event event;
-    bool poisoned;
-
-    static void handle_message(NodeID sender, const EventTriggerMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-  };
-
-  struct EventUpdateMessage {
-    Event event;
-
-    static void handle_message(NodeID sender, const EventUpdateMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-  };
 }; // namespace Realm
 
 #include "realm/event_impl.inl"
