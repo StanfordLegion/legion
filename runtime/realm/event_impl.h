@@ -40,7 +40,6 @@
 namespace Realm {
 
   class GenEventImpl;
-  typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
 
   extern Logger log_poison; // defined in event_impl.cc
   class ProcessorImpl;      // defined in proc_impl.h

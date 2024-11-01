@@ -66,7 +66,7 @@ namespace Realm {
 
   // use a wide tree for local events - max depth will be 2
   // use a narrow tree for remote events - depth is 3, leaves have 128 events
-  // typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
+  typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
   typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
   typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
   typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;

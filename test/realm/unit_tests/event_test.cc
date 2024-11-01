@@ -42,7 +42,6 @@ protected:
   void TearDown() override {}
 
   MockEventCommunicator *event_comm;
-  DynamicTable<LocalEventTableAllocator> local_events;
 };
 
 TEST_F(GenEventTest, GetCurrentEvent)
