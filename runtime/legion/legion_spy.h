@@ -92,7 +92,7 @@ namespace Legion {
         // but is too stupid to see that when that is true then
         // provenance.length() is 0 and so there's not UB. The
         // false-positive warning is fixed in GCC10.
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER) 
 #if __GNUC__ <= 9
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-overflow"
@@ -100,7 +100,7 @@ namespace Legion {
 #endif
         log_spy.print("Index Space " IDFMT " %u %.*s", unique_id,
             owner, int(provenance.length()), provenance.data());
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
 #if __GNUC__ <= 9
 #pragma GCC diagnostic pop
 #endif
