@@ -1268,16 +1268,19 @@ namespace Realm {
       }
     }
 
-    inline bool GenEventImpl::is_generation_poisoned(gen_t gen) const
+    bool GenEventImpl::is_generation_poisoned(gen_t gen) const
     {
       // common case: no poisoned generations
       int npg_cached = num_poisoned_generations.load_acquire();
-      if(REALM_LIKELY(npg_cached == 0))
-	return false;
-      
-      for(int i = 0; i < npg_cached; i++)
-	if(poisoned_generations[i] == gen)
-	  return true;
+      if(REALM_LIKELY(npg_cached == 0)) {
+        return false;
+      }
+
+      for(int i = 0; i < npg_cached; i++) {
+        if(poisoned_generations[i] == gen) {
+          return true;
+        }
+      }
       return false;
     }
 
