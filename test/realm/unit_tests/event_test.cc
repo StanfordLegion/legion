@@ -53,12 +53,16 @@ protected:
 
 TEST_F(GenEventTest, GetCurrentEvent)
 {
+  const NodeID creator_node = 2;
+  const int event_index = 7;
   GenEventImpl event(nullptr, local_event_free_list, event_comm);
 
-  event.init(ID::make_event(0, 0, 0), 0);
+  event.init(ID::make_event(creator_node, event_index, 0), 0);
 
   EXPECT_EQ(ID(event.current_event()).event_generation(),
-            ID::make_event(0, 0, 1).event_generation());
+            ID::make_event(creator_node, event_index, 1).event_generation());
+  EXPECT_EQ(ID(event.current_event()).event_creator_node(), creator_node);
+  EXPECT_EQ(ID(event.current_event()).event_gen_event_idx(), event_index);
 }
 
 TEST_F(GenEventTest, LocalAddWaiter)
