@@ -87,8 +87,24 @@ namespace Legion {
       static inline void log_top_index_space(IDType unique_id,
           AddressSpaceID owner, const std::string_view &provenance)
       {
+        // GCC9 has a really dumb bug here: it's smart enough to
+        // see that provenance.data() might be null in some cases
+        // but is too stupid to see that when that is true then
+        // provenance.length() is 0 and so there's not UB. The
+        // false-positive warning is fixed in GCC10.
+#ifdef __GNUC__
+#if __GNUC__ <= 9
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-overflow"
+#endif
+#endif
         log_spy.print("Index Space " IDFMT " %u %.*s", unique_id,
             owner, int(provenance.length()), provenance.data());
+#ifdef __GNUC__
+#if __GNUC__ <= 9
+#pragma GCC diagnostic pop
+#endif
+#endif
       }
 
       static inline void log_index_space_name(IDType unique_id,
