@@ -940,32 +940,17 @@ namespace Realm {
   //
 
   GenEventImpl::GenEventImpl(void)
-    : generation(0)
-    , gen_subscribed(0)
-    , num_poisoned_generations(0)
-    , merger(this)
+    : merger(this)
     , event_triggerer(&get_runtime()->event_triggerer)
     , event_comm(std::make_unique<EventCommunicator>())
-    , current_trigger_op(nullptr)
-    , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
-  {
-    next_free = 0;
-    poisoned_generations = 0;
-    has_local_triggers = false;
-    free_list_insertion_delayed = false;
-  }
+  {}
 
   GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer,
                              EventCommunicator *_event_comm)
-    : generation(0)
-    , gen_subscribed(0)
-    , num_poisoned_generations(0)
-    , merger(this)
+    : merger(this)
     , event_triggerer(_event_triggerer)
     , event_comm(_event_comm)
-    , current_trigger_op(nullptr)
-    , has_external_waiters(false)
     , external_waiter_condvar(external_waiter_mutex)
   {}
 
@@ -1340,7 +1325,7 @@ namespace Realm {
       // it is legal to use poisoned generation info like this because it is
       // always updated before the generation - the load_acquire above makes
       // sure we read in the correct order
-      int npg_cached = num_poisoned_generations.load_acquire();
+      const int npg_cached = num_poisoned_generations.load_acquire();
       event_comm->update(triggered, sender, poisoned_generations,
                          npg_cached * sizeof(EventImpl::gen_t));
     }
@@ -1859,9 +1844,10 @@ namespace Realm {
                                                      const void *data, size_t datalen,
                                                      TimeLimit work_until)
   {
-    const EventImpl::gen_t *new_poisoned_gens = (const EventImpl::gen_t *)data;
-    int new_poisoned_count = datalen / sizeof(EventImpl::gen_t);
-    assert((new_poisoned_count * sizeof(EventImpl::gen_t)) ==
+    const EventImpl::gen_t *new_poisoned_gens =
+        static_cast<const EventImpl::gen_t *>(data);
+    int new_poisoned_count = datalen / sizeof(*new_poisoned_gens);
+    assert((new_poisoned_count * sizeof(*new_poisoned_gens)) ==
            datalen); // no remainders or overflow please
 
     log_event.debug() << "event update: event=" << args.event << " poisoned="

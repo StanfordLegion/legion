@@ -250,15 +250,15 @@ namespace Realm {
   public: // protected:
     // these state variables are monotonic, so can be checked without a lock for
     //  early-out conditions
-    atomic<gen_t> generation;
-    atomic<gen_t> gen_subscribed;
-    atomic<int> num_poisoned_generations;
-    bool has_local_triggers;
+    atomic<gen_t> generation = atomic<gen_t>(0);
+    atomic<gen_t> gen_subscribed = atomic<gen_t>(0);
+    atomic<int> num_poisoned_generations = atomic<int>(0);
+    bool has_local_triggers = false;
 
     bool is_generation_poisoned(gen_t gen) const; // helper function - linear search
 
     // this is only manipulated when the event is "idle"
-    GenEventImpl *next_free;
+    GenEventImpl *next_free = 0;
 
     // used for merge_events and delayed UserEvent triggers
     EventMerger merger;
@@ -270,7 +270,7 @@ namespace Realm {
     Mutex mutex;
 
     // The operation that will trigger this generation
-    Operation *current_trigger_op;
+    Operation *current_trigger_op = nullptr;
 
     // local waiters are tracked by generation - an easily-accessed list is used
     //  for the "current" generation, whereas a map-by-generation-id is used for
@@ -280,7 +280,7 @@ namespace Realm {
     std::map<gen_t, EventWaiter::EventWaiterList> future_local_waiters;
 
     // external waiters on this node are notifies via a condition variable
-    bool has_external_waiters;
+    bool has_external_waiters = false;
     // use kernel mutex for timedwait functionality
     KernelMutex external_waiter_mutex;
     KernelMutex::CondVar external_waiter_condvar;
@@ -299,7 +299,7 @@ namespace Realm {
     // we also can't use an STL vector because reallocation prevents us from reading the
     //  list without the lock - instead we'll allocate the max size if/when we need
     //  any space
-    gen_t *poisoned_generations;
+    gen_t *poisoned_generations = 0;
 
     // local triggerings - if we're not the owner, but we've triggered/poisoned events,
     //  we need to give consistent answers for those generations, so remember what we've
@@ -309,7 +309,7 @@ namespace Realm {
 
     // these resolve a race condition between the early trigger of a
     //  poisoned merge and the last precondition
-    bool free_list_insertion_delayed;
+    bool free_list_insertion_delayed = false;
     friend class EventMerger;
   };
 

@@ -37,10 +37,7 @@ public:
 
 class GenEventTest : public ::testing::Test {
 protected:
-  void SetUp() override
-  {
-    event_comm = new MockEventCommunicator();
-  }
+  void SetUp() override { event_comm = new MockEventCommunicator(); }
 
   void TearDown() override {}
 
