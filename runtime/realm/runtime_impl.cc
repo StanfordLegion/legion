@@ -1003,10 +1003,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
     MemoryImpl *sysmem;
     if(config->sysmem_size > 0) {
+      bool enable_ipc = (config->sysmem_ipc_limit == 0 ||
+                         config->sysmem_size <= config->sysmem_ipc_limit);
+      log_runtime.debug("core module sysmem ipc enabled %d", enable_ipc);
       Memory m = runtime->next_local_memory_id();
-      sysmem = new LocalCPUMemory(m, config->sysmem_size,
-                                  -1/*don't care numa domain*/,
-                                  Memory::SYSTEM_MEM);
+      sysmem = new LocalCPUMemory(m, config->sysmem_size, -1 /*don't care numa domain*/,
+                                  Memory::SYSTEM_MEM, 0, 0, enable_ipc);
       runtime->add_memory(sysmem);
     } else
       sysmem = 0;
@@ -1016,9 +1018,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     //  usually won't have those affinities)
     if(config->use_ext_sysmem || !sysmem) {
       Memory m = runtime->next_local_memory_id();
-      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/,
-                                      -1 /*don't care numa domain*/,
-                                      Memory::SYSTEM_MEM);
+      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/, -1 /*don't care numa domain*/,
+                                      Memory::SYSTEM_MEM, 0, 0, false);
       runtime->add_memory(ext_sysmem);
     } else
       ext_sysmem = sysmem;
@@ -2152,9 +2153,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       //  maps where non-CPU devices can see them
       repl_heap.init(config->replheap_size, 1 /*chunks*/);
 
-      if(!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0 &&
-         (config->sysmem_ipc_limit == 0 ||
-          config->sysmem_size <= config->sysmem_ipc_limit)) {
+      if(!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0) {
         if (!share_memories()) {
           log_runtime.fatal("Failed to share memories with peers");
           abort();

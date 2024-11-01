@@ -360,8 +360,8 @@ namespace Realm {
       static const size_t ALIGNMENT = 256;
 
       LocalCPUMemory(Memory _me, size_t _size, int numa_node, Memory::Kind _lowlevel_kind,
-		     void *prealloc_base = 0,
-		     NetworkSegment *_segment = 0);
+                     void *prealloc_base = 0, NetworkSegment *_segment = 0,
+                     bool enable_ipc = true);
 
       virtual ~LocalCPUMemory(void);
 

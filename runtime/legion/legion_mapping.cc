@@ -198,6 +198,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PointerConstraint PhysicalInstance::get_pointer_constraint(void) const
+    //--------------------------------------------------------------------------
+    {
+      if ((impl == NULL) || !impl->is_physical_manager())
+        return PointerConstraint();
+      return impl->get_pointer_constraint();
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalInstance::exists(bool strong_test /*= false*/) const
     //--------------------------------------------------------------------------
     {

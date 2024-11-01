@@ -47,6 +47,7 @@ list(APPEND REALM_SRC
   realm/deppart/sparsity_impl.inl
   realm/atomics.h           realm/atomics.inl
   realm/bgwork.h            realm/bgwork.cc
+  realm/comp_queue_impl.h   realm/comp_queue_impl.cc
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
   realm/barrier_impl.h        realm/barrier_impl.cc
@@ -516,6 +517,7 @@ if(Legion_USE_CUDA)
     else()
       # without Kokkos interop, we can just add the hijack directly
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
+      target_sources(RealmStatic PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
   else()
     if(REALM_CUDA_DYNAMIC_LOAD)
