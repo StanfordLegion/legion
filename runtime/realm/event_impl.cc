@@ -1248,6 +1248,20 @@ namespace Realm {
   bool GenEventImpl::remove_waiter(gen_t needed_gen, EventWaiter *waiter)
   {
     AutoLock<> a(mutex);
+
+    // case 1: the event has already triggered, so nothing to remove
+    // TODO: this might still be racy with delayed event waiter notification
+    if(needed_gen <= generation.load()) {
+      return false;
+    }
+
+    // case 2: is it a local trigger we've also already dealt with?
+    {
+      std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+      if(it != local_triggers.end())
+        return false;
+    }
+
     // case 3: it'd better be in a waiter list
     if(needed_gen == (generation.load() + 1)) {
       bool ok = current_local_waiters.erase(waiter) > 0;
