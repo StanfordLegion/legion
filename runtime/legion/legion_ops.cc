@@ -8610,11 +8610,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
@@ -16545,15 +16545,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(num_points > 0);
 #endif
-        unsigned point_idx = 0;
-        points.resize(num_points);
-        for (Domain::DomainPointIterator itr(launch_domain); 
-              itr; itr++, point_idx++)
+        points.reserve(num_points);
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           PointDepPartOp *point = 
             runtime->get_available_point_dep_part_op();
           point->initialize(this, itr.p);
-          points[point_idx] = point;
+          points.push_back(point);
         }
         // Perform the projections
         ProjectionFunction *function = 
@@ -16744,14 +16742,15 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_index_space);
+      assert(-1 <= points_completed.load());
 #endif
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
@@ -18679,11 +18678,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
       {
         if (set_view)
         {
@@ -20297,11 +20296,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
@@ -21397,11 +21396,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
