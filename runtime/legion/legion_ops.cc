@@ -1581,8 +1581,7 @@ namespace Legion {
       {
         provenance->add_reference();
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_operation_provenance(unique_op_id,
-                                              prov->human_str());
+          LegionSpy::log_operation_provenance(unique_op_id, prov->human);
       }
       if (implicit_profiler != NULL)
         implicit_profiler->register_operation(this);
@@ -1819,7 +1818,7 @@ namespace Legion {
       Provenance *provenance = get_provenance();
       if (provenance != NULL) {
         std::stringstream prov_ss;
-        prov_ss << ", provenance: " << provenance->human_str();
+        prov_ss << ", provenance: " << provenance->human;
         prov_str = prov_ss.str();
       }
       const RegionRequirement &req = get_requirement(index); 
@@ -10159,7 +10158,7 @@ namespace Legion {
                 if (runtime->legion_spy_enabled)
                   LegionSpy::log_field_creation(field_space_node->handle.id,
                       fields[idx], *field_size, (get_provenance() == NULL) ?
-                      NULL : get_provenance()->human_str());
+                      std::string_view() : get_provenance()->human);
               }
             }
             break;

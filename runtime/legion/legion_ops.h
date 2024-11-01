@@ -50,9 +50,6 @@ namespace Legion {
       static void serialize_null(Serializer &rez);
       static Provenance* deserialize(Deserializer &derez);
     public:
-      inline const char* human_str(void) const { return human.data(); }
-      inline const char* machine_str(void) const { return machine.data(); }
-    public:
       const ProvenanceID pid;
     public:
       std::string full;
