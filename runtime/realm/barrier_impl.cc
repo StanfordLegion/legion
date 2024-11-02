@@ -186,6 +186,93 @@ namespace Realm {
     return impl;
   }
 
+  // active messages
+
+  struct BarrierSubscribeMessage {
+    NodeID subscriber;
+    ID::IDType barrier_id;
+    EventImpl::gen_t subscribe_gen;
+    bool forwarded;
+
+    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
+                               const void *data, size_t datalen);
+
+    static void send_request(NodeID target, ID::IDType barrier_id,
+                             EventImpl::gen_t subscribe_gen, NodeID subscriber,
+                             bool forwarded);
+  };
+
+  struct BarrierTriggerMessage {
+    ID::IDType barrier_id;
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
+
+    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
+                               const void *data, size_t datalen, TimeLimit work_until);
+
+    static void send_request(NodeID target, ID::IDType barrier_id,
+                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
+                             NodeID migration_target, unsigned base_arrival_count,
+                             const void *data, size_t datalen);
+  };
+
+  struct BarrierAdjustMessage {
+    NodeID sender;
+    int forwarded;
+    int delta;
+    Barrier barrier;
+    Event wait_on;
+
+    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
+                               const void *data, size_t datalen, TimeLimit work_until);
+    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
+                             NodeID sender, bool forwarded, const void *data,
+                             size_t datalen);
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class BarrierCommunicator
+  //
+
+  void BarrierCommunicator::adjust(NodeID target, Barrier barrier, int delta,
+                                   Event wait_on, NodeID sender, bool forwarded,
+                                   const void *data, size_t datalen)
+  {
+    BarrierAdjustMessage::send_request(target, barrier, delta, wait_on, sender, forwarded,
+                                       data, datalen);
+  }
+
+  void BarrierCommunicator::trigger(NodeID target, ID::IDType barrier_id,
+                                    EventImpl::gen_t trigger_gen,
+                                    EventImpl::gen_t previous_gen,
+                                    EventImpl::gen_t first_gen, ReductionOpID redop_id,
+                                    NodeID migration_target, int base_arrival_count,
+                                    const void *data, size_t datalen)
+  {
+    BarrierTriggerMessage::send_request(target, barrier_id, trigger_gen, previous_gen,
+                                        first_gen, redop_id, migration_target,
+                                        base_arrival_count, data, datalen);
+  }
+
+  void BarrierCommunicator::subscribe(NodeID target, ID::IDType barrier_id,
+                                      EventImpl::gen_t subscribe_gen, NodeID subscriber,
+                                      bool forwarded)
+  {
+    BarrierSubscribeMessage::send_request(target, barrier_id, subscribe_gen, subscriber,
+                                          forwarded);
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class BarrierImpl
+  //
+
   BarrierImpl::BarrierImpl(void)
     : generation(0)
     , gen_subscribed(0)
