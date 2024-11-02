@@ -1137,6 +1137,117 @@ namespace Realm {
                                      datalen);
   }
 
+  void BarrierImpl::handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
+                                          EventImpl::gen_t trigger_gen,
+                                          EventImpl::gen_t previous_gen,
+                                          EventImpl::gen_t first_generation,
+                                          ReductionOpID redop_id, NodeID migration_target,
+                                          unsigned base_count, const void *data,
+                                          size_t datalen, TimeLimit work_until)
+  {
+    // we'll probably end up with a list of local waiters to notify
+    EventWaiter::EventWaiterList local_notifications;
+    {
+      AutoLock<> a(mutex);
+
+      bool generation_updated = false;
+
+      // handle migration of the barrier ownership (possibly to us)
+      if(migration_target != (NodeID)-1) {
+        owner = migration_target;
+        base_arrival_count = base_count;
+      }
+
+      // it's theoretically possible for multiple trigger messages to arrive out
+      //  of order, so check if this message triggers the oldest possible range
+      // NOTE: it's ok for previous_gen to be earlier than our current generation - this
+      //  occurs with barrier migration because the new owner may not know which
+      //  notifications have already been performed
+      if(previous_gen <= generation.load()) {
+        // see if we can pick up any of the held triggers too
+        while(!held_triggers.empty()) {
+          std::map<EventImpl::gen_t, EventImpl::gen_t>::iterator it =
+              held_triggers.begin();
+          // if it's not contiguous, we're done
+          if(it->first != trigger_gen)
+            break;
+          // it is contiguous, so absorb it into this message and remove the held trigger
+          log_barrier.info("collapsing future trigger: " IDFMT "/%d -> %d -> %d",
+                           barrier_id, previous_gen, trigger_gen, it->second);
+          trigger_gen = it->second;
+          held_triggers.erase(it);
+        }
+
+        if(trigger_gen > generation.load()) {
+          generation.store_release(trigger_gen);
+          generation_updated = true;
+        }
+
+        // now iterate through any generations up to and including the latest triggered
+        //  generation, and accumulate local waiters to notify
+        while(!generations.empty()) {
+          std::map<EventImpl::gen_t, BarrierImpl::Generation *>::iterator it =
+              generations.begin();
+          if(it->first > trigger_gen)
+            break;
+
+          local_notifications.absorb_append(it->second->local_waiters);
+          delete it->second;
+          generations.erase(it);
+        }
+      } else {
+        // hold this trigger until we get messages for the earlier generation(s)
+        log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)", barrier_id,
+                         generation.load(), previous_gen, trigger_gen);
+        held_triggers[previous_gen] = trigger_gen;
+      }
+
+      // is there any data we need to store?
+      if(datalen) {
+        assert(redop_id != 0);
+
+        // TODO: deal with invalidation of previous instance of a barrier
+        redop_id = redop_id;
+        redop = get_runtime()->reduce_op_table.get(redop_id, 0);
+        if(redop == 0) {
+          log_barrier.fatal() << "no reduction op registered for ID " << redop_id;
+          abort();
+        }
+        first_generation = first_generation;
+
+        int rel_gen = trigger_gen - first_generation;
+        assert(rel_gen > 0);
+        if(value_capacity < (size_t)rel_gen) {
+          size_t new_capacity = rel_gen;
+          final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
+          // no need to initialize new entries - we'll overwrite them now or when data
+          // does show up
+          value_capacity = new_capacity;
+        }
+        assert(trigger_gen <= trigger_gen);
+        // trigger_gen might have changed so make sure you use args.trigger_gen here
+        assert(datalen == (redop->sizeof_lhs * (trigger_gen - previous_gen)));
+        assert(previous_gen >= first_generation);
+        memcpy(final_values + ((previous_gen - first_generation) * redop->sizeof_lhs),
+               data, datalen);
+      }
+
+      // external waiters need to be signalled inside the lock
+      if(generation_updated && has_external_waiters) {
+        has_external_waiters = false;
+        // also need external waiter mutex
+        AutoLock<KernelMutex> al2(external_waiter_mutex);
+        external_waiter_condvar.broadcast();
+      }
+    }
+
+    // with lock released, perform any local notifications
+    if(!local_notifications.empty()) {
+      get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
+                                                           POISON_FIXME, work_until);
+    }
+  }
+
   /*static*/ void BarrierTriggerMessage::handle_message(NodeID sender,
                                                         const BarrierTriggerMessage &args,
                                                         const void *data, size_t datalen,
@@ -1152,112 +1263,10 @@ namespace Realm {
     Barrier b = id.convert<Barrier>();
     BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
-    // we'll probably end up with a list of local waiters to notify
-    EventWaiter::EventWaiterList local_notifications;
-    {
-      AutoLock<> a(impl->mutex);
-
-      bool generation_updated = false;
-
-      // handle migration of the barrier ownership (possibly to us)
-      if(args.migration_target != (NodeID)-1) {
-        log_barrier.info() << "barrier " << b << " has migrated to "
-                           << args.migration_target;
-        impl->owner = args.migration_target;
-        impl->base_arrival_count = args.base_arrival_count;
-      }
-
-      // it's theoretically possible for multiple trigger messages to arrive out
-      //  of order, so check if this message triggers the oldest possible range
-      // NOTE: it's ok for previous_gen to be earlier than our current generation - this
-      //  occurs with barrier migration because the new owner may not know which
-      //  notifications have already been performed
-      if(args.previous_gen <= impl->generation.load()) {
-        // see if we can pick up any of the held triggers too
-        while(!impl->held_triggers.empty()) {
-          std::map<EventImpl::gen_t, EventImpl::gen_t>::iterator it =
-              impl->held_triggers.begin();
-          // if it's not contiguous, we're done
-          if(it->first != trigger_gen)
-            break;
-          // it is contiguous, so absorb it into this message and remove the held trigger
-          log_barrier.info("collapsing future trigger: " IDFMT "/%d -> %d -> %d",
-                           args.barrier_id, args.previous_gen, trigger_gen, it->second);
-          trigger_gen = it->second;
-          impl->held_triggers.erase(it);
-        }
-
-        if(trigger_gen > impl->generation.load()) {
-          impl->generation.store_release(trigger_gen);
-          generation_updated = true;
-        }
-
-        // now iterate through any generations up to and including the latest triggered
-        //  generation, and accumulate local waiters to notify
-        while(!impl->generations.empty()) {
-          std::map<EventImpl::gen_t, BarrierImpl::Generation *>::iterator it =
-              impl->generations.begin();
-          if(it->first > trigger_gen)
-            break;
-
-          local_notifications.absorb_append(it->second->local_waiters);
-          delete it->second;
-          impl->generations.erase(it);
-        }
-      } else {
-        // hold this trigger until we get messages for the earlier generation(s)
-        log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
-                         args.barrier_id, impl->generation.load(), args.previous_gen,
-                         trigger_gen);
-        impl->held_triggers[args.previous_gen] = trigger_gen;
-      }
-
-      // is there any data we need to store?
-      if(datalen) {
-        assert(args.redop_id != 0);
-
-        // TODO: deal with invalidation of previous instance of a barrier
-        impl->redop_id = args.redop_id;
-        impl->redop = get_runtime()->reduce_op_table.get(args.redop_id, 0);
-        if(impl->redop == 0) {
-          log_barrier.fatal() << "no reduction op registered for ID " << args.redop_id;
-          abort();
-        }
-        impl->first_generation = args.first_generation;
-
-        int rel_gen = trigger_gen - impl->first_generation;
-        assert(rel_gen > 0);
-        if(impl->value_capacity < (size_t)rel_gen) {
-          size_t new_capacity = rel_gen;
-          impl->final_values =
-              (char *)realloc(impl->final_values, new_capacity * impl->redop->sizeof_lhs);
-          // no need to initialize new entries - we'll overwrite them now or when data
-          // does show up
-          impl->value_capacity = new_capacity;
-        }
-        assert(args.trigger_gen <= trigger_gen);
-        // trigger_gen might have changed so make sure you use args.trigger_gen here
-        assert(datalen ==
-               (impl->redop->sizeof_lhs * (args.trigger_gen - args.previous_gen)));
-        assert(args.previous_gen >= impl->first_generation);
-        memcpy(impl->final_values + ((args.previous_gen - impl->first_generation) *
-                                     impl->redop->sizeof_lhs),
-               data, datalen);
-      }
-
-      // external waiters need to be signalled inside the lock
-      if(generation_updated && impl->has_external_waiters) {
-        impl->has_external_waiters = false;
-        // also need external waiter mutex
-        AutoLock<KernelMutex> al2(impl->external_waiter_mutex);
-        impl->external_waiter_condvar.broadcast();
-      }
-    }
-
-    // with lock released, perform any local notifications
-    if(!local_notifications.empty())
-      get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
-                                                           POISON_FIXME, work_until);
+    impl->handle_remote_trigger(sender, args.barrier_id, args.trigger_gen,
+                                args.previous_gen, args.first_generation, args.redop_id,
+                                args.migration_target, args.base_arrival_count, data,
+                                datalen, work_until);
   }
 
   bool BarrierImpl::get_result(gen_t result_gen, void *value, size_t value_size)

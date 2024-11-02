@@ -86,11 +86,17 @@ namespace Realm {
     // test whether an event has triggered without waiting
     virtual bool has_triggered(gen_t needed_gen, bool &poisoned);
 
-    virtual void handle_remote_subscription(NodeID subscriber,
-                                            EventImpl::gen_t subscribe_gen,
-                                            bool forwarded, const void *data,
-                                            size_t datalen);
     virtual void subscribe(gen_t subscribe_gen);
+
+    void handle_remote_subscription(NodeID subscriber, EventImpl::gen_t subscribe_gen,
+                                    bool forwarded, const void *data, size_t datalen);
+
+    void handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
+                               EventImpl::gen_t trigger_gen,
+                               EventImpl::gen_t previous_gen,
+                               EventImpl::gen_t first_generation, ReductionOpID redop_id,
+                               NodeID migration_target, unsigned base_count,
+                               const void *data, size_t datalen, TimeLimit work_until);
 
     virtual void external_wait(gen_t needed_gen, bool &poisoned);
     virtual bool external_timedwait(gen_t needed_gen, bool &poisoned, long long max_ns);
