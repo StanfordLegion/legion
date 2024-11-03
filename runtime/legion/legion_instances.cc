@@ -1420,6 +1420,9 @@ namespace Legion {
         if (gc_events.insert(user_event).second && 
             (++added_gc_events == runtime->gc_epoch_size))
         {
+          // We don't prune these when doing detailed legion spy so that we
+          // can check that there are no use-after-delete errors
+#ifndef LEGION_SPY
           // Go through and prune out any events that have triggered
           for (std::set<ApEvent>::iterator it = gc_events.begin();
                 it != gc_events.end(); /*nothing*/)
@@ -1432,6 +1435,7 @@ namespace Legion {
             else
               it++;
           }
+#endif
           added_gc_events = 0;
         }
       }
@@ -3222,6 +3226,18 @@ namespace Legion {
 #else
       // Release the i_lock since we're done with the atomic updates
       i_lock->release();
+#endif
+#ifdef LEGION_SPY
+      if (!deferred_deletion.exists())
+      {
+        const Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        deferred_deletion = RtEvent(rename);
+      }
+      for (std::set<ApEvent>::const_iterator it = gc_events.begin();
+            it != gc_events.end(); it++)
+        LegionSpy::log_event_dependence(*it, deferred_deletion);
+      LegionSpy::log_instance_deletion(unique_event, deferred_deletion);
 #endif
       // Once the deletion is actually done then we can tell the memory
       // manager that the deletion is finished and it is safe to remove
