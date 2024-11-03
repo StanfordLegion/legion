@@ -603,7 +603,7 @@ namespace Legion {
       {
         info.preconditions[idx] = preconditions[idx];
         if (preconditions[idx].is_barrier())
-          record_barrier_arrival(preconditions[idx], implicit_provenance);
+          record_barrier_use(preconditions[idx], implicit_provenance);
       }
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
@@ -621,7 +621,7 @@ namespace Legion {
       info.result = result;
       info.precondition = pre;
       if (pre.is_barrier())
-        record_barrier_arrival(pre, implicit_provenance);
+        record_barrier_use(pre, implicit_provenance);
       info.fevent = implicit_fevent;
       // See if we're triggering this node on the same node where it was made
       // If not we need to eventually notify the node where it was made that
@@ -675,6 +675,7 @@ namespace Legion {
       if (owner->no_critical_paths)
         return;
 #ifdef DEBUG_LEGION
+      assert(result.is_barrier());
       assert(owner->all_critical_arrivals);
 #endif
       BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
@@ -682,12 +683,14 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.precondition = pre;
+      if (pre.is_barrier())
+        record_barrier_use(pre, implicit_provenance);
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_barrier_arrival(LgEvent bar, UniqueID uid)
+    void LegionProfInstance::record_barrier_use(LgEvent bar, UniqueID uid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -753,7 +756,7 @@ namespace Legion {
       info.result = result;
       info.precondition = precondition;
       if (precondition.is_barrier())
-        record_barrier_arrival(precondition, implicit_provenance);
+        record_barrier_use(precondition, implicit_provenance);
       info.reservation = r;
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
@@ -773,7 +776,7 @@ namespace Legion {
       info.unique = unique_event;
       info.precondition = precondition;
       if (precondition.is_barrier())
-        record_barrier_arrival(precondition, implicit_provenance);
+        record_barrier_use(precondition, implicit_provenance);
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -800,7 +803,7 @@ namespace Legion {
       {
         info.preconditions[idx] = preconditions[idx];
         if (preconditions[idx].is_barrier())
-          record_barrier_arrival(preconditions[idx], implicit_provenance);
+          record_barrier_use(preconditions[idx], implicit_provenance);
       }
       info.fevent = fevent;
       info.performed = performed;
@@ -827,7 +830,7 @@ namespace Legion {
       assert(timeline.is_valid());
 #endif
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationTimelineGPU timeline_gpu;
       if (response.get_measurement<
             Realm::ProfilingMeasurements::OperationTimelineGPU>(timeline_gpu))
@@ -953,7 +956,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
@@ -1016,7 +1019,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
       {
@@ -1203,7 +1206,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       owner->update_footprint(sizeof(CopyInfo) +
           info.inst_infos.size() * sizeof(CopyInstInfo), this);
       if (closure->remove_reference())
@@ -1271,7 +1274,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       owner->update_footprint(sizeof(FillInfo) + 
           info.inst_infos.size() * sizeof(FillInstInfo), this);
       if (closure->remove_reference())
@@ -1330,7 +1333,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       info.fevent = LgEvent(fevent.finish_event);
       owner->update_footprint(sizeof(PartitionInfo), this);
     }
@@ -1525,7 +1528,7 @@ namespace Legion {
       event_wait_infos.emplace_back(
           EventWaitInfo{current.id, implicit_fevent, event, backtrace_id});
       if (event.is_barrier())
-        record_barrier_arrival(event, implicit_provenance);
+        record_barrier_use(event, implicit_provenance);
       owner->update_footprint(sizeof(EventWaitInfo), this);
     }
 
@@ -3172,7 +3175,7 @@ namespace Legion {
             {
               LgEvent barrier;
               barrier.id = info->id;
-              implicit_profiler->record_barrier_arrival(barrier, info->op_id);
+              implicit_profiler->record_barrier_use(barrier, info->op_id);
             }
             break;
           }
