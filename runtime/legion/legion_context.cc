@@ -1075,9 +1075,10 @@ namespace Legion {
           runtime->find_or_create_provenance(prov, strlen(prov));
         if (user_profiling_ranges.empty())
           REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
-              "Detected mismatched profiling range calls, received a stop call "
-              "without a corresponding start call in task %s (UID %lld) at %s",
-              get_task_name(), get_unique_id(), provenance->human_str())
+            "Detected mismatched profiling range calls, received a stop call "
+            "without a corresponding start call in task %s (UID %lld) at %.*s",
+            get_task_name(), get_unique_id(), int(provenance->human.length()),
+            provenance->human.data())
         const long long stop = Realm::Clock::current_time_in_nanoseconds();
         implicit_profiler->record_application_range(provenance->pid,
             user_profiling_ranges.back(), stop);
@@ -3678,7 +3679,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Will take ownership of provenance if not NULL
       runtime->forest->create_index_space(handle, bounds, did, provenance); 
       register_index_space_creation(handle);
@@ -3776,7 +3777,7 @@ namespace Legion {
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       return handle;
     }
 
@@ -3809,7 +3810,7 @@ namespace Legion {
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       return handle;
     }
 
@@ -3834,7 +3835,7 @@ namespace Legion {
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       return handle;
     }
 
@@ -3853,7 +3854,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
@@ -5323,7 +5324,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
 
       runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
@@ -5347,7 +5348,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
 
       FieldSpaceNode *node =
         runtime->forest->create_field_space(space, did, provenance);
@@ -5368,7 +5369,8 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() : 
+             provenance->human);
       }
       node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
@@ -5590,7 +5592,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
 
       std::set<RtEvent> done_events;
       if (local)
@@ -5633,7 +5635,8 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() :
+             provenance->human);
       }
       std::set<RtEvent> done_events;
       if (local)
@@ -6041,7 +6044,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid,
             runtime->address_space, (provenance == NULL) ? 
-            NULL : provenance->human_str());
+            std::string_view() : provenance->human);
       const DistributedID did = runtime->get_available_distributed_id();
       runtime->forest->create_logical_region(region, did, provenance);
       // Register the creation of a top-level region with the context
@@ -6444,10 +6447,13 @@ namespace Legion {
               deleted_regions.begin(); it != deleted_regions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed for region (%x,%x,%x) "
-              "in task tree rooted by %s (provenance %s)", 
+              "in task tree rooted by %s (provenance %.*s)", 
               it->region.index_space.id, it->region.field_space.id, 
-              it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              it->region.tree_id, get_task_name(), 
+              (it->provenance == NULL) ? 7 : 
+                int(it->provenance->human.length()),
+              (it->provenance == NULL) ? "unknown" : 
+                it->provenance->human.data())
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
@@ -6456,9 +6462,10 @@ namespace Legion {
               deleted_fields.begin(); it != deleted_fields.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field %d of "
-              "field space %x in task tree rooted by %s (provenance %s)", 
+              "field space %x in task tree rooted by %s (provenance %.*s)",
               it->fid, it->space.id, get_task_name(), 
-              (it->provenance != NULL) ? it->provenance->human_str() :
+              (it->provenance != NULL) ? int(it->provenance->human.length()) : 
+              7, (it->provenance != NULL) ? it->provenance->human.data() :
               "unknown")
         deleted_fields.clear();
       }
@@ -6469,9 +6476,10 @@ namespace Legion {
               deleted_field_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field space %x "
-              "in task tree rooted by %s (provenance %s)", it->space.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              "in task tree rooted by %s (provenance %.*s)", it->space.id,
+              get_task_name(), (it->provenance == NULL) ? 7 :
+              int(it->provenance->human.length()), (it->provenance != NULL) ?
+              it->provenance->human.data() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
@@ -6481,9 +6489,10 @@ namespace Legion {
               deleted_index_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index space %x "
-              "in task tree rooted by %s (provenance %s)", it->space.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              "in task tree rooted by %s (provenance %.*s)", it->space.id,
+              get_task_name(), (it->provenance == NULL) ? 7 :
+              int(it->provenance->human.length()), (it->provenance != NULL) ?
+              it->provenance->human.data() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
@@ -6493,9 +6502,10 @@ namespace Legion {
               deleted_index_partitions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index partition %x "
-              "in task tree rooted by %s (provenance %s)", it->partition.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              "in task tree rooted by %s (provenance %.*s)", it->partition.id,
+              get_task_name(), (it->provenance == NULL) ? 7 :
+              int(it->provenance->human.length()), (it->provenance != NULL) ?
+              it->provenance->human.data() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -13829,12 +13839,13 @@ namespace Legion {
         if (finder->second == owner_shard->shard_id)
           log_run.error(
            "Detected control replication violation when invoking %s in "
-           "task %s (UID %lld) on shard %d [Provenance: %s]. The hash summary "
-           "for the function does not align with the hash summaries from other "
-           "call sites. We'll run the hash algorithm again to try to recognize "
-           "what value differs between the shards, hang tight...",
+           "task %s (UID %lld) on shard %d [Provenance: %.*s]. The hash summary"
+           " for the function does not align with the hash summaries from other"
+           " call sites. We'll run the hash algorithm again to try to recognize"
+           " what value differs between the shards, hang tight...",
            description, get_task_name(), get_unique_id(), owner_shard->shard_id,
-           (provenance == NULL) ? "unknown" : provenance->human_str());
+           (provenance == NULL) ? 7 : int(provenance->human.length()),
+           (provenance == NULL) ? "unknown" : provenance->human.data());
       }
       else
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
@@ -14096,7 +14107,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14243,7 +14254,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14428,7 +14439,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14529,7 +14540,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14620,7 +14631,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -16677,7 +16688,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_space(space.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -16809,7 +16820,8 @@ namespace Legion {
         if (runtime->legion_spy_enabled && !non_owner)
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() : 
+             provenance->human);
       }
       else
         runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
@@ -17176,7 +17188,7 @@ namespace Legion {
                                              serdez_id, provenance, non_owner);
         if (runtime->legion_spy_enabled && !non_owner)
           LegionSpy::log_field_creation(space.id, fid, field_size,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
       runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
@@ -17486,7 +17498,8 @@ namespace Legion {
         if (runtime->legion_spy_enabled && !non_owner)
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() :
+             provenance->human);
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
       runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
@@ -17743,7 +17756,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_region(index_space.id, field_space.id,
               handle.tree_id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {

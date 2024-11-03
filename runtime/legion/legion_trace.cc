@@ -1878,7 +1878,7 @@ namespace Legion {
         {
           // Delete now because couldn't acquire some instances
           if (acquired)
-            current->release_instance_references();
+            current->release_instance_references(map_applied_events);
           // Now delete this template from the entry since at least one of its
           // instances have been deleted and therefore we'll never be able to
           // replay it
@@ -1920,7 +1920,7 @@ namespace Legion {
           return true;
         }
         else if (acquired)
-          current->release_instance_references();
+          current->release_instance_references(map_applied_events);
         if (idx > 0)
         {
           // If this is the first iteration then we start testing the
@@ -1987,8 +1987,9 @@ namespace Legion {
         if (!recurrent)
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
-        current_template->finish_replay(execution_preconditions);
-        current_template->release_instance_references();
+        current_template->finish_replay(
+            op->get_complete_operation(), execution_preconditions);
+        current_template->release_instance_references(map_applied_conditions);
       }
       current_template = NULL;
     }
@@ -2019,7 +2020,8 @@ namespace Legion {
             if (op->allreduce_template_status(valid, acquired))
             {
               if (acquired)
-                current_template->release_instance_references();
+                current_template->release_instance_references(
+                    map_applied_conditions);
               // Now delete this template from the entry since at least one 
               // of its instances have been deleted and therefore we'll never
               // be able to replay it
@@ -2069,7 +2071,8 @@ namespace Legion {
         if (!recurrent)
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
-        current_template->finish_replay(execution_preconditions);
+        current_template->finish_replay(
+            op->get_complete_operation(), execution_preconditions);
         begin_replay(op, true/*recurrent*/, has_intermediate_fence);
         return true;
       }
@@ -5112,13 +5115,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::release_instance_references(void) const
+    void PhysicalTemplate::release_instance_references(
+                                std::set<RtEvent> &map_applied_conditions) const
     //--------------------------------------------------------------------------
     {
-      // No need to check for deletions, we stil hold gc references
       for (std::vector<PhysicalManager*>::const_iterator it =
             all_instances.begin(); it != all_instances.end(); it++)
+      {
+        // Record the last replay completion event as a user
+        // Note the map_applied_conditions are a formality here since we
+        // know that we're still holding a valid reference when we do this
+        // call so all the work of this operation should be local and no
+        // messages should end up being sent
+        (*it)->record_instance_user(replay_complete, map_applied_conditions);
+        // No need to check for deletions, we stil hold gc references
         (*it)->remove_base_valid_ref(TRACE_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8017,7 +8029,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
+    void PhysicalTemplate::finish_replay(FenceOp *fence,
+                                         std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
       if (remaining_replays.load() > 0)
@@ -8046,6 +8059,7 @@ namespace Legion {
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->complete]);
       operations.clear();
+      replay_complete = fence->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
@@ -9673,11 +9687,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::finish_replay(
+    void ShardedPhysicalTemplate::finish_replay(FenceOp *fence,
                                               std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      PhysicalTemplate::finish_replay(postconditions);
+      PhysicalTemplate::finish_replay(fence, postconditions);
       // Also need to do any local frontiers that we have here as well
       for (std::map<unsigned,ApBarrier>::const_iterator it = 
             local_frontiers.begin(); it != local_frontiers.end(); it++)

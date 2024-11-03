@@ -842,7 +842,7 @@ namespace Legion {
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
       virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
-      virtual void finish_replay(std::set<ApEvent> &postconditions);
+      virtual void finish_replay(FenceOp *op,std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       ReplayableStatus finalize(CompleteOp *op, bool has_blocking_call);
@@ -855,7 +855,7 @@ namespace Legion {
       void refresh_condition_sets(FenceOp *op,
           std::set<RtEvent> &ready_events) const;
       bool acquire_instance_references(void) const;
-      void release_instance_references(void) const;
+      void release_instance_references(std::set<RtEvent> &applied) const;
     public:
       void optimize(CompleteOp *op, bool do_transitive_reduction);
     private:
@@ -1163,6 +1163,7 @@ namespace Legion {
     protected:
       RtEvent                         replay_precondition;
       RtUserEvent                     replay_postcondition;
+      ApEvent                         replay_complete;
       std::atomic<unsigned>           remaining_replays;
       std::atomic<unsigned>           total_logical;
       std::vector<ApEvent>            events;
@@ -1320,7 +1321,7 @@ namespace Legion {
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
       virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
-      virtual void finish_replay(std::set<ApEvent> &postconditions);
+      virtual void finish_replay(FenceOp *op,std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
                                         const TraceLocalID &tlid);

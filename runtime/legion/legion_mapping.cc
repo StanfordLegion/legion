@@ -2138,7 +2138,8 @@ namespace Legion {
       runtime->forest->create_union_space(result, did, prov, sources);
       if (runtime->legion_spy_enabled)
         Internal::LegionSpy::log_top_index_space(result.get_id(),
-                    runtime->address_space, provenance);
+            runtime->address_space, (provenance == NULL) ? std::string_view() : 
+            std::string_view(provenance));
       return result;
     }
 
@@ -2170,7 +2171,8 @@ namespace Legion {
       runtime->forest->create_intersection_space(result, did, prov, sources);
       if (runtime->legion_spy_enabled)
         Internal::LegionSpy::log_top_index_space(result.get_id(),
-                    runtime->address_space, provenance);
+            runtime->address_space, (provenance == NULL) ? std::string_view() :
+            std::string_view(provenance));
       return result;
     }
 
@@ -2194,7 +2196,8 @@ namespace Legion {
                                                left, right);
       if (runtime->legion_spy_enabled)
         Internal::LegionSpy::log_top_index_space(result.get_id(),
-                    runtime->address_space, provenance);
+            runtime->address_space, (provenance == NULL) ? std::string_view() :
+            std::string_view(provenance));
       return result;
     }
 
