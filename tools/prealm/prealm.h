@@ -17,6 +17,7 @@
 #define PREALM_H
 
 #include "realm.h"
+#include "realm/id.h"
 #include "realm/cmdline.h"
 
 namespace PRealm {
@@ -83,6 +84,8 @@ namespace PRealm {
     Event& operator=(const Realm::Event &e) { id = e.id; return *this; }
     Event& operator=(const Event &e) = default;
     Event& operator=(Event &&rhs) = default;
+  public:
+    bool is_barrier(void) const;
   public:
     // Don't care about external waits
     void wait(void) const;
@@ -152,8 +155,9 @@ namespace PRealm {
     CompletionQueue& operator=(Realm::CompletionQueue q) { this->id = q.id; return *this; }
     CompletionQueue& operator=(const CompletionQueue &q) = default;
     CompletionQueue& operator=(CompletionQueue &&q) = default;
-    // TODO: tracking completion queue events is hard because you need to follow this
-    // through to the point where we pop the events out the queue
+    // TODO: tracking completion queue events is hard because you need to follow them
+    // through to the point where we pop the events out the queue so we can record
+    // them as an "or" of all the popped events
     Event get_nonempty_event(void);
     size_t pop_events(Event *events, size_t max_events);
   public:
@@ -225,6 +229,15 @@ namespace PRealm {
                                        const CodeDescriptor& codedesc,
                                        const ProfilingRequestSet& prs,
                                        const void *user_data = 0, size_t user_data_len = 0);
+    // special task IDs
+    enum {
+	TASK_ID_PROCESSOR_NOP      = Realm::Processor::TASK_ID_PROCESSOR_NOP,
+	TASK_ID_PROCESSOR_INIT     = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+	TASK_ID_PROCESSOR_SHUTDOWN = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+        // Increment this by 1 to reserve a task ID for our profiling responses
+	TASK_ID_FIRST_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
+    };
+
     static const Processor NO_PROC;
   };
   static_assert(sizeof(Processor) == sizeof(Realm::Processor));

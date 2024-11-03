@@ -13,9 +13,43 @@
  * limitations under the License.
  */
 
+#include <deque>
+
 namespace PRealm {
 
   class ThreadProfiler {
+  public:
+    typedef long long timestamp_t;
+    typedef ::realm_id_t ProcID;
+    typedef ::realm_id_t MemID;
+    typedef ::realm_id_t InstID;
+    struct EventWaitInfo {
+    public:
+      ProcID proc_id;
+      Event fevent;
+      Event event;
+      unsigned long long backtrace_id;
+    };
+    struct EventMergerInfo {
+    public:
+      Event result;
+      Event provenance;
+      timestamp_t performed;
+      std::vector<Event> preconditions; 
+    };
+    struct EventTriggerInfo {
+    public:
+      Event result;
+      Event provenance;
+      Event precondition;
+      timestamp_t performed;
+    };
+    struct EventPoisonInfo {
+    public:
+      Event result;
+      Event provenance;
+      timestamp_t performed;
+    };
   public:
     ThreadProfiler(Processor p);
     ThreadProfiler(const ThreadProfiler &rhs) = delete;
@@ -27,21 +61,28 @@ namespace PRealm {
         const std::vector<CopySrcDstField> &srcs,
         const std::vector<CopySrcDstField> &dsts, Event critical);
     void add_task_request(ProfilingRequestSet &requests,
-        Processor target, Event critical);
+        Processor::TaskFuncID task_id, Event critical);
     Event add_inst_request(ProfilingRequestSet &requests,
         const InstanceLayoutGeneric *ilg, Event critical);
   public:
     void record_event_wait(Event wait_on, Backtrace &bt);
     void record_event_trigger(Event result, Event precondition);
     void record_event_poison(Event result);
+    void record_barrier_usage(Event barrier);
     void record_barrier_arrival(Event result, Event precondition);
     void record_event_merger(Event result, const Event *preconditions, size_t num_events);
     void record_reservation_acquire(Reservation r, Event result, Event precondition);
     void record_instance_usage(RegionInstance inst, FieldID field_id);
+    size_t dump_inter(double over);
+    void finalize(void);
   
     static ThreadProfiler& get_thread_profiler(void);
   private:
     const Processor local_proc;
+    std::deque<EventWaitInfo> event_wait_infos;
+    std::deque<EventMergerInfo> event_merger_infos;
+    std::deque<EventTriggerInfo> event_trigger_infos;
+    std::deque<EventPoisonInfo> event_poison_infos;
   };
 
   inline CopySrcDstField::CopySrcDstField(void)
@@ -202,6 +243,12 @@ namespace PRealm {
     return result;
   } 
 
+  inline bool Event::is_barrier(void) const
+  {
+    const Realm::ID identity(id);
+    return identity.is_barrier();
+  }
+
   inline void Event::wait(void) const
   {
     if (!exists()) return;
@@ -327,7 +374,7 @@ namespace PRealm {
 		  Event wait_on, int priority) const
   {
     ProfilingRequestSet requests;
-    ThreadProfiler::get_thread_profiler().add_task_request(requests, *this, wait_on);
+    ThreadProfiler::get_thread_profiler().add_task_request(requests, func_id, wait_on);
     return Realm::Processor::spawn(func_id, args, arglen, requests, wait_on, priority);
   }
 
@@ -335,7 +382,7 @@ namespace PRealm {
                 const ProfilingRequestSet &requests, Event wait_on, int priority) const
   {
     ProfilingRequestSet alt_requests = requests;
-    ThreadProfiler::get_thread_profiler().add_task_request(alt_requests, *this, wait_on);
+    ThreadProfiler::get_thread_profiler().add_task_request(alt_requests, func_id, wait_on);
     return Realm::Processor::spawn(func_id, args, arglen, alt_requests, wait_on, priority);
   }
 
