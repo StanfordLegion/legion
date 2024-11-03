@@ -49,16 +49,16 @@ protected:
   void SetUp() override
   {
     barrier_comm = new MockBarrierCommunicator();
-    // local_event_free_list =
-    //  new LocalEventTableAllocator::FreeList(local_events, Network::my_node_id);
   }
 
   void TearDown() override {}
 
-  // LocalEventTableAllocator::FreeList *local_event_free_list;
   MockBarrierCommunicator *barrier_comm;
-  // DynamicTable<LocalEventTableAllocator> local_events;
 };
+
+// TODO(apryakhin@):
+// 1. Test redop
+// 2. Test migration
 
 TEST_F(BarrierTest, RemoteSubscribe)
 {
@@ -114,7 +114,7 @@ TEST_F(BarrierTest, DISABLED_LocalArriveOnTriggered)
   EXPECT_EQ(barrier.generation.load(), arrival_gen);
 }
 
-TEST_F(BarrierTest, LocalArriveWithWaiter)
+TEST_F(BarrierTest, LocalArriveTriggerOneWaiter)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t arrival_gen = 1;
@@ -135,6 +135,53 @@ TEST_F(BarrierTest, LocalArriveWithWaiter)
   EXPECT_EQ(barrier.generation.load(), arrival_gen);
   EXPECT_TRUE(waiter_one.triggered);
   EXPECT_FALSE(waiter_two.triggered);
+}
+
+TEST_F(BarrierTest, LocalArriveWithoutWaiterTrigger)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 1;
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+  BarrierImpl barrier;
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.add_waiter(arrival_gen, &waiter_one);
+  barrier.add_waiter(arrival_gen + 1, &waiter_two);
+  barrier.remove_waiter(arrival_gen, &waiter_one);
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+  EXPECT_FALSE(waiter_one.triggered);
+  EXPECT_FALSE(waiter_two.triggered);
+}
+
+TEST_F(BarrierTest, LocalArriveTriggerBothWaiters)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t arrival_gen = 1;
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+  BarrierImpl barrier;
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.base_arrival_count = 2;
+  barrier.add_waiter(arrival_gen, &waiter_one);
+  barrier.add_waiter(arrival_gen + 1, &waiter_two);
+  barrier.adjust_arrival(arrival_gen, -2, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen + 1, -2, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen + 1);
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_TRUE(waiter_two.triggered);
 }
 
 TEST_F(BarrierTest, LocalArriveFutureGen)
@@ -229,4 +276,86 @@ TEST_F(BarrierTest, RemoteArrive)
                          TimeLimit::responsive());
 
   EXPECT_EQ(barrier_comm->sent_adjust_arrivals, 1);
+}
+
+TEST_F(BarrierTest, RemoteAddWaiter)
+{
+  NodeID owner = 1;
+  BarrierImpl barrier(barrier_comm);
+  EventImpl::gen_t trigger_gen = 1;
+  Realm::ID barrier_id = ID::make_barrier(owner, 0, 0);
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+
+  barrier.init(barrier_id, owner);
+  barrier.add_waiter(trigger_gen, &waiter_one);
+  barrier.add_waiter(trigger_gen + 1, &waiter_two);
+
+  EXPECT_EQ(barrier_comm->sent_subscription_count, 2);
+  EXPECT_FALSE(waiter_one.triggered);
+  EXPECT_FALSE(waiter_two.triggered);
+}
+
+TEST_F(BarrierTest, HandleRemoteTriggerNextGen)
+{
+  NodeID owner = 1;
+  BarrierImpl barrier(barrier_comm);
+  EventImpl::gen_t trigger_gen = 1;
+  EventImpl::gen_t previous_gen = 0;
+  EventImpl::gen_t first_gen = 0;
+  NodeID migration_target = owner;
+  unsigned base_count = 2;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  DeferredOperation waiter_one;
+  DeferredOperation waiter_two;
+
+  barrier.init(barrier_id, owner);
+  barrier.add_waiter(trigger_gen, &waiter_one);
+  barrier.add_waiter(trigger_gen + 1, &waiter_two);
+
+  barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, 0,
+                                migration_target, base_count, nullptr, 0,
+                                TimeLimit::responsive());
+
+  EXPECT_EQ(barrier.generation.load(), trigger_gen);
+  EXPECT_TRUE(waiter_one.triggered);
+  EXPECT_FALSE(waiter_two.triggered);
+}
+
+TEST_F(BarrierTest, HandleRemoteTriggerCurrGen)
+{
+  NodeID owner = 1;
+  BarrierImpl barrier(barrier_comm);
+  EventImpl::gen_t trigger_gen = 2;
+  EventImpl::gen_t previous_gen = 2;
+  EventImpl::gen_t first_gen = 0;
+  NodeID migration_target = owner;
+  unsigned base_count = 2;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+
+  barrier.init(barrier_id, owner);
+  barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, 0,
+                                migration_target, base_count, nullptr, 0,
+                                TimeLimit::responsive());
+
+  EXPECT_EQ(barrier.generation.load(), 0);
+}
+
+TEST_F(BarrierTest, HandleRemoteTriggerHigherPrevGen)
+{
+  NodeID owner = 1;
+  BarrierImpl barrier(barrier_comm);
+  EventImpl::gen_t trigger_gen = 1;
+  EventImpl::gen_t previous_gen = 2;
+  EventImpl::gen_t first_gen = 0;
+  NodeID migration_target = owner;
+  unsigned base_count = 2;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+
+  barrier.init(barrier_id, owner);
+  barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, 0,
+                                migration_target, base_count, nullptr, 0,
+                                TimeLimit::responsive());
+
+  EXPECT_EQ(barrier.generation.load(), 0);
 }

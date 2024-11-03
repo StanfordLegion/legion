@@ -985,8 +985,7 @@ namespace Realm {
     if(send_subscription_request) {
       log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen)
                          << " (prev=" << previous_subscription << ")";
-      BarrierSubscribeMessage::send_request(cur_owner, me.id, needed_gen,
-                                            Network::my_node_id, false /*!forwarded*/);
+      barrier_comm->subscribe(cur_owner, me.id, needed_gen, Network::my_node_id, false);
     }
 
     if(trigger_now) {
