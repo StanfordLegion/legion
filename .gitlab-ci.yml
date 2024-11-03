@@ -651,7 +651,7 @@ before_script:
 .realm_clang_format: &realm_clang_format
   script:
     - apt update -qq -yy && apt install -qq -yy clang-format-14
-    - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
+    - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**runtime/realm/*.cc' '**runtime/realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
     - |
       if grep -q '[^[:space:]]' /tmp/not-formatted.diff; then
         echo 'Code is not formatted'
