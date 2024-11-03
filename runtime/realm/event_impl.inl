@@ -19,11 +19,11 @@
 #include "realm/event_impl.h"
 
 // can't include runtime_impl.h because it's including us, but we need this declaration:
-//include "realm/runtime_impl.h"
-namespace Realm { 
+// include "realm/runtime_impl.h"
+namespace Realm {
   extern EventImpl *get_event_impl(Event e);
   extern GenEventImpl *get_genevent_impl(Event e);
-};
+}; // namespace Realm
 
 namespace Realm {
 
@@ -40,9 +40,9 @@ namespace Realm {
 
   inline /*static*/ bool EventImpl::add_waiter(Event needed, EventWaiter *waiter)
   {
-    return get_event_impl(needed)->add_waiter(gen_t(ID(needed).event_generation()), waiter);
+    return get_event_impl(needed)->add_waiter(gen_t(ID(needed).event_generation()),
+                                              waiter);
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -61,28 +61,27 @@ namespace Realm {
     // ideally the caller would tell us how long we can spend triggering
     //  a large fanout, but in the absence of such information, try to
     //  remain "responsive"
-    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id,
-		  poisoned, TimeLimit::responsive());
+    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id, poisoned,
+                  TimeLimit::responsive());
   }
 
   inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned,
-					       TimeLimit work_until)
+                                               TimeLimit work_until)
   {
     GenEventImpl *impl = get_genevent_impl(e);
-    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id,
-		  poisoned, work_until);
+    impl->trigger(gen_t(ID(e).event_generation()), Network::my_node_id, poisoned,
+                  work_until);
   }
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class EventWaiter
 
-  inline std::ostream& operator<<(std::ostream& os, const EventWaiter &waiter)
+  inline std::ostream &operator<<(std::ostream &os, const EventWaiter &waiter)
   {
     waiter.print(os);
     return os;
   }
-
 
 }; // namespace Realm
 
