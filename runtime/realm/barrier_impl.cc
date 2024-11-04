@@ -1095,9 +1095,8 @@ namespace Realm {
     } while(0);
 
     if(forward_to_node != (NodeID)-1) {
-      BarrierSubscribeMessage::send_request(forward_to_node, me.id, subscribe_gen,
-                                            subscriber,
-                                            (subscriber != Network::my_node_id));
+      barrier_comm->subscribe(forward_to_node, me.id, subscribe_gen, subscriber,
+                              (subscriber != Network::my_node_id));
     }
 
     if(inform_migration != (NodeID)-1) {

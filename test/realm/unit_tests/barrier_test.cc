@@ -266,6 +266,19 @@ TEST_F(BarrierTest, LocalArriveRemoteFutureSubscription)
   EXPECT_EQ(barrier_comm->sent_trigger_count, 3);
 }
 
+TEST_F(BarrierTest, HandleRemoteSubscription)
+{
+  const NodeID owner = 1;
+  const EventImpl::gen_t subscribe_gen = 1;
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.handle_remote_subscription(/*subscriber=*/1, subscribe_gen, 0, 0, 0);
+
+  EXPECT_EQ(barrier_comm->sent_subscription_count, 1);
+  EXPECT_EQ(barrier.generation.load(), 0);
+}
+
 TEST_F(BarrierTest, RemoteArrive)
 {
   const NodeID owner = 1;
@@ -360,21 +373,6 @@ TEST_F(BarrierTest, HandleRemoteTriggerHigherPrevGen)
   EXPECT_EQ(barrier.generation.load(), 0);
 }
 
-TEST_F(BarrierTest, GetEmptyResultForUntriggeredGen)
-{
-  NodeID owner = 0;
-  auto barrier_id = ID::make_barrier(owner, 0, 0);
-  EventImpl::gen_t result_gen = 1;
-  void *value = nullptr;
-  size_t value_size = 0;
-  BarrierImpl barrier(barrier_comm);
-
-  barrier.init(barrier_id, owner);
-  bool ok = barrier.get_result(result_gen, value, value_size);
-
-  EXPECT_FALSE(ok);
-}
-
 class ReductionOpIntAdd {
 public:
   typedef int LHS;
@@ -398,7 +396,37 @@ public:
 
 const ReductionOpIntAdd::RHS ReductionOpIntAdd::identity = 0;
 
-TEST_F(BarrierTest, GetResultForTriggeredGen)
+class BarrierRedopTest : public ::testing::Test {
+protected:
+  void SetUp() override
+  {
+    barrier_comm = new MockBarrierCommunicator();
+    redop = new ReductionOp<ReductionOpIntAdd>();
+  }
+
+  void TearDown() override { delete redop; }
+
+  MockBarrierCommunicator *barrier_comm;
+  ReductionOpUntyped *redop;
+  ReductionOpID redop_id = 1;
+};
+
+TEST_F(BarrierRedopTest, GetEmptyResultForUntriggeredGen)
+{
+  NodeID owner = 0;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  EventImpl::gen_t result_gen = 1;
+  void *value = nullptr;
+  size_t value_size = 0;
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(barrier_id, owner);
+  bool ok = barrier.get_result(result_gen, value, value_size);
+
+  EXPECT_FALSE(ok);
+}
+
+TEST_F(BarrierRedopTest, GetResultForTriggeredGen)
 {
   NodeID owner = 0;
   auto barrier_id = ID::make_barrier(owner, 0, 0);
@@ -406,8 +434,6 @@ TEST_F(BarrierTest, GetResultForTriggeredGen)
   size_t value_size = 0;
   std::vector<int> reduce_value(1, 4);
   std::vector<int> result(1, 0);
-  ReductionOpUntyped *redop = new ReductionOp<ReductionOpIntAdd>();
-  ReductionOpID redop_id = 1;
   BarrierImpl barrier(barrier_comm);
 
   barrier.init(barrier_id, owner);
@@ -427,5 +453,4 @@ TEST_F(BarrierTest, GetResultForTriggeredGen)
   EXPECT_TRUE(ok);
   EXPECT_EQ(barrier.generation.load(), result_gen);
   EXPECT_EQ(reduce_value[0] + reduce_value[0], result[0]);
-  delete redop;
 }
