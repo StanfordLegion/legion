@@ -86,10 +86,11 @@ namespace Realm {
       log_compqueue.fatal() << "completion queue ID space exhausted!";
       abort();
     }
-    if(max_size > 0)
+    if(max_size > 0) {
       cq->set_capacity(max_size, false /*!resizable*/);
-    else
+    } else {
       cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
+    }
 
     log_compqueue.info() << "created completion queue: cq=" << cq->me
                          << " size=" << max_size;
@@ -107,10 +108,12 @@ namespace Realm {
     if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
-      if(wait_on.has_triggered())
+      if(wait_on.has_triggered()) {
         cq->destroy();
-      else
+        get_runtime()->local_compqueue_free_list->free_entry(cq);
+      } else {
         cq->deferred_destroy.defer(cq, wait_on);
+      }
     } else {
       ActiveMessage<CompQueueDestroyMessage> amsg(owner);
       amsg->comp_queue = *this;
@@ -124,10 +127,12 @@ namespace Realm {
   {
     CompQueueImpl *cq = get_runtime()->get_compqueue_impl(msg.comp_queue);
 
-    if(msg.wait_on.has_triggered())
+    if(msg.wait_on.has_triggered()) {
       cq->destroy();
-    else
+      get_runtime()->local_compqueue_free_list->free_entry(cq);
+    } else {
       cq->deferred_destroy.defer(cq, msg.wait_on);
+    }
   }
 
   // adds an event to the completion queue (once it triggers)
@@ -417,8 +422,6 @@ namespace Realm {
       free(completed_events);
       completed_events = 0;
     }
-
-    get_runtime()->local_compqueue_free_list->free_entry(this);
   }
 
   void CompQueueImpl::add_event(GenEventImpl *ev_impl, bool faultaware)
@@ -782,6 +785,7 @@ namespace Realm {
   {
     assert(!poisoned);
     cq->destroy();
+    get_runtime()->local_compqueue_free_list->free_entry(cq);
   }
 
   void CompQueueImpl::DeferredDestroy::print(std::ostream &os) const

@@ -61,6 +61,20 @@ TEST_F(CompQueueTest, SetCapacity)
   EXPECT_EQ(compqueue.get_capacity(), max_size);
 }
 
+TEST_F(CompQueueTest, Destroy)
+{
+  const NodeID owner = 0;
+  const int index = 0;
+  const size_t max_size = 16;
+  CompQueueImpl compqueue;
+
+  compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
+  compqueue.set_capacity(max_size, /*!resizable=*/false);
+  compqueue.destroy();
+
+  EXPECT_EQ(compqueue.get_capacity(), 0);
+}
+
 TEST_F(CompQueueTest, AddEvent)
 {
   const NodeID owner = 0;
