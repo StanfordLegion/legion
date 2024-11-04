@@ -353,34 +353,24 @@ namespace Realm {
   // class CompQueueImpl
   //
 
-  CompQueueImpl::CompQueueImpl(void)
-    : next_free(0)
-    , resizable(false)
-    , max_events(0)
-    , wr_ptr(0)
-    , rd_ptr(0)
-    , pending_events(0)
-    , commit_ptr(0)
-    , consume_ptr(0)
-    , cur_events(0)
-    , completed_events(0)
-    , has_progress_events(false)
-    , local_progress_event(0)
-    , first_free_waiter(0)
-    , batches(0)
+  CompQueueImpl::CompQueueImpl(void) {}
+
+  CompQueueImpl::CompQueueImpl(CompQueueCommunicator *_comp_queue_comm)
+    : comp_queue_comm(_comp_queue_comm)
   {}
 
   CompQueueImpl::~CompQueueImpl(void)
   {
     AutoLock<> al(mutex);
-    assert(pending_events.load() == 0);
+    // assert(pending_events.load() == 0);
     while(batches) {
       CompQueueWaiterBatch *next_batch = batches->next_batch;
       delete batches;
       batches = next_batch;
     }
-    if(completed_events)
+    if(completed_events) {
       free(completed_events);
+    }
   }
 
   void CompQueueImpl::init(CompletionQueue _me, int _owner)
@@ -392,10 +382,11 @@ namespace Realm {
   void CompQueueImpl::set_capacity(size_t _max_size, bool _resizable)
   {
     AutoLock<> al(mutex);
-    if(resizable)
+    if(resizable) {
       assert(cur_events == 0);
-    else
+    } else {
       assert(wr_ptr.load() == consume_ptr.load());
+    }
     wr_ptr.store(0);
     rd_ptr.store(0);
     pending_events.store(0);
@@ -405,13 +396,19 @@ namespace Realm {
     resizable = _resizable;
     // round up to a power of 2 for easy modulo arithmetic
     max_events = 1;
-    while(max_events < _max_size)
+
+    while(max_events < _max_size) {
       max_events <<= 1;
+    }
 
     void *ptr = malloc(sizeof(Event) * max_events);
     assert(ptr != 0);
     completed_events = reinterpret_cast<Event *>(ptr);
   }
+
+  size_t CompQueueImpl::get_capacity() const { return max_events; }
+
+  size_t CompQueueImpl::get_pending_events() const { return pending_events.load(); }
 
   void CompQueueImpl::destroy(void)
   {
@@ -419,6 +416,7 @@ namespace Realm {
     // ok to have completed events leftover, but no pending events
     assert(pending_events.load() == 0);
     max_events = 0;
+
     if(completed_events) {
       free(completed_events);
       completed_events = 0;
@@ -427,19 +425,12 @@ namespace Realm {
     get_runtime()->local_compqueue_free_list->free_entry(this);
   }
 
-  void CompQueueImpl::add_event(Event event, bool faultaware)
+  void CompQueueImpl::add_event(GenEventImpl *ev_impl, bool faultaware)
   {
-    bool poisoned = false;
-
-    // special case: NO_EVENT has no impl...
-    if(!event.exists()) {
-      add_completed_event(event, 0 /*no waiter*/, TimeLimit::responsive());
-      return;
-    }
-
-    EventImpl *ev_impl = get_runtime()->get_event_impl(event);
+    Event event = ev_impl->current_event();
     EventImpl::gen_t needed_gen = ID(event).event_generation();
 
+    bool poisoned = false;
     if(ev_impl->has_triggered(needed_gen, poisoned)) {
       if(poisoned && !faultaware) {
         log_compqueue.fatal() << "cannot enqueue poisoned event: cq=" << me
@@ -486,6 +477,21 @@ namespace Realm {
       waiter->faultaware = faultaware;
       ev_impl->add_waiter(needed_gen, waiter);
     }
+  }
+
+  void CompQueueImpl::add_event(Event event, bool faultaware)
+  {
+    bool poisoned = false;
+
+    // special case: NO_EVENT has no impl...
+    if(!event.exists()) {
+      add_completed_event(event, 0 /*no waiter*/, TimeLimit::responsive());
+      return;
+    }
+
+    GenEventImpl *gev_impl = get_runtime()->get_genevent_impl(event);
+
+    add_event(gev_impl, faultaware);
   }
 
   Event CompQueueImpl::get_local_progress_event(void)

@@ -35,12 +35,16 @@
 
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace Realm {
+
+  class CompQueueCommunicator {};
 
   class CompQueueImpl {
   public:
     CompQueueImpl(void);
+    CompQueueImpl(CompQueueCommunicator *_comp_queue_comm);
     ~CompQueueImpl(void);
 
     void init(CompletionQueue _me, int _owner);
@@ -52,10 +56,13 @@ namespace Realm {
     }
 
     void set_capacity(size_t _max_size, bool _resizable);
+    size_t get_capacity() const;
+    size_t get_pending_events() const;
 
     void destroy(void);
 
     void add_event(Event event, bool faultaware);
+    void add_event(GenEventImpl *ev_impl, bool faultaware);
 
     Event get_local_progress_event(void);
     void add_remote_progress_event(Event event);
@@ -117,22 +124,25 @@ namespace Realm {
 
     Mutex mutex; // protects everything below here
 
-    bool resizable;
-    size_t max_events;
-    atomic<size_t> wr_ptr, rd_ptr, pending_events;
-    // used if resizable==false
-    atomic<size_t> commit_ptr, consume_ptr;
-    // used if resizable==true
-    size_t cur_events;
+    bool resizable = false;
+    size_t max_events = 0;
+    atomic<size_t> wr_ptr = atomic<size_t>(0);
+    atomic<size_t> rd_ptr = atomic<size_t>(0);
+    atomic<size_t> pending_events = atomic<size_t>(0);
 
-    Event *completed_events;
+    atomic<size_t> commit_ptr = atomic<size_t>(0);
+    atomic<size_t> consume_ptr = atomic<size_t>(0);
+    size_t cur_events = 0;
 
-    atomic<bool> has_progress_events;
-    GenEventImpl *local_progress_event;
-    EventImpl::gen_t local_progress_event_gen;
+    Event *completed_events = nullptr;
+
+    atomic<bool> has_progress_events = atomic<bool>(0);
+    GenEventImpl *local_progress_event = nullptr;
+    EventImpl::gen_t local_progress_event_gen = 0;
     std::vector<Event> remote_progress_events;
-    atomic<CompQueueWaiter *> first_free_waiter;
-    CompQueueWaiterBatch *batches;
+    atomic<CompQueueWaiter *> first_free_waiter = atomic<CompQueueWaiter *>(nullptr);
+    CompQueueWaiterBatch *batches = nullptr;
+    std::unique_ptr<CompQueueCommunicator> comp_queue_comm;
   };
 }; // namespace Realm
 
