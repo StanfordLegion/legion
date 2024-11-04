@@ -359,3 +359,73 @@ TEST_F(BarrierTest, HandleRemoteTriggerHigherPrevGen)
 
   EXPECT_EQ(barrier.generation.load(), 0);
 }
+
+TEST_F(BarrierTest, GetEmptyResultForUntriggeredGen)
+{
+  NodeID owner = 0;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  EventImpl::gen_t result_gen = 1;
+  void *value = nullptr;
+  size_t value_size = 0;
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(barrier_id, owner);
+  bool ok = barrier.get_result(result_gen, value, value_size);
+
+  EXPECT_FALSE(ok);
+}
+
+class ReductionOpIntAdd {
+public:
+  typedef int LHS;
+  typedef int RHS;
+
+  template <bool EXCL>
+  static void apply(LHS &lhs, RHS rhs)
+  {
+    lhs += rhs;
+  }
+
+  // both of these are optional
+  static const RHS identity;
+
+  template <bool EXCL>
+  static void fold(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+};
+
+const ReductionOpIntAdd::RHS ReductionOpIntAdd::identity = 0;
+
+TEST_F(BarrierTest, GetResultForTriggeredGen)
+{
+  NodeID owner = 0;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  EventImpl::gen_t result_gen = 1;
+  size_t value_size = 0;
+  std::vector<int> reduce_value(1, 4);
+  std::vector<int> result(1, 0);
+  ReductionOpUntyped *redop = new ReductionOp<ReductionOpIntAdd>();
+  ReductionOpID redop_id = 1;
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(barrier_id, owner);
+  barrier.initial_value = (char *)calloc(sizeof(int), 0);
+  barrier.redop = redop;
+  barrier.redop_id = redop_id;
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(result_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0,
+                         reinterpret_cast<void *>(reduce_value.data()),
+                         sizeof(reduce_value[0]), TimeLimit::responsive());
+  barrier.adjust_arrival(result_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0,
+                         reinterpret_cast<void *>(reduce_value.data()),
+                         sizeof(reduce_value[0]), TimeLimit::responsive());
+  bool ok = barrier.get_result(result_gen, reinterpret_cast<void *>(result.data()),
+                               sizeof(result[0]));
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(barrier.generation.load(), result_gen);
+  EXPECT_EQ(reduce_value[0] + reduce_value[0], result[0]);
+  delete redop;
+}

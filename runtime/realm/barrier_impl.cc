@@ -1204,10 +1204,6 @@ namespace Realm {
       // is there any data we need to store?
       if(datalen) {
         assert(redop_id != 0);
-
-        // TODO: deal with invalidation of previous instance of a barrier
-        redop_id = redop_id;
-        redop = get_runtime()->reduce_op_table.get(redop_id, 0);
         if(redop == 0) {
           log_barrier.fatal() << "no reduction op registered for ID " << redop_id;
           abort();
@@ -1262,6 +1258,12 @@ namespace Realm {
     Barrier b = id.convert<Barrier>();
     BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
+    if(datalen > 0) {
+      assert(args.redop_id != 0);
+      impl->redop_id = args.redop_id;
+      impl->redop = get_runtime()->reduce_op_table.get(args.redop_id, 0);
+    }
+
     impl->handle_remote_trigger(sender, args.barrier_id, args.trigger_gen,
                                 args.previous_gen, args.first_generation, args.redop_id,
                                 args.migration_target, args.base_arrival_count, data,
@@ -1271,8 +1273,9 @@ namespace Realm {
   bool BarrierImpl::get_result(gen_t result_gen, void *value, size_t value_size)
   {
     // generation hasn't triggered yet?
-    if(result_gen > generation.load_acquire())
+    if(result_gen > generation.load_acquire()) {
       return false;
+    }
 
     // take the lock so we can safely see how many results (if any) are on hand
     AutoLock<> al(mutex);
