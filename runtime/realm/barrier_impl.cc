@@ -1138,7 +1138,7 @@ namespace Realm {
   void BarrierImpl::handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
                                           EventImpl::gen_t trigger_gen,
                                           EventImpl::gen_t previous_gen,
-                                          EventImpl::gen_t first_generation,
+                                          EventImpl::gen_t first_gen,
                                           ReductionOpID redop_id, NodeID migration_target,
                                           unsigned base_count, const void *data,
                                           size_t datalen, TimeLimit work_until)
@@ -1207,9 +1207,9 @@ namespace Realm {
           log_barrier.fatal() << "no reduction op registered for ID " << redop_id;
           abort();
         }
-        first_generation = first_generation;
+        first_generation = first_gen;
 
-        int rel_gen = trigger_gen - first_generation;
+        int rel_gen = trigger_gen - first_gen;
         assert(rel_gen > 0);
         if(value_capacity < (size_t)rel_gen) {
           size_t new_capacity = rel_gen;
@@ -1221,9 +1221,9 @@ namespace Realm {
         assert(trigger_gen <= trigger_gen);
         // trigger_gen might have changed so make sure you use args.trigger_gen here
         assert(datalen == (redop->sizeof_lhs * (trigger_gen - previous_gen)));
-        assert(previous_gen >= first_generation);
-        memcpy(final_values + ((previous_gen - first_generation) * redop->sizeof_lhs),
-               data, datalen);
+        assert(previous_gen >= first_gen);
+        memcpy(final_values + ((previous_gen - first_gen) * redop->sizeof_lhs), data,
+               datalen);
       }
 
       // external waiters need to be signalled inside the lock

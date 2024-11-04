@@ -46,10 +46,7 @@ public:
 
 class BarrierTest : public ::testing::Test {
 protected:
-  void SetUp() override
-  {
-    barrier_comm = new MockBarrierCommunicator();
-  }
+  void SetUp() override { barrier_comm = new MockBarrierCommunicator(); }
 
   void TearDown() override {}
 

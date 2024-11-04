@@ -93,10 +93,10 @@ namespace Realm {
 
     void handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
                                EventImpl::gen_t trigger_gen,
-                               EventImpl::gen_t previous_gen,
-                               EventImpl::gen_t first_generation, ReductionOpID redop_id,
-                               NodeID migration_target, unsigned base_count,
-                               const void *data, size_t datalen, TimeLimit work_until);
+                               EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
+                               ReductionOpID redop_id, NodeID migration_target,
+                               unsigned base_count, const void *data, size_t datalen,
+                               TimeLimit work_until);
 
     virtual void external_wait(gen_t needed_gen, bool &poisoned);
     virtual bool external_timedwait(gen_t needed_gen, bool &poisoned, long long max_ns);
