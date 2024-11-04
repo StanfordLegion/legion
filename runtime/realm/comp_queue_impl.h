@@ -39,12 +39,9 @@
 
 namespace Realm {
 
-  class CompQueueCommunicator {};
-
   class CompQueueImpl {
   public:
     CompQueueImpl(void);
-    CompQueueImpl(CompQueueCommunicator *_comp_queue_comm);
     ~CompQueueImpl(void);
 
     void init(CompletionQueue _me, int _owner);
@@ -142,7 +139,6 @@ namespace Realm {
     std::vector<Event> remote_progress_events;
     atomic<CompQueueWaiter *> first_free_waiter = atomic<CompQueueWaiter *>(nullptr);
     CompQueueWaiterBatch *batches = nullptr;
-    std::unique_ptr<CompQueueCommunicator> comp_queue_comm;
   };
 }; // namespace Realm
 

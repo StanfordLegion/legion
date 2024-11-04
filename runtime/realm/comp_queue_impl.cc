@@ -355,10 +355,6 @@ namespace Realm {
 
   CompQueueImpl::CompQueueImpl(void) {}
 
-  CompQueueImpl::CompQueueImpl(CompQueueCommunicator *_comp_queue_comm)
-    : comp_queue_comm(_comp_queue_comm)
-  {}
-
   CompQueueImpl::~CompQueueImpl(void)
   {
     AutoLock<> al(mutex);
@@ -498,8 +494,9 @@ namespace Realm {
   {
     // non-resizable queues can observe a non-empty queue and return NO_EVENT
     //  without taking the lock
-    if(!resizable && (rd_ptr.load() < commit_ptr.load()))
+    if(!resizable && (rd_ptr.load() < commit_ptr.load())) {
       return Event::NO_EVENT;
+    }
 
     {
       AutoLock<> al(mutex);
@@ -518,8 +515,9 @@ namespace Realm {
         //  log to handle the progress event we're about to make
         has_progress_events.store(true);
         // commit load has to be fenced to stay after the store above
-        if(rd_ptr.load() < commit_ptr.load_fenced())
+        if(rd_ptr.load() < commit_ptr.load_fenced()) {
           return Event::NO_EVENT;
+        }
       }
 
       // we appear to be empty - get or create the progress event
@@ -552,8 +550,9 @@ namespace Realm {
       // now that we hold the lock, check emptiness consistent with progress
       //  event information
       if(resizable) {
-        if(cur_events > 0)
+        if(cur_events > 0) {
           immediate_trigger = true;
+        }
       } else {
         // before we recheck in the non-resizable case, set the
         //  'has_progress_events' flag - this ensures that any pusher we don't
@@ -561,12 +560,14 @@ namespace Realm {
         //  log to handle the remote progress event we're about to add
         has_progress_events.store(true);
         // commit load has to be fenced to stay after the store above
-        if(rd_ptr.load() < commit_ptr.load_fenced())
+        if(rd_ptr.load() < commit_ptr.load_fenced()) {
           immediate_trigger = true;
+        }
       }
 
-      if(!immediate_trigger)
+      if(!immediate_trigger) {
         remote_progress_events.push_back(event);
+      }
     }
 
     // lock is released, so we can trigger now if needed
