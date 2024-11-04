@@ -460,7 +460,6 @@ TEST_F(BarrierRedopTest, GetResultForRemoteTriggeredGen)
   EventImpl::gen_t first_gen = 0;
   NodeID migration_target = owner;
   unsigned base_count = 2;
-  size_t value_size = 0;
   std::vector<int> reduce_value(1, 4);
   std::vector<int> result(1, 0);
   BarrierImpl barrier(barrier_comm);
@@ -493,7 +492,6 @@ TEST_F(BarrierRedopTest, GetResultRemoteTriggeredGens)
   EventImpl::gen_t first_gen = 0;
   NodeID migration_target = owner;
   unsigned base_count = 2;
-  size_t value_size = 0;
   std::vector<int> reduce_value(1, 4);
   std::vector<int> result_1(1, 0);
   std::vector<int> result_2(1, 0);
