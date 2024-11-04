@@ -6401,6 +6401,8 @@ class Operation(object):
     def get_context_index(self):
         if self.context_index is not None:
             return self.context_index
+        if self.index_owner is not None:
+            return self.index_owner.get_context_index()
         # This better be an internal oepration with a creator
         # if it does not have a context index
         assert self.creator is not None
