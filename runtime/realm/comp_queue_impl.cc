@@ -477,8 +477,6 @@ namespace Realm {
 
   void CompQueueImpl::add_event(Event event, bool faultaware)
   {
-    bool poisoned = false;
-
     // special case: NO_EVENT has no impl...
     if(!event.exists()) {
       add_completed_event(event, 0 /*no waiter*/, TimeLimit::responsive());
