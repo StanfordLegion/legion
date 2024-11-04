@@ -159,10 +159,9 @@ void top_level_task(const void *args, size_t arglen,
   // numa module
   ModuleConfig *numa_config = rt.get_module_config("numa");
   if(numa_config) {
-    bool numa_avail = false;
-    ret_value = numa_config->get_resource("numa", numa_avail);
-    assert(ret_value == true);
-    if(numa_avail) {
+    std::vector<size_t> numa_mems;
+    ret_value = numa_config->get_resource("numa_mems", numa_mems);
+    if(ret_value) {
       size_t numa_mem_size = 0;
       size_t numa_nocpu_mem_size = 0;
       int num_numa_cpus = 0;
@@ -546,12 +545,9 @@ int main(int argc, char **argv)
     // numa module
     ModuleConfig *numa_config = rt.get_module_config("numa");
     if(numa_config) {
-      bool numa_avail = false;
-      ret_value = numa_config->get_resource("numa", numa_avail);
-      assert(ret_value == true);
-      if(numa_avail) {
-        std::vector<size_t> numa_mems;
-        ret_value = numa_config->get_resource("numa_mems", numa_mems);
+      std::vector<size_t> numa_mems;
+      ret_value = numa_config->get_resource("numa_mems", numa_mems);
+      if(ret_value) {
         assert(numa_mems.size() >= 1);
         log_app.info() << "numa mems:" << PrettyVector<size_t>(numa_mems);
         assert(ret_value == true);

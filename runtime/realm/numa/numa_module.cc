@@ -99,23 +99,23 @@ namespace Realm {
       config_map.insert({"numacpus", &cfg_num_numa_cpus});
       config_map.insert({"pin_memory", &cfg_pin_memory});
 
-      resource_map.insert({"numa", &res_numa_available});
       resource_map.insert({"numa_mems", &res_numa_mems});
     }
 
     bool NumaModuleConfig::discover_resource(void)
     {
-      res_numa_available = numasysif_numa_available();
-      // we pick it instead of numasysif_get_cpu_info because it
-      // is 10x faster than the later one.
-      std::map<int, NumaNodeMemInfo> meminfo;
-      numasysif_get_mem_info(meminfo);
-      res_numa_mems.reserve(meminfo.size());
-      for(std::pair<const int, NumaNodeMemInfo> &mem : meminfo) {
-        res_numa_mems.push_back(mem.second.bytes_available);
+      // TODO(WW): combine these two functions?
+      if(numasysif_numa_available()) {
+        std::map<int, NumaNodeMemInfo> meminfo;
+        if(numasysif_get_mem_info(meminfo)) {
+          res_numa_mems.reserve(meminfo.size());
+          for(std::pair<const int, NumaNodeMemInfo> &mem : meminfo) {
+            res_numa_mems.push_back(mem.second.bytes_available);
+          }
+        }
+        resource_discover_finished = true;
       }
 
-      resource_discover_finished = true;
       return resource_discover_finished;
     }
 
@@ -183,7 +183,7 @@ namespace Realm {
       }
 
       // next step - see if the system supports NUMA allocation/binding
-      if(!config->res_numa_available) {
+      if(config->res_numa_mems.size() == 0) {
         // TODO: warning or fatal error here?
         log_numa.warning() << "numa support not available in system";
         delete m;
