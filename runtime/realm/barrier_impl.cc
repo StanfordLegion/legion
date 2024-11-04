@@ -274,39 +274,19 @@ namespace Realm {
   //
 
   BarrierImpl::BarrierImpl(void)
-    : generation(0)
-    , gen_subscribed(0)
-    , barrier_comm(std::make_unique<BarrierCommunicator>())
-    , has_external_waiters(false)
+    : barrier_comm(std::make_unique<BarrierCommunicator>())
     , external_waiter_condvar(external_waiter_mutex)
   {
-    first_generation = /*free_generation =*/0;
-    next_free = 0;
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    base_arrival_count = 0;
-    redop = 0;
-    initial_value = 0;
-    value_capacity = 0;
-    final_values = 0;
   }
 
   BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm)
-    : generation(0)
-    , gen_subscribed(0)
-    , barrier_comm(_barrier_comm)
-    , has_external_waiters(false)
+    : barrier_comm(_barrier_comm)
     , external_waiter_condvar(external_waiter_mutex)
   {
-    first_generation = /*free_generation =*/0;
-    next_free = 0;
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    base_arrival_count = 0;
-    redop = 0;
-    initial_value = 0;
-    value_capacity = 0;
-    final_values = 0;
   }
 
   BarrierImpl::~BarrierImpl(void)

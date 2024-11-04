@@ -118,11 +118,11 @@ namespace Realm {
 
     bool get_result(gen_t result_gen, void *value, size_t value_size);
 
-  public:                     // protected:
-    atomic<gen_t> generation; // can be read without holding mutex
-    atomic<gen_t> gen_subscribed;
-    gen_t first_generation;
-    BarrierImpl *next_free;
+  public:
+    atomic<gen_t> generation = atomic<gen_t>(0);
+    atomic<gen_t> gen_subscribed = atomic<gen_t>(0);
+    gen_t first_generation = 0;
+    BarrierImpl *next_free = nullptr;
 
     std::unique_ptr<BarrierCommunicator> barrier_comm;
 
@@ -150,7 +150,7 @@ namespace Realm {
     std::map<gen_t, Generation *> generations;
 
     // external waiters on this node are notifies via a condition variable
-    bool has_external_waiters;
+    bool has_external_waiters = false;
     // use kernel mutex for timedwait functionality
     KernelMutex external_waiter_mutex;
     KernelMutex::CondVar external_waiter_condvar;
@@ -161,13 +161,13 @@ namespace Realm {
     std::map<unsigned, gen_t> remote_subscribe_gens, remote_trigger_gens;
     std::map<gen_t, gen_t> held_triggers;
 
-    unsigned base_arrival_count;
+    unsigned base_arrival_count = 0;
     ReductionOpID redop_id;
-    const ReductionOpUntyped *redop;
-    char *initial_value; // for reduction barriers
+    const ReductionOpUntyped *redop = nullptr;
+    char *initial_value = nullptr;
 
-    unsigned value_capacity; // how many values the two allocations below can hold
-    char *final_values;      // results of completed reductions
+    unsigned value_capacity = 0;
+    char *final_values = nullptr;
   };
 
   // active messages
