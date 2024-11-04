@@ -38,10 +38,7 @@ public:
 
 class CompQueueTest : public ::testing::Test {
 protected:
-  void SetUp() override
-  {
-    event_comm = new MockEventCommunicator();
-  }
+  void SetUp() override { event_comm = new MockEventCommunicator(); }
 
   void TearDown() override {}
 
@@ -189,7 +186,7 @@ TEST_F(CompQueueTest, PopLessEvents)
   bool poisoned_b = true;
   std::vector<Event> pop_events(max_size - 1);
   CompQueueImpl compqueue;
-  std::vector<GenEventImpl*> events;
+  std::vector<GenEventImpl *> events;
   std::vector<Event> completed_events;
 
   for(size_t i = 0; i < max_size; i++) {
