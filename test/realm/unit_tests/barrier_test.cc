@@ -451,3 +451,79 @@ TEST_F(BarrierRedopTest, GetResultForTriggeredGen)
   EXPECT_EQ(barrier.generation.load(), result_gen);
   EXPECT_EQ(reduce_value[0] + reduce_value[0], result[0]);
 }
+
+TEST_F(BarrierRedopTest, GetResultForRemoteTriggeredGen)
+{
+  NodeID owner = 1;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  EventImpl::gen_t trigger_gen = 1;
+  EventImpl::gen_t previous_gen = 0;
+  EventImpl::gen_t first_gen = 0;
+  NodeID migration_target = owner;
+  unsigned base_count = 2;
+  size_t value_size = 0;
+  std::vector<int> reduce_value(1, 4);
+  std::vector<int> result(1, 0);
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(barrier_id, owner);
+  barrier.initial_value = (char *)calloc(sizeof(int), 0);
+  barrier.redop = redop;
+  barrier.redop_id = redop_id;
+  barrier.base_arrival_count = 2;
+
+  barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, redop_id,
+                                migration_target, base_count,
+                                reinterpret_cast<void *>(reduce_value.data()),
+                                sizeof(result[0]), TimeLimit::responsive());
+
+  bool ok = barrier.get_result(trigger_gen, reinterpret_cast<void *>(result.data()),
+                               sizeof(result[0]));
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(barrier.generation.load(), trigger_gen);
+  EXPECT_EQ(reduce_value[0], result[0]);
+}
+
+TEST_F(BarrierRedopTest, GetResultRemoteTriggeredGens)
+{
+  NodeID owner = 1;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  EventImpl::gen_t trigger_gen = 1;
+  EventImpl::gen_t previous_gen = 0;
+  EventImpl::gen_t first_gen = 0;
+  NodeID migration_target = owner;
+  unsigned base_count = 2;
+  size_t value_size = 0;
+  std::vector<int> reduce_value(1, 4);
+  std::vector<int> result_1(1, 0);
+  std::vector<int> result_2(1, 0);
+  BarrierImpl barrier(barrier_comm);
+
+  barrier.init(barrier_id, owner);
+  barrier.initial_value = (char *)calloc(sizeof(int), 0);
+  barrier.redop = redop;
+  barrier.redop_id = redop_id;
+  barrier.base_arrival_count = 2;
+
+  barrier.handle_remote_trigger(/*sender=*/0, 0, trigger_gen, previous_gen, first_gen,
+                                redop_id, migration_target, base_count,
+                                reinterpret_cast<void *>(reduce_value.data()),
+                                sizeof(reduce_value[0]), TimeLimit::responsive());
+
+  barrier.handle_remote_trigger(/*sender=*/2, 0, trigger_gen + 1, previous_gen + 1,
+                                first_gen, redop_id, migration_target, base_count,
+                                reinterpret_cast<void *>(reduce_value.data()),
+                                sizeof(reduce_value[0]), TimeLimit::responsive());
+
+  bool ok_gen1 = barrier.get_result(
+      trigger_gen, reinterpret_cast<void *>(result_1.data()), sizeof(result_1[0]));
+  bool ok_gen2 = barrier.get_result(
+      trigger_gen + 1, reinterpret_cast<void *>(result_2.data()), sizeof(result_2[0]));
+
+  EXPECT_TRUE(ok_gen1);
+  EXPECT_TRUE(ok_gen2);
+  EXPECT_EQ(barrier.generation.load(), trigger_gen + 1);
+  EXPECT_EQ(reduce_value[0], result_1[0]);
+  EXPECT_EQ(reduce_value[0], result_2[0]);
+}
