@@ -77,7 +77,6 @@ TEST_F(CompQueueTest, AddEvent)
   const NodeID owner = 0;
   const int index = 0;
   const size_t max_size = 16;
-  const GenEventImpl::gen_t trigger_gen = 1;
   CompQueueImpl compqueue;
   GenEventImpl event_a(nullptr, new MockEventCommunicator());
   GenEventImpl event_b(nullptr, new MockEventCommunicator());
@@ -162,7 +161,6 @@ TEST_F(CompQueueTest, PopEventsEmpty)
   const int index = 0;
   const size_t max_size = 12;
   std::vector<Event> events;
-  const GenEventImpl::gen_t trigger_gen = 1;
   CompQueueImpl compqueue;
   GenEventImpl event_a(nullptr, event_comm);
 
@@ -182,8 +180,6 @@ TEST_F(CompQueueTest, PopLessEvents)
   int index = 0;
   const size_t max_size = 3;
   const GenEventImpl::gen_t trigger_gen = 1;
-  bool poisoned_a = false;
-  bool poisoned_b = true;
   std::vector<Event> pop_events(max_size - 1);
   CompQueueImpl compqueue;
   std::vector<GenEventImpl *> events;
@@ -226,7 +222,6 @@ TEST_F(CompQueueTest, DISABLED_GetLocalProgressEvent)
   const NodeID owner = 0;
   const int index = 0;
   const size_t max_size = 1;
-  const GenEventImpl::gen_t trigger_gen = 1;
   CompQueueImpl compqueue;
   GenEventImpl event_a(nullptr, event_comm);
 
@@ -243,7 +238,6 @@ TEST_F(CompQueueTest, DISABLED_AddRemoveProgressEvent)
   const NodeID owner = 0;
   const int index = 0;
   const size_t max_size = 1;
-  const GenEventImpl::gen_t trigger_gen = 1;
   CompQueueImpl compqueue;
   GenEventImpl event_a(nullptr, event_comm);
 
