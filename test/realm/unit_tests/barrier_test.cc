@@ -428,7 +428,6 @@ TEST_F(BarrierRedopTest, GetResultForTriggeredGen)
   NodeID owner = 0;
   auto barrier_id = ID::make_barrier(owner, 0, 0);
   EventImpl::gen_t result_gen = 1;
-  size_t value_size = 0;
   std::vector<int> reduce_value(1, 4);
   std::vector<int> result(1, 0);
   BarrierImpl barrier(barrier_comm);
