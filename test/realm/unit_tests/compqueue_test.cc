@@ -6,15 +6,6 @@
 
 using namespace Realm;
 
-class DeferredOperation : public EventWaiter {
-public:
-  void defer(Event wait_on) {}
-  virtual void event_triggered(bool poisoned, TimeLimit work_until) { triggered = true; }
-  virtual void print(std::ostream &os) const {}
-  virtual Event get_finish_event(void) const { return Event::NO_EVENT; }
-  bool triggered = false;
-};
-
 class MockEventCommunicator : public EventCommunicator {
 public:
   virtual void trigger(Event event, NodeID owner, bool poisoned) { sent_trigger_count++; }
