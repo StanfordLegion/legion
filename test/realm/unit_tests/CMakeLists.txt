@@ -22,6 +22,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
+  ucx_mpool_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
   address_list_test.cc
@@ -39,6 +40,11 @@ list(APPEND REALM_TESTS
   gather_scatter_test.cc
  )
 
+list(APPEND UCX_SOURCES
+   ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.h
+   ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.cc
+)
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -49,6 +55,8 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
+
+target_sources(realm_tests PRIVATE ${UCX_SOURCES})
 
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
