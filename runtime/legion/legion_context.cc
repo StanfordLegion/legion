@@ -10482,8 +10482,7 @@ namespace Legion {
 
         {
           AutoLock child_lock(child_op_lock);
-          if (context_index < reorder_buffer.front().operation_index ||
-              context_index > reorder_buffer.back().operation_index)
+          if (context_index < reorder_buffer.front().operation_index)
           {
             return RtEvent::NO_RT_EVENT;
           }

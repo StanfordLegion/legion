@@ -198,6 +198,7 @@ namespace Legion {
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
           unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
+          Domain index_domain,
           Operation *source);
       void set_point_wise_dependences(size_t index, Operation *op);
 #endif

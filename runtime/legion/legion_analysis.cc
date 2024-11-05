@@ -53,6 +53,12 @@ namespace Legion {
         op->add_mapping_reference(gen);
       if (shard_proj != NULL)
         shard_proj->add_reference();
+      if (op->get_operation_kind() == Operation::TASK_OP_KIND)
+      {
+        if (static_cast<TaskOp*>(op)->get_task_kind() ==
+            TaskOp::INDEX_TASK_KIND)
+          index_domain = static_cast<TaskOp*>(op)->index_domain;
+      }
     }
 
     //--------------------------------------------------------------------------

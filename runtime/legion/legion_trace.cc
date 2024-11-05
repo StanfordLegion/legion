@@ -657,6 +657,7 @@ namespace Legion {
         GenerationID prev_gen, uint64_t prev_ctx_index,
         ProjectionSummary *shard_proj,
         unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
+        Domain index_domain,
         Operation *source)
     //--------------------------------------------------------------------------
     {
@@ -680,7 +681,7 @@ namespace Legion {
                               region_idx,
                               TracePointWisePreviousIndexTaskInfo(
                                   shard_proj,
-                                  static_cast<IndexTask*>(prev_op)->index_domain,
+                                  index_domain,
                                   prev_op->get_trace_local_id(),
                                   prev_finder->second.first,
                                   prev_gen, prev_ctx_index, dep_type,
@@ -723,7 +724,8 @@ namespace Legion {
               op_info.op, op_info.gen, op_info.context_index,
               prev_info_finder->second.shard_proj,
               i, prev_info_finder->second.dep_type,
-              prev_info_finder->second.region_idx);
+              prev_info_finder->second.region_idx,
+              prev_info_finder->second.index_domain);
         }
       }
     }

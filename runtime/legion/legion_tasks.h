@@ -1412,7 +1412,8 @@ namespace Legion {
       bool set_prev_point_wise_user(Operation *prev_op,
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
-          unsigned region_idx, unsigned dtype, unsigned prev_region_idx);
+          unsigned region_idx, unsigned dtype, unsigned prev_region_idx,
+          Domain index_domain);
       bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen, unsigned region_idx);
       void add_point_to_completed_list(DomainPoint point,

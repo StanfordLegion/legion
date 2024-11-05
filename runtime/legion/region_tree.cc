@@ -16632,7 +16632,7 @@ namespace Legion {
                             }
                             static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
                                 prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
-                                user.idx, dtype, prev.idx);
+                                user.idx, dtype, prev.idx, prev.index_domain);
                           }
                         }
                       }

@@ -10371,18 +10371,20 @@ namespace Legion {
     bool IndexTask::set_prev_point_wise_user(Operation *prev_op,
         GenerationID prev_gen, uint64_t prev_ctx_index,
         ProjectionSummary *shard_proj,
-        unsigned region_idx, unsigned dep_type, unsigned prev_region_idx)
+        unsigned region_idx, unsigned dep_type,
+        unsigned prev_region_idx, Domain index_domain)
     //--------------------------------------------------------------------------
     {
+      assert (index_domain != Domain::NO_DOMAIN);
       if ((trace != NULL) && trace->is_recording())
       {
         trace->set_prev_point_wise_user(prev_op, prev_gen, prev_ctx_index,
             shard_proj,
             region_idx, dep_type, prev_region_idx,
+            index_domain,
             this);
       }
       AutoLock o_lock(op_lock);
-      //printf("[%d] SET DEPTYPE ==== %u\n", parent_ctx->get_shard_id(), dep_type);
       prev_index_tasks.insert({
                               region_idx,
                               PointWisePreviousIndexTaskInfo(
@@ -10390,7 +10392,7 @@ namespace Legion {
                                   shard_proj->projection,
                                   shard_proj->sharding,
                                   shard_proj->sharding_domain,
-                                  static_cast<IndexTask*>(prev_op)->index_domain,
+                                  index_domain,
                                   prev_op, prev_gen, prev_ctx_index, dep_type,
                                   prev_region_idx)
                               });

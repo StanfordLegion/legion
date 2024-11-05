@@ -104,6 +104,7 @@ namespace Legion {
       const unsigned idx;
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
+      Domain index_domain = Domain::NO_DOMAIN;
 #ifdef LEGION_SPY
       const UniqueID uid;
 #endif
