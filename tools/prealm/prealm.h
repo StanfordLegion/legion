@@ -27,6 +27,7 @@ namespace PRealm {
   // forward declarations
   using Realm::Logger;
   using Realm::CodeDescriptor;
+  // TODO: add profiling to client-level profiling requests
   using Realm::ProfilingRequestSet;
   using Realm::CommandLineParser;
   template<int N, typename T>
@@ -218,7 +219,6 @@ namespace PRealm {
                 const ProfilingRequestSet &requests,
                 Event wait_on = Event::NO_EVENT, int priority = 0) const;
 
-    // TODO: do we need to profile these? right now Legion prof won't use them
     Event register_task(TaskFuncID func_id,
                         const CodeDescriptor& codedesc,
                         const ProfilingRequestSet& prs,
@@ -468,6 +468,7 @@ namespace PRealm {
                                       Processor::Kind kind) const;
     void get_shared_processors(Memory m, std::set<Processor>& pset,
 				 bool local_only = true) const;
+    static Machine get_machine(void);
   };
   static_assert(sizeof(Machine) == sizeof(Realm::Machine));
 
@@ -495,6 +496,7 @@ namespace PRealm {
     bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
     void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
     int wait_for_shutdown(void);
+    static Runtime get_runtime(void);
   };
   static_assert(sizeof(Runtime) == sizeof(Realm::Runtime));
 

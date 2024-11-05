@@ -23,6 +23,58 @@ namespace PRealm {
     typedef ::realm_id_t ProcID;
     typedef ::realm_id_t MemID;
     typedef ::realm_id_t InstID;
+
+    enum ProfKind {
+      FILL_PROF,
+      COPY_PROF,
+      TASK_PROF,
+      INST_PROF,
+      PART_PROF,
+      LAST_PROF, // must be last
+    };
+
+    struct NameClosure {
+    public:
+      void add_instance(const RegionInstance &inst);
+      Event find_instance_name(Realm::RegionInstance inst) const;
+    public:
+      std::vector<RegionInstance> instances;
+    };
+
+    struct ProfilingArgs {
+    public:
+      inline ProfilingArgs(ProfKind k) : kind(k) { }
+    public:
+      Event critical;
+      Event provenance;
+      union {
+        Realm::Event inst;
+        Processor::TaskFuncID task;
+        NameClosure *closure;
+      } id;
+      ProfKind kind;
+    };
+    struct ProcDesc {
+    public:
+      ProcID proc_id;
+      Processor::Kind kind;
+#ifdef LEGION_USE_CUDA
+      Realm::Cuda::Uuid cuda_device_uuid;
+#endif
+    };
+    struct MemDesc {
+    public:
+      MemID mem_id;
+      Memory::Kind kind;
+      unsigned long long capacity;
+    };
+    struct ProcMemDesc {
+    public:
+      ProcID proc_id;
+      MemID mem_id;
+      unsigned bandwidth;
+      unsigned latency;
+    };
     struct EventWaitInfo {
     public:
       ProcID proc_id;
@@ -50,6 +102,108 @@ namespace PRealm {
       Event provenance;
       timestamp_t performed;
     };
+    struct BarrierArrivalInfo {
+    public:
+      Event result;
+      Event provenance;
+      Event precondition;
+      timestamp_t performed;
+    };
+    struct ReservationAcquireInfo {
+    public:
+      Event result;
+      Event provenance;
+      Event precondition;
+      timestamp_t performed;
+      Reservation reservation;
+    };
+    struct InstanceReadyInfo {
+    public:
+      Event result;
+      Event precondition;
+      Event unique;
+      timestamp_t performed;
+    };
+    struct InstanceUsageInfo {
+    public:
+      Event inst_event;
+      unsigned long long op_id;
+      FieldID field;
+    };
+    struct FillInstInfo {
+    public:
+      MemID dst;
+      FieldID fid;
+      Event dst_inst_uid;
+    };
+    struct FillInfo {
+    public:
+      unsigned long long size;
+      timestamp_t create, ready, start, stop;
+      Event fevent;
+      Event creator;
+      Event critical;
+      std::vector<FillInstInfo> inst_infos;
+    };
+    struct CopyInstInfo {
+    public:
+      MemID src, dst;
+      FieldID src_fid, dst_fid;
+      Event src_inst_uid, dst_inst_uid;
+      unsigned num_hops;
+      bool indirect;
+    };
+    struct CopyInfo {
+    public:
+      unsigned long long size;
+      timestamp_t create, ready, start, stop;
+      Event fevent;
+      Event creator;
+      Event critical;
+      std::vector<CopyInstInfo> inst_infos;
+    };
+    struct WaitInfo {
+    public:
+      timestamp_t wait_start, wait_ready, wait_end;
+      Event wait_event;
+    };
+    struct TaskInfo {
+    public:
+      Processor::TaskFuncID task_id;
+      Processor proc;
+      timestamp_t create, ready, start, stop;
+      std::vector<WaitInfo> wait_intervals;
+      Event creator;
+      Event critical;
+      Event finish_event;
+    };
+    struct GPUTaskInfo {
+    public:
+      Processor::TaskFuncID task_id;
+      Processor proc;
+      timestamp_t create, ready, start, stop;
+      timestamp_t gpu_start, gpu_stop;
+      std::vector<WaitInfo> wait_intervals;
+      Event creator;
+      Event critical;
+      Event finish_event;
+    };
+    struct InstTimelineInfo {
+    public:
+      Event inst_uid;
+      InstID inst_id;
+      MemID mem_id;
+      unsigned long long size;
+      timestamp_t create, ready, destroy;
+      Event creator;
+    };
+    struct ProfTaskInfo {
+    public:
+      ProcID proc_id;
+      timestamp_t start, stop;
+      Event creator;
+      Event finish_event;
+    };
   public:
     ThreadProfiler(Processor p);
     ThreadProfiler(const ThreadProfiler &rhs) = delete;
@@ -65,24 +219,40 @@ namespace PRealm {
     Event add_inst_request(ProfilingRequestSet &requests,
         const InstanceLayoutGeneric *ilg, Event critical);
   public:
+    void process_proc_desc(const Processor &p);
+    void process_mem_desc(const Memory &m);
     void record_event_wait(Event wait_on, Backtrace &bt);
     void record_event_trigger(Event result, Event precondition);
     void record_event_poison(Event result);
-    void record_barrier_usage(Event barrier);
+    void record_barrier_use(Event barrier);
     void record_barrier_arrival(Event result, Event precondition);
     void record_event_merger(Event result, const Event *preconditions, size_t num_events);
     void record_reservation_acquire(Reservation r, Event result, Event precondition);
+    void record_instance_ready(RegionInstance inst, Event result, Event precondition);
     void record_instance_usage(RegionInstance inst, FieldID field_id);
-    size_t dump_inter(double over);
+    void process_response(ProfilingResponse &response);
+    size_t dump_inter(long long target_latency);
     void finalize(void);
   
-    static ThreadProfiler& get_thread_profiler(void);
+    static ThreadProfiler& get_thread_profiler(void); 
   private:
     const Processor local_proc;
     std::deque<EventWaitInfo> event_wait_infos;
     std::deque<EventMergerInfo> event_merger_infos;
     std::deque<EventTriggerInfo> event_trigger_infos;
     std::deque<EventPoisonInfo> event_poison_infos;
+    std::deque<BarrierArrivalInfo> barrier_arrival_infos;
+    std::deque<ReservationAcquireInfo> reservation_acquire_infos;
+    std::deque<InstanceReadyInfo> instance_ready_infos;
+    std::deque<InstanceUsageInfo> instance_usage_infos;
+    std::deque<FillInfo> fill_infos;
+    std::deque<CopyInfo> copy_infos;
+    std::deque<TaskInfo> task_infos;
+    std::deque<GPUTaskInfo> gpu_task_infos;
+    std::deque<InstTimelineInfo> inst_timeline_infos;
+    std::deque<ProfTaskInfo> prof_task_infos;
+    std::vector<ProcID> proc_ids;
+    std::vector<MemID> mem_ids;
   };
 
   inline CopySrcDstField::CopySrcDstField(void)
@@ -226,7 +396,7 @@ namespace PRealm {
     return set_fill(&value, sizeof(T));
   }
 
-  CopySrcDstField::operator Realm::CopySrcDstField(void) const
+  inline CopySrcDstField::operator Realm::CopySrcDstField(void) const
   {
     Realm::CopySrcDstField result;
     result.inst = inst;
@@ -390,8 +560,11 @@ namespace PRealm {
       Memory memory, InstanceLayoutGeneric *ilg, const ProfilingRequestSet &requests, Event wait_on)
   {
     ProfilingRequestSet alt_requests = requests;
-    inst.unique_event = ThreadProfiler::get_thread_profiler().add_inst_request(alt_requests, ilg, wait_on);
-    return Realm::RegionInstance::create_instance(inst, memory, ilg, alt_requests, wait_on);
+    ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
+    inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
+    Event result = Realm::RegionInstance::create_instance(inst, memory, ilg, alt_requests, wait_on);
+    profiler.record_instance_ready(inst, result, wait_on);
+    return result;
   }
 
   /*static*/ inline Event RegionInstance::create_external_instance(RegionInstance &inst,
@@ -399,8 +572,11 @@ namespace PRealm {
       const ProfilingRequestSet &requests, Event wait_on)
   {
     ProfilingRequestSet alt_requests = requests;
-    inst.unique_event = ThreadProfiler::get_thread_profiler().add_inst_request(alt_requests, ilg, wait_on);
-    return Realm::RegionInstance::create_external_instance(inst, memory, ilg, resource, alt_requests, wait_on);
+    ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
+    inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
+    Event result = Realm::RegionInstance::create_external_instance(inst, memory, ilg, resource, alt_requests, wait_on);
+    profiler.record_instance_ready(inst, result, wait_on);
+    return result;
   }
 
   /*static*/ inline Event RegionInstance::create_external(RegionInstance &inst,
@@ -638,6 +814,8 @@ namespace PRealm {
                Event wait_on, int priority) const
   {
     ProfilingRequestSet alt_requests = requests;
+    // TODO: need a way to get the instances for the indirects
+    std::abort();
     ThreadProfiler::get_thread_profiler().add_copy_request(alt_requests, srcs, dsts, wait_on);
     std::vector<Realm::CopySrcDstField> alt_srcs(srcs.size());
     for (unsigned idx = 0; idx < srcs.size(); idx++)
@@ -704,5 +882,10 @@ namespace PRealm {
   {
     // Container type problem is dumb
     Realm::Machine::get_shared_processors(m, *reinterpret_cast<std::set<Realm::Processor>*>(&pset), local_only);
+  }
+
+  /*static*/ inline Machine Machine::get_machine(void)
+  {
+    return Realm::Machine::get_machine();
   }
 }
