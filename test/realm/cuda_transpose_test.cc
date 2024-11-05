@@ -11,14 +11,26 @@
 #include "osdep.h"
 #include "philox.h"
 #include "realm/cmdline.h"
+#ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_memcpy.h"
 #include "realm/cuda/cuda_module.h"
+#endif
+#ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
+#include "realm/hip/hiphijack_api.h"
+#include "realm/hip/hip_module.h"
+#endif
+
 #include "realm/id.h"
 
 
 using namespace Realm;
+#ifdef REALM_USE_CUDA
 using namespace Realm::Cuda;
-
+#endif
+#ifdef  REALM_USE_HIP
+using namespace Realm::Hip;
+#endif
 Logger log_app("app");
 
 // Task IDs, some IDs are reserved so start at first available number
@@ -105,6 +117,37 @@ namespace TestConfig {
   bool wait_after = false;      // wait after each copy?
   bool do_unit_test = false;
 };                              // namespace TestConfig
+
+template <int N, typename T, typename DT>
+void dump_and_verify_fill(RegionInstance inst, DT fill_value, FieldID fid, const IndexSpace<N, T> &is, bool verbose = false, bool verify = false)
+{
+  const size_t row_size = is.bounds.hi[N - 1] - is.bounds.lo[N - 1];
+  if(verify || verbose) {
+    GenericAccessor<DT, N, T> acc(inst, fid);
+    size_t i = 0;
+    for(IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
+      for(PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
+        DT v = acc[it2.p];
+        if(verify) {
+          if(v != fill_value) {
+            std::cout << "Mismatch at " << it2.p << ": " << v << " != " << fill_value
+                      << '\n';
+            assert(0);
+          }
+          assert(v == fill_value);
+        }
+        if(verbose) {
+          if((i) % row_size == 0)
+            std::cout << '\n';
+          std::cout << it2.p << ": " << v << " ";
+        }
+      }
+      if(verbose)
+        std::cout << '\n';
+    }
+  }
+}
+
 
 template <int N, typename T, typename DT>
 void dump_and_verify(RegionInstance inst, FieldID fid, const IndexSpace<N, T> &is,
@@ -354,7 +397,11 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       dsts[0].inst = dst_inst;
       dsts[0].field_id = 0;
       dsts[0].size = field_sizes[0];
-
+      // add fill operation for testing
+      FT fill_value = 60;
+      wait_for = is.fill(dsts, ProfilingRequestSet(), &fill_value, sizeof(fill_value), wait_for);
+      wait_for.wait();
+      dump_and_verify_fill<N,T,FT>(dst_inst, fill_value, /*field_id*/0, is, TestConfig::verbose, TestConfig::verify);
       wait_for = is.copy(srcs, dsts, prs, wait_for);
       wait_for.wait();
 
