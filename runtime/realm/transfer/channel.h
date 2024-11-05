@@ -1062,7 +1062,10 @@ namespace Realm {
 
     class MemcpyChannel : public SingleXDQChannel<MemcpyChannel, MemcpyXferDes> {
     public:
-      MemcpyChannel(BackgroundWorkManager *bgwork);
+      MemcpyChannel(BackgroundWorkManager *_bgwork, const Node *_node,
+                    const std::unordered_map<realm_id_t, SharedMemoryInfo>
+                        &remote_shared_memory_mappings,
+                    NodeID _my_node_id);
 
       // multiple concurrent memcpys ok
       static const bool is_ordered = false;
@@ -1072,6 +1075,7 @@ namespace Realm {
       // helper to list all memories that can be reached by load/store instructions
       //  on the cpu in the current process
       static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
+      void enumerate_local_cpu_memories_internal(std::vector<Memory> &mems);
 
       virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
                                      CustomSerdezID src_serdez_id,
@@ -1096,6 +1100,7 @@ namespace Realm {
 
       virtual long submit(Request** requests, long nr);
 
+      const Node* node;
       bool is_stopped;
     };
 

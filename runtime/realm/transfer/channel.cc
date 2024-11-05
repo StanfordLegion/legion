@@ -4734,39 +4734,56 @@ namespace Realm {
     }
   }
 
+  static void
+  enumerate_remote_shared_mems(std::vector<Memory> &mems,
+                               const std::unordered_map<realm_id_t, SharedMemoryInfo>
+                                   &remote_shared_memory_mappings)
+  {
+    size_t idx = 0;
+    mems.resize(remote_shared_memory_mappings.size(), Memory::NO_MEMORY);
+    for(std::unordered_map<realm_id_t, SharedMemoryInfo>::const_iterator it =
+            remote_shared_memory_mappings.begin();
+        it != remote_shared_memory_mappings.end(); ++it) {
+      Memory m;
+      m.id = it->first;
+      mems[idx++] = m;
+    }
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class MemcpyChannel
   //
 
-      MemcpyChannel::MemcpyChannel(BackgroundWorkManager *bgwork)
-	: SingleXDQChannel<MemcpyChannel,MemcpyXferDes>(bgwork,
-							XFER_MEM_CPY,
-							"memcpy channel")
-      {
-        //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
-        unsigned bw = 128000;         // HACK - estimate at 128 GB/s
-        unsigned latency = 100;       // HACK - estimate at 100ns
-        unsigned frag_overhead = 100; // HACK - estimate at 100ns
+  MemcpyChannel::MemcpyChannel(BackgroundWorkManager *_bgwork, const Node *_node,
+                               const std::unordered_map<realm_id_t, SharedMemoryInfo>
+                                   &remote_shared_memory_mappings,
+                               NodeID _my_node_id)
+    : SingleXDQChannel<MemcpyChannel, MemcpyXferDes>(_bgwork, XFER_MEM_CPY,
+                                                     "memcpy channel")
+    , node(_node)
+  {
+    // cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
+    unsigned bw = 128000;         // HACK - estimate at 128 GB/s
+    unsigned latency = 100;       // HACK - estimate at 100ns
+    unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
-        // all local cpu memories are valid sources and dests
-        std::vector<Memory> local_cpu_mems;
-        enumerate_local_cpu_memories(local_cpu_mems);
-        std::vector<Memory> remote_shared_mems;
-        enumerate_remote_shared_mems(remote_shared_mems);
+    std::vector<Memory> local_cpu_mems;
+    enumerate_local_cpu_memories_internal(local_cpu_mems);
+    std::vector<Memory> remote_shared_mems;
+    enumerate_remote_shared_mems(remote_shared_mems);
 
-        add_path(local_cpu_mems, local_cpu_mems,
-                 bw, latency, frag_overhead, XFER_MEM_CPY)
-          .set_max_dim(3)
-          .allow_serdez();
+    add_path(local_cpu_mems, local_cpu_mems, bw, latency, frag_overhead, XFER_MEM_CPY)
+        .set_max_dim(3)
+        .allow_serdez();
 
-        if (remote_shared_mems.size() > 0) {
-          add_path(local_cpu_mems, remote_shared_mems, bw, latency, frag_overhead,
-                   XFER_MEM_CPY)
-              .set_max_dim(3);
-        }
+    if(remote_shared_mems.size() > 0) {
+      add_path(local_cpu_mems, remote_shared_mems, bw, latency, frag_overhead,
+               XFER_MEM_CPY)
+          .set_max_dim(3);
+    }
 
-        xdq.add_to_manager(bgwork);
+    xdq.add_to_manager(_bgwork);
       }
 
       MemcpyChannel::~MemcpyChannel()
@@ -4774,13 +4791,34 @@ namespace Realm {
         //free(cbs);
       }
 
-      /*static*/ void MemcpyChannel::enumerate_local_cpu_memories(std::vector<Memory>& mems)
+      void MemcpyChannel::enumerate_local_cpu_memories_internal(std::vector<Memory> &mems)
+      {
+        for(std::vector<MemoryImpl *>::const_iterator it = node->memories.begin();
+            it != node->memories.end(); ++it)
+          if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+             ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+             ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
+             ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+             ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
+            mems.push_back((*it)->me);
+
+        for(std::vector<IBMemory *>::const_iterator it = node->ib_memories.begin();
+            it != node->ib_memories.end(); ++it)
+          if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+             ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+             ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
+             ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+             ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
+            mems.push_back((*it)->me);
+      }
+
+      /*static*/ void
+      MemcpyChannel::enumerate_local_cpu_memories(std::vector<Memory> &mems)
       {
         Node& n = get_runtime()->nodes[Network::my_node_id];
 
         for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
-            it != n.memories.end();
-            ++it)
+            it != n.memories.end(); ++it)
           if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
              ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
              ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
@@ -4789,8 +4827,7 @@ namespace Realm {
             mems.push_back((*it)->me);
 
         for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-            it != n.ib_memories.end();
-            ++it)
+            it != n.ib_memories.end(); ++it)
           if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
              ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
              ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
@@ -4798,7 +4835,6 @@ namespace Realm {
              ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
             mems.push_back((*it)->me);
       }
-
 
       uint64_t MemcpyChannel::supports_path(ChannelCopyInfo channel_copy_info,
                                             CustomSerdezID src_serdez_id,

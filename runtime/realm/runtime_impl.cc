@@ -1068,7 +1068,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     Module::create_dma_channels(runtime);
 
     // create the standard set of channels here
-    runtime->add_dma_channel(new MemcpyChannel(&runtime->bgwork));
+    runtime->add_dma_channel(
+        new MemcpyChannel(&runtime->bgwork, &runtime->nodes[Network::my_node_id],
+                          runtime->remote_shared_memory_mappings, Network::my_node_id));
     runtime->add_dma_channel(new MemfillChannel(&runtime->bgwork));
     runtime->add_dma_channel(new MemreduceChannel(&runtime->bgwork));
     runtime->add_dma_channel(new RemoteWriteChannel(&runtime->bgwork));
