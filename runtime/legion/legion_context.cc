@@ -10479,6 +10479,15 @@ namespace Legion {
           return finder->second.first;
         }
         //printf("FINDER DID NOT FIND IN READY AND DID NOT FIND IN PENDING context_index: %ld, point: %lld\n", context_index, point.point_data[0]);
+
+        {
+          AutoLock child_lock(child_op_lock);
+          if (context_index < reorder_buffer.front().operation_index ||
+              context_index > reorder_buffer.back().operation_index)
+          {
+            return RtEvent::NO_RT_EVENT;
+          }
+        }
         const RtUserEvent pending_event = Runtime::create_rt_user_event();
         pending_point_wise_deps[key] = std::pair<RtUserEvent,int>{pending_event,1};
         return pending_event;
@@ -10519,7 +10528,15 @@ namespace Legion {
         std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>>::iterator pending_finder =
           pending_point_wise_deps.find(key);
         if (pending_finder != pending_point_wise_deps.end())
+        {
+          if (pending_finder->second.first.exists() &&
+              !pending_finder->second.first.has_triggered() &&
+              pending_finder->second.second != 0)
+          {
+            Runtime::trigger_event(pending_finder->second.first);
+          }
            pending_point_wise_deps.erase(pending_finder);
+        }
       }
     }
 #endif

@@ -8594,6 +8594,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
       reduction_instance = NULL; // we don't own this so clear it
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      clear_context_maps();
+#endif
       MultiTask::deactivate(false/*free*/);
       if (!origin_mapped_slices.empty())
       {
@@ -10072,9 +10075,6 @@ namespace Legion {
         else
           commit_operation(true/*deactivate*/);
       }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      clear_context_maps();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10564,7 +10564,7 @@ namespace Legion {
         if (previous_index_task_points.size() > 1)
         {
           // throw _error
-          assert(1);
+          assert(false);
         }
         assert(!previous_index_task_points.empty());
 
@@ -10589,7 +10589,7 @@ namespace Legion {
             previous_index_task_points[0]);
       }
 
-      assert(1);
+      assert(false);
       return RtUserEvent::NO_RT_USER_EVENT;
     }
 #endif

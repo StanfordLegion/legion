@@ -1955,7 +1955,7 @@ namespace Legion {
           runtime->forest->find_domain(internal_space, local_domain);
         }
         else
-          assert(1);
+          return;
 
 
         for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
@@ -2003,7 +2003,7 @@ namespace Legion {
         if (previous_index_task_points.size() > 1)
         {
           // throw _error
-          assert(1);
+          assert(false);
         }
         assert(!previous_index_task_points.empty());
 
