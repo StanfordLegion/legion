@@ -43,7 +43,11 @@ protected:
     event_notifier = new EventTriggerNotifier();
   }
 
-  void TearDown() override { delete event_notifier; }
+  void TearDown() override
+  {
+    event_notifier->shutdown_work_item();
+    delete event_notifier;
+  }
 
   MockEventCommunicator *event_comm;
   EventTriggerNotifier *event_notifier;
