@@ -76,8 +76,8 @@ TEST_F(CompQueueTest, AddEvent)
   event_b.init(ID::make_event(owner, index, 0), 0);
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
   compqueue.set_capacity(max_size, /*!resizable=*/false);
-  compqueue.add_event(&event_a, /*faultaware=*/false);
-  compqueue.add_event(&event_b, /*faultaware=*/false);
+  compqueue.add_event(event_a.current_event(), &event_a, /*faultaware=*/false);
+  compqueue.add_event(event_b.current_event(), &event_b, /*faultaware=*/false);
   size_t num_pending_events = compqueue.get_pending_events();
 
   EXPECT_EQ(num_pending_events, 2);
@@ -99,8 +99,8 @@ TEST_F(CompQueueTest, AddAndCompleteEvent)
   event_a.init(ID::make_event(owner, index, 0), 0);
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
   compqueue.set_capacity(max_size, /*!resizable=*/false);
-  compqueue.add_event(&event_a, /*faultaware=*/false);
-  compqueue.add_event(&event_b, /*faultaware=*/false);
+  compqueue.add_event(event_a.current_event(), &event_a, /*faultaware=*/false);
+  compqueue.add_event(event_b.current_event(), &event_b, /*faultaware=*/false);
   bool free_event =
       event_b.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   size_t num_pending_events = compqueue.get_pending_events();
@@ -130,8 +130,8 @@ TEST_F(CompQueueTest, AddAndCompleteEventRemote)
   event_a.init(ID::make_event(owner, index, 0), 0);
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
   compqueue.set_capacity(max_size, /*!resizable=*/false);
-  compqueue.add_event(&event_a, /*faultaware=*/false);
-  compqueue.add_event(&event_b, /*faultaware=*/false);
+  compqueue.add_event(event_a.current_event(), &event_a, /*faultaware=*/false);
+  compqueue.add_event(event_b.current_event(), &event_b, /*faultaware=*/false);
   bool free_event =
       event_b.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   size_t num_pending_events = compqueue.get_pending_events();
@@ -184,7 +184,7 @@ TEST_F(CompQueueTest, PopLessEvents)
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
   compqueue.set_capacity(max_size, /*!resizable=*/false);
   for(size_t i = 0; i < max_size; i++) {
-    compqueue.add_event(events[i], /*faultaware=*/false);
+    compqueue.add_event(events[i]->current_event(), events[i], /*faultaware=*/false);
   }
   for(size_t i = 0; i < max_size; i++) {
     events[i]->trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());

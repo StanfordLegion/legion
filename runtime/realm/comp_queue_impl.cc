@@ -422,9 +422,8 @@ namespace Realm {
     }
   }
 
-  void CompQueueImpl::add_event(GenEventImpl *ev_impl, bool faultaware)
+  void CompQueueImpl::add_event(Event event, GenEventImpl *ev_impl, bool faultaware)
   {
-    Event event = ev_impl->current_event();
     EventImpl::gen_t needed_gen = ID(event).event_generation();
 
     bool poisoned = false;
@@ -484,9 +483,8 @@ namespace Realm {
       return;
     }
 
-    GenEventImpl *gev_impl = get_runtime()->get_genevent_impl(event);
-
-    add_event(gev_impl, faultaware);
+    GenEventImpl *ev_impl = get_runtime()->get_genevent_impl(event);
+    return add_event(event, ev_impl, faultaware);
   }
 
   Event CompQueueImpl::get_local_progress_event(void)
