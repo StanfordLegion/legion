@@ -358,8 +358,6 @@ namespace Realm {
   // class CompQueueImpl
   //
 
-  CompQueueImpl::CompQueueImpl(void) {}
-
   CompQueueImpl::~CompQueueImpl(void)
   {
     AutoLock<> al(mutex);
