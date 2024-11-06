@@ -157,8 +157,8 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
 
   input_port.mem = input_mem;
   input_port.peer_port_idx = 0;
-
   input_port.iter = new TransferIteratorMock<1, int>();
+
   input_port.peer_guid = XferDes::XFERDES_NO_GUID;
 
   xfer_desc->output_ports.resize(1);
@@ -185,9 +185,16 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
 }
 
 const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
-    // Case 1
+    // Case 1 - 1D
     MemcpyXferDescTestCase{
-        .src_strides = {4}, .src_extents = {4}, .dst_strides = {4}, .dst_extents = {4}}};
+        .src_strides = {4}, .src_extents = {4}, .dst_strides = {4}, .dst_extents = {4}},
+    // Case 2 - 2D
+    MemcpyXferDescTestCase{
+        .src_strides = {4, 16},
+        .src_extents = {4, 4},
+        .dst_strides = {4, 4},
+        .dst_extents = {4, 16},
+    }};
 
 INSTANTIATE_TEST_SUITE_P(Foo, MemcpyXferDescParamTest,
                          testing::ValuesIn(kMemcpyXferDescTestCases));

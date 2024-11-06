@@ -4694,40 +4694,37 @@ namespace Realm {
     return 0;
   }
 
-      void RemoteChannel::pull()
-      {
-	assert(0);
-      }
+  void RemoteChannel::pull() { assert(0); }
 
-      long RemoteChannel::available()
-      {
-	assert(0);
-	return 0;
-      }
+  long RemoteChannel::available()
+  {
+    assert(0);
+    return 0;
+  }
 
-      uint64_t RemoteChannel::supports_path(
-          ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
-          CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
-          const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
-          XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/,
-          unsigned *lat_ret /*= 0*/)
-      {
-        // simultaneous serialization/deserialization not
-        //  allowed anywhere right now
-        if((src_serdez_id != 0) && (dst_serdez_id != 0))
-          return 0;
+  uint64_t RemoteChannel::supports_path(
+      ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+      CustomSerdezID dst_serdez_id, ReductionOpID redop_id, size_t total_bytes,
+      const std::vector<size_t> *src_frags, const std::vector<size_t> *dst_frags,
+      XferDesKind *kind_ret /*= 0*/, unsigned *bw_ret /*= 0*/, unsigned *lat_ret /*= 0*/)
+  {
+    // simultaneous serialization/deserialization not
+    //  allowed anywhere right now
+    if((src_serdez_id != 0) && (dst_serdez_id != 0))
+      return 0;
 
-        // fall through to normal checks
-        return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
-                                      redop_id, total_bytes, src_frags, dst_frags,
-                                      kind_ret, bw_ret, lat_ret);
-      }
+    // fall through to normal checks
+    return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
+                                  redop_id, total_bytes, src_frags, dst_frags, kind_ret,
+                                  bw_ret, lat_ret);
+  }
 
-      bool RemoteChannel::supports_indirection_memory(Memory mem) const
-      {
-        return indirect_memories.count(mem) > 0;
-      }
+  bool RemoteChannel::supports_indirection_memory(Memory mem) const
+  {
+    return indirect_memories.count(mem) > 0;
+  }
 
+  // TODO(apryakhin@): delete
   static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
   {
     RuntimeImpl *runtime = get_runtime();
@@ -4782,7 +4779,7 @@ namespace Realm {
     std::vector<Memory> remote_shared_mems;
 
     if(!remote_shared_memory_mappings.empty()) {
-      enumerate_remote_shared_mems(remote_shared_mems);
+      enumerate_remote_shared_mems(remote_shared_mems, remote_shared_memory_mappings);
     }
 
     add_path(local_cpu_mems, local_cpu_mems, bw, latency, frag_overhead, XFER_MEM_CPY)
