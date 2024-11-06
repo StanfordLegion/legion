@@ -59,7 +59,7 @@ namespace Realm {
     void destroy(void);
 
     void add_event(Event event, bool faultaware);
-    void add_event(Event event, GenEventImpl *ev_impl, bool faultaware);
+    void add_event(Event event, EventImpl *ev_impl, bool faultaware);
 
     Event get_local_progress_event(void);
     void add_remote_progress_event(Event event);
