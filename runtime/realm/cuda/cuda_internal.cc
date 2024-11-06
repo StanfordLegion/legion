@@ -2065,8 +2065,8 @@ namespace Realm {
                       CHECK_CU(CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)(&copy2d,
                                                                   stream->get_stream()));
                     }
-		    out_alc.advance(2, planes);
-		    total_bytes += bytes * lines * planes;
+                    out_alc.advance(2, planes);
+                    total_bytes += bytes * lines * planes;
                   }
                 }
               }

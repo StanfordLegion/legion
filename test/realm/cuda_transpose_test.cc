@@ -28,7 +28,7 @@ using namespace Realm;
 #ifdef REALM_USE_CUDA
 using namespace Realm::Cuda;
 #endif
-#ifdef  REALM_USE_HIP
+#ifdef REALM_USE_HIP
 using namespace Realm::Hip;
 #endif
 Logger log_app("app");
@@ -119,7 +119,9 @@ namespace TestConfig {
 };                              // namespace TestConfig
 
 template <int N, typename T, typename DT>
-void dump_and_verify_fill(RegionInstance inst, DT fill_value, FieldID fid, const IndexSpace<N, T> &is, bool verbose = false, bool verify = false)
+void dump_and_verify_fill(RegionInstance inst, DT fill_value, FieldID fid,
+                          const IndexSpace<N, T> &is, bool verbose = false,
+                          bool verify = false)
 {
   const size_t row_size = is.bounds.hi[N - 1] - is.bounds.lo[N - 1];
   if(verify || verbose) {
@@ -147,7 +149,6 @@ void dump_and_verify_fill(RegionInstance inst, DT fill_value, FieldID fid, const
     }
   }
 }
-
 
 template <int N, typename T, typename DT>
 void dump_and_verify(RegionInstance inst, FieldID fid, const IndexSpace<N, T> &is,
@@ -399,9 +400,11 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       dsts[0].size = field_sizes[0];
       // add fill operation for testing
       FT fill_value = 60;
-      wait_for = is.fill(dsts, ProfilingRequestSet(), &fill_value, sizeof(fill_value), wait_for);
+      wait_for =
+          is.fill(dsts, ProfilingRequestSet(), &fill_value, sizeof(fill_value), wait_for);
       wait_for.wait();
-      dump_and_verify_fill<N,T,FT>(dst_inst, fill_value, /*field_id*/0, is, TestConfig::verbose, TestConfig::verify);
+      dump_and_verify_fill<N, T, FT>(dst_inst, fill_value, /*field_id*/ 0, is,
+                                     TestConfig::verbose, TestConfig::verify);
       wait_for = is.copy(srcs, dsts, prs, wait_for);
       wait_for.wait();
 
