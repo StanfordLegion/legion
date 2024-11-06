@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::num::NonZeroU64;
 use std::path::Path;
 
@@ -127,31 +127,31 @@ pub enum Record {
     SliceOwner { parent_id: UniqueID, op_id: OpID },
     TaskWaitInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
     MetaWaitInfo { op_id: OpID, lg_id: VariantID, wait_start: Timestamp, wait_ready: Timestamp, wait_end: Timestamp, wait_event: EventID },
-    TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID  },
-    ImplicitTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID  },
-    GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
-    MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
-    MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
-    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID, collective: u32 },
-    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: EventID, dst_inst: EventID, fevent: EventID, num_hops: u32, indirect: bool },
-    FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
+    TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID  },
+    ImplicitTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID  },
+    GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
+    MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
+    MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
+    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID, collective: u32 },
+    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: Option<EventID>, dst_inst: Option<EventID>, fevent: EventID, num_hops: u32, indirect: bool },
+    FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: EventID, fevent: EventID },
     InstTimelineInfo { fevent: EventID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
-    PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: EventID, critical: EventID, fevent: EventID },
-    MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
-    RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
-    ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: EventID },
+    PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
+    MapperCallInfo { mapper_id: MapperID, mapper_proc: ProcID, kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: Option<EventID> },
+    RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: Option<EventID> },
+    ApplicationCallInfo { provenance: ProvenanceID, start: Timestamp, stop: Timestamp, proc_id: ProcID, fevent: Option<EventID> },
     ProfTaskInfo { proc_id: ProcID, op_id: OpID, start: Timestamp, stop: Timestamp, creator: EventID, fevent: EventID, completion: bool },
     CalibrationErr { calibration_err: i64 },
     BacktraceDesc { backtrace_id: BacktraceID , backtrace: String },
     EventWaitInfo { proc_id: ProcID, fevent: EventID, event: EventID, backtrace_id: BacktraceID },
-    EventMergerInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: EventID, pre1: EventID, pre2: EventID, pre3: EventID },
-    EventTriggerInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp },
+    EventMergerInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
+    EventTriggerInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
     EventPoisonInfo { result: EventID, fevent: EventID, performed: Timestamp },
-    BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp },
-    ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: EventID, performed: Timestamp, reservation: u64 },
-    CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: EventID, pre1: EventID, pre2: EventID, pre3: EventID },
-    InstanceReadyInfo { result: EventID, precondition: EventID, fevent: EventID, performed: Timestamp },
+    BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
+    ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp, reservation: u64 },
+    CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
+    InstanceReadyInfo { result: EventID, precondition: Option<EventID>, fevent: EventID, performed: Timestamp },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
@@ -314,8 +314,11 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 /// Binary parsers for type aliases
 ///
 
+fn parse_option_event_id(input: &[u8]) -> IResult<&[u8], Option<EventID>> {
+    map(le_u64, |x| NonZeroU64::new(x).map(EventID))(input)
+}
 fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
-    map(le_u64, EventID)(input)
+    map(le_u64, |x| EventID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
     map(le_u64, InstID)(input)
@@ -792,8 +795,8 @@ fn parse_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -821,8 +824,8 @@ fn parse_implicit_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -852,8 +855,8 @@ fn parse_gpu_task_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, stop) = parse_timestamp(input)?;
     let (input, gpu_start) = parse_timestamp(input)?;
     let (input, gpu_stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -882,8 +885,8 @@ fn parse_meta_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -910,8 +913,8 @@ fn parse_message_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -937,8 +940,8 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, collective) = le_u32(input)?;
     Ok((
@@ -962,8 +965,8 @@ fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, dst) = parse_mem_id(input)?;
     let (input, src_fid) = parse_field_id(input)?;
     let (input, dst_fid) = parse_field_id(input)?;
-    let (input, src_inst) = parse_event_id(input)?;
-    let (input, dst_inst) = parse_event_id(input)?;
+    let (input, src_inst) = parse_option_event_id(input)?;
+    let (input, dst_inst) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, num_hops) = le_u32(input)?;
     let (input, indirect) = parse_bool(input)?;
@@ -989,8 +992,8 @@ fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -1054,8 +1057,8 @@ fn parse_partition_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
-    let (input, creator) = parse_event_id(input)?;
-    let (input, critical) = parse_event_id(input)?;
+    let (input, creator) = parse_option_event_id(input)?;
+    let (input, critical) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
@@ -1093,7 +1096,7 @@ fn parse_mapper_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record>
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, proc_id) = parse_proc_id(input)?;
-    let (input, fevent) = parse_event_id(input)?;
+    let (input, fevent) = parse_option_event_id(input)?;
     Ok((
         input,
         Record::MapperCallInfo {
@@ -1113,7 +1116,7 @@ fn parse_runtime_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, proc_id) = parse_proc_id(input)?;
-    let (input, fevent) = parse_event_id(input)?;
+    let (input, fevent) = parse_option_event_id(input)?;
     Ok((
         input,
         Record::RuntimeCallInfo {
@@ -1130,7 +1133,7 @@ fn parse_application_call_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Re
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, proc_id) = parse_proc_id(input)?;
-    let (input, fevent) = parse_event_id(input)?;
+    let (input, fevent) = parse_option_event_id(input)?;
     Ok((
         input,
         Record::ApplicationCallInfo {
@@ -1193,10 +1196,10 @@ fn parse_event_merger_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
     let (input, result) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
-    let (input, pre0) = parse_event_id(input)?;
-    let (input, pre1) = parse_event_id(input)?;
-    let (input, pre2) = parse_event_id(input)?;
-    let (input, pre3) = parse_event_id(input)?;
+    let (input, pre0) = parse_option_event_id(input)?;
+    let (input, pre1) = parse_option_event_id(input)?;
+    let (input, pre2) = parse_option_event_id(input)?;
+    let (input, pre3) = parse_option_event_id(input)?;
     Ok((
         input,
         Record::EventMergerInfo {
@@ -1213,7 +1216,7 @@ fn parse_event_merger_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
 fn parse_event_trigger_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, result) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, precondition) = parse_event_id(input)?;
+    let (input, precondition) = parse_option_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
     Ok((
         input,
@@ -1241,7 +1244,7 @@ fn parse_event_poison_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
 fn parse_barrier_arrival_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, result) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, precondition) = parse_event_id(input)?;
+    let (input, precondition) = parse_option_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
     Ok((
         input,
@@ -1256,7 +1259,7 @@ fn parse_barrier_arrival_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Rec
 fn parse_reservation_acquire_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, result) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, precondition) = parse_event_id(input)?;
+    let (input, precondition) = parse_option_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
     let (input, reservation) = le_u64(input)?;
     Ok((
@@ -1272,7 +1275,7 @@ fn parse_reservation_acquire_info(input: &[u8], _max_dim: i32) -> IResult<&[u8],
 }
 fn parse_instance_ready_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, result) = parse_event_id(input)?;
-    let (input, precondition) = parse_event_id(input)?;
+    let (input, precondition) = parse_option_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
     Ok((
@@ -1289,10 +1292,10 @@ fn parse_completion_queue_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Re
     let (input, result) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
-    let (input, pre0) = parse_event_id(input)?;
-    let (input, pre1) = parse_event_id(input)?;
-    let (input, pre2) = parse_event_id(input)?;
-    let (input, pre3) = parse_event_id(input)?;
+    let (input, pre0) = parse_option_event_id(input)?;
+    let (input, pre1) = parse_option_event_id(input)?;
+    let (input, pre2) = parse_option_event_id(input)?;
+    let (input, pre3) = parse_option_event_id(input)?;
     Ok((
         input,
         Record::CompletionQueueInfo {
@@ -1398,78 +1401,74 @@ fn parse<'a>(
     let (input, _) = newline(input)?;
 
     let mut parsers = BTreeMap::<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>::new();
-    parsers.insert(ids["MapperName"], parse_mapper_name);
-    parsers.insert(ids["MapperCallDesc"], parse_mapper_call_desc);
-    parsers.insert(ids["RuntimeCallDesc"], parse_runtime_call_desc);
-    parsers.insert(ids["MetaDesc"], parse_meta_desc);
-    parsers.insert(ids["OpDesc"], parse_op_desc);
-    parsers.insert(ids["MaxDimDesc"], parse_max_dim_desc);
-    parsers.insert(ids["RuntimeConfig"], parse_runtime_config);
-    parsers.insert(ids["MachineDesc"], parse_machine_desc);
-    parsers.insert(ids["ZeroTime"], parse_zero_time);
-    parsers.insert(ids["Provenance"], parse_provenance);
-    parsers.insert(ids["ProcDesc"], parse_proc_desc);
-    parsers.insert(ids["MemDesc"], parse_mem_desc);
-    parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);
-    parsers.insert(ids["CalibrationErr"], parse_calibration_err);
-    parsers.insert(ids["IndexSpacePointDesc"], parse_index_space_point_desc);
-    parsers.insert(ids["IndexSpaceRectDesc"], parse_index_space_rect_desc);
-    parsers.insert(ids["IndexSpaceEmptyDesc"], parse_index_space_empty_desc);
-    parsers.insert(ids["FieldDesc"], parse_field_desc);
-    parsers.insert(ids["FieldSpaceDesc"], parse_field_space_desc);
-    parsers.insert(ids["PartDesc"], parse_part_desc);
-    parsers.insert(ids["IndexSpaceDesc"], parse_index_space_desc);
-    parsers.insert(ids["IndexSubSpaceDesc"], parse_index_subspace_desc);
-    parsers.insert(ids["IndexPartitionDesc"], parse_index_partition_desc);
-    parsers.insert(ids["IndexSpaceSizeDesc"], parse_index_space_size_desc);
-    parsers.insert(ids["LogicalRegionDesc"], parse_logical_region_desc);
-    parsers.insert(
-        ids["PhysicalInstRegionDesc"],
-        parse_physical_inst_region_desc,
-    );
-    parsers.insert(
-        ids["PhysicalInstLayoutDesc"],
-        parse_physical_inst_layout_desc,
-    );
-    parsers.insert(
-        ids["PhysicalInstDimOrderDesc"],
+    let mut insert = |name, parser| {
+        if let Some(id) = ids.get(name) {
+            parsers.insert(*id, parser);
+        }
+    };
+    insert("MapperName", parse_mapper_name);
+    insert("MapperCallDesc", parse_mapper_call_desc);
+    insert("RuntimeCallDesc", parse_runtime_call_desc);
+    insert("MetaDesc", parse_meta_desc);
+    insert("OpDesc", parse_op_desc);
+    insert("MaxDimDesc", parse_max_dim_desc);
+    insert("RuntimeConfig", parse_runtime_config);
+    insert("MachineDesc", parse_machine_desc);
+    insert("ZeroTime", parse_zero_time);
+    insert("Provenance", parse_provenance);
+    insert("ProcDesc", parse_proc_desc);
+    insert("MemDesc", parse_mem_desc);
+    insert("ProcMDesc", parse_mem_proc_affinity_desc);
+    insert("CalibrationErr", parse_calibration_err);
+    insert("IndexSpacePointDesc", parse_index_space_point_desc);
+    insert("IndexSpaceRectDesc", parse_index_space_rect_desc);
+    insert("IndexSpaceEmptyDesc", parse_index_space_empty_desc);
+    insert("FieldDesc", parse_field_desc);
+    insert("FieldSpaceDesc", parse_field_space_desc);
+    insert("PartDesc", parse_part_desc);
+    insert("IndexSpaceDesc", parse_index_space_desc);
+    insert("IndexSubSpaceDesc", parse_index_subspace_desc);
+    insert("IndexPartitionDesc", parse_index_partition_desc);
+    insert("IndexSpaceSizeDesc", parse_index_space_size_desc);
+    insert("LogicalRegionDesc", parse_logical_region_desc);
+    insert("PhysicalInstRegionDesc", parse_physical_inst_region_desc);
+    insert("PhysicalInstLayoutDesc", parse_physical_inst_layout_desc);
+    insert(
+        "PhysicalInstDimOrderDesc",
         parse_physical_inst_layout_dim_desc,
     );
-    parsers.insert(ids["PhysicalInstanceUsage"], parse_physical_inst_usage);
-    parsers.insert(ids["TaskKind"], parse_task_kind);
-    parsers.insert(ids["TaskVariant"], parse_task_variant);
-    parsers.insert(ids["OperationInstance"], parse_operation);
-    parsers.insert(ids["MultiTask"], parse_multi_task);
-    parsers.insert(ids["SliceOwner"], parse_slice_owner);
-    parsers.insert(ids["TaskWaitInfo"], parse_task_wait_info);
-    parsers.insert(ids["MetaWaitInfo"], parse_meta_wait_info);
-    parsers.insert(ids["TaskInfo"], parse_task_info);
-    parsers.insert(ids["GPUTaskInfo"], parse_gpu_task_info);
-    parsers.insert(ids["ImplicitTaskInfo"], parse_implicit_info);
-    parsers.insert(ids["MetaInfo"], parse_meta_info);
-    parsers.insert(ids["MessageInfo"], parse_message_info);
-    parsers.insert(ids["CopyInfo"], parse_copy_info);
-    parsers.insert(ids["CopyInstInfo"], parse_copy_inst_info);
-    parsers.insert(ids["FillInfo"], parse_fill_info);
-    parsers.insert(ids["FillInstInfo"], parse_fill_inst_info);
-    parsers.insert(ids["InstTimelineInfo"], parse_inst_timeline);
-    parsers.insert(ids["PartitionInfo"], parse_partition_info);
-    parsers.insert(ids["MapperCallInfo"], parse_mapper_call_info);
-    parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
-    parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
-    parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
-    parsers.insert(ids["BacktraceDesc"], parse_backtrace_desc);
-    parsers.insert(ids["EventWaitInfo"], parse_event_wait_info);
-    parsers.insert(ids["EventMergerInfo"], parse_event_merger_info);
-    parsers.insert(ids["EventTriggerInfo"], parse_event_trigger_info);
-    parsers.insert(ids["EventPoisonInfo"], parse_event_poison_info);
-    parsers.insert(ids["BarrierArrivalInfo"], parse_barrier_arrival_info);
-    parsers.insert(
-        ids["ReservationAcquireInfo"],
-        parse_reservation_acquire_info,
-    );
-    parsers.insert(ids["InstanceReadyInfo"], parse_instance_ready_info);
-    parsers.insert(ids["CompletionQueueInfo"], parse_completion_queue_info);
+    insert("PhysicalInstanceUsage", parse_physical_inst_usage);
+    insert("TaskKind", parse_task_kind);
+    insert("TaskVariant", parse_task_variant);
+    insert("OperationInstance", parse_operation);
+    insert("MultiTask", parse_multi_task);
+    insert("SliceOwner", parse_slice_owner);
+    insert("TaskWaitInfo", parse_task_wait_info);
+    insert("MetaWaitInfo", parse_meta_wait_info);
+    insert("TaskInfo", parse_task_info);
+    insert("GPUTaskInfo", parse_gpu_task_info);
+    insert("ImplicitTaskInfo", parse_implicit_info);
+    insert("MetaInfo", parse_meta_info);
+    insert("MessageInfo", parse_message_info);
+    insert("CopyInfo", parse_copy_info);
+    insert("CopyInstInfo", parse_copy_inst_info);
+    insert("FillInfo", parse_fill_info);
+    insert("FillInstInfo", parse_fill_inst_info);
+    insert("InstTimelineInfo", parse_inst_timeline);
+    insert("PartitionInfo", parse_partition_info);
+    insert("MapperCallInfo", parse_mapper_call_info);
+    insert("RuntimeCallInfo", parse_runtime_call_info);
+    insert("ApplicationCallInfo", parse_application_call_info);
+    insert("ProfTaskInfo", parse_proftask_info);
+    insert("BacktraceDesc", parse_backtrace_desc);
+    insert("EventWaitInfo", parse_event_wait_info);
+    insert("EventMergerInfo", parse_event_merger_info);
+    insert("EventTriggerInfo", parse_event_trigger_info);
+    insert("EventPoisonInfo", parse_event_poison_info);
+    insert("BarrierArrivalInfo", parse_barrier_arrival_info);
+    insert("ReservationAcquireInfo", parse_reservation_acquire_info);
+    insert("InstanceReadyInfo", parse_instance_ready_info);
+    insert("CompletionQueueInfo", parse_completion_queue_info);
 
     let mut input = input;
     let mut max_dim = -1;
@@ -1496,14 +1495,35 @@ fn parse<'a>(
     Ok((input, records))
 }
 
+fn decode_compressed_file(file: &mut File) -> io::Result<Vec<u8>> {
+    let mut gz = GzDecoder::new(file);
+    let mut s = Vec::new();
+    gz.read_to_end(&mut s)?;
+    Ok(s)
+}
+
+fn read_uncompressed_file(file: &mut File) -> io::Result<Vec<u8>> {
+    let mut s = Vec::new();
+    file.read_to_end(&mut s)?;
+    Ok(s)
+}
+
+fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    let mut f = File::open(path)?;
+    if let Ok(decoded) = decode_compressed_file(&mut f) {
+        Ok(decoded)
+    } else {
+        f.rewind()?;
+        read_uncompressed_file(&mut f)
+    }
+}
+
 pub fn deserialize<P: AsRef<Path>>(
     path: P,
     visible_nodes: &Vec<NodeID>,
     filter_input: bool,
 ) -> io::Result<Vec<Record>> {
-    let mut gz = GzDecoder::new(File::open(path)?);
-    let mut s = Vec::<u8>::new();
-    gz.read_to_end(&mut s)?;
+    let s = read_file(path)?;
     // throw error here if parse failed
     let (rest, records) = parse(&s, visible_nodes, filter_input).unwrap();
     assert_eq!(rest.len(), 0);

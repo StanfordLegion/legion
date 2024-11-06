@@ -16,14 +16,15 @@ use legion_prof_viewer::{
 
 #[cfg(feature = "archiver")]
 use legion_prof::backend::archiver;
+#[cfg(feature = "nvtxw")]
+use legion_prof::backend::nvtxw;
 #[cfg(feature = "server")]
 use legion_prof::backend::server;
 #[cfg(feature = "viewer")]
 use legion_prof::backend::viewer;
 use legion_prof::backend::{analyze, dump, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
-use legion_prof::spy;
-use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
+use legion_prof::state::{Config, NodeID, State, Timestamp};
 
 #[derive(Debug, Clone, Args)]
 struct ParserArgs {
@@ -126,6 +127,23 @@ enum Commands {
         #[command(flatten)]
         out: OutputArgs,
     },
+    #[command(about = "process data through NVTXW for NVIDIA Nsight Systems")]
+    NVTXW {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[arg(long, help = "path to NVTXW backend implementation")]
+        backend: Option<OsString>,
+
+        #[arg(long, help = "output nsys-rep filename")]
+        output: OsString,
+
+        #[arg(short, long, help = "overwrite output file if it exists")]
+        force: bool,
+
+        #[arg(long, help = "input nsys-rep filename to merge with Legion Prof data")]
+        merge: Option<OsString>,
+    },
     #[command(about = "start profile HTTP server")]
     Serve {
         #[command(flatten)]
@@ -188,6 +206,13 @@ fn main() -> io::Result<()> {
                  Rebuild with --features=client to enable."
             );
         }
+        Commands::NVTXW { .. } => {
+            #[cfg(not(feature = "nvtxw"))]
+            panic!(
+                "Legion Prof was not built with the \"nvtxw\" feature. \
+                 Rebuild with --features=nvtxw to enable."
+            );
+        }
         Commands::Serve { .. } => {
             #[cfg(not(feature = "server"))]
             panic!(
@@ -228,6 +253,7 @@ fn main() -> io::Result<()> {
         Commands::Archive { ref args, .. }
         | Commands::Dump { ref args, .. }
         | Commands::Legacy { ref args, .. }
+        | Commands::NVTXW { ref args, .. }
         | Commands::View { ref args, .. }
         | Commands::Serve { ref args, .. }
         | Commands::Statistics { ref args, .. }
@@ -260,28 +286,18 @@ fn main() -> io::Result<()> {
         filter_input = !args.no_filter_input;
     }
 
-    let records: Result<Vec<Records>, _> = args
+    let records: Result<Vec<_>, _> = args
         .filenames
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
-            deserialize(filename, &node_list, filter_input).map_or_else(
-                |_| spy::serialize::deserialize(filename).map(Records::Spy),
-                |r| Ok(Records::Prof(r)),
-            )
+            deserialize(filename, &node_list, filter_input)
         })
         .collect();
     match cli.command {
         Commands::Dump { .. } => {
             for record in records? {
-                match record {
-                    Records::Prof(r) => {
-                        dump::dump_record(&r)?;
-                    }
-                    Records::Spy(r) => {
-                        dump::dump_spy_record(&r)?;
-                    }
-                }
+                dump::dump_record(&record)?;
             }
             return Ok(());
         }
@@ -302,21 +318,12 @@ fn main() -> io::Result<()> {
     state.source_locator.extend(unique_paths.into_iter());
 
     state.visible_nodes = node_list;
-    let mut spy_state = SpyState::default();
     if filter_input {
         println!("Filtering profiles to nodes: {:?}", state.visible_nodes);
     }
     for record in records? {
-        match record {
-            Records::Prof(r) => {
-                println!("Matched {} objects", r.len());
-                state.process_records(&r, Timestamp::from_us(args.call_threshold));
-            }
-            Records::Spy(r) => {
-                println!("Matched {} objects", r.len());
-                spy_state.process_spy_records(&r);
-            }
-        }
+        println!("Matched {} objects", record.len());
+        state.process_records(&record, Timestamp::from_us(args.call_threshold));
     }
 
     if !state.complete_parse() {
@@ -339,8 +346,6 @@ fn main() -> io::Result<()> {
     }
 
     Config::set_config(filter_input, args.verbose, have_alllogs);
-
-    spy_state.postprocess_spy_records(&state);
 
     state.trim_time_range(start_trim, stop_trim);
     println!("Sorting time ranges");
@@ -374,7 +379,22 @@ fn main() -> io::Result<()> {
         }
         Commands::Legacy { out, .. } => {
             state.assign_colors();
-            visualize::emit_interactive_visualization(&state, &spy_state, out.output, out.force)?;
+            visualize::emit_interactive_visualization(&state, out.output, out.force)?;
+        }
+        Commands::NVTXW {
+            backend,
+            output,
+            force,
+            merge,
+            ..
+        } => {
+            #[cfg(feature = "nvtxw")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                let zero_time = state.zero_time;
+                nvtxw::write(state, backend, output, force, merge, zero_time)?;
+            }
         }
         Commands::View { .. } => {
             #[cfg(feature = "viewer")]

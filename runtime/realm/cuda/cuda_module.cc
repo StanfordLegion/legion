@@ -56,9 +56,6 @@ typedef CUresult CUDAAPI (*PFN_cuGetProcAddress)(const char *, void **, int, int
 #define CU_GET_PROC_ADDRESS_DEFAULT 0
 #endif
 
-#define IS_DEFAULT_STREAM(stream)   \
-  (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
-
 // The embedded fat binary that holds all the internal
 // realm cuda kernels (see generated file realm_fatbin.c)
 extern const unsigned char realm_fatbin[];
@@ -148,7 +145,7 @@ namespace Realm {
 
     // function pointers for cuda hook
     typedef void (*PFN_cuhook_register_callback)(void);
-    typedef void (*PFN_cuhook_start_task)(GPUProcessor *gpu_proc);
+    typedef void (*PFN_cuhook_start_task)(CUstream current_task_stream);
     typedef void (*PFN_cuhook_end_task)(CUstream current_task_stream);
 
     static PFN_cuhook_register_callback cuhook_register_callback_fnptr = nullptr;
@@ -157,10 +154,10 @@ namespace Realm {
     static bool cuhook_enabled = false;
 
     namespace ThreadLocal {
-      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
-      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      static REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams = 0;
+      REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
+      REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams = 0;
       static REALM_THREAD_LOCAL int context_sync_required = 0;
+      REALM_THREAD_LOCAL bool block_on_synchronize = false;
     }; // namespace ThreadLocal
 
     ////////////////////////////////////////////////////////////////////////
@@ -596,15 +593,15 @@ namespace Realm {
     {
       // set the shutdown flag and wake up everybody
       {
-	AutoLock<> al(mutex);
-	shutdown_flag = true;
-	if(sleeping_threads > 0)
-	  condvar.broadcast();
+        AutoLock<> al(mutex);
+        shutdown_flag = true;
+        if(sleeping_threads > 0)
+          condvar.broadcast();
       }
 
       for(int i = 0; i < total_threads; i++) {
-	worker_threads[i]->join();
-	delete worker_threads[i];
+        worker_threads[i]->join();
+        delete worker_threads[i];
       }
 
       worker_threads.clear();
@@ -618,149 +615,108 @@ namespace Realm {
     {
       bool start_new_thread = false;
       {
-	AutoLock<> al(mutex);
+        AutoLock<> al(mutex);
 
-	fences.push_back(fence);
+        fences.push_back(fence);
 
-	// if all the current threads are asleep or busy syncing, we
-	//  need to do something
-	if((sleeping_threads + syncing_threads) == total_threads) {
-	  // is there a sleeping thread we can wake up to handle this?
-	  if(sleeping_threads > 0) {
-	    // just poke one of them
-	    condvar.signal();
-	  } else {
-	    // can we start a new thread?  (if not, we'll just have to
-	    //  be patient)
-	    if(total_threads < max_threads) {
-	      total_threads++;
-	      syncing_threads++; // threads starts as if it's syncing
-	      start_new_thread = true;
-	    }
-	  }
-	}
+        // if all the current threads are asleep or busy syncing, we
+        //  need to do something
+        if((sleeping_threads + syncing_threads) == total_threads) {
+          // is there a sleeping thread we can wake up to handle this?
+          if(sleeping_threads > 0) {
+            // just poke one of them
+            condvar.signal();
+          } else {
+            // can we start a new thread?  (if not, we'll just have to
+            //  be patient)
+            if(total_threads < max_threads) {
+              total_threads++;
+              syncing_threads++; // threads starts as if it's syncing
+              start_new_thread = true;
+            }
+          }
+        }
       }
 
       if(start_new_thread) {
-	Realm::ThreadLaunchParameters tlp;
+        Realm::ThreadLaunchParameters tlp;
 
-	Thread *t = Realm::Thread::create_kernel_thread<ContextSynchronizer,
-							&ContextSynchronizer::thread_main>(this,
-											   tlp,
-											   *core_rsrv,
-											   0);
-	// need the mutex to put this thread in the list
-	{
-	  AutoLock<> al(mutex);
-	  worker_threads.push_back(t);
-	}
+        Thread *t =
+            Realm::Thread::create_kernel_thread<ContextSynchronizer,
+                                                &ContextSynchronizer::thread_main>(
+                this, tlp, *core_rsrv, 0);
+        // need the mutex to put this thread in the list
+        {
+          AutoLock<> al(mutex);
+          worker_threads.push_back(t);
+        }
       }
     }
 
     void ContextSynchronizer::thread_main()
     {
       while(true) {
-	GPUWorkFence::FenceList my_fences;
+        GPUWorkFence::FenceList my_fences;
 
-	// attempt to get a non-empty list of fences to synchronize,
-	//  sleeping when needed and paying attention to the shutdown
-	//  flag
-	{
-	  AutoLock<> al(mutex);
+        // attempt to get a non-empty list of fences to synchronize,
+        //  sleeping when needed and paying attention to the shutdown
+        //  flag
+        {
+          AutoLock<> al(mutex);
 
-	  syncing_threads--;
+          syncing_threads--;
 
-	  while(true) {
-	    if(shutdown_flag)
-	      return;
+          while(true) {
+            if(shutdown_flag)
+              return;
 
-	    if(fences.empty()) {
-	      // sleep until somebody tells us there's stuff to do
-	      sleeping_threads++;
-	      condvar.wait();
-	      sleeping_threads--;
-	    } else {
-	      // grab everything (a single sync covers however much stuff
-	      //  was pushed ahead of it)
-	      syncing_threads++;
-	      my_fences.swap(fences);
-	      break;
-	    }
-	  }
-	}
+            if(fences.empty()) {
+              // sleep until somebody tells us there's stuff to do
+              sleeping_threads++;
+              condvar.wait();
+              sleeping_threads--;
+            } else {
+              // grab everything (a single sync covers however much stuff
+              //  was pushed ahead of it)
+              syncing_threads++;
+              my_fences.swap(fences);
+              break;
+            }
+          }
+        }
 
-	// shouldn't get here with an empty list
-	assert(!my_fences.empty());
+        // shouldn't get here with an empty list
+        assert(!my_fences.empty());
 
-	log_stream.debug() << "starting ctx sync: ctx=" << context;
+        log_stream.debug() << "starting ctx sync: ctx=" << context;
 
-	{
-	  AutoGPUContext agc(gpu);
+        {
+          AutoGPUContext agc(gpu);
 
-	  CUresult res = CUDA_DRIVER_FNPTR(cuCtxSynchronize)();
+          CUresult res = CUDA_DRIVER_FNPTR(cuCtxSynchronize)();
 
-	  // complain loudly about any errors
-	  if(res != CUDA_SUCCESS) {
-	    const char *ename = 0;
-	    const char *estr = 0;
-	    CUDA_DRIVER_FNPTR(cuGetErrorName)(res, &ename);
-	    CUDA_DRIVER_FNPTR(cuGetErrorString)(res, &estr);
-	    log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": " << estr << " (" << ename << ")";
-	    abort();
-	  }
-	}
+          // complain loudly about any errors
+          if(res != CUDA_SUCCESS) {
+            const char *ename = 0;
+            const char *estr = 0;
+            CUDA_DRIVER_FNPTR(cuGetErrorName)(res, &ename);
+            CUDA_DRIVER_FNPTR(cuGetErrorString)(res, &estr);
+            log_gpu.fatal() << "CUDA error reported on GPU " << gpu->info->index << ": "
+                            << estr << " (" << ename << ")";
+            abort();
+          }
+        }
 
-	log_stream.debug() << "finished ctx sync: ctx=" << context;
+        log_stream.debug() << "finished ctx sync: ctx=" << context;
 
-	// mark all the fences complete
-	while(!my_fences.empty()) {
-	  GPUWorkFence *fence = my_fences.pop_front();
-	  fence->mark_finished(true /*successful*/);
-	}
+        // mark all the fences complete
+        while(!my_fences.empty()) {
+          GPUWorkFence *fence = my_fences.pop_front();
+          fence->mark_finished(true /*successful*/);
+        }
 
-	// and go back around for more...
+        // and go back around for more...
       }
-    }
-
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class GPUTaskScheduler<T>
-
-    // we want to subclass the scheduler to replace the execute_task method, but we also want to
-    //  allow the use of user or kernel threads, so we apply a bit of template magic (which only works
-    //  because the constructors for the KernelThreadTaskScheduler and UserThreadTaskScheduler classes
-    //  have the same prototypes)
-
-    template <typename T>
-    class GPUTaskScheduler : public T {
-    public:
-      GPUTaskScheduler(Processor _proc, Realm::CoreReservation& _core_rsrv,
-		       GPUProcessor *_gpu_proc);
-
-      virtual ~GPUTaskScheduler(void);
-
-    protected:
-      virtual bool execute_task(Task *task);
-      virtual void execute_internal_task(InternalTask *task);
-
-      // might also need to override the thread-switching methods to keep TLS up to date
-
-      GPUProcessor *gpu_proc;
-    };
-
-    template <typename T>
-    GPUTaskScheduler<T>::GPUTaskScheduler(Processor _proc,
-					  Realm::CoreReservation& _core_rsrv,
-					  GPUProcessor *_gpu_proc)
-      : T(_proc, _core_rsrv), gpu_proc(_gpu_proc)
-    {
-      // nothing else
-    }
-
-    template <typename T>
-    GPUTaskScheduler<T>::~GPUTaskScheduler(void)
-    {
     }
 
 #ifdef REALM_USE_CUDART_HIJACK
@@ -777,29 +733,30 @@ namespace Realm {
     /*extern*/ int cudart_hijack_nongpu_sync = 2;
 #endif
 
-    template <typename T>
-    bool GPUTaskScheduler<T>::execute_task(Task *task)
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUContextManager
+
+    GPUContextManager::GPUContextManager(GPU *_gpu, GPUProcessor *_proc)
+      : gpu(_gpu)
+      , proc(_proc)
+    {}
+
+    void *GPUContextManager::create_context(Task *task) const
     {
-      // use TLS to make sure that the task can find the current GPU processor when it makes
-      //  CUDA RT calls
-      // TODO: either eliminate these asserts or do TLS swapping when using user threads
-      assert(ThreadLocal::current_gpu_proc == 0);
-      ThreadLocal::current_gpu_proc = gpu_proc;
-
-      // start record cuda calls if cuda book is enabled
-      if(cuhook_enabled) {
-        cuhook_start_task_fnptr(ThreadLocal::current_gpu_proc);
-      }
-
       // push the CUDA context for this GPU onto this thread
-      gpu_proc->gpu->push_context();
+      gpu->push_context();
 
       // bump the current stream
       // TODO: sanity-check whether this even works right when GPU tasks suspend
       assert(ThreadLocal::current_gpu_stream == 0);
-      GPUStream *s = gpu_proc->gpu->get_next_task_stream();
+      GPUStream *s = gpu->get_next_task_stream();
       ThreadLocal::current_gpu_stream = s;
       assert(!ThreadLocal::created_gpu_streams);
+
+      if(cuhook_enabled) {
+        cuhook_start_task_fnptr(s->get_stream());
+      }
 
       // a task can force context sync on task completion either on or off during
       //  execution, so use -1 as a "no preference" value
@@ -812,13 +769,17 @@ namespace Realm {
 
       // event to record the GPU start time for the task, if requested
       if(task->wants_gpu_work_start()) {
-	GPUWorkStart *start = new GPUWorkStart(task);
-	task->add_async_work_item(start);
-	start->enqueue_on_stream(s);
+        GPUWorkStart *start = new GPUWorkStart(task);
+        task->add_async_work_item(start);
+        start->enqueue_on_stream(s);
       }
+      return fence;
+    }
 
-      bool ok = T::execute_task(task);
-
+    void GPUContextManager::destroy_context(Task *task, void *context) const
+    {
+      GPUWorkFence *fence = static_cast<GPUWorkFence *>(context);
+      GPUStream *s = ThreadLocal::current_gpu_stream;
       // if the user could have put work on any other streams then make our
       // stream wait on those streams as well
       // TODO: update this so that it works when GPU tasks suspend
@@ -828,14 +789,13 @@ namespace Realm {
         delete ThreadLocal::created_gpu_streams;
         ThreadLocal::created_gpu_streams = 0;
       }
-
       // if this is our first task, we might need to decide whether
       //  full context synchronization is required for a task to be
       //  "complete"
-      if(gpu_proc->gpu->module->config->cfg_task_context_sync < 0) {
+      if(gpu->module->config->cfg_task_context_sync < 0) {
         // if legacy stream sync was requested, default for ctxsync is off
-        if(gpu_proc->gpu->module->config->cfg_task_legacy_sync) {
-          gpu_proc->gpu->module->config->cfg_task_context_sync = 0;
+        if(gpu->module->config->cfg_task_legacy_sync) {
+          gpu->module->config->cfg_task_context_sync = 0;
         } else {
 #ifdef REALM_USE_CUDART_HIJACK
           // normally hijack code will catch all the work and put it on the
@@ -843,105 +803,91 @@ namespace Realm {
           //  static copy of the cuda runtime that's in use and foiling the
           //  hijack
           if(cudart_hijack_active) {
-            gpu_proc->gpu->module->config->cfg_task_context_sync = 0;
+            gpu->module->config->cfg_task_context_sync = 0;
           } else {
-            if(!gpu_proc->gpu->module->config->cfg_suppress_hijack_warning)
+            if(!gpu->module->config->cfg_suppress_hijack_warning)
               log_gpu.warning() << "CUDART hijack code not active"
                                 << " - device synchronizations required after every GPU task!";
-            gpu_proc->gpu->module->config->cfg_task_context_sync = 1;
+            gpu->module->config->cfg_task_context_sync = 1;
           }
 #else
           // without hijack or legacy sync requested, ctxsync is needed
-          gpu_proc->gpu->module->config->cfg_task_context_sync = 1;
+          gpu->module->config->cfg_task_context_sync = 1;
 #endif
         }
       }
 
       // if requested, use a cuda event to couple legacy stream work into
       //  the current task's stream
-      if(gpu_proc->gpu->module->config->cfg_task_legacy_sync) {
-        CUevent e = gpu_proc->gpu->event_pool.get_event();
+      if(gpu->module->config->cfg_task_legacy_sync) {
+        CUevent e = gpu->event_pool.get_event();
         CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, CU_STREAM_LEGACY) );
         CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(s->get_stream(), e, 0) );
-        gpu_proc->gpu->event_pool.return_event(e);
+        gpu->event_pool.return_event(e);
       }
 
       if((ThreadLocal::context_sync_required > 0) ||
          ((ThreadLocal::context_sync_required < 0) &&
-          gpu_proc->gpu->module->config->cfg_task_context_sync)) {
+          gpu->module->config->cfg_task_context_sync)) {
 #if(CUDA_VERSION >= 12050)
         // If this driver supports retrieving an event for the context's current work,
         // retrieve and wait for it.  This will still over-synchronize with work from the
         // DMA engine, but at least this is completely asynchronous and doesn't require a
         // separate thread.
         if(CUDA_DRIVER_HAS_FNPTR(cuCtxRecordEvent)) {
-          CUevent e = gpu_proc->gpu->event_pool.get_event();
-          CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxRecordEvent)(gpu_proc->gpu->context, e));
+          CUevent e = gpu->event_pool.get_event();
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxRecordEvent)(gpu->context, e));
           CHECK_CU(CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(s->get_stream(), e, 0));
           s->add_event(e, fence);
         } else
 #endif
         {
           // Add the context sync to the thread
-          gpu_proc->ctxsync.add_fence(fence);
+          gpu->ctxsync.add_fence(fence);
         }
       } else {
         // Just wait for the fence
         fence->enqueue_on_stream(s);
       }
-
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
       CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(s->get_stream()) );
 #endif
 
       // pop the CUDA context for this GPU back off
-      gpu_proc->gpu->pop_context();
+      gpu->pop_context();
 
       // cuda stream sanity check and clear cuda hook calls
       // we only check against the current_gpu_stream because it is impossible to launch
       // tasks onto other realm gpu streams
       if(cuhook_enabled) {
-        cuhook_end_task_fnptr(ThreadLocal::current_gpu_stream->get_stream());
+        cuhook_end_task_fnptr(s->get_stream());
       }
 
-      assert(ThreadLocal::current_gpu_proc == gpu_proc);
-      ThreadLocal::current_gpu_proc = 0;
-      assert(ThreadLocal::current_gpu_stream == s);
-      ThreadLocal::current_gpu_stream = 0;
-
-      return ok;
+      ThreadLocal::current_gpu_stream = nullptr;
     }
 
-    template <typename T>
-    void GPUTaskScheduler<T>::execute_internal_task(InternalTask *task)
+    void *GPUContextManager::create_context(InternalTask *task) const
     {
-      // use TLS to make sure that the task can find the current GPU processor when it makes
-      //  CUDA RT calls
-      // TODO: either eliminate these asserts or do TLS swapping when using user threads
-      assert(ThreadLocal::current_gpu_proc == 0);
-      ThreadLocal::current_gpu_proc = gpu_proc;
-
       // push the CUDA context for this GPU onto this thread
-      gpu_proc->gpu->push_context();
+      gpu->push_context();
 
       assert(ThreadLocal::current_gpu_stream == 0);
-      GPUStream *s = gpu_proc->gpu->get_next_task_stream();
+      GPUStream *s = gpu->get_next_task_stream();
       ThreadLocal::current_gpu_stream = s;
-      assert(!ThreadLocal::created_gpu_streams);
-
+      assert(ThreadLocal::created_gpu_streams == nullptr);
       // internal tasks aren't allowed to wait on events, so any cuda synch
       //  calls inside the call must be blocking
-      gpu_proc->block_on_synchronize = true;
+      ThreadLocal::block_on_synchronize = true;
 
-      // execute the internal task, whatever it is
-      T::execute_internal_task(task);
+      return nullptr;
+    }
 
-      // if the user could have put work on any other streams then make our
-      // stream wait on those streams as well
-      // TODO: update this so that it works when GPU tasks suspend
-      if(ThreadLocal::created_gpu_streams)
-      {
+    void GPUContextManager::destroy_context(InternalTask *task, void *context) const
+    {
+      GPUStream *s = ThreadLocal::current_gpu_stream;
+      assert(context == nullptr);
+      if(ThreadLocal::created_gpu_streams) {
         s->wait_on_streams(*ThreadLocal::created_gpu_streams);
         delete ThreadLocal::created_gpu_streams;
         ThreadLocal::created_gpu_streams = 0;
@@ -949,28 +895,21 @@ namespace Realm {
 
       // we didn't use streams here, so synchronize the whole context
       CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxSynchronize)() );
-      gpu_proc->block_on_synchronize = false;
+      ThreadLocal::block_on_synchronize = false;
 
       // pop the CUDA context for this GPU back off
-      gpu_proc->gpu->pop_context();
-
-      assert(ThreadLocal::current_gpu_proc == gpu_proc);
-      ThreadLocal::current_gpu_proc = 0;
-      assert(ThreadLocal::current_gpu_stream == s);
-      ThreadLocal::current_gpu_stream = 0;
+      gpu->pop_context();
+      ThreadLocal::current_gpu_stream = nullptr;
     }
-
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPUProcessor
 
-    GPUProcessor::GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet& crs,
+    GPUProcessor::GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet &crs,
                                size_t _stack_size)
       : LocalTaskProcessor(_me, Processor::TOC_PROC)
       , gpu(_gpu)
-      , block_on_synchronize(false)
-      , ctxsync(_gpu, _gpu->context, crs, _gpu->module->config->cfg_max_ctxsync_threads)
     {
       Realm::CoreReservationParameters params;
 
@@ -1005,13 +944,15 @@ namespace Realm {
 
       core_rsrv = new Realm::CoreReservation(name, crs, params);
 
+      Realm::ThreadedTaskScheduler *sched = nullptr;
+
 #ifdef REALM_USE_USER_THREADS_FOR_GPU
-      Realm::UserThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::UserThreadTaskScheduler>(me, *core_rsrv, this);
-      // no config settings we want to tweak yet
+      sched = new Realm::UserThreadTaskScheduler(me, *core_rsrv);
 #else
-      Realm::KernelThreadTaskScheduler *sched = new GPUTaskScheduler<Realm::KernelThreadTaskScheduler>(me, *core_rsrv, this);
-      // no config settings we want to tweak yet
+      sched = new Realm::KernelThreadTaskScheduler(me, *core_rsrv);
 #endif
+      sched->add_task_context(new GPUContextManager(_gpu, this));
+
       set_scheduler(sched);
     }
 
@@ -1180,94 +1121,101 @@ namespace Realm {
 				     const ByteArrayRef& user_data)
     {
       // see if we have a function pointer to register
-      const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+      const FunctionPointerImplementation *fpi =
+          codedesc.find_impl<FunctionPointerImplementation>();
 
       // if we don't have a function pointer implementation, see if we can make one
       if(!fpi) {
-	const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
-	for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
-	    it != translators.end();
-	    it++)
-	  if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
-	    FunctionPointerImplementation *newfpi = (*it)->translate<FunctionPointerImplementation>(codedesc);
-	    if(newfpi) {
-	      log_taskreg.info() << "function pointer created: trans=" << (*it)->name << " fnptr=" << (void *)(newfpi->fnptr);
-	      codedesc.add_implementation(newfpi);
-	      fpi = newfpi;
-	      break;
-	    }
-	  }
+        const std::vector<CodeTranslator *> &translators =
+            get_runtime()->get_code_translators();
+        for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+            it != translators.end(); it++)
+          if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
+            FunctionPointerImplementation *newfpi =
+                (*it)->translate<FunctionPointerImplementation>(codedesc);
+            if(newfpi) {
+              log_taskreg.info() << "function pointer created: trans=" << (*it)->name
+                                 << " fnptr=" << (void *)(newfpi->fnptr);
+              codedesc.add_implementation(newfpi);
+              fpi = newfpi;
+              break;
+            }
+          }
       }
 
       assert(fpi != 0);
 
       {
-	RWLock::AutoWriterLock al(task_table_mutex);
+        RWLock::AutoWriterLock al(task_table_mutex);
 
-	// first, make sure we haven't seen this task id before
-	if(gpu_task_table.count(func_id) > 0) {
-	  log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
-	  return false;
-	}
+        // first, make sure we haven't seen this task id before
+        if(gpu_task_table.count(func_id) > 0) {
+          log_taskreg.fatal() << "duplicate task registration: proc=" << me
+                              << " func=" << func_id;
+          return false;
+        }
 
-	GPUTaskTableEntry &tte = gpu_task_table[func_id];
+        GPUTaskTableEntry &tte = gpu_task_table[func_id];
 
-	// figure out what type of function we have
-	if(codedesc.type() == TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
-	  tte.fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
-	  tte.stream_aware_fnptr = 0;
-	} else if(codedesc.type() == TypeConv::from_cpp_type<Cuda::StreamAwareTaskFuncPtr>()) {
-	  tte.fnptr = 0;
-	  tte.stream_aware_fnptr = (Cuda::StreamAwareTaskFuncPtr)(fpi->fnptr);
-	} else {
-	  log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
-	  assert(0);
-	}
+        // figure out what type of function we have
+        if(codedesc.type() == TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+          tte.fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+          tte.stream_aware_fnptr = 0;
+        } else if(codedesc.type() ==
+                  TypeConv::from_cpp_type<Cuda::StreamAwareTaskFuncPtr>()) {
+          tte.fnptr = 0;
+          tte.stream_aware_fnptr = (Cuda::StreamAwareTaskFuncPtr)(fpi->fnptr);
+        } else {
+          log_taskreg.fatal() << "attempt to register a task function of improper type: "
+                              << codedesc.type();
+          assert(0);
+        }
 
-	tte.user_data = user_data;
+        tte.user_data = user_data;
       }
 
-      log_taskreg.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
+      log_taskreg.info() << "task " << func_id << " registered on " << me << ": "
+                         << codedesc;
 
       return true;
     }
 
     void GPUProcessor::execute_task(Processor::TaskFuncID func_id,
-				    const ByteArrayRef& task_args)
+                                    const ByteArrayRef &task_args)
     {
       if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
-	return;
+        return;
 
       std::map<Processor::TaskFuncID, GPUTaskTableEntry>::const_iterator it;
       {
-	RWLock::AutoReaderLock al(task_table_mutex);
-	
-	it = gpu_task_table.find(func_id);
-	if(it == gpu_task_table.end()) {
-	  log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
-	  assert(0);
-	}
+        RWLock::AutoReaderLock al(task_table_mutex);
+
+        it = gpu_task_table.find(func_id);
+        if(it == gpu_task_table.end()) {
+          log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
+          assert(0);
+        }
       }
 
-      const GPUTaskTableEntry& tte = it->second;
+      const GPUTaskTableEntry &tte = it->second;
 
       if(tte.stream_aware_fnptr) {
-	// shouldn't be here without a valid stream
-	assert(ThreadLocal::current_gpu_stream);
-	CUstream stream = ThreadLocal::current_gpu_stream->get_stream();
+        // shouldn't be here without a valid stream
+        assert(ThreadLocal::current_gpu_stream);
+        CUstream stream = ThreadLocal::current_gpu_stream->get_stream();
 
-	log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.stream_aware_fnptr)) << " (stream aware)";
-      
-	(tte.stream_aware_fnptr)(task_args.base(), task_args.size(),
-				 tte.user_data.base(), tte.user_data.size(),
-				 me, stream);
+        log_taskreg.debug() << "task " << func_id << " executing on " << me << ": "
+                            << ((void *)(tte.stream_aware_fnptr)) << " (stream aware)";
+
+        (tte.stream_aware_fnptr)(task_args.base(), task_args.size(), tte.user_data.base(),
+                                 tte.user_data.size(), me, stream);
       } else {
-	assert(tte.fnptr);
-	log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
-      
-	(tte.fnptr)(task_args.base(), task_args.size(),
-		    tte.user_data.base(), tte.user_data.size(),
-		    me);
+        assert(tte.fnptr);
+        log_taskreg.debug() << "task " << func_id << " executing on " << me << ": "
+                            << ((void *)(tte.fnptr));
+
+        (tte.fnptr)(task_args.base(), task_args.size(), tte.user_data.base(),
+                    tte.user_data.size(), me);
       }
     }
 
@@ -1277,16 +1225,6 @@ namespace Realm {
 
       // shut down threads/scheduler
       LocalTaskProcessor::shutdown();
-
-      ctxsync.shutdown_threads();
-
-      // synchronize the device so we can flush any printf buffers - do
-      //  this after shutting down the threads so that we know all work is done
-      {
-	AutoGPUContext agc(gpu);
-
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuCtxSynchronize)() );
-      }
     }
 
     GPUWorker::GPUWorker(void)
@@ -2017,385 +1955,14 @@ namespace Realm {
       segment = &local_segment;
     }
 
-
-    // Helper methods for emulating the cuda runtime
-    /*static*/ GPUProcessor* GPUProcessor::get_current_gpu_proc(void)
-    {
-      return ThreadLocal::current_gpu_proc;
-    }
-
-#ifdef REALM_USE_CUDART_HIJACK
-    void GPUProcessor::push_call_configuration(dim3 grid_dim, dim3 block_dim,
-                                               size_t shared_size, void *stream)
-    {
-      call_configs.push_back(CallConfig(grid_dim, block_dim,
-                                        shared_size, (CUstream)stream));
-    }
-
-    void GPUProcessor::pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
-                                              size_t *shared_size, void *stream)
-    {
-      assert(!call_configs.empty());
-      const CallConfig &config = call_configs.back();
-      *grid_dim = config.grid;
-      *block_dim = config.block;
-      *shared_size = config.shared;
-      *((CUstream*)stream) = config.stream;
-      call_configs.pop_back();
-    }
-#endif
-
-    void GPUProcessor::stream_wait_on_event(CUstream stream, CUevent event)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(
-              ThreadLocal::current_gpu_stream->get_stream(), event, 0) );
-      else
-        CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamWaitEvent)(stream, event, 0) );
-    }
-
-    void GPUProcessor::stream_synchronize(CUstream stream)
-    {
-      // same as device_synchronize if stream is zero
-      if(!IS_DEFAULT_STREAM(stream))
-      {
-        if(!block_on_synchronize) {
-          GPUStream *s = gpu->find_stream(stream);
-          if(s) {
-            // We don't actually want to block the GPU processor
-            // when synchronizing, so we instead register a cuda
-            // event on the stream and then use it triggering to
-            // indicate that the stream is caught up
-            // Make a completion notification to be notified when
-            // the event has actually triggered
-            GPUPreemptionWaiter waiter(gpu);
-            // Register the waiter with the stream 
-            s->add_notification(&waiter); 
-            // Perform the wait, this will preempt the thread
-            waiter.preempt();
-          } else {
-            log_gpu.warning() << "WARNING: Detected unknown CUDA stream "
-              << stream << " that Realm did not create which suggests "
-              << "that there is another copy of the CUDA runtime "
-              << "somewhere making its own streams... be VERY careful.";
-            CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream) );
-          }
-        } else {
-          // oh well...
-          CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(stream) );
-        }
-      }
-      else
-        device_synchronize();
-    }
-
-    GPUPreemptionWaiter::GPUPreemptionWaiter(GPU *g) : gpu(g)
-    {
-      GenEventImpl *impl = GenEventImpl::create_genevent();
-      wait_event = impl->current_event();
-    }
-
-    void GPUPreemptionWaiter::request_completed(void)
-    {
-      GenEventImpl::trigger(wait_event, false/*poisoned*/);
-    }
-
-    void GPUPreemptionWaiter::preempt(void)
-    {
-      // Realm threads don't obey a stack discipline for
-      // preemption so we can't leave our context on the stack
-      gpu->pop_context();
-      wait_event.wait();
-      // When we wake back up, we have to push our context again
-      gpu->push_context();
-    }
-
-    void GPUProcessor::device_synchronize(void)
-    {
-      GPUStream *current = ThreadLocal::current_gpu_stream;
-
-      if(ThreadLocal::created_gpu_streams)
-      {
-        current->wait_on_streams(*ThreadLocal::created_gpu_streams); 
-        delete ThreadLocal::created_gpu_streams;
-        ThreadLocal::created_gpu_streams = 0;
-      }
-
-      if(!block_on_synchronize) {
-	// We don't actually want to block the GPU processor
-	// when synchronizing, so we instead register a cuda
-	// event on the stream and then use it triggering to
-	// indicate that the stream is caught up
-	// Make a completion notification to be notified when
-	// the event has actually triggered
-	GPUPreemptionWaiter waiter(gpu);
-	// Register the waiter with the stream 
-	current->add_notification(&waiter); 
-	// Perform the wait, this will preempt the thread
-	waiter.preempt();
-      } else {
-	// oh well...
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(current->get_stream()) );
-      }
-    }
-    
-#ifdef REALM_USE_CUDART_HIJACK
-    void GPUProcessor::event_record(CUevent event, CUstream stream)
-    {
-      CUevent e = event;
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
-    }
-      
-    GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
-      : grid(_grid), block(_block), shared(_shared)
-    {}
-
-    GPUProcessor::CallConfig::CallConfig(dim3 _grid, dim3 _block, 
-                                         size_t _shared, CUstream _stream)
-      : LaunchConfig(_grid, _block, _shared), stream(_stream)
-    {}
-
-    void GPUProcessor::configure_call(dim3 grid_dim,
-				      dim3 block_dim,
-				      size_t shared_mem,
-				      CUstream stream)
-    {
-      launch_configs.push_back(CallConfig(grid_dim, block_dim, shared_mem, stream));
-    }
-
-    void GPUProcessor::setup_argument(const void *arg,
-				      size_t size, size_t offset)
-    {
-      size_t required = offset + size;
-
-      if(required > kernel_args.size())
-	kernel_args.resize(required);
-
-      memcpy(&kernel_args[offset], arg, size);
-    }
-
-    void GPUProcessor::launch(const void *func)
-    {
-      // make sure we have a launch config
-      assert(!launch_configs.empty());
-      CallConfig &config = launch_configs.back();
-
-      // Find our function
-      CUfunction f = gpu->lookup_function(func);
-
-      size_t arg_size = kernel_args.size();
-      void *extra[] = { 
-        CU_LAUNCH_PARAM_BUFFER_POINTER, &kernel_args[0],
-        CU_LAUNCH_PARAM_BUFFER_SIZE, &arg_size,
-        CU_LAUNCH_PARAM_END
-      };
-
-      if(IS_DEFAULT_STREAM(config.stream))
-        config.stream = ThreadLocal::current_gpu_stream->get_stream();
-      log_stream.debug() << "kernel " << func << " added to stream " << config.stream;
-
-      // Launch the kernel on our stream dammit!
-      CHECK_CU( cuLaunchKernel(f, 
-			       config.grid.x, config.grid.y, config.grid.z,
-                               config.block.x, config.block.y, config.block.z,
-                               config.shared,
-                               config.stream,
-			       NULL, extra) );
-
-      // pop the config we just used
-      launch_configs.pop_back();
-
-      // clear out the kernel args
-      kernel_args.clear();
-    }
-
-    void GPUProcessor::launch_kernel(const void *func,
-                                     dim3 grid_dim,
-                                     dim3 block_dim,
-                                     void **args,
-                                     size_t shared_memory,
-                                     CUstream stream,
-                                     bool cooperative /*=false*/)
-    {
-      // Find our function
-      CUfunction f = gpu->lookup_function(func);
-
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      log_stream.debug() << "kernel " << func << " added to stream " << stream;
-
-      if (cooperative) {
-#if CUDA_VERSION >= 9000
-        CHECK_CU( cuLaunchCooperativeKernel(f,
-                                 grid_dim.x, grid_dim.y, grid_dim.z,
-                                 block_dim.x, block_dim.y, block_dim.z,
-                                 shared_memory,
-                                 stream,
-                                 args) );
-#else
-	log_gpu.fatal() << "attempt to launch cooperative kernel on CUDA < 9.0!";
-	abort();
-#endif
-      } else {
-        CHECK_CU( cuLaunchKernel(f,
-                                 grid_dim.x, grid_dim.y, grid_dim.z,
-                                 block_dim.x, block_dim.y, block_dim.z,
-                                 shared_memory,
-                                 stream,
-                                 args, NULL) );
-      }
-    }
-#endif
-
-    void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size)
-    {
-      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
-      // the synchronous copy still uses cuMemcpyAsync so that we can limit the
-      //  synchronization to just the right stream
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
-                ((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
-      stream_synchronize(current);
-    }
-
-    void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size, CUstream stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
-                ((CUdeviceptr)dst, (CUdeviceptr)src, size, stream) );
-      // no synchronization here
-    }
-
-#ifdef REALM_USE_CUDART_HIJACK
-    void GPUProcessor::gpu_memcpy2d(void *dst, size_t dpitch, const void *src, 
-                                    size_t spitch, size_t width, size_t height)
-    {
-      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
-      CUDA_MEMCPY2D copy_info;
-      copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
-      copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
-      copy_info.srcDevice = (CUdeviceptr)src;
-      copy_info.srcHost = src;
-      copy_info.srcPitch = spitch;
-      copy_info.srcY = 0;
-      copy_info.srcXInBytes = 0;
-      copy_info.dstDevice = (CUdeviceptr)dst;
-      copy_info.dstHost = dst;
-      copy_info.dstPitch = dpitch;
-      copy_info.dstY = 0;
-      copy_info.dstXInBytes = 0;
-      copy_info.WidthInBytes = width;
-      copy_info.Height = height;
-      // the synchronous copy still uses cuMemcpyAsync so that we can limit the
-      //  synchronization to just the right stream
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
-                (&copy_info, current) );
-      stream_synchronize(current);
-    }
-
-    void GPUProcessor::gpu_memcpy2d_async(void *dst, size_t dpitch, const void *src, 
-                                          size_t spitch, size_t width, size_t height, 
-                                          CUstream stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CUDA_MEMCPY2D copy_info;
-      copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
-      copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
-      copy_info.srcDevice = (CUdeviceptr)src;
-      copy_info.srcHost = src;
-      copy_info.srcPitch = spitch;
-      copy_info.srcY = 0;
-      copy_info.srcXInBytes = 0;
-      copy_info.dstDevice = (CUdeviceptr)dst;
-      copy_info.dstHost = dst;
-      copy_info.dstPitch = dpitch;
-      copy_info.dstY = 0;
-      copy_info.dstXInBytes = 0;
-      copy_info.WidthInBytes = width;
-      copy_info.Height = height;
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpy2DAsync)
-                (&copy_info, stream) );
-      // no synchronization here
-    }
-
-    void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src,
-					    size_t size, size_t offset)
-    {
-      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
-      CUdeviceptr var_base = gpu->lookup_variable(dst);
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
-                (var_base + offset,
-                 (CUdeviceptr)src, size, current) );
-      stream_synchronize(current);
-    }
-
-    void GPUProcessor::gpu_memcpy_to_symbol_async(const void *dst, const void *src,
-						  size_t size, size_t offset, CUstream stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CUdeviceptr var_base = gpu->lookup_variable(dst);
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
-                (var_base + offset,
-                 (CUdeviceptr)src, size, stream) );
-      // no synchronization here
-    }
-
-    void GPUProcessor::gpu_memcpy_from_symbol(void *dst, const void *src,
-					      size_t size, size_t offset)
-    {
-      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
-      CUdeviceptr var_base = gpu->lookup_variable(src);
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
-                ((CUdeviceptr)dst,
-                 var_base + offset,
-                 size, current) );
-      stream_synchronize(current);
-    }
-
-    void GPUProcessor::gpu_memcpy_from_symbol_async(void *dst, const void *src,
-						    size_t size, size_t offset,
-						    CUstream stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CUdeviceptr var_base = gpu->lookup_variable(src);
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemcpyAsync)
-                ((CUdeviceptr)dst,
-                 var_base + offset,
-                 size, stream) );
-      // no synchronization here
-    }
-#endif
-
-    void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
-    {
-      CUstream current = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
-                ((CUdeviceptr)dst, (unsigned char)value,
-                 count, current) );
-    }
-
-    void GPUProcessor::gpu_memset_async(void *dst, int value, 
-                                        size_t count, CUstream stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuMemsetD8Async)
-                ((CUdeviceptr)dst, (unsigned char)value,
-                 count, stream) );
-    }
-
-
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPU
 
     GPU::GPU(CudaModule *_module, GPUInfo *_info, GPUWorker *_worker, CUcontext _context)
-      : module(_module)
+      : ctxsync(this, _context, get_runtime()->core_reservation_set(),
+                _module->config->cfg_max_ctxsync_threads)
+      , module(_module)
       , info(_info)
       , worker(_worker)
       , context(_context)
@@ -2539,6 +2106,10 @@ namespace Realm {
       if (fb_dmem) {
         fb_dmem->cleanup();
       }
+
+      ctxsync.shutdown_threads();
+
+      CHECK_CU(CUDA_DRIVER_FNPTR(cuCtxSynchronize)());
 
       pop_context();
 
@@ -2779,190 +2350,6 @@ namespace Realm {
       runtime->add_memory(fb_dmem);
     }
 
-#ifdef REALM_USE_CUDART_HIJACK
-    void GPU::register_fat_binary(const FatBin *fatbin)
-    {
-      AutoGPUContext agc(this);
-
-      log_gpu.info() << "registering fat binary " << fatbin << " with GPU " << this;
-
-      // have we see this one already?
-      if(device_modules.count(fatbin) > 0) {
-	log_gpu.warning() << "duplicate registration of fat binary data " << fatbin;
-	return;
-      }
-
-      if(fatbin->data != 0) {
-	// binary data to be loaded with cuModuleLoad(Ex)
-	CUmodule module = load_cuda_module(fatbin->data);
-	device_modules[fatbin] = module;
-	return;
-      }
-
-      assert(0);
-    }
-    
-    void GPU::register_variable(const RegisteredVariable *var)
-    {
-      AutoGPUContext agc(this);
-
-      log_gpu.debug() << "registering variable " << var->device_name << " (" << var->host_var << ") with GPU " << this;
-
-      // have we seen it already?
-      if(device_variables.count(var->host_var) > 0) {
-	log_gpu.warning() << "duplicate registration of variable " << var->device_name;
-	return;
-      }
-
-      // get the module it lives in
-      std::map<const FatBin *, CUmodule>::const_iterator it = device_modules.find(var->fat_bin);
-      assert(it != device_modules.end());
-      CUmodule module = it->second;
-
-      CUdeviceptr ptr;
-      size_t size;
-      CHECK_CU( cuModuleGetGlobal(&ptr, &size, module, var->device_name) );
-      device_variables[var->host_var] = ptr;
-
-      // if this is a managed variable, the "host_var" is actually a pointer
-      //  we need to fill in, so do that now
-      if(var->managed) {
-        CUdeviceptr *indirect = const_cast<CUdeviceptr *>(static_cast<const CUdeviceptr *>(var->host_var));
-        if(*indirect) {
-          // it's already set - make sure we're consistent (we're probably not)
-          if(*indirect != ptr) {
-            log_gpu.fatal() << "__managed__ variables are not supported when using multiple devices with CUDART hijack enabled";
-            abort();
-          }
-        } else {
-          *indirect = ptr;
-        }
-      }
-    }
-    
-    void GPU::register_function(const RegisteredFunction *func)
-    {
-      AutoGPUContext agc(this);
-
-      log_gpu.debug() << "registering function " << func->device_fun << " (" << func->host_fun << ") with GPU " << this;
-
-      // have we seen it already?
-      if(device_functions.count(func->host_fun) > 0) {
-	log_gpu.warning() << "duplicate registration of function " << func->device_fun;
-	return;
-      }
-
-      // get the module it lives in
-      std::map<const FatBin *, CUmodule>::const_iterator it = device_modules.find(func->fat_bin);
-      assert(it != device_modules.end());
-      CUmodule module = it->second;
-
-      CUfunction f;
-      // the cuda runtime apparently permits calls to __cudaRegisterFunction
-      //  that name a symbol that does not actually exist in the module - since
-      //  we are doing eager lookup, we need to tolerate CUDA_ERROR_NOT_FOUND
-      //  results here
-      CUresult res = CUDA_DRIVER_FNPTR(cuModuleGetFunction)(&f, module, func->device_fun);
-      switch(res) {
-      case CUDA_SUCCESS:
-        {
-          device_functions[func->host_fun] = f;
-          break;
-        }
-      case CUDA_ERROR_NOT_FOUND:
-        {
-          // just an informational message here - an actual attempt to invoke
-          //  this kernel will be a fatal error at the call site
-          log_gpu.info() << "symbol '" << func->device_fun
-                         << "' not found in module " << module;
-          break;
-        }
-      default:
-        {
-          const char *name, *str;
-          CUDA_DRIVER_FNPTR(cuGetErrorName)(res, &name);
-          CUDA_DRIVER_FNPTR(cuGetErrorString)(res, &str);
-          log_gpu.fatal() << "unexpected error when looking up device function '"
-                          << func->device_fun << "' in module " << module
-                          << ": " << str << " (" << name << ")";
-          abort();
-        }
-      }
-    }
-
-    CUfunction GPU::lookup_function(const void *func)
-    {
-      std::map<const void *, CUfunction>::iterator finder = device_functions.find(func);
-      assert(finder != device_functions.end());
-      return finder->second;
-    }
-
-    CUdeviceptr GPU::lookup_variable(const void *var)
-    {
-      std::map<const void *, CUdeviceptr>::iterator finder = device_variables.find(var);
-      assert(finder != device_variables.end());
-      return finder->second;
-    }
-#endif
-
-    CUmodule GPU::load_cuda_module(const void *data)
-    {
-      const unsigned num_options = 4;
-      CUjit_option jit_options[num_options];
-      void*        option_vals[num_options];
-      const size_t buffer_size = 16384;
-      char* log_info_buffer = (char*)malloc(buffer_size);
-      char* log_error_buffer = (char*)malloc(buffer_size);
-      jit_options[0] = CU_JIT_INFO_LOG_BUFFER;
-      jit_options[1] = CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES;
-      jit_options[2] = CU_JIT_ERROR_LOG_BUFFER;
-      jit_options[3] = CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES;
-      option_vals[0] = log_info_buffer;
-      option_vals[1] = (void*)buffer_size;
-      option_vals[2] = log_error_buffer;
-      option_vals[3] = (void*)buffer_size;
-      CUmodule module;
-      CUresult result = CUDA_DRIVER_FNPTR(cuModuleLoadDataEx)(&module,
-                                                              data,
-                                                              num_options,
-                                                              jit_options,
-                                                              option_vals);
-      if (result != CUDA_SUCCESS)
-      {
-#ifdef REALM_ON_MACOS
-        if (result == CUDA_ERROR_OPERATING_SYSTEM) {
-          log_gpu.error("ERROR: Device side asserts are not supported by the "
-                              "CUDA driver for MAC OSX, see NVBugs 1628896.");
-        } else
-#endif
-        if (result == CUDA_ERROR_NO_BINARY_FOR_GPU) {
-          log_gpu.error("ERROR: The binary was compiled for the wrong GPU "
-                              "architecture. Update the 'GPU_ARCH' flag at the top "
-                              "of runtime/runtime.mk to match/include your current GPU "
-			      "architecture (%d).",
-			(info->major * 10 + info->minor));
-        } else {
-	  log_gpu.error("Failed to load CUDA module! Error log: %s", 
-			log_error_buffer);
-#if CUDA_VERSION >= 6050
-	  const char *name, *str;
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuGetErrorName)(result, &name) );
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuGetErrorString)(result, &str) );
-	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
-		  result, name, str);
-#else
-	  fprintf(stderr,"CU: cuModuleLoadDataEx = %d\n", result);
-#endif
-	}
-	abort();
-      }
-      else
-        log_gpu.info("Loaded CUDA Module. JIT Output: %s", log_info_buffer);
-      free(log_info_buffer);
-      free(log_error_buffer);
-      return module;
-    }
-
     ////////////////////////////////////////////////////////////////////////
     //
     // class AutoGPUContext
@@ -3043,35 +2430,36 @@ namespace Realm {
       CommandLineParser cp;
 
       cp.add_option_int_units("-ll:fsize", cfg_fb_mem_size, 'm')
-        .add_option_int_units("-ll:zsize", cfg_zc_mem_size, 'm')
-        .add_option_int_units("-ll:ib_fsize", cfg_fb_ib_size, 'm')
-        .add_option_int_units("-ll:ib_zsize", cfg_zc_ib_size, 'm')
-        .add_option_int_units("-ll:msize", cfg_uvm_mem_size, 'm')
-        .add_option_int("-cuda:dynfb", cfg_use_dynamic_fb)
-        .add_option_int_units("-cuda:dynfb_max", cfg_dynfb_max_size, 'm')
-        .add_option_int("-ll:gpu", cfg_num_gpus)
-        .add_option_string("-ll:gpu_ids", cfg_gpu_idxs)
-        .add_option_int("-ll:streams", cfg_task_streams)
-        .add_option_int("-ll:d2d_streams", cfg_d2d_streams)
-        .add_option_int("-ll:d2d_priority", cfg_d2d_stream_priority)
-        .add_option_int("-ll:gpuworkthread", cfg_use_worker_threads)
-        .add_option_int("-ll:gpuworker", cfg_use_shared_worker)
-        .add_option_int("-ll:pin", cfg_pin_sysmem)
-        .add_option_bool("-cuda:callbacks", cfg_fences_use_callbacks)
-        .add_option_bool("-cuda:nohijack", cfg_suppress_hijack_warning)
-        .add_option_int("-cuda:skipgpus", cfg_skip_gpu_count)
-        .add_option_bool("-cuda:skipbusy", cfg_skip_busy_gpus)
-        .add_option_int_units("-cuda:minavailmem", cfg_min_avail_mem, 'm')
-        .add_option_int("-cuda:legacysync", cfg_task_legacy_sync)
-        .add_option_int("-cuda:contextsync", cfg_task_context_sync)
-        .add_option_int("-cuda:maxctxsync", cfg_max_ctxsync_threads)
-        .add_option_int("-cuda:lmemresize", cfg_lmem_resize_to_max)
-        .add_option_int("-cuda:mtdma", cfg_multithread_dma)
-        .add_option_int_units("-cuda:hostreg", cfg_hostreg_limit, 'm')
-        .add_option_int("-cuda:ipc", cfg_use_cuda_ipc);
-  #ifdef REALM_USE_CUDART_HIJACK
-        cp.add_option_int("-cuda:nongpusync", Cuda::cudart_hijack_nongpu_sync);
-  #endif
+          .add_option_int_units("-ll:zsize", cfg_zc_mem_size, 'm')
+          .add_option_int_units("-ll:ib_fsize", cfg_fb_ib_size, 'm')
+          .add_option_int_units("-ll:ib_zsize", cfg_zc_ib_size, 'm')
+          .add_option_int_units("-ll:msize", cfg_uvm_mem_size, 'm')
+          .add_option_int("-cuda:dynfb", cfg_use_dynamic_fb)
+          .add_option_int_units("-cuda:dynfb_max", cfg_dynfb_max_size, 'm')
+          .add_option_int("-ll:gpu", cfg_num_gpus)
+          .add_option_string("-ll:gpu_ids", cfg_gpu_idxs)
+          .add_option_int("-ll:streams", cfg_task_streams)
+          .add_option_int("-ll:d2d_streams", cfg_d2d_streams)
+          .add_option_int("-ll:d2d_priority", cfg_d2d_stream_priority)
+          .add_option_int("-ll:gpuworkthread", cfg_use_worker_threads)
+          .add_option_int("-ll:gpuworker", cfg_use_shared_worker)
+          .add_option_int("-ll:pin", cfg_pin_sysmem)
+          .add_option_bool("-cuda:callbacks", cfg_fences_use_callbacks)
+          .add_option_bool("-cuda:nohijack", cfg_suppress_hijack_warning)
+          .add_option_int("-cuda:skipgpus", cfg_skip_gpu_count)
+          .add_option_bool("-cuda:skipbusy", cfg_skip_busy_gpus)
+          .add_option_int_units("-cuda:minavailmem", cfg_min_avail_mem, 'm')
+          .add_option_int("-cuda:legacysync", cfg_task_legacy_sync)
+          .add_option_int("-cuda:contextsync", cfg_task_context_sync)
+          .add_option_int("-cuda:maxctxsync", cfg_max_ctxsync_threads)
+          .add_option_int("-cuda:lmemresize", cfg_lmem_resize_to_max)
+          .add_option_int("-cuda:mtdma", cfg_multithread_dma)
+          .add_option_int_units("-cuda:hostreg", cfg_hostreg_limit, 'm')
+          .add_option_int("-cuda:pageable_access", cfg_pageable_access)
+          .add_option_int("-cuda:ipc", cfg_use_cuda_ipc);
+#ifdef REALM_USE_CUDART_HIJACK
+      cp.add_option_int("-cuda:nongpusync", Cuda::cudart_hijack_nongpu_sync);
+#endif
 
       bool ok = cp.parse_command_line(cmdline);
       if(!ok) {
@@ -4300,154 +3688,6 @@ namespace Realm {
       // can not find the Processor p, so return false
       return false;
     }
-
-#ifdef REALM_USE_CUDART_HIJACK
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // struct RegisteredFunction
-
-    RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
-					   const char *_device_fun)
-      : fat_bin(_fat_bin), host_fun(_host_fun), device_fun(_device_fun)
-    {}
-     
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // struct RegisteredVariable
-
-    RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
-					   const char *_device_name, bool _external,
-					   int _size, bool _constant, bool _global,
-                                           bool _managed)
-      : fat_bin(_fat_bin), host_var(_host_var), device_name(_device_name),
-	external(_external), size(_size), constant(_constant), global(_global),
-        managed(_managed)
-    {}
-
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class GlobalRegistrations
-
-    GlobalRegistrations::GlobalRegistrations(void)
-    {}
-
-    GlobalRegistrations::~GlobalRegistrations(void)
-    {
-      delete_container_contents(variables);
-      delete_container_contents(functions);
-      // we don't own fat binary pointers, but we can forget them
-      fat_binaries.clear();
-    }
-
-    /*static*/ GlobalRegistrations& GlobalRegistrations::get_global_registrations(void)
-    {
-      static GlobalRegistrations reg;
-      return reg;
-    }
-
-    // called by a GPU when it has created its context - will result in calls back
-    //  into the GPU for any modules/variables/whatever already registered
-    /*static*/ void GlobalRegistrations::add_gpu_context(GPU *gpu)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add this gpu to the list
-      assert(g.active_gpus.count(gpu) == 0);
-      g.active_gpus.insert(gpu);
-
-      // and now tell it about all the previous-registered stuff
-      for(std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-	  it != g.fat_binaries.end();
-	  it++)
-	gpu->register_fat_binary(*it);
-
-      for(std::vector<RegisteredVariable *>::iterator it = g.variables.begin();
-	  it != g.variables.end();
-	  it++)
-	gpu->register_variable(*it);
-
-      for(std::vector<RegisteredFunction *>::iterator it = g.functions.begin();
-	  it != g.functions.end();
-	  it++)
-	gpu->register_function(*it);
-    }
-
-    /*static*/ void GlobalRegistrations::remove_gpu_context(GPU *gpu)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      assert(g.active_gpus.count(gpu) > 0);
-      g.active_gpus.erase(gpu);
-    }
-
-    // called by __cuda(un)RegisterFatBinary
-    /*static*/ void GlobalRegistrations::register_fat_binary(FatBin *fatbin)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add the fat binary to the list and tell any gpus we know of about it
-      g.fat_binaries.push_back(fatbin);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_fat_binary(fatbin);
-    }
-
-    /*static*/ void GlobalRegistrations::unregister_fat_binary(FatBin *fatbin)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // remove the fatbin from the list - don't bother telling gpus
-      std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-      while(it != g.fat_binaries.end())
-	if(*it == fatbin)
-	  it = g.fat_binaries.erase(it);
-	else
-	  it++;
-    }
-
-    // called by __cudaRegisterVar
-    /*static*/ void GlobalRegistrations::register_variable(RegisteredVariable *var)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add the variable to the list and tell any gpus we know
-      g.variables.push_back(var);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_variable(var);
-    }
-
-    // called by __cudaRegisterFunction
-    /*static*/ void GlobalRegistrations::register_function(RegisteredFunction *func)
-    {
-      GlobalRegistrations& g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add the function to the list and tell any gpus we know
-      g.functions.push_back(func);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin();
-	  it != g.active_gpus.end();
-	  it++)
-	(*it)->register_function(func);
-    }
-#endif
 
     ////////////////////////////////////////////////////////////////////////
     //

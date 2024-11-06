@@ -1581,8 +1581,7 @@ namespace Legion {
       {
         provenance->add_reference();
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_operation_provenance(unique_op_id,
-                                              prov->human_str());
+          LegionSpy::log_operation_provenance(unique_op_id, prov->human);
       }
       if (implicit_profiler != NULL)
         implicit_profiler->register_operation(this);
@@ -1819,7 +1818,7 @@ namespace Legion {
       Provenance *provenance = get_provenance();
       if (provenance != NULL) {
         std::stringstream prov_ss;
-        prov_ss << ", provenance: " << provenance->human_str();
+        prov_ss << ", provenance: " << provenance->human;
         prov_str = prov_ss.str();
       }
       const RegionRequirement &req = get_requirement(index); 
@@ -4549,7 +4548,8 @@ namespace Legion {
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
             get_mapped_event(), ready_event, term_event, true/*mapped*/, ctx,
             map_id, tag, false/*leaf*/, false/*virtual mapped*/,
-            true/*collective for replication*/, runtime));
+            true/*collective for replication*/, 
+            ctx->get_next_blocking_index(), runtime));
       termination_event = term_event;
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -4600,7 +4600,8 @@ namespace Legion {
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       region = reg;
-      termination_event = region.impl->remap_region(ready_event);
+      termination_event = 
+        region.impl->remap_region(ready_event, ctx->get_next_blocking_index());
       remap_region = true;
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
@@ -8609,11 +8610,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
@@ -10157,7 +10158,7 @@ namespace Legion {
                 if (runtime->legion_spy_enabled)
                   LegionSpy::log_field_creation(field_space_node->handle.id,
                       fields[idx], *field_size, (get_provenance() == NULL) ?
-                      NULL : get_provenance()->human_str());
+                      std::string_view() : get_provenance()->human);
               }
             }
             break;
@@ -16544,15 +16545,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(num_points > 0);
 #endif
-        unsigned point_idx = 0;
-        points.resize(num_points);
-        for (Domain::DomainPointIterator itr(launch_domain); 
-              itr; itr++, point_idx++)
+        points.reserve(num_points);
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           PointDepPartOp *point = 
             runtime->get_available_point_dep_part_op();
           point->initialize(this, itr.p);
-          points[point_idx] = point;
+          points.push_back(point);
         }
         // Perform the projections
         ProjectionFunction *function = 
@@ -16743,14 +16742,15 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_index_space);
+      assert(-1 <= points_completed.load());
 #endif
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
@@ -18678,11 +18678,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
       {
         if (set_view)
         {
@@ -19673,7 +19673,8 @@ namespace Legion {
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
         get_mapped_event(), get_completion_event(),ApUserEvent::NO_AP_USER_EVENT,
         false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-        false/*virtual mapped*/, launcher.collective, runtime)); 
+        false/*virtual mapped*/, launcher.collective,
+        ctx->get_next_blocking_index(), runtime)); 
       // Restore privileges back to write-discard
       requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
@@ -20295,11 +20296,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 
@@ -20816,7 +20817,8 @@ namespace Legion {
             get_mapped_event(), get_completion_event(), 
             ApUserEvent::NO_AP_USER_EVENT,
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-            false/*virtual mapped*/, false/*collective*/, runtime)); 
+            false/*virtual mapped*/, false/*collective*/,
+            ctx->get_next_blocking_index(), runtime)); 
       // Restore privileges back to write-discard
       requirement.privilege = LEGION_WRITE_DISCARD;
       if (runtime->legion_spy_enabled)
@@ -21394,11 +21396,11 @@ namespace Legion {
     {
       if (effect.exists())
         record_completion_effect(effect);
-      const unsigned received = points_completed.fetch_add(1);
+      const unsigned received = ++points_completed;
 #ifdef DEBUG_LEGION
-      assert(received < points.size());
+      assert(received <= points.size());
 #endif
-      if ((received + 1) == points.size())
+      if (received == points.size())
         complete_execution();
     }
 

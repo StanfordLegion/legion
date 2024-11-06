@@ -1911,7 +1911,7 @@ namespace Legion {
         {
           // Delete now because couldn't acquire some instances
           if (acquired)
-            current->release_instance_references();
+            current->release_instance_references(map_applied_events);
           // Now delete this template from the entry since at least one of its
           // instances have been deleted and therefore we'll never be able to
           // replay it
@@ -1953,7 +1953,7 @@ namespace Legion {
           return true;
         }
         else if (acquired)
-          current->release_instance_references();
+          current->release_instance_references(map_applied_events);
         if (idx > 0)
         {
           // If this is the first iteration then we start testing the
@@ -2020,8 +2020,9 @@ namespace Legion {
         if (!recurrent)
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
-        current_template->finish_replay(execution_preconditions);
-        current_template->release_instance_references();
+        current_template->finish_replay(
+            op->get_complete_operation(), execution_preconditions);
+        current_template->release_instance_references(map_applied_conditions);
       }
       current_template = NULL;
     }
@@ -2052,7 +2053,8 @@ namespace Legion {
             if (op->allreduce_template_status(valid, acquired))
             {
               if (acquired)
-                current_template->release_instance_references();
+                current_template->release_instance_references(
+                    map_applied_conditions);
               // Now delete this template from the entry since at least one 
               // of its instances have been deleted and therefore we'll never
               // be able to replay it
@@ -2102,7 +2104,8 @@ namespace Legion {
         if (!recurrent)
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
-        current_template->finish_replay(execution_preconditions);
+        current_template->finish_replay(
+            op->get_complete_operation(), execution_preconditions);
         begin_replay(op, true/*recurrent*/, has_intermediate_fence);
         return true;
       }
@@ -3145,67 +3148,132 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
-                    bool allow_independent, FailedPrecondition *condition) const
+    bool TraceViewSet::subsumed_by(TraceViewSet &set, 
+        const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+        FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
+      bool subsumed = true;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              vit->second.begin(); it != vit->second.end(); ++it)
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+              vit->second.begin(); eit != vit->second.end(); ++eit)
         {
-          if (allow_independent)
+          // First check to see what fields and expressions are not dominated
+          LegionMap<LogicalView*,
+                    FieldMaskSet<IndexSpaceExpression> > non_dominated;
+          set.dominates(vit->first, eit->first, eit->second, non_dominated);
+          if (non_dominated.empty())
+            continue;
+          // For all the non-dominated fields and expressions we need to
+          // check to see if they are dirty or not. If there are any dirty
+          // expression-fields that are not dominated then set is no longer
+          // subsumed. If the non-dominated fields are not dirty, then it's
+          // ok for them to not be subsumed as that means they are just
+          // read-only and any additional copies in the postconditions.
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator dit =
+                non_dominated.begin(); dit != non_dominated.end(); /*nothing*/)
           {
-            // If we're allowing independent views, that means the set
-            // does not need to dominate the view as long as there are no
-            // views in the set that overlap logically with the test view
-            // This allows us to handle the read-only precondition case
-            // where we have read-only views that show up in the preconditions
-            // but do not appear logically anywhere in the postconditions
-            LegionMap<LogicalView*,
-                      FieldMaskSet<IndexSpaceExpression> > non_dominated;
-            set.dominates(vit->first, it->first, it->second, non_dominated);
-            for (LegionMap<LogicalView*,
-                  FieldMaskSet<IndexSpaceExpression> >::const_iterator dit =
-                  non_dominated.begin(); dit != non_dominated.end(); dit++)
+            FieldMaskSet<IndexSpaceExpression> to_add;
+            std::vector<IndexSpaceExpression*> to_delete;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator nit =
+                  dit->second.begin(); nit != dit->second.end(); nit++)
             {
-              for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
-                    dit->second.begin(); nit != dit->second.end(); nit++)
+              // Check to see if it interferes with the dirty expressions
+              if (nit->second * unique_dirty_exprs.get_valid_mask())
+                continue;
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    unique_dirty_exprs.begin(); it != 
+                    unique_dirty_exprs.end(); it++)
               {
-                // If all the fields are independent from anything that was
-                // written in the postcondition then we know this is a
-                // read-only precondition that does not need to be subsumed
-                FieldMask mask = nit->second;
-                set.filter_independent_fields(nit->first, mask);
-                if (!mask)
+                const FieldMask overlap = nit->second & it->second;
+                if (!overlap)
                   continue;
+                IndexSpaceExpression *expr_overlap = 
+                  forest->intersect_index_spaces(nit->first, it->first);
+                if (expr_overlap->is_empty())
+                  continue;
+                // These are dirty expr-fields which are not subsumed
+                subsumed = false;
                 if (condition != NULL)
                 {
                   condition->view = vit->first;
-                  condition->expr = nit->first;
-                  condition->mask = mask;
+                  condition->expr = expr_overlap;
+                  condition->mask = overlap;
                 }
-                return false;
+                if (expr_overlap->get_volume() < nit->first->get_volume())
+                {
+                  // Not everything is dominated so we need to record it
+                  IndexSpaceExpression *non_dirty =
+                    forest->subtract_index_spaces(nit->first, it->first);
+                  to_add.insert(non_dirty, overlap);
+                }
+                nit.filter(overlap);
+                if (!nit->second)
+                {
+                  to_delete.push_back(nit->first);
+                  break;
+                }
               }
             }
-          }
-          else
-          {
-            FieldMask mask = it->second;
-            if (!set.dominates(vit->first, it->first, mask))
+            // Update the non-dominated expressions
+            for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
             {
-              if (condition != NULL)
+              if (to_add.find(*it) != to_add.end())
+                continue;
+              dit->second.erase(*it);
+            }
+            if (!to_add.empty())
+            {
+              if (!dit->second.empty())
               {
-                condition->view = vit->first;
-                condition->expr = it->first;
-                condition->mask = mask;
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                      to_add.begin(); it != to_add.end(); it++)
+                  dit->second.insert(it->first, it->second);
               }
-              return false;
+              else
+                dit->second.swap(to_add);
+            }
+            if (dit->second.empty())
+            {
+              LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator 
+                  delete_it = dit++;
+              non_dominated.erase(delete_it);
+            }
+            else
+              dit++;
+          }
+          // If there are any remanining non-dominated fields then we
+          // add them to the postconditions because views that are both
+          // non-dirty and non-dominated need to be in the postconditions
+          // so we don't invalidate them when we do the overwriting
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator dit =
+                non_dominated.begin(); dit != non_dominated.end(); dit++)
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
+                  dit->second.begin(); nit != dit->second.end(); nit++)
+            {
+              // This is a small optimization to see if there are any
+              // fields which are independent for this view against all
+              // the other views in the postcondition set. If there are
+              // then we don't need to record this view at all since 
+              // there won't be any postcondition to overwrite it.
+              FieldMask mask = nit->second;
+              set.filter_independent_fields(nit->first, mask);
+              if (!mask)
+                continue;
+              set.insert(dit->first, nit->first, mask);
             }
           }
         }
-
-      return true;
+      }
+      return subsumed;
     }
 
     //--------------------------------------------------------------------------
@@ -4925,15 +4993,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::receive_trace_conditions(TraceViewSet *previews,
-                       TraceViewSet *antiviews, TraceViewSet *postviews,
-                       unsigned parent_req_index, RegionTreeID tree_id,
-                       std::atomic<unsigned> *result)
+                   TraceViewSet *antiviews, TraceViewSet *postviews,
+                   const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+                   unsigned parent_req_index, RegionTreeID tree_id,
+                   std::atomic<unsigned> *result)
     //--------------------------------------------------------------------------
     {
       // First check to see if these conditions are idempotent or not  
       TraceViewSet::FailedPrecondition fail;
       if ((previews != NULL) && (postviews != NULL) &&
-          !previews->subsumed_by(*postviews, true/*allow independent*/, &fail))
+          !previews->subsumed_by(*postviews, unique_dirty_exprs, &fail))
       {
         unsigned initial = IDEMPOTENT;
         if (result->compare_exchange_strong(initial,
@@ -5079,13 +5148,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::release_instance_references(void) const
+    void PhysicalTemplate::release_instance_references(
+                                std::set<RtEvent> &map_applied_conditions) const
     //--------------------------------------------------------------------------
     {
-      // No need to check for deletions, we stil hold gc references
       for (std::vector<PhysicalManager*>::const_iterator it =
             all_instances.begin(); it != all_instances.end(); it++)
+      {
+        // Record the last replay completion event as a user
+        // Note the map_applied_conditions are a formality here since we
+        // know that we're still holding a valid reference when we do this
+        // call so all the work of this operation should be local and no
+        // messages should end up being sent
+        (*it)->record_instance_user(replay_complete, map_applied_conditions);
+        // No need to check for deletions, we stil hold gc references
         (*it)->remove_base_valid_ref(TRACE_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7960,7 +8038,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
+    void PhysicalTemplate::finish_replay(FenceOp *fence,
+                                         std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
       if (remaining_replays.load() > 0)
@@ -7989,6 +8068,7 @@ namespace Legion {
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->complete]);
       operations.clear();
+      replay_complete = fence->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
@@ -9672,11 +9752,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::finish_replay(
+    void ShardedPhysicalTemplate::finish_replay(FenceOp *fence,
                                               std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      PhysicalTemplate::finish_replay(postconditions);
+      PhysicalTemplate::finish_replay(fence, postconditions);
       // Also need to do any local frontiers that we have here as well
       for (std::map<unsigned,ApBarrier>::const_iterator it = 
             local_frontiers.begin(); it != local_frontiers.end(); it++)

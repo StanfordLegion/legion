@@ -410,13 +410,23 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(Legion_EMBED_GASNet_GITREPO
       "https://github.com/StanfordLegion/gasnet.git"
       CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
+    set(GASNet_GITREPO ${Legion_EMBED_GASNet_GITREPO})
+
     set(Legion_EMBED_GASNet_GITREF
       "d7cc06907cc66e2a3f968e19ea17a80650b16a3b" # master as of 2024-07-19
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
+    set(GASNet_GITREF ${Legion_EMBED_GASNet_GITREF})
+
     set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of StanfordLegion/gasnet repository")
+    set(GASNet_LOCALSRC ${Legion_EMBED_GASNet_LOCALSRC})
+
     set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
-    option(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS "Enable GASNet memory kinds when Realm has been built with CUDA/HIP/etc." ON)
+    set(GASNet_VERSION ${Legion_EMBED_GASNet_VERSION})
+
     set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
+    set(GASNet_CONFIGURE_ARGS ${Legion_EMBED_GASNet_CONFIGURE_ARGS})
+
+    option(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS "Enable GASNet memory kinds when Realm has been built with CUDA/HIP/etc." ON)
   else()
     set(GASNet_THREADING par)
     set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
@@ -936,12 +946,10 @@ if(Legion_ENABLE_TESTING)
     list(APPEND Legion_TEST_ARGS -ll:ocpu 1 -ll:onuma 0)
   endif()
 endif()
-if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
-  # Make a namespaced alias so in-build examples can use it the same way as if
-  # it were imported
-  add_library(Legion::Legion ALIAS Legion)
-  add_library(Legion::Realm ALIAS Realm)
 
+add_library(Legion::Legion ALIAS Legion)
+add_library(Legion::Realm ALIAS Realm)
+if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   if(Legion_HIP_TARGET STREQUAL "ROCM")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} ${HIPCC_FLAGS} ${HIP_GENCODE}")
   endif()
@@ -965,8 +973,6 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
     add_subdirectory(jupyter_notebook)
   endif()
 elseif(Legion_BUILD_REALM_TESTS)
-  # temporary hackery to just enable the realm tests
-  add_library(Legion::Realm ALIAS Realm)
   add_subdirectory(test/realm)
 endif()
 if(Legion_BUILD_REALM_UNIT_TESTS)

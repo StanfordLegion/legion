@@ -21,3 +21,4 @@ ConstructorInitializerIndentWidth: 2
 NamespaceIndentation: All
 SpaceBeforeParens: Never
 SortIncludes: false
+InsertBraces: true

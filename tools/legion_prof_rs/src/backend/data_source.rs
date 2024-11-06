@@ -1527,6 +1527,27 @@ impl StateDataSource {
         }
     }
 
+    fn parse_provenance(provenance: &str) -> Field {
+        if let Ok(value) = serde_json::from_str(provenance) {
+            if let serde_json::Value::Array(vec) = value {
+                if let [_user, machine] = &*vec {
+                    if let serde_json::Value::Object(map) = machine {
+                        let mut result = Vec::new();
+                        for (k, v) in map {
+                            if let serde_json::Value::String(s) = v {
+                                result.push(Field::String(format!("{}: {}", k, s)));
+                            } else {
+                                result.push(Field::String(format!("{}: {}", k, v)));
+                            }
+                        }
+                        return Field::Vec(result);
+                    }
+                }
+            }
+        }
+        Field::String(provenance.to_string())
+    }
+
     fn generate_proc_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -1586,7 +1607,7 @@ impl StateDataSource {
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
-                    Field::String(provenance.to_string()),
+                    Self::parse_provenance(provenance),
                     None,
                 ));
             }
@@ -1873,7 +1894,7 @@ impl StateDataSource {
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
-                    Field::String(provenance.to_string()),
+                    Self::parse_provenance(provenance),
                     None,
                 ));
             }
@@ -2198,7 +2219,7 @@ impl StateDataSource {
             if let Some(provenance) = provenance {
                 fields.push((
                     self.fields.provenance,
-                    Field::String(provenance.to_string()),
+                    Self::parse_provenance(provenance),
                     None,
                 ));
             }

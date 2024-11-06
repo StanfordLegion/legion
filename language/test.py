@@ -244,9 +244,6 @@ def test_spy(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, l
             spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
             assert len(spy_logs) > 0
             run_spy(spy_logs, verbose, py_exe_path)
-            # Run legion_prof_rs too so that we can be sure it's at least parsing all the logs
-            if legion_prof_rs is not None:
-                run_prof_rs(spy_dir, spy_logs, verbose, legion_prof_rs)
     except:
         raise
     else:

@@ -20,6 +20,7 @@
 #include "legion/legion_context.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_profiling_serializer.h"
+#include "realm/id.h" // need this for synthesizing implicit proc IDs
 
 #include <string.h>
 #include <stdlib.h>
@@ -602,7 +603,7 @@ namespace Legion {
       {
         info.preconditions[idx] = preconditions[idx];
         if (preconditions[idx].is_barrier())
-          record_barrier_arrival(preconditions[idx], implicit_provenance);
+          record_barrier_use(preconditions[idx], implicit_provenance);
       }
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info) + count * sizeof(LgEvent), this);
@@ -620,7 +621,7 @@ namespace Legion {
       info.result = result;
       info.precondition = pre;
       if (pre.is_barrier())
-        record_barrier_arrival(pre, implicit_provenance);
+        record_barrier_use(pre, implicit_provenance);
       info.fevent = implicit_fevent;
       // See if we're triggering this node on the same node where it was made
       // If not we need to eventually notify the node where it was made that
@@ -674,6 +675,7 @@ namespace Legion {
       if (owner->no_critical_paths)
         return;
 #ifdef DEBUG_LEGION
+      assert(result.is_barrier());
       assert(owner->all_critical_arrivals);
 #endif
       BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
@@ -681,12 +683,14 @@ namespace Legion {
       info.performed = Realm::Clock::current_time_in_nanoseconds();
       info.result = result;
       info.precondition = pre;
+      if (pre.is_barrier())
+        record_barrier_use(pre, implicit_provenance);
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_barrier_arrival(LgEvent bar, UniqueID uid)
+    void LegionProfInstance::record_barrier_use(LgEvent bar, UniqueID uid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -752,7 +756,7 @@ namespace Legion {
       info.result = result;
       info.precondition = precondition;
       if (precondition.is_barrier())
-        record_barrier_arrival(precondition, implicit_provenance);
+        record_barrier_use(precondition, implicit_provenance);
       info.reservation = r;
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
@@ -772,7 +776,7 @@ namespace Legion {
       info.unique = unique_event;
       info.precondition = precondition;
       if (precondition.is_barrier())
-        record_barrier_arrival(precondition, implicit_provenance);
+        record_barrier_use(precondition, implicit_provenance);
       owner->update_footprint(sizeof(info), this);
     }
 
@@ -799,7 +803,7 @@ namespace Legion {
       {
         info.preconditions[idx] = preconditions[idx];
         if (preconditions[idx].is_barrier())
-          record_barrier_arrival(preconditions[idx], implicit_provenance);
+          record_barrier_use(preconditions[idx], implicit_provenance);
       }
       info.fevent = fevent;
       info.performed = performed;
@@ -826,7 +830,7 @@ namespace Legion {
       assert(timeline.is_valid());
 #endif
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationTimelineGPU timeline_gpu;
       if (response.get_measurement<
             Realm::ProfilingMeasurements::OperationTimelineGPU>(timeline_gpu))
@@ -952,7 +956,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
         info.finish_event = LgEvent(finish.finish_event);
@@ -1015,7 +1019,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
       {
@@ -1202,7 +1206,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       owner->update_footprint(sizeof(CopyInfo) +
           info.inst_infos.size() * sizeof(CopyInstInfo), this);
       if (closure->remove_reference())
@@ -1270,7 +1274,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       owner->update_footprint(sizeof(FillInfo) + 
           info.inst_infos.size() * sizeof(FillInstInfo), this);
       if (closure->remove_reference())
@@ -1329,7 +1333,7 @@ namespace Legion {
       info.creator = prof_info->creator;
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
-        record_barrier_arrival(prof_info->critical, prof_info->op_id);
+        record_barrier_use(prof_info->critical, prof_info->op_id);
       info.fevent = LgEvent(fevent.finish_event);
       owner->update_footprint(sizeof(PartitionInfo), this);
     }
@@ -1353,16 +1357,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_implicit(UniqueID op_id, TaskID tid,
-        Processor proc, long long start_time, long long stop_time,
+        long long start_time, long long stop_time,
         std::deque<WaitInfo> &waits, LgEvent finish_event)
     //--------------------------------------------------------------------------
     {
-      process_proc_desc(proc);
       TaskInfo &info = implicit_infos.emplace_back(TaskInfo()); 
       info.op_id = op_id;
       info.task_id = tid;
       info.variant_id = 0; // no variants for implicit tasks
-      info.proc_id = proc.id;
+      info.proc_id = owner->get_implicit_processor();
       // We make create, ready, and start all the same for implicit tasks
       info.create = start_time;
       info.ready = start_time;
@@ -1431,12 +1434,10 @@ namespace Legion {
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
-#ifdef DEBUG_LEGION
-        assert(implicit_context != NULL);
-#endif
-        current = implicit_context->get_executing_processor();
+        current.id = owner->get_implicit_processor();
       }
-      process_proc_desc(current);
+      else
+        process_proc_desc(current);
       // Check to see if it exceeds the call threshold
       if ((stop - start) < owner->minimum_call_threshold)
         return;
@@ -1467,12 +1468,10 @@ namespace Legion {
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
-#ifdef DEBUG_LEGION
-        assert(implicit_context != NULL);
-#endif
-        current = implicit_context->get_executing_processor();
+        current.id = owner->get_implicit_processor();
       }
-      process_proc_desc(current);
+      else
+        process_proc_desc(current);
       // Check to see if it exceeds the call threshold
       if ((stop - start) < owner->minimum_call_threshold)
         return;
@@ -1497,10 +1496,7 @@ namespace Legion {
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
-#ifdef DEBUG_LEGION
-        assert(implicit_context != NULL);
-#endif
-        current = implicit_context->get_executing_processor();
+        current.id = owner->get_implicit_processor();
       }
       // We don't filter application call ranges currently since presumably 
       // the application knows what its doing and wants to see everything 
@@ -1525,17 +1521,14 @@ namespace Legion {
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
-#ifdef DEBUG_LEGION
-        assert(implicit_context != NULL);
-#endif
-        current = implicit_context->get_executing_processor();
+        current.id = owner->get_implicit_processor();
       }
       // Check to see if we have a backtrace ID for this backtrace yet 
       unsigned long long backtrace_id = owner->find_backtrace_id(bt);
       event_wait_infos.emplace_back(
           EventWaitInfo{current.id, implicit_fevent, event, backtrace_id});
       if (event.is_barrier())
-        record_barrier_arrival(event, implicit_provenance);
+        record_barrier_use(event, implicit_provenance);
       owner->update_footprint(sizeof(EventWaitInfo), this);
     }
 
@@ -2264,7 +2257,8 @@ namespace Legion {
 #ifndef DEBUG_LEGION
         total_outstanding_requests(1/*start with guard*/),
 #endif
-        total_memory_footprint(0), need_default_mapper_warning(!slow_config_ok)
+        total_memory_footprint(0), implicit_top_level_task_proc(0),
+        need_default_mapper_warning(!slow_config_ok)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2582,6 +2576,36 @@ namespace Legion {
           serializer->serialize(info); 
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ProcID LegionProfiler::get_implicit_processor(void)
+    //--------------------------------------------------------------------------
+    {
+      ProcID proc = implicit_top_level_task_proc.load();
+      if (proc > 0)
+        return proc;
+      // Figure out how many local processors there are on this node
+      Machine::ProcessorQuery query(runtime->machine);
+      query.local_address_space();
+      proc = Realm::ID::make_processor(runtime->address_space,query.count()).id;
+      AutoLock p_lock(profiler_lock);
+      // Check to see if we lost the race
+      if (implicit_top_level_task_proc.load() > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(proc == implicit_top_level_task_proc.load());
+#endif
+        return proc;
+      }
+      // Record the processor kind as being an I/O kind so that the profiler
+      // renders all implicit top-level tasks separately
+      LegionProfDesc::ProcDesc desc;
+      desc.proc_id = proc;
+      desc.kind = Processor::IO_PROC;
+      serializer->serialize(desc);
+      implicit_top_level_task_proc.store(proc);
+      return proc;
     }
 
     //--------------------------------------------------------------------------
@@ -3151,7 +3175,7 @@ namespace Legion {
             {
               LgEvent barrier;
               barrier.id = info->id;
-              implicit_profiler->record_barrier_arrival(barrier, info->op_id);
+              implicit_profiler->record_barrier_use(barrier, info->op_id);
             }
             break;
           }
@@ -3428,6 +3452,10 @@ namespace Legion {
         return;
       // We'll only issue this warning once on each node for now
       if (!need_default_mapper_warning.exchange(false/*no longer needed*/))
+        return;
+      // Check to see if the application has registered other mappers other
+      // than the default mapper, if it has then we don't issue this warning
+      if (runtime->has_non_default_mapper())
         return;
       // Give a massive warning for profilig when using the default mapper
       for (int i = 0; i < 2; i++)

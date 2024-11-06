@@ -471,7 +471,7 @@ namespace Legion {
       // The depth of the context in which this was made
       const int producer_depth;
       const UniqueID producer_uid;
-      // Note this is a future coordinate and not a task tree coordinate!
+      // Note this is a blocking coordinate and not a task tree coordinate!
       const ContextCoordinate coordinate;
       Provenance *const provenance;
     private:
@@ -662,10 +662,10 @@ namespace Legion {
                     bool register_now = true, 
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
-                    DistributedID did, uint64_t future_coordinate,
+                    DistributedID did, uint64_t blocking_index,
                     Provenance *provenance, bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
-      FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t future_coordinate,
+      FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t blocking_index,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
                     Provenance *provenance);
@@ -716,7 +716,7 @@ namespace Legion {
       const GenerationID op_gen;
       const int op_depth;
       const UniqueID op_uid;
-      const uint64_t future_coordinate;
+      const uint64_t blocking_index;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
     protected:
@@ -836,7 +836,7 @@ namespace Legion {
       PhysicalRegionImpl(const RegionRequirement &req, RtEvent mapped_event,
             ApEvent ready_event, ApUserEvent term_event, bool mapped, 
             TaskContext *ctx, MapperID mid, MappingTagID tag, bool leaf, 
-            bool virt, bool collective, Runtime *rt);
+            bool virt, bool collective, uint64_t blocking, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs) = delete;
       ~PhysicalRegionImpl(void);
     public:
@@ -852,7 +852,7 @@ namespace Legion {
       PrivilegeMode get_privilege(void) const;
     public:
       void unmap_region(void);
-      ApEvent remap_region(ApEvent new_ready_event);
+      ApEvent remap_region(ApEvent new_ready_event, uint64_t blocking);
       const RegionRequirement& get_requirement(void) const;
       void add_padded_field(FieldID fid);
       void set_reference(const InstanceRef &references, bool safe = false);
@@ -931,6 +931,8 @@ namespace Legion {
       // Any fields which we have privileges on the padded space (sorted)
       // This enables us to access the padded space for this field
       std::vector<FieldID> padded_fields;
+      // The blocking index for when this physical region was created
+      uint64_t blocking_index;
       // "appliciation side" state
       // whether it is currently mapped
       bool mapped; 
@@ -1332,6 +1334,7 @@ namespace Legion {
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid) const;
+      bool has_non_default_mapper(void) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -2984,6 +2987,7 @@ namespace Legion {
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
+      bool has_non_default_mapper(void) const;
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                 MapperID map_id, Processor proc, bool is_default = false);
     public:

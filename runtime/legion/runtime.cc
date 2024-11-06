@@ -484,7 +484,7 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-              InnerContext::NO_FUTURE_COORDINATE, provenance, true/*reg now*/));
+              InnerContext::NO_BLOCKING_INDEX, provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -870,8 +870,8 @@ namespace Legion {
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
         coordinate((o == NULL) ?
-            ContextCoordinate(InnerContext::NO_FUTURE_COORDINATE) :
-            ContextCoordinate(o->get_context()->get_next_future_coordinate())),
+            ContextCoordinate(InnerContext::NO_BLOCKING_INDEX) :
+            ContextCoordinate(o->get_context()->get_next_blocking_index())),
         provenance(prov), local_visible_memory(Memory::NO_MEMORY),
         metadata(NULL), metasize(0), future_size(0), upper_bound_size(SIZE_MAX),
         callback_functor(NULL), own_callback_functor(false),
@@ -2571,7 +2571,7 @@ namespace Legion {
       if (ctx != context)
         return false;
       // No coordinates if we are an application-generated future
-      if (coordinate.context_index == InnerContext::NO_FUTURE_COORDINATE)
+      if (coordinate.context_index == InnerContext::NO_BLOCKING_INDEX)
         return false;
       coord = coordinate;
       return true;
@@ -2695,13 +2695,14 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_FUTURE_USE,
                 "Illegal use of future produced in context %s (UID %lld) "
                 "but consumed in context %s (UID %lld) by operation %s "
-                "(UID %lld) launched from %s. Futures are only permitted "
+                "(UID %lld) launched from %.*s. Futures are only permitted "
                 "to be used in the task sub-tree rooted by the context "
                 "that produced the future.", context->get_task_name(),
                 context->get_unique_id(), consumer_context->get_task_name(), 
                 consumer_context->get_unique_id(),
                 consumer_op->get_logging_name(),
-                consumer_op->get_unique_op_id(), provenance->human_str())
+                consumer_op->get_unique_op_id(), 
+                int(provenance->human.length()), provenance->human.data())
           }
         }
       }
@@ -4000,7 +4001,7 @@ namespace Legion {
           register_now, mapping),
         context(ctx), op(o), op_gen(o->get_generation()),
         op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
-        future_coordinate(o->get_context()->get_next_future_coordinate()),
+        blocking_index(o->get_context()->get_next_blocking_index()),
         provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
@@ -4018,14 +4019,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
-                                 DistributedID did, uint64_t coordinate,
+                                 DistributedID did, uint64_t blocking,
                                  Provenance *prov,
                                  bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
         context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
-        future_coordinate(coordinate), provenance(prov), future_map_domain(d)
+        blocking_index(blocking), provenance(prov), future_map_domain(d)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4041,14 +4042,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t coord,
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t index,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
-        future_coordinate(coord), provenance(prov), future_map_domain(domain)
+        blocking_index(index), provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4160,7 +4161,7 @@ namespace Legion {
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(), op, op_gen, 
-              ContextCoordinate(future_coordinate, point),
+              ContextCoordinate(blocking_index, point),
               op_uid, op_depth, provenance);
         result->add_nested_gc_ref(did);
         result->add_nested_resource_ref(did);
@@ -4214,7 +4215,7 @@ namespace Legion {
             context->get_task_name(),
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      context->record_blocking_call(future_coordinate);
+      context->record_blocking_call(blocking_index);
       if (op != NULL)
         context->wait_on_future_map(this, op->get_commit_event(op_gen));
     }
@@ -4246,7 +4247,7 @@ namespace Legion {
       {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
-        rez.serialize(future_coordinate);
+        rez.serialize(blocking_index);
         if (provenance != NULL)
           provenance->serialize(rez);
         else
@@ -4454,7 +4455,7 @@ namespace Legion {
     void FutureMapImpl::process_future_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ContextCoordinate coordinate(future_coordinate);
+      ContextCoordinate coordinate(blocking_index);
       derez.deserialize(coordinate.index_point);
       DistributedID future_did;
       derez.deserialize(future_did);
@@ -4501,7 +4502,7 @@ namespace Legion {
     TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
                               IndexSpaceNode *domain, PointTransformFnptr fnptr,
                               Provenance *prov)
-      : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
+      : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prov),
@@ -4516,7 +4517,7 @@ namespace Legion {
     TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
           IndexSpaceNode *domain, PointTransformFunctor *functor, bool own_func,
           Provenance *prov)
-      : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
+      : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prov),
@@ -4844,7 +4845,7 @@ namespace Legion {
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(), op, op_gen, 
-              ContextCoordinate(future_coordinate, point),
+              ContextCoordinate(blocking_index, point),
               op_uid, op_depth, provenance);
         result->add_nested_gc_ref(did);
         result->add_nested_resource_ref(did);
@@ -4989,12 +4990,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
       RtEvent mapped, ApEvent ready, ApUserEvent term, bool m, TaskContext *ctx, 
-      MapperID mid, MappingTagID t, bool leaf, bool virt, bool col, Runtime *rt)
+      MapperID mid, MappingTagID t, bool leaf, bool virt, bool col,
+      uint64_t blocking, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), collective(col),
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
         req(r),mapped_event(mapped),ready_event(ready),termination_event(term),
-        mapped(m), valid(false), made_accessor(false)
+        blocking_index(blocking), mapped(m), valid(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5025,7 +5027,7 @@ namespace Legion {
       assert(implicit_context != NULL);
       assert(implicit_context == context);
 #endif
-      context->record_blocking_call(InnerContext::NO_FUTURE_COORDINATE);
+      context->record_blocking_call(blocking_index);
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
@@ -5157,13 +5159,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PhysicalRegionImpl::remap_region(ApEvent new_ready)
+    ApEvent PhysicalRegionImpl::remap_region(ApEvent new_ready,
+                                             uint64_t blocking)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped);
       assert(!termination_event.exists());
 #endif
+      blocking_index = blocking;
       termination_event = Runtime::create_ap_user_event(NULL);
       ready_event = new_ready;
       mapped = true;
@@ -7543,6 +7547,18 @@ namespace Legion {
       if (finder != mappers.end())
         result = finder->second.first;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProcessorManager::has_non_default_mapper(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock, 0/*mode*/, false/*exclusive*/);
+      for (std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+            it = mappers.begin(); it != mappers.end(); it++)
+        if (!it->second.first->is_default_mapper)
+          return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -11026,8 +11042,10 @@ namespace Legion {
       assert(measured);
 #endif
       success.store(result.success);
-      Runtime::trigger_event(ready);
       fevent = unique_event;
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
+      Runtime::trigger_event(ready);
       return true;
     }
 
@@ -19968,6 +19986,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_non_default_mapper(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+        if (it->second->has_non_default_mapper())
+          return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     ProjectionID Runtime::generate_dynamic_projection_id(
                                                    bool check_context/*= true*/)
     //--------------------------------------------------------------------------
@@ -28028,7 +28057,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -32699,7 +32728,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
+      log_run.fatal("LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32710,7 +32739,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
+      log_run.error("LEGION ERROR: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32722,7 +32751,7 @@ namespace Legion {
                                          const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
+      log_run.warning("LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
       if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
       {

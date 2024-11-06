@@ -4645,7 +4645,13 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(sharding_function != NULL);
+        assert(points_completed.load() == 0);
 #endif
+        // This is a bit tricky, but set the points_completed to be -1 as
+        // a guard so that we don't call complete_execution until we've see
+        // all our completed points and had a chance to run trigger_execution
+        // for ourselves as they both need to be done before finishing execution
+        points_completed.store(-1);
         // Compute the local index space of points for this shard
         IndexSpace local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
@@ -4864,6 +4870,7 @@ namespace Legion {
       assert(requirement.privilege_fields.size() == 1);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(-1 <= points_completed.load());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -4902,9 +4909,12 @@ namespace Legion {
                          instances, &remote_targets, &deppart_results);
         }
       }
-      // If we don't have any points then we need to complete our execution
-      // now since we're not going to get any calls for it later
-      if (points.empty())
+      // Remove our guard that we added in trigger_ready and see if we're done
+      const unsigned received = ++points_completed;
+#ifdef DEBUG_LEGION
+      assert(received <= points.size());
+#endif
+      if (received == points.size())
         complete_execution();
     }
 
@@ -10315,12 +10325,12 @@ namespace Legion {
           // Make sure to bump the future coordinate for this context as well
 #ifndef NDEBUG
 #ifdef DEBUG_LEGION
-          const uint64_t coord =
+          const uint64_t index =
 #endif
 #endif
-            ctx->get_next_future_coordinate();
+            ctx->get_next_blocking_index();
 #ifdef DEBUG_LEGION
-          assert(coord == finder->second.first->coordinate.context_index);
+          assert(index == finder->second.first->coordinate.context_index);
 #endif
           Future result(finder->second.first);
 #ifdef DEBUG_LEGION
@@ -10337,7 +10347,7 @@ namespace Legion {
         // Didn't find it so make it
         FutureImpl *result = new FutureImpl(ctx, runtime, false/*register*/,
             did, op, op->get_generation(),
-            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
+            ContextCoordinate(ctx->get_next_blocking_index(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -10357,7 +10367,7 @@ namespace Legion {
       {
         FutureImpl *impl = new FutureImpl(ctx, runtime, false/*register*/,
             did, op, op->get_generation(),
-            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
+            ContextCoordinate(ctx->get_next_blocking_index(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -10388,12 +10398,12 @@ namespace Legion {
           // Make sure to bump the future coordinate for this context as well
 #ifndef NDEBUG
 #ifdef DEBUG_LEGION
-          const uint64_t coord =
+          const uint64_t index =
 #endif
 #endif
-            ctx->get_next_future_coordinate();
+            ctx->get_next_blocking_index();
 #ifdef DEBUG_LEGION
-          assert(coord == finder->second.first->future_coordinate);
+          assert(index== finder->second.first->blocking_index);
 #endif
           FutureMap result(finder->second.first);
 #ifdef DEBUG_LEGION
@@ -14012,6 +14022,7 @@ namespace Legion {
     // Instantiate this for a common use case
     template class AllReduceCollective<SumReduction<bool>,false>;
     template class AllReduceCollective<ProdReduction<bool>,false>;
+    template class AllReduceCollective<MaxReduction<uint32_t>,false>;
     template class AllReduceCollective<MaxReduction<uint64_t>,false>;
 
     /////////////////////////////////////////////////////////////
@@ -17398,7 +17409,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ConcurrentAllreduce::ConcurrentAllreduce(ReplicateContext *ctx,
         CollectiveID id, Color c, MultiTask::ConcurrentGroup &g)
-      : AllGatherCollective<true>(ctx, id, g.shards), color(c), group(g)
+      : AllGatherCollective<false>(ctx, id, g.shards), color(c), group(g)
     //--------------------------------------------------------------------------
     {
     }

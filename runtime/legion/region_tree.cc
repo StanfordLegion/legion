@@ -300,7 +300,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
               complete, partition_color, runtime->address_space, 
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -318,7 +318,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       ctx->register_index_partition_creation(pid);
       return parent_notified;
@@ -16598,9 +16598,22 @@ namespace Legion {
                       assert(proj_info.is_sharding());
                       assert(user.shard_proj != NULL);
 #endif
+                      bool dominates = true;
                       if (!state.has_interfering_shards(logical_analysis,
-                                          prev.shard_proj, user.shard_proj))
+                            prev.shard_proj, user.shard_proj, dominates))
+                      {
+                        // If the two projections are non-interfering, then 
+                        // we can only consider the second projection as 
+                        // dominating the first if it uses all the same data.
+                        // Otherwise you can cases like those that occur in 
+                        // https://github.com/StanfordLegion/legion/issues/1765
+                        // where some index tasks push earlier index tasks out
+                        // of the set of current/previous epoch users and then 
+                        // we end up missing a merge close op fence.
+                        if (!dominates)
+                          dominator_mask -= it->second;
                         break;
+                      }
                     }
                     // We weren't able to prove that the projections were
                     // non-interfering with each other so we need a close

@@ -47,8 +47,11 @@ list(APPEND REALM_SRC
   realm/deppart/sparsity_impl.inl
   realm/atomics.h           realm/atomics.inl
   realm/bgwork.h            realm/bgwork.cc
+  realm/comp_queue_impl.h   realm/comp_queue_impl.cc
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
+  realm/barrier_impl.h        realm/barrier_impl.cc
+  realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
@@ -152,6 +155,17 @@ if (Legion_USE_Python)
   )
 endif()
 
+if(Legion_EMBED_GASNet_ENABLE_GPU_MEMORY_KINDS)
+  if(Legion_USE_CUDA)
+    list(APPEND GASNet_CONFIG_SETTINGS "USE_CUDA=1")
+  endif()
+  if(Legion_USE_HIP)
+    list(APPEND GASNet_CONFIG_SETTINGS "USE_HIP=1")
+  endif()
+else()
+  list(APPEND GASNet_CONFIG_SETTINGS "GASNET_GPU_CONFIGURE_ARGS=")
+endif()
+
 if(REALM_USE_GASNET1)
   list(APPEND REALM_SRC
     realm/gasnet1/gasnet1_module.h
@@ -175,6 +189,7 @@ if(REALM_USE_GASNETEX)
     set(GEX_WRAPPER_BUILD_SHARED ${REALM_USE_GASNETEX_WRAPPER})
     set(GEX_DEBUG ${DEBUG_REALM})
     set(GEX_NO_INSTALL NOT ${REALM_USE_GASNETEX_WRAPPER})
+
     add_subdirectory(realm/gasnetex/gasnetex_wrapper EXCLUDE_FROM_ALL)
   endif()
 endif()
@@ -396,8 +411,10 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
     find_package(GASNet)
     if (NOT GASNet_FOUND AND Legion_EMBED_GASNet)
       set(GASNet_BUILD_SHARED ${BUILD_SHARED_LIBS})
+
       include(${PROJECT_SOURCE_DIR}/cmake/FetchAndBuildGASNet.cmake)
       find_package(GASNet REQUIRED)
+
     elseif (NOT GASNet_FOUND)
       message(FATAL_ERROR "Unable to find GASNet")
     endif ()
@@ -406,8 +423,12 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   # cmake won't include GASNet::GASNet in the exported link libraries
   #  because we're doing a shared build, so force that
   if(NOT REALM_USE_GASNETEX_WRAPPER AND REALM_USE_GASNETEX)
-    target_link_libraries(RealmRuntime PRIVATE $<LINK_ONLY:realm_gex_wrapper_objs>)
-    install(TARGETS realm_gex_wrapper_objs EXPORT LegionTargets)
+    target_sources(RealmRuntime PRIVATE $<TARGET_OBJECTS:realm_gex_wrapper_objs>)
+    target_include_directories(RealmRuntime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/realm/gasnetex/gasnetex_wrapper/exports")
+    target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+    if (BUILD_SHARED_LIBS)
+      target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
+    endif()
   elseif(NOT REALM_USE_GASNETEX_WRAPPER)
     target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
     if (BUILD_SHARED_LIBS)
@@ -423,16 +444,16 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
       # get the list of libraries and filter only those that are not in the
       #  (gasnet) install dir - the gasnet ones are sucked into librealm.so
       get_target_property(gasnet_ext_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
-      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_ROOT_DIR}")
       set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_ext_libs} PARENT_SCOPE)
-    elseif()
+    else()
       # get the list of libraries and filter out those that are not in the
       #  (gasnet) install dir
       get_target_property(gasnet_all_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
       set(gasnet_libs "${gasnet_all_libs}")
-      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_ROOT_DIR}")
       set(gasnet_installed_libs ${gasnet_libs})
-      string(REGEX REPLACE "${GASNet_INSTALL_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
+      string(REGEX REPLACE "${GASNet_ROOT_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
       install(FILES ${gasnet_libs} DESTINATION ${CMAKE_INSTALL_LIBDIR})
       set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_installed_libs} PARENT_SCOPE)
     endif()
@@ -496,6 +517,7 @@ if(Legion_USE_CUDA)
     else()
       # without Kokkos interop, we can just add the hijack directly
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
+      target_sources(RealmStatic PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
   else()
     if(REALM_CUDA_DYNAMIC_LOAD)

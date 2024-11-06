@@ -25,8 +25,6 @@ local hiphelper = {}
 local RuntimeAPI = terralib.includecstring [[
 #define __HIP_PLATFORM_AMD__ 1
 #include <hip/hip_runtime.h>
-hipStream_t hipGetTaskStream();
-//#include "realm/hip/hiphijack_api.h"
 ]]
 
 function hiphelper.check_gpu_available()
@@ -49,12 +47,6 @@ do
 end
 
 function hiphelper.driver_library_link_flags()
-  -- If the hijack is turned off, we need extra dependencies to link
-  -- the generated HIP code correctly
-  if base.c.REGENT_USE_HIJACK == 0 then
-    local rocm_path = os.getenv("ROCM_PATH")
-    return terralib.newlist({"-L" .. rocm_path .. "/lib", "-lamdhip64"})
-  end
   return terralib.newlist()
 end
 
@@ -502,7 +494,9 @@ function hiphelper.codegen_kernel_call(cx, kernel, count, args, shared_mem_size,
   return quote
     if [count] > 0 then
       var [grid], [block]
-      var [stream] = RuntimeAPI.hipGetTaskStream()
+      var stream : RuntimeAPI.hipStream_t
+      var ok = base.c.regent_get_task_hip_stream(&stream)
+      base.assert(ok, "unable to get task HIP stream")
       var dev_id : int
       check(RuntimeAPI.hipGetDevice(&dev_id), "hipGetDevice")
       [launch_domain_init]

@@ -1524,7 +1524,7 @@ namespace Legion {
      * short-circuit the result when all points come from just a subset
      * of the shards.
      */
-    class ConcurrentAllreduce : public AllGatherCollective<true> {
+    class ConcurrentAllreduce : public AllGatherCollective<false> {
     public:
       ConcurrentAllreduce(ReplicateContext *ctx, CollectiveID id,
                           Color color, MultiTask::ConcurrentGroup &group);

@@ -743,6 +743,7 @@ namespace Realm {
     config_map.insert({"util", &num_util_procs});
     config_map.insert({"io", &num_io_procs});
     config_map.insert({"sysmem", &sysmem_size});
+    config_map.insert({"sysmem_ipc_limit", &sysmem_ipc_limit});
     config_map.insert({"stack_size", &stack_size});
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
@@ -782,37 +783,43 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     std::ifstream infile("/proc/cpuinfo");
     if (infile.fail()) return false;
     std::string line;
+    int logical_cpu_cores = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
     int cpu_id = 0;
-    int cpu_cores = 0;
-    std::map<int, int> cpus;
+    int physical_cpu_cores = 0;
+    std::map<int, int> physcal_cpus;
     while (std::getline(infile, line)) {
-      if (strncmp(line.c_str(), "physical id", 11) == 0) {
+      if(line.find("physical id") != std::string::npos) {
         std::istringstream iss(line);
         std::string x, y, z;
-        if (!(iss >> x >> y >> z >> cpu_id)) {
-          infile.close();
+        if(!(iss >> x >> y >> z >> cpu_id)) {
           return false;
         };
       }
-      if (strncmp(line.c_str(), "cpu cores", 9) == 0) {
+      if(line.find("cpu cores") != std::string::npos) {
         std::istringstream iss(line);
         std::string x, y, z;
-        if (!(iss >> x >> y >> z >> cpu_cores)) {
-          infile.close();
+        if(!(iss >> x >> y >> z >> physical_cpu_cores)) {
           return false;
         }
-        std::map<int, int>::iterator it = cpus.find(cpu_id);
-        if (it == cpus.end()) {
-          cpus.insert({cpu_id, cpu_cores});
+        std::map<int, int>::iterator it = physcal_cpus.find(cpu_id);
+        if(it == physcal_cpus.end()) {
+          physcal_cpus.insert({cpu_id, physical_cpu_cores});
         } else {
-          assert(it->second == cpu_cores);
+          assert(it->second == physical_cpu_cores);
         }
       }
     }
-    for (std::map<int, int>::iterator it = cpus.begin(); it != cpus.end(); it++) {
+    for(std::map<int, int>::iterator it = physcal_cpus.begin(); it != physcal_cpus.end();
+        it++) {
       res_num_cpus += it->second;
     }
-    infile.close();
+    // Some ARM machines do not have "cpu cores" and "physical id",
+    // so we will use "processor", however, there is no way to tell
+    // if local cores == physical cores, therefore, we just assume
+    // they are equal.
+    if(res_num_cpus == 0) {
+      res_num_cpus = logical_cpu_cores;
+    }
 #endif
 #ifdef REALM_ON_WINDOWS
     // system memory
@@ -841,13 +848,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = buffer;
     while (reinterpret_cast<LPBYTE>(ptr) < reinterpret_cast<LPBYTE>(buffer) + buffer_size) {
       if (ptr->Relationship == RelationProcessorCore) {
-        DWORD logical_processor_count = 0;
-        for (DWORD i = 0; i < ptr->Processor.GroupCount; i++) {
-          logical_processor_count += CountSetBits(ptr->Processor.GroupMask[i].Mask);
-        }
-        if (logical_processor_count == 1) {
-          res_num_cpus++;
-        }
+        res_num_cpus++;
       }
       ptr = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(reinterpret_cast<LPBYTE>(ptr) + ptr->Size);
     }
@@ -869,6 +870,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     buflen = sizeof(int);
     sysctlbyname("hw.physicalcpu", &res_num_cpus, &buflen, NULL, 0);
 #endif
+    // we should be able to safely assume they are larger than 0,
+    // otherwise, something is wrong with resource detection
+    assert(res_num_cpus > 0 && res_sysmem_size > 0);
     log_runtime.info("Discover resource cpu cores %d, sysmem %zu", res_num_cpus, res_sysmem_size);
     resource_discover_finished = true;
     return resource_discover_finished;
@@ -882,15 +886,16 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
     // config for CoreModule
     cp.add_option_int("-ll:cpu", num_cpu_procs)
-      .add_option_int("-ll:util", num_util_procs)
-      .add_option_int("-ll:io", num_io_procs)
-      .add_option_int("-ll:concurrent_io", concurrent_io_threads)
-      .add_option_int_units("-ll:csize", sysmem_size, 'm')
-      .add_option_int_units("-ll:stacksize", stack_size, 'm')
-      .add_option_bool("-ll:pin_util", pin_util_procs)
-      .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
-      .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
-      .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
+        .add_option_int("-ll:util", num_util_procs)
+        .add_option_int("-ll:io", num_io_procs)
+        .add_option_int("-ll:concurrent_io", concurrent_io_threads)
+        .add_option_int_units("-ll:csize", sysmem_size, 'm')
+        .add_option_int_units("-ll:ipc_limit", sysmem_ipc_limit, 'm')
+        .add_option_int_units("-ll:stacksize", stack_size, 'm')
+        .add_option_bool("-ll:pin_util", pin_util_procs)
+        .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
+        .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
+        .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
 
     // config for RuntimeImpl
     // low-level runtime parameters
@@ -1001,10 +1006,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
     MemoryImpl *sysmem;
     if(config->sysmem_size > 0) {
+      bool enable_ipc = (config->sysmem_ipc_limit == 0 ||
+                         config->sysmem_size <= config->sysmem_ipc_limit);
+      log_runtime.debug("core module sysmem ipc enabled %d", enable_ipc);
       Memory m = runtime->next_local_memory_id();
-      sysmem = new LocalCPUMemory(m, config->sysmem_size,
-                                  -1/*don't care numa domain*/,
-                                  Memory::SYSTEM_MEM);
+      sysmem = new LocalCPUMemory(m, config->sysmem_size, -1 /*don't care numa domain*/,
+                                  Memory::SYSTEM_MEM, 0, 0, enable_ipc);
       runtime->add_memory(sysmem);
     } else
       sysmem = 0;
@@ -1014,9 +1021,8 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     //  usually won't have those affinities)
     if(config->use_ext_sysmem || !sysmem) {
       Memory m = runtime->next_local_memory_id();
-      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/,
-                                      -1 /*don't care numa domain*/,
-                                      Memory::SYSTEM_MEM);
+      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/, -1 /*don't care numa domain*/,
+                                      Memory::SYSTEM_MEM, 0, 0, false);
       runtime->add_memory(ext_sysmem);
     } else
       ext_sysmem = sysmem;
@@ -2150,7 +2156,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       //  maps where non-CPU devices can see them
       repl_heap.init(config->replheap_size, 1 /*chunks*/);
 
-      if (!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0) {
+      if(!Network::shared_peers.empty() && local_shared_memory_mappings.size() > 0) {
         if (!share_memories()) {
           log_runtime.fatal("Failed to share memories with peers");
           abort();

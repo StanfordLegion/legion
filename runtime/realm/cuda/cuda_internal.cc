@@ -27,6 +27,9 @@ namespace Realm {
     extern Logger log_gpu;
     extern Logger log_stream;
     extern Logger log_gpudma;
+    namespace ThreadLocal {
+      extern REALM_THREAD_LOCAL GPUStream *current_gpu_stream;
+    }
 
     typedef int (*PFN_cudaLaunchKernel)(const void *func, dim3 gridDim,
                                         dim3 blockDim, void **args,
@@ -498,7 +501,7 @@ namespace Realm {
     {
       assert(mem != nullptr);
 
-      if(info->pageable_access_supported) {
+      if(info->pageable_access_supported && (module->config->cfg_pageable_access != 0)) {
         // System that support full unified memory access may access any host accessible
         // memory, so exclude all memories that are not host accessible.  This assumes
         // that the memory given is somehow accessible by the current node
@@ -1477,7 +1480,8 @@ namespace Realm {
         unsigned latency = 1000;       // HACK - estimate at 1 us
         unsigned frag_overhead = 2000; // HACK - estimate at 2 us
 
-        if(src_gpu->info->pageable_access_supported) {
+        if(src_gpu->info->pageable_access_supported &&
+           (src_gpu->module->config->cfg_pageable_access != 0)) {
           // GPU can access all host memories, so add a path for each memory kind that is
           // accessible to the host as the source
           // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
@@ -1524,7 +1528,8 @@ namespace Realm {
         unsigned latency = 1000;          // HACK - estimate at 1 us
         unsigned frag_overhead = 2000;    // HACK - estimate at 2 us
 
-        if(src_gpu->info->pageable_access_supported) {
+        if(src_gpu->info->pageable_access_supported &&
+           (src_gpu->module->config->cfg_pageable_access != 0)) {
           // GPU can access all host memories, so add a path for each memory kind that is
           // accessible to the host as the source
           // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
@@ -2139,7 +2144,8 @@ namespace Realm {
 
       // TODO(cperry): Even though this is a HOST fill, mark it as a GPU_TO_FB xfer kind.
       // Is it really necesscary to annotate the kind of transfer?
-      if(gpu->info->pageable_access_supported) {
+      if(gpu->info->pageable_access_supported &&
+         (gpu->module->config->cfg_pageable_access != 0)) {
         // GPU can access all host memories, so add a path for each memory kind that is
         // accessible to the host
         // TODO(cperry): Add a query for the memory kind that it is CPU accessible.
@@ -2214,22 +2220,36 @@ namespace Realm {
       kernel_host_proxy = nullptr;
       assert(redop);
 
+      src_is_ipc.resize(inputs_info.size(), false);
+      src_gpus.resize(inputs_info.size(), 0);
+      for(size_t i = 0; i < input_ports.size(); i++) {
+        src_gpus[i] = mem_to_gpu(input_ports[i].mem);
+        // sanity-check
+        if(input_ports[i].mem->kind == MemoryImpl::MKIND_GPUFB) {
+          assert(src_gpus[i]);
+        } else {
+          // assume a memory owned by another node is ipc
+          if(NodeID(ID(input_ports[i].mem->me).memory_owner_node()) !=
+             Network::my_node_id)
+            src_is_ipc[i] = true;
+        }
+      }
+
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
+      stream = gpu->get_next_d2d_stream();
 
       // select reduction kernel now - translate to CUfunction if possible
       void *host_proxy =
-          (redop_info.is_fold
-               ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
-                                          : redop->cuda_fold_nonexcl_fn)
-               : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
-                                          : redop->cuda_apply_nonexcl_fn));
-#ifdef REALM_USE_CUDART_HIJACK
-      // we have the host->device mapping table for functions
-      kernel = gpu->lookup_function(host_proxy);
-#else
+          (redop_info.is_fold ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
+                                                         : redop->cuda_fold_nonexcl_fn)
+                              : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
+                                                         : redop->cuda_apply_nonexcl_fn));
       if (redop->cudaGetFuncBySymbol_fn != 0) {
         // we can ask the runtime to perform the mapping for us
         gpu->push_context();
+#ifdef REALM_USE_CUDART_HIJACK
+        ThreadLocal::current_gpu_stream = stream;
+#endif
         CHECK_CUDART(reinterpret_cast<PFN_cudaGetFuncBySymbol>(
             redop->cudaGetFuncBySymbol_fn)((void **)&kernel, host_proxy));
         gpu->pop_context();
@@ -2240,9 +2260,6 @@ namespace Realm {
         kernel_host_proxy = host_proxy;
         assert(redop->cudaLaunchKernel_fn != 0);
       }
-#endif
-
-      stream = gpu->get_next_d2d_stream();
     }
 
     long GPUreduceXferDes::get_requests(Request** requests, long nr)
@@ -2321,8 +2338,30 @@ namespace Realm {
             log_xd.info() << "gpureduce chunk: min=" << min_xfer_size
                           << " max_elems=" << max_elems;
 
-            uintptr_t in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+            uintptr_t in_base = 0;
             uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+
+            GPU *in_gpu = nullptr;
+
+            bool in_is_ipc = false;
+            if(input_control.current_io_port >= 0) {
+              in_gpu = src_gpus[input_control.current_io_port];
+              if(in_gpu == nullptr) {
+                in_gpu = channel->gpu;
+              }
+              in_is_ipc = src_is_ipc[input_control.current_io_port];
+            }
+
+            if(in_is_ipc) {
+              const GPU::CudaIpcMapping *in_mapping =
+                  channel->gpu->find_ipc_mapping(in_port->mem->me);
+              assert(in_mapping);
+              in_base = in_mapping->local_base;
+            } else {
+              in_base = reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+            }
+
+            assert(channel->gpu->can_access_peer(in_gpu));
 
             while(total_elems < max_elems) {
               AddressListCursor& in_alc = in_port->addrcursor;
@@ -2479,9 +2518,9 @@ namespace Realm {
     // class GPUreduceChannel
 
     GPUreduceChannel::GPUreduceChannel(GPU *_gpu, BackgroundWorkManager *bgwork)
-      : SingleXDQChannel<GPUreduceChannel,GPUreduceXferDes>(bgwork,
-                                                            XFER_GPU_IN_FB,
-                                                            stringbuilder() << "cuda reduce channel (gpu=" << _gpu->info->index << ")")
+      : SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes>(
+            bgwork, XFER_GPU_IN_FB,
+            stringbuilder() << "cuda reduce channel (gpu=" << _gpu->info->index << ")")
       , gpu(_gpu)
     {
       std::vector<Memory> local_gpu_mems;
@@ -2545,17 +2584,17 @@ namespace Realm {
                 gpu->info->logical_peer_latency[peer_gpu->info->index]);
             unsigned frag_overhead = 2000; // HACK - estimate at 2 us
             if(peer_gpu->fbmem != nullptr) {
-              add_path(local_gpu_mems, peer_gpu->fbmem->me, bw, latency, frag_overhead,
+              add_path(peer_gpu->fbmem->me, local_gpu_mems, bw, latency, frag_overhead,
                        XFER_GPU_PEER_FB)
                   .allow_redops();
             }
             if(peer_gpu->fb_dmem != nullptr) {
-              add_path(local_gpu_mems, peer_gpu->fb_dmem->me, bw, latency, frag_overhead,
+              add_path(peer_gpu->fb_dmem->me, local_gpu_mems, bw, latency, frag_overhead,
                        XFER_GPU_PEER_FB)
                   .allow_redops();
             }
             if(peer_gpu->fb_ibmem != nullptr) {
-              add_path(local_gpu_mems, peer_gpu->fb_ibmem->me, bw, latency, frag_overhead,
+              add_path(peer_gpu->fb_ibmem->me, local_gpu_mems, bw, latency, frag_overhead,
                        XFER_GPU_PEER_FB)
                   .allow_redops();
             }
@@ -2565,7 +2604,7 @@ namespace Realm {
             size_t bw = std::max(gpu->info->c2c_bandwidth, gpu->info->pci_bandwidth);
             size_t latency = 2000;         // HACK - estimate at 2 us
             unsigned frag_overhead = 2000; // HACK - estimate at 2 us
-            add_path(local_gpu_mems, mem, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
+            add_path(mem, local_gpu_mems, bw, latency, frag_overhead, XFER_GPU_PEER_FB)
                 .allow_redops();
           }
           for(const GPU::CudaIpcMapping &mapping : gpu->cudaipc_mappings) {
@@ -2576,7 +2615,7 @@ namespace Realm {
               bw = gpu->info->logical_peer_bandwidth[mapping.src_gpu->info->index];
               latency = gpu->info->logical_peer_latency[mapping.src_gpu->info->index];
             }
-            add_path(local_gpu_mems, mapping.mem, bw, latency, frag_overhead,
+            add_path(mapping.mem, local_gpu_mems, bw, latency, frag_overhead,
                      XFER_GPU_PEER_FB)
                 .allow_redops();
           }

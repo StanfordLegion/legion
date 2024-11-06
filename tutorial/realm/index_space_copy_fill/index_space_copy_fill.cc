@@ -74,12 +74,18 @@ void main_task(const void *args, size_t arglen, const void *userdata,
 
   ev3.wait();
 
+  bool success = true;
   GenericAccessor<int, 1, int> acc(inst2, FID_BASE);
   for (IndexSpaceIterator<1, int> it(isect); it.valid; it.step()) {
     for (PointInRectIterator<1, int> it2(it.rect); it2.valid; it2.step()) {
-      assert(acc[it2.p] == 7);
+      if(acc[it2.p] != 7) {
+        log_app.error() << "point=" << it2.p[0] << ", expected=7, actual=" << acc[it2.p];
+        success = false;
+      }
     }
   }
+
+  assert(success);
 
   inst2.destroy();
   inst1.destroy();

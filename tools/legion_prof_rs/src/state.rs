@@ -23,15 +23,6 @@ use slice_group_by::GroupBy;
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
-use crate::spy;
-
-const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
-
-#[derive(Debug, Clone)]
-pub enum Records {
-    Prof(Vec<Record>),
-    Spy(Vec<spy::serialize::Record>),
-}
 
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
@@ -378,7 +369,6 @@ pub trait Container {
 
     fn name(&self, state: &State) -> String;
     fn max_levels(&self, device: Option<DeviceKind>) -> u32;
-    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32;
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>>;
     fn time_points_stacked(
         &self,
@@ -645,12 +635,10 @@ pub struct Proc {
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     event_waits: BTreeMap<ProfUID, BTreeMap<EventID, BacktraceID>>,
     max_levels: u32,
-    max_levels_ready: u32,
     time_points: Vec<ProcPoint>,
     time_points_stacked: Vec<Vec<ProcPoint>>,
     util_time_points: Vec<ProcPoint>,
     max_levels_device: u32,
-    max_levels_ready_device: u32,
     time_points_device: Vec<ProcPoint>,
     time_points_stacked_device: Vec<Vec<ProcPoint>>,
     util_time_points_device: Vec<ProcPoint>,
@@ -667,12 +655,10 @@ impl Proc {
             meta_tasks: BTreeMap::new(),
             event_waits: BTreeMap::new(),
             max_levels: 0,
-            max_levels_ready: 0,
             time_points: Vec::new(),
             time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
             max_levels_device: 0,
-            max_levels_ready_device: 0,
             time_points_device: Vec::new(),
             time_points_stacked_device: Vec::new(),
             util_time_points_device: Vec::new(),
@@ -697,7 +683,7 @@ impl Proc {
         }
         prof_uid_proc.insert(base.prof_uid, self.proc_id);
         match kind {
-            ProcEntryKind::Task(_, _) => {
+            ProcEntryKind::Task(..) => {
                 self.tasks.insert(op.unwrap(), base.prof_uid);
             }
             ProcEntryKind::MetaTask(variant_id) => {
@@ -883,7 +869,7 @@ impl Proc {
                 // Update the operation info for the calls
                 let call_entry = self.entries.get_mut(&call_uid).unwrap();
                 match task_entry.kind {
-                    ProcEntryKind::Task(_, _) => {
+                    ProcEntryKind::Task(..) => {
                         call_entry.initiation_op = task_entry.op_id;
                     }
                     ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => {
@@ -915,20 +901,11 @@ impl Proc {
         fn add(
             time: &TimeRange,
             prof_uid: ProfUID,
-            all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
         ) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            let ready = time.ready;
-            if stop - start > TASK_GRANULARITY_THRESHOLD && ready.is_some() {
-                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
-            } else {
-                all_points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
-            }
 
             points.push(ProcPoint::new(start, prof_uid, true, Timestamp::MAX - stop));
             points.push(ProcPoint::new(stop, prof_uid, false, Timestamp::ZERO));
@@ -951,11 +928,9 @@ impl Proc {
         // Before we do anything sort the runtime/mapper calls and waiters
         self.sort_calls_and_waits();
 
-        let mut all_points = Vec::new();
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        let mut all_points_device = Vec::new();
         let mut points_device = Vec::new();
         let mut util_points_device = Vec::new();
 
@@ -967,17 +942,11 @@ impl Proc {
                 let time = &entry.time_range;
                 match entry.kind {
                     ProcEntryKind::GPUKernel(_, _) => {
-                        add(
-                            time,
-                            *uid,
-                            &mut all_points_device,
-                            &mut points_device,
-                            &mut util_points_device,
-                        );
+                        add(time, *uid, &mut points_device, &mut util_points_device);
                         add_waiters(&entry.waiters, *uid, &mut util_points_device);
                     }
                     _ => {
-                        add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                        add(time, *uid, &mut points, &mut util_points);
                         add_waiters(&entry.waiters, *uid, &mut util_points);
                     }
                 }
@@ -985,15 +954,13 @@ impl Proc {
         } else {
             for (uid, entry) in &self.entries {
                 let time = &entry.time_range;
-                add(time, *uid, &mut all_points, &mut points, &mut util_points);
+                add(time, *uid, &mut points, &mut util_points);
                 add_waiters(&entry.waiters, *uid, &mut util_points);
             }
         }
 
         let mut sort_and_stack =
             |max_levels: &mut u32,
-             max_levels_ready: &mut u32,
-             all_points: &mut Vec<ProcPoint>,
              points: &mut Vec<ProcPoint>,
              util_points: &mut Vec<ProcPoint>| {
                 points.sort_by_key(|a| a.time_key());
@@ -1015,55 +982,25 @@ impl Proc {
                     }
                 }
 
-                all_points.sort_by_key(|a| a.time_key());
-
-                // Hack: This is a max heap so reverse the values as they go in.
-                let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
-                for point in all_points {
-                    if point.first {
-                        let level = if let Some(level) = free_levels_ready.pop() {
-                            level.0
-                        } else {
-                            max_levels_ready.postincrement()
-                        };
-                        self.entry_mut(point.entry).base.set_level_ready(level);
-                    } else {
-                        let level = self.entry(point.entry).base.level_ready.unwrap();
-                        free_levels_ready.push(Reverse(level));
-                    }
-                }
-
                 // Rendering of the profile will never use non-first points, so we can
                 // throw those away now.
                 points.retain(|p| p.first);
             };
 
         let mut max_levels = 0;
-        let mut max_levels_ready = 0;
         let mut max_levels_device = 0;
-        let mut max_levels_ready_device = 0;
-        sort_and_stack(
-            &mut max_levels,
-            &mut max_levels_ready,
-            &mut all_points,
-            &mut points,
-            &mut util_points,
-        );
+        sort_and_stack(&mut max_levels, &mut points, &mut util_points);
         sort_and_stack(
             &mut max_levels_device,
-            &mut max_levels_ready_device,
-            &mut all_points_device,
             &mut points_device,
             &mut util_points_device,
         );
 
         self.max_levels = max_levels;
-        self.max_levels_ready = max_levels_ready;
         self.time_points = points;
         self.util_time_points = util_points;
 
         self.max_levels_device = max_levels_device;
-        self.max_levels_ready_device = max_levels_ready_device;
         self.time_points_device = points_device;
         self.util_time_points_device = util_points_device;
     }
@@ -1131,14 +1068,6 @@ impl Container for Proc {
             Some(DeviceKind::Device) => self.max_levels_device,
             Some(DeviceKind::Host) => self.max_levels,
             None => self.max_levels,
-        }
-    }
-
-    fn max_levels_ready(&self, device: Option<DeviceKind>) -> u32 {
-        match device {
-            Some(DeviceKind::Device) => self.max_levels_ready_device,
-            Some(DeviceKind::Host) => self.max_levels_ready,
-            None => self.max_levels_ready,
         }
     }
 
@@ -1402,10 +1331,6 @@ impl Container for Mem {
     fn max_levels(&self, device: Option<DeviceKind>) -> u32 {
         assert!(device.is_none());
         self.max_live_insts
-    }
-
-    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
-        unreachable!()
     }
 
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
@@ -1783,10 +1708,6 @@ impl Container for Chan {
         self.max_levels
     }
 
-    fn max_levels_ready(&self, _device: Option<DeviceKind>) -> u32 {
-        unreachable!()
-    }
-
     fn time_points(&self, device: Option<DeviceKind>) -> &Vec<TimePoint<Self::E, Self::S>> {
         assert!(device.is_none());
         &self.time_points
@@ -2030,55 +1951,6 @@ impl Region {
 }
 
 #[derive(Debug)]
-pub struct Dependencies {
-    pub in_: BTreeSet<ProfUID>,
-    pub out: BTreeSet<ProfUID>,
-    pub parent: BTreeSet<ProfUID>,
-    pub children: BTreeSet<ProfUID>,
-}
-
-impl Dependencies {
-    fn new() -> Self {
-        Dependencies {
-            in_: BTreeSet::new(),
-            out: BTreeSet::new(),
-            parent: BTreeSet::new(),
-            children: BTreeSet::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct SpyEvent {
-    preconditions: BTreeSet<EventID>,
-    postconditions: BTreeSet<EventID>,
-}
-
-impl SpyEvent {
-    fn new() -> Self {
-        SpyEvent {
-            preconditions: BTreeSet::new(),
-            postconditions: BTreeSet::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct SpyOp {
-    precondition: EventID,
-    postcondition: EventID,
-}
-
-impl SpyOp {
-    fn new(precondition: EventID, postcondition: EventID) -> Self {
-        SpyOp {
-            precondition,
-            postcondition,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct Align {
     _field_id: FieldID,
     _eqk: u32,
@@ -2184,7 +2056,6 @@ impl Inst {
         self
     }
     fn set_critical(&mut self, critical: EventID) -> &mut Self {
-        assert!(critical.exists());
         assert!(self.critical.is_none());
         self.critical = Some(critical);
         self
@@ -2232,9 +2103,9 @@ impl Inst {
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         self.time_range.trim_time_range(start, stop)
     }
-    fn set_creator(&mut self, creator: Option<ProfUID>) -> &mut Self {
-        assert!(self.creator.map_or(true, |c| c == creator.unwrap()));
-        self.creator = creator;
+    fn set_creator(&mut self, creator: ProfUID) -> &mut Self {
+        assert!(self.creator.map_or(true, |c| c == creator));
+        self.creator = Some(creator);
         self
     }
     pub fn allocated_immediately(&self) -> bool {
@@ -2506,7 +2377,6 @@ pub struct ProfUID(pub u64);
 pub struct Base {
     pub prof_uid: ProfUID,
     pub level: Option<u32>,
-    pub level_ready: Option<u32>,
 }
 
 impl Base {
@@ -2514,24 +2384,17 @@ impl Base {
         Base {
             prof_uid: allocator.create_fresh(),
             level: None,
-            level_ready: None,
         }
     }
     fn from_fevent(allocator: &mut ProfUIDAllocator, fevent: EventID) -> Self {
         Base {
             prof_uid: allocator.create_object(fevent),
             level: None,
-            level_ready: None,
         }
     }
     fn set_level(&mut self, level: u32) -> &mut Self {
         assert!(self.level.is_none());
         self.level = Some(level);
-        self
-    }
-    fn set_level_ready(&mut self, level_ready: u32) -> &mut Self {
-        assert!(self.level_ready.is_none());
-        self.level_ready = Some(level_ready);
         self
     }
 }
@@ -2689,18 +2552,6 @@ impl OpID {
     pub const ZERO: OpID = OpID(NonMaxU64::ZERO);
 }
 
-impl From<spy::serialize::UniqueID> for OpID {
-    fn from(e: spy::serialize::UniqueID) -> Self {
-        OpID(NonMaxU64::new(e.0).unwrap())
-    }
-}
-
-impl From<spy::serialize::ContextID> for OpID {
-    fn from(e: spy::serialize::ContextID) -> Self {
-        OpID(NonMaxU64::new(e.0).unwrap())
-    }
-}
-
 #[derive(Debug)]
 pub struct MultiTask {
     pub op_id: OpID,
@@ -2784,19 +2635,9 @@ impl Operation {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub struct EventID(pub u64);
+pub struct EventID(pub NonZeroU64);
 
 impl EventID {
-    fn exists(&self) -> bool {
-        self.0 != 0
-    }
-    fn existing(&self) -> Option<EventID> {
-        if self.exists() {
-            Some(*self)
-        } else {
-            None
-        }
-    }
     // Important: keep this in sync with realm/id.h
     // EVENT:   tag:1 = 0b1, creator_node:16, gen_event_idx:27, generation:20
     // owner_node = event_id[62:47]
@@ -2804,30 +2645,24 @@ impl EventID {
     // owner_node = barrier_id[59:44]
     pub fn node_id(&self) -> NodeID {
         if self.is_barrier() {
-            NodeID((self.0 >> 44) & ((1 << 16) - 1))
+            NodeID((self.0.get() >> 44) & ((1 << 16) - 1))
         } else {
-            NodeID((self.0 >> 47) & ((1 << 16) - 1))
+            NodeID((self.0.get() >> 47) & ((1 << 16) - 1))
         }
     }
     pub fn is_barrier(&self) -> bool {
-        (self.0 >> 60) == 2
+        (self.0.get() >> 60) == 2
     }
     pub fn generation(&self) -> u64 {
-        self.0 & ((1 << 20) - 1)
+        self.0.get() & ((1 << 20) - 1)
     }
     pub fn get_previous_phase(&self) -> Option<EventID> {
         assert!(self.is_barrier());
         if self.generation() > 1 {
-            Some(EventID(self.0 - 1))
+            Some(EventID(NonZeroU64::new(self.0.get() - 1).unwrap()))
         } else {
             None
         }
-    }
-}
-
-impl From<spy::serialize::EventID> for EventID {
-    fn from(e: spy::serialize::EventID) -> Self {
-        EventID(e.0 .0)
     }
 }
 
@@ -3217,21 +3052,16 @@ impl ProfUIDAllocator {
         self.next_prof_uid.0 += 1;
         self.next_prof_uid
     }
-    fn create_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
-        if let Some(event) = fevent.existing() {
-            Some(*self.fevents.entry(event).or_insert_with(|| {
-                self.next_prof_uid.0 += 1;
-                self.next_prof_uid
-            }))
-        } else {
-            None
-        }
+    fn create_reference(&mut self, fevent: EventID) -> ProfUID {
+        *self.fevents.entry(fevent).or_insert_with(|| {
+            self.next_prof_uid.0 += 1;
+            self.next_prof_uid
+        })
     }
     fn create_object(&mut self, fevent: EventID) -> ProfUID {
-        assert!(fevent.exists());
         assert!(!self.used_fevents.contains(&fevent));
         self.used_fevents.insert(fevent);
-        self.create_reference(fevent).unwrap()
+        self.create_reference(fevent)
     }
     fn complete_parse(&mut self) {
         // Invert the mapping so we can lookup fevents from ProfUIDs too
@@ -3409,7 +3239,7 @@ impl State {
             .and_then(|op| op.provenance.and_then(|pid| self.find_provenance(pid)))
     }
 
-    fn create_fevent_reference(&mut self, fevent: EventID) -> Option<ProfUID> {
+    fn create_fevent_reference(&mut self, fevent: EventID) -> ProfUID {
         self.prof_uid_allocator.create_reference(fevent)
     }
 
@@ -3425,7 +3255,6 @@ impl State {
         time: Timestamp,
         deduplicate: bool,
     ) -> CriticalPathVertex {
-        assert!(fevent.exists());
         if let Some(index) = self.event_lookup.get(&fevent) {
             let node_weight = self.event_graph.node_weight_mut(*index).unwrap();
             if node_weight.kind == EventEntryKind::UnknownEvent {
@@ -3451,7 +3280,6 @@ impl State {
     }
 
     fn find_event_node(&mut self, event: EventID) -> CriticalPathVertex {
-        assert!(event.exists());
         if let Some(index) = self.event_lookup.get(&event) {
             return *index;
         }
@@ -3472,7 +3300,6 @@ impl State {
     }
 
     pub fn find_critical_entry(&self, event: EventID) -> Option<&EventEntry> {
-        assert!(event.exists());
         let Some(node_id) = self.event_lookup.get(&event) else {
             return None;
         };
@@ -3524,8 +3351,8 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
         implicit: bool,
     ) -> &mut ProcEntry {
@@ -3535,7 +3362,7 @@ impl State {
         let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
         if implicit {
             // The fevent for implicit top-level tasks is a user event that
@@ -3560,7 +3387,7 @@ impl State {
             ProcEntryKind::Task(task_id, variant_id),
             time_range,
             creator_uid,
-            critical.existing(),
+            critical,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -3583,14 +3410,14 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
         self.record_event_node(
             fevent,
@@ -3607,7 +3434,7 @@ impl State {
             ProcEntryKind::MetaTask(variant_id),
             time_range,
             creator_uid,
-            critical.existing(),
+            critical,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -3628,11 +3455,11 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
-        fevent: EventID,
+        fevent: Option<EventID>,
     ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = fevent.map(|e| alloc.create_reference(e));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3656,10 +3483,10 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-        fevent: EventID,
+        fevent: Option<EventID>,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = fevent.map(|e| alloc.create_reference(e));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3679,11 +3506,11 @@ impl State {
         provenance: ProvenanceID,
         proc_id: ProcID,
         time_range: TimeRange,
-        fevent: EventID,
+        fevent: Option<EventID>,
     ) -> &mut ProcEntry {
         assert!(self.provenances.contains_key(&provenance));
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = fevent.map(|e| alloc.create_reference(e));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3708,7 +3535,7 @@ impl State {
         fevent: EventID,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(fevent);
+        let creator_uid = Some(alloc.create_reference(fevent));
         let proc = self.procs.create_proc(proc_id);
         proc.create_proc_entry(
             Base::new(alloc),
@@ -3748,7 +3575,7 @@ impl State {
             Some(op_id), // FIXME: should really make this None if op_id == 0 but backwards compatibilty with Python is hard
             ProcEntryKind::ProfTask,
             time_range,
-            creator_uid,
+            Some(creator_uid),
             None,
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
@@ -3756,18 +3583,18 @@ impl State {
     }
 
     fn create_copy<'a>(
-        &'a mut self,
+        &mut self,
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
         collective: u32,
         copies: &'a mut BTreeMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::new(alloc);
         self.record_event_node(
             fevent,
@@ -3784,7 +3611,7 @@ impl State {
                 op_id,
                 size,
                 creator_uid,
-                critical.existing(),
+                critical,
                 collective,
             )
         })
@@ -3795,13 +3622,13 @@ impl State {
         time_range: TimeRange,
         op_id: OpID,
         size: u64,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
         fills: &'a mut BTreeMap<EventID, Fill>,
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::new(alloc);
         self.record_event_node(
             fevent,
@@ -3811,16 +3638,9 @@ impl State {
             false,
         );
         assert!(!fills.contains_key(&fevent));
-        fills.entry(fevent).or_insert_with(|| {
-            Fill::new(
-                base,
-                time_range,
-                op_id,
-                size,
-                creator_uid,
-                critical.existing(),
-            )
-        })
+        fills
+            .entry(fevent)
+            .or_insert_with(|| Fill::new(base, time_range, op_id, size, creator_uid, critical))
     }
 
     fn create_deppart(
@@ -3829,14 +3649,14 @@ impl State {
         op_id: OpID,
         part_op: DepPartKind,
         time_range: TimeRange,
-        creator: EventID,
-        critical: EventID,
+        creator: Option<EventID>,
+        critical: Option<EventID>,
         fevent: EventID,
     ) {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
-        let creator_uid = alloc.create_reference(creator);
+        let creator_uid = creator.map(|e| alloc.create_reference(e));
         self.record_event_node(
             fevent,
             EventEntryKind::DepPartEvent,
@@ -3856,7 +3676,7 @@ impl State {
             time_range,
             op_id,
             creator_uid,
-            critical.existing(),
+            critical,
         ));
     }
 
@@ -3871,7 +3691,7 @@ impl State {
         fevent: EventID,
         insts: &'a mut BTreeMap<ProfUID, Inst>,
     ) -> &'a mut Inst {
-        let prof_uid = self.prof_uid_allocator.create_reference(fevent).unwrap();
+        let prof_uid = self.prof_uid_allocator.create_reference(fevent);
         insts
             .entry(prof_uid)
             .or_insert_with(|| Inst::new(Base::from_fevent(&mut self.prof_uid_allocator, fevent)))
@@ -4027,22 +3847,6 @@ impl State {
     pub fn complete_parse(&mut self) -> bool {
         self.prof_uid_allocator.complete_parse();
         self.has_prof_data
-    }
-
-    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
-        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
-            let proc = self.procs.get(proc_id).unwrap();
-            let entry = &proc.entry(prof_uid);
-            let mut total = 0u64;
-            let mut start = entry.time_range.start.unwrap().to_ns();
-            for wait in &entry.waiters.wait_intervals {
-                total += wait.start.to_ns() - start;
-                start = wait.end.to_ns();
-            }
-            total += entry.time_range.stop.unwrap().to_ns() - start;
-            return total;
-        }
-        0
     }
 
     pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
@@ -4451,382 +4255,6 @@ impl State {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SpyState {
-    has_spy_data: bool,
-    spy_ops: BTreeMap<OpID, SpyOp>,
-    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
-    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
-    spy_op_parent: BTreeMap<OpID, OpID>,
-    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
-    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
-    spy_events: BTreeMap<EventID, SpyEvent>,
-    pub critical_path: Vec<ProfUID>,
-}
-
-impl SpyState {
-    fn create_spy_event_depencence(&mut self, pre: EventID, post: EventID) {
-        assert!(pre != post);
-        self.spy_events
-            .entry(post)
-            .or_insert_with(SpyEvent::new)
-            .preconditions
-            .insert(pre);
-        self.spy_events
-            .entry(pre)
-            .or_insert_with(SpyEvent::new)
-            .postconditions
-            .insert(post);
-    }
-
-    fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        let entry = self
-            .spy_ops
-            .entry(op)
-            .or_insert_with(|| SpyOp::new(pre, post));
-        if pre.0 != 0 {
-            assert!(entry.precondition == pre || entry.precondition.0 == 0);
-            entry.precondition = pre;
-            self.spy_op_by_precondition
-                .entry(pre)
-                .or_insert_with(BTreeSet::new)
-                .insert(op);
-        }
-        if post.0 != 0 {
-            assert!(entry.postcondition == post || entry.postcondition.0 == 0);
-            entry.postcondition = post;
-            self.spy_op_by_postcondition
-                .entry(post)
-                .or_insert_with(BTreeSet::new)
-                .insert(op);
-        }
-    }
-
-    fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
-        if let Some(old) = self.spy_op_parent.insert(child, parent) {
-            assert!(old == parent);
-        }
-        self.spy_op_children
-            .entry(parent)
-            .or_insert_with(BTreeSet::new)
-            .insert(child);
-    }
-
-    pub fn process_spy_records(&mut self, records: &Vec<spy::serialize::Record>) {
-        for record in records {
-            process_spy_record(record, self);
-        }
-        assert!(self.has_spy_data, "no Legion Spy logs in logfile");
-    }
-
-    fn traverse_dag_pre<V, N, F>(root: V, neighbors: N, mut pre: F)
-    where
-        V: std::marker::Copy + Ord,
-        N: Fn(&mut Vec<V>, V),
-        F: FnMut(V),
-    {
-        let mut visited = BTreeSet::new();
-        let mut stack = Vec::new();
-        stack.push(root);
-        while let Some(node) = stack.pop() {
-            if visited.contains(&node) {
-                continue;
-            }
-            visited.insert(node);
-
-            neighbors(&mut stack, node);
-
-            pre(node);
-        }
-    }
-
-    fn traverse_dag_post<V, I, J, N, F>(roots: I, neighbors: N, mut post: F)
-    where
-        V: std::marker::Copy + Ord,
-        I: Iterator<Item = V>,
-        J: Iterator<Item = V>,
-        N: Fn(V) -> J,
-        F: FnMut(V),
-    {
-        let mut visited = BTreeSet::new();
-        let mut stack = Vec::new();
-        for root in roots {
-            stack.push((root, true));
-            while let Some((node, first_pass)) = stack.pop() {
-                if first_pass {
-                    if visited.contains(&node) {
-                        continue;
-                    }
-                    visited.insert(node);
-                    stack.push((node, false));
-                    stack.extend(neighbors(node).map(|x| (x, true)));
-                } else {
-                    post(node);
-                }
-            }
-        }
-    }
-
-    fn compute_op_preconditions(
-        op: &SpyOp,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-    ) {
-        let neighbors = |stack: &mut Vec<_>, event_id| {
-            if let Some(event) = spy_events.get(&event_id) {
-                stack.extend(event.preconditions.iter());
-            }
-        };
-        let visit = |event_id| {
-            if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
-                for op_id in op_ids {
-                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
-                        deps.in_.insert(*prof_uid);
-                    }
-                }
-            }
-        };
-        Self::traverse_dag_pre(op.precondition, neighbors, visit);
-    }
-
-    fn compute_op_postconditions(
-        op: &SpyOp,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
-        spy_events: &BTreeMap<EventID, SpyEvent>,
-    ) {
-        let neighbors = |stack: &mut Vec<_>, event_id| {
-            if let Some(event) = spy_events.get(&event_id) {
-                stack.extend(event.postconditions.iter());
-            }
-        };
-        let visit = |event_id| {
-            if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
-                for op_id in op_ids {
-                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
-                        deps.out.insert(*prof_uid);
-                    }
-                }
-            }
-        };
-        Self::traverse_dag_pre(op.postcondition, neighbors, visit);
-    }
-
-    fn compute_op_parent(
-        op_id: OpID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_op_parent: &BTreeMap<OpID, OpID>,
-    ) {
-        let mut stack = Vec::new();
-        stack.push(op_id);
-        while let Some(node) = stack.pop() {
-            if let Some(parent) = spy_op_parent.get(&node) {
-                if let Some(parent_uid) = op_prof_uid.get(parent) {
-                    deps.parent.insert(*parent_uid);
-                } else {
-                    stack.push(*parent);
-                }
-            }
-        }
-    }
-
-    fn compute_op_children(
-        op_id: OpID,
-        deps: &mut Dependencies,
-        op_prof_uid: &BTreeMap<OpID, ProfUID>,
-        spy_op_children: &BTreeMap<OpID, BTreeSet<OpID>>,
-    ) {
-        let mut stack = Vec::new();
-        stack.push(op_id);
-        while let Some(node) = stack.pop() {
-            if let Some(children) = spy_op_children.get(&node) {
-                for child in children {
-                    if let Some(child_uid) = op_prof_uid.get(child) {
-                        deps.children.insert(*child_uid);
-                    } else {
-                        stack.push(*child);
-                    }
-                }
-            }
-        }
-    }
-
-    fn toposort_graph(&mut self) -> Vec<ProfUID> {
-        let mut postorder = Vec::new();
-        let neighbors = |node| {
-            let deps = self.spy_op_deps.get(&node).unwrap();
-            deps.in_.iter().copied()
-        };
-        let visit = |node| {
-            postorder.push(node);
-        };
-        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
-        postorder
-    }
-
-    fn transitive_reduce_graph(&mut self, toposort: &Vec<ProfUID>) {
-        // TODO: Elliott: legion_spy.py computes this with a bit set,
-        // which may be more efficient.
-        let mut reachable: BTreeMap<ProfUID, BTreeSet<ProfUID>> = BTreeMap::new();
-        for root in toposort {
-            // Compute the reachable sets in topological order to
-            // minimize the size of the graph we have to traverse
-            let mut root_reachable = BTreeSet::new();
-            let deps = self.spy_op_deps.get(root).unwrap();
-            for node in &deps.in_ {
-                // Ok to unwrap here as we're walking in toposort
-                // order to make sure this has been precomputed
-                let node_reachable = reachable.get(node).unwrap();
-                root_reachable.extend(node_reachable.iter());
-            }
-
-            let mut to_remove = Vec::new();
-            for node in &deps.in_ {
-                if root_reachable.contains(node) {
-                    to_remove.push(*node);
-                } else {
-                    root_reachable.insert(*node);
-                }
-            }
-            reachable.insert(*root, root_reachable);
-
-            for node in to_remove {
-                let root_deps = self.spy_op_deps.get_mut(root).unwrap();
-                assert!(root_deps.in_.remove(&node));
-                let node_deps = self.spy_op_deps.get_mut(&node).unwrap();
-                assert!(node_deps.out.remove(root));
-            }
-        }
-    }
-
-    fn simplify_spy_graph(&mut self) {
-        let toposort = self.toposort_graph();
-
-        self.transitive_reduce_graph(&toposort);
-    }
-
-    fn compute_critical_path(&mut self, state: &State) {
-        // Postorder DFS walking both in and child edges, computing the
-        // longest path at each node based on the sum of the longest input and
-        // longest child
-        type Path = (u64, Vec<ProfUID>);
-        fn path_max<'a>(a: &'a Path, b: &'a Path) -> &'a Path {
-            if a.0 > b.0 {
-                a
-            } else {
-                b
-            }
-        }
-
-        let empty_path = (0, Vec::new());
-
-        let mut longest_paths = BTreeMap::<ProfUID, Path>::new();
-        let neighbors = |node| {
-            let deps = self.spy_op_deps.get(&node).unwrap();
-            let children = deps.children.iter().copied();
-            children.chain(deps.in_.iter().copied())
-        };
-        let visit = |node| {
-            let deps = self.spy_op_deps.get(&node).unwrap();
-            let path = |dep| longest_paths.get(dep).unwrap();
-            let long_in = deps.in_.iter().map(path).fold(&empty_path, path_max);
-            let long_child = deps.children.iter().map(path).fold(&empty_path, path_max);
-            let duration = long_in.0 + long_child.0 + state.compute_duration(node);
-            let mut path = long_in.1.to_owned();
-            path.extend(long_child.1.iter());
-            path.push(node);
-            longest_paths.insert(node, (duration, path));
-        };
-        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
-        self.critical_path = longest_paths
-            .values()
-            .fold(&empty_path, path_max)
-            .1
-            .to_owned();
-    }
-
-    pub fn postprocess_spy_records(&mut self, state: &State) {
-        if !self.has_spy_data {
-            println!("No Legion Spy data, skipping postprocess step");
-            return;
-        }
-
-        // Process tasks first
-        for op_id in state.tasks.keys() {
-            let prof_uid = state.op_prof_uid.get(op_id).unwrap();
-            let deps = self
-                .spy_op_deps
-                .entry(*prof_uid)
-                .or_insert_with(Dependencies::new);
-            let op = self.spy_ops.get(op_id).expect("missing dependecies for op");
-            Self::compute_op_preconditions(
-                op,
-                deps,
-                &state.op_prof_uid,
-                &self.spy_op_by_postcondition,
-                &self.spy_events,
-            );
-            Self::compute_op_postconditions(
-                op,
-                deps,
-                &state.op_prof_uid,
-                &self.spy_op_by_precondition,
-                &self.spy_events,
-            );
-            Self::compute_op_parent(*op_id, deps, &state.op_prof_uid, &self.spy_op_parent);
-            Self::compute_op_children(*op_id, deps, &state.op_prof_uid, &self.spy_op_children);
-        }
-
-        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
-        for proc in state.procs.values() {
-            for (uid, entry) in &proc.entries {
-                if let ProcEntryKind::ProfTask = entry.kind {
-                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
-                    // has an op_id not an initiation_op, so we have to work
-                    // around that here
-                    continue;
-                }
-                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
-                    if let Some(task) = state.find_task(initiation_op) {
-                        let task_stop = task.time_range.stop;
-                        let task_uid = task.base.prof_uid;
-                        let before = entry.time_range.stop < task_stop;
-
-                        let task_deps = self
-                            .spy_op_deps
-                            .entry(task_uid)
-                            .or_insert_with(Dependencies::new);
-                        if before {
-                            task_deps.in_.insert(*uid);
-                        } else {
-                            task_deps.out.insert(*uid);
-                        }
-
-                        let entry_deps = self
-                            .spy_op_deps
-                            .entry(*uid)
-                            .or_insert_with(Dependencies::new);
-                        if before {
-                            entry_deps.out.insert(task_uid);
-                        } else {
-                            entry_deps.in_.insert(task_uid);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Reduce the graph
-        self.simplify_spy_graph();
-
-        self.compute_critical_path(state);
-    }
-}
-
 trait CreateProc {
     fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc;
 }
@@ -5057,7 +4485,6 @@ fn process_record(
             fspace_id,
             tree_id,
         } => {
-            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
@@ -5074,7 +4501,6 @@ fn process_record(
             eqk,
             align_desc,
         } => {
-            assert!(fevent.exists());
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
@@ -5092,7 +4518,6 @@ fn process_record(
                 Ok(x) => x,
                 Err(_) => unreachable!("bad dim kind"),
             };
-            assert!(fevent.exists());
             state
                 .create_inst(*fevent, insts)
                 .add_dim_order(dim, dim_kind);
@@ -5103,9 +4528,8 @@ fn process_record(
             index_id,
             field_id,
         } => {
-            assert!(fevent.exists());
             state.create_op(*op_id);
-            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            let inst_uid = state.create_fevent_reference(*fevent);
             let operation_inst_info = OperationInstInfo::new(inst_uid, *index_id, *field_id);
             state
                 .find_op_mut(*op_id)
@@ -5178,13 +4602,7 @@ fn process_record(
                 .find_task_mut(*op_id)
                 .unwrap()
                 .waiters
-                .add_wait_interval(WaitInterval::from_event(
-                    *start,
-                    *ready,
-                    *end,
-                    event.existing().unwrap(),
-                    None,
-                ));
+                .add_wait_interval(WaitInterval::from_event(*start, *ready, *end, *event, None));
         }
         Record::MetaWaitInfo {
             op_id,
@@ -5199,13 +4617,7 @@ fn process_record(
                 .find_last_meta_mut(*op_id, *lg_id)
                 .unwrap()
                 .waiters
-                .add_wait_interval(WaitInterval::from_event(
-                    *start,
-                    *ready,
-                    *end,
-                    event.existing().unwrap(),
-                    None,
-                ));
+                .add_wait_interval(WaitInterval::from_event(*start, *ready, *end, *event, None));
         }
         Record::TaskInfo {
             op_id,
@@ -5382,8 +4794,8 @@ fn process_record(
             if *dst != MemID(0) {
                 dst_mem = Some(*dst);
             }
-            let src_uid = state.create_fevent_reference(*src_inst);
-            let dst_uid = state.create_fevent_reference(*dst_inst);
+            let src_uid = src_inst.map(|i| state.create_fevent_reference(i));
+            let dst_uid = dst_inst.map(|i| state.create_fevent_reference(i));
             let copy_inst_info = CopyInstInfo::new(
                 src_mem, dst_mem, *src_fid, *dst_fid, src_uid, dst_uid, *num_hops, *indirect,
             );
@@ -5413,7 +4825,7 @@ fn process_record(
             dst_inst,
             fevent,
         } => {
-            let dst_uid = state.create_fevent_reference(*dst_inst).unwrap();
+            let dst_uid = state.create_fevent_reference(*dst_inst);
             let fill_inst_info = FillInstInfo::new(*dst, *fid, dst_uid);
             let fill = fills.get_mut(fevent).unwrap();
             fill.add_fill_inst_info(fill_inst_info);
@@ -5429,11 +4841,9 @@ fn process_record(
             destroy,
             creator,
         } => {
-            assert!(fevent.exists());
-            assert!(creator.exists());
             state.create_op(*op_id);
             let creator_uid = state.create_fevent_reference(*creator);
-            let inst_uid = state.create_fevent_reference(*fevent).unwrap();
+            let inst_uid = state.create_fevent_reference(*fevent);
             state.insts.entry(inst_uid).or_insert_with(|| *mem_id);
             state
                 .create_inst(*fevent, insts)
@@ -5533,8 +4943,6 @@ fn process_record(
             fevent,
             completion,
         } => {
-            assert!(fevent.exists());
-            assert!(creator.exists());
             let time_range = TimeRange::new_call(*start, *stop);
             let entry = state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
             profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
@@ -5560,7 +4968,7 @@ fn process_record(
             event,
             backtrace_id,
         } => {
-            let task_uid = state.create_fevent_reference(*fevent).unwrap();
+            let task_uid = state.create_fevent_reference(*fevent);
             let proc = state.procs.get_mut(proc_id).unwrap();
             proc.record_event_wait(task_uid, *event, *backtrace_id);
         }
@@ -5573,9 +4981,7 @@ fn process_record(
             pre2,
             pre3,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Event mergers can record multiple of these statements so need to deduplicate
             let dst = state.record_event_node(
                 *result,
@@ -5584,20 +4990,20 @@ fn process_record(
                 *performed,
                 true,
             );
-            if pre0.exists() {
-                let src = state.find_event_node(*pre0);
+            if let Some(pre0) = *pre0 {
+                let src = state.find_event_node(pre0);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre1.exists() {
-                let src = state.find_event_node(*pre1);
+            if let Some(pre1) = *pre1 {
+                let src = state.find_event_node(pre1);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre2.exists() {
-                let src = state.find_event_node(*pre2);
+            if let Some(pre2) = *pre2 {
+                let src = state.find_event_node(pre2);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre3.exists() {
-                let src = state.find_event_node(*pre3);
+            if let Some(pre3) = *pre3 {
+                let src = state.find_event_node(pre3);
                 state.event_graph.add_edge(src, dst, ());
             }
         }
@@ -5607,9 +5013,7 @@ fn process_record(
             precondition,
             performed,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Only need to deduplicate if it was triggered on a remote node
             let deduplicate = result.node_id() != fevent.node_id();
             let dst = state.record_event_node(
@@ -5619,8 +5023,8 @@ fn process_record(
                 *performed,
                 deduplicate,
             );
-            if precondition.exists() {
-                let src = state.find_event_node(*precondition);
+            if let Some(precondition) = *precondition {
+                let src = state.find_event_node(precondition);
                 if deduplicate {
                     // Use update edge to deduplicate edges
                     state.event_graph.update_edge(src, dst, ());
@@ -5634,9 +5038,7 @@ fn process_record(
             fevent,
             performed,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Only need to deduplicate if it was poisoned on a remote node
             let deduplicate = result.node_id() != fevent.node_id();
             state.record_event_node(
@@ -5653,10 +5055,8 @@ fn process_record(
             precondition,
             performed,
         } => {
-            assert!(result.exists());
             assert!(result.is_barrier());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Barrier arrivals are strange in that we might ultimately have multiple
             // arrivals on the barrier and we need to deduplicate those and find the
             // last arrival which we can't do with record_event_node
@@ -5692,8 +5092,8 @@ fn process_record(
                     state.event_graph.add_edge(previous_index, index, ());
                 }
             }
-            if precondition.exists() {
-                let src = state.find_event_node(*precondition);
+            if let Some(precondition) = *precondition {
+                let src = state.find_event_node(precondition);
                 let dst = *state.event_lookup.get(&result).unwrap();
                 // Use update edge here to deduplicate adding edges in case
                 // we did a reduction of arrivals with the barrier in the runtime
@@ -5707,9 +5107,7 @@ fn process_record(
             performed,
             reservation: _, // Ignoring this for now until we can do a contention analysis
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             let dst = state.record_event_node(
                 *result,
                 EventEntryKind::ReservationAcquire,
@@ -5717,31 +5115,8 @@ fn process_record(
                 *performed,
                 false,
             );
-            if precondition.exists() {
-                let src = state.find_event_node(*precondition);
-                state.event_graph.add_edge(src, dst, ());
-            }
-        }
-        Record::InstanceReadyInfo {
-            result,
-            precondition,
-            fevent,
-            performed,
-        } => {
-            assert!(result.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
-            let dst = state.record_event_node(
-                *result,
-                EventEntryKind::InstanceReady,
-                creator_uid,
-                *performed,
-                false,
-            );
-            if precondition.exists() {
-                state
-                    .create_inst(*fevent, insts)
-                    .set_critical(*precondition);
-                let src = state.find_event_node(*precondition);
+            if let Some(precondition) = *precondition {
+                let src = state.find_event_node(precondition);
                 state.event_graph.add_edge(src, dst, ());
             }
         }
@@ -5754,9 +5129,7 @@ fn process_record(
             pre2,
             pre3,
         } => {
-            assert!(result.exists());
-            assert!(fevent.exists());
-            let creator_uid = state.create_fevent_reference(*fevent).unwrap();
+            let creator_uid = state.create_fevent_reference(*fevent);
             // Completion queue events are weird in a similar way to how event mergers are weird in
             // that we might ultimately have multiple preconditions on the event and we need to
             // deduplicate those and find the first triggering event
@@ -5767,82 +5140,42 @@ fn process_record(
                 *performed,
                 true,
             );
-            if pre0.exists() {
-                let src = state.find_event_node(*pre0);
+            if let Some(pre0) = *pre0 {
+                let src = state.find_event_node(pre0);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre1.exists() {
-                let src = state.find_event_node(*pre1);
+            if let Some(pre1) = *pre1 {
+                let src = state.find_event_node(pre1);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre2.exists() {
-                let src = state.find_event_node(*pre2);
+            if let Some(pre2) = *pre2 {
+                let src = state.find_event_node(pre2);
                 state.event_graph.add_edge(src, dst, ());
             }
-            if pre3.exists() {
-                let src = state.find_event_node(*pre3);
+            if let Some(pre3) = *pre3 {
+                let src = state.find_event_node(pre3);
                 state.event_graph.add_edge(src, dst, ());
             }
         }
-    }
-}
-
-fn process_spy_record(record: &spy::serialize::Record, state: &mut SpyState) {
-    use spy::serialize::Record;
-
-    match record {
-        Record::SpyLogging => unimplemented!("legion_prof_rs requires detailed Legion Spy logging"),
-        Record::SpyDetailedLogging => {
-            state.has_spy_data = true;
-        }
-        Record::EventDependence { id1, id2 } => {
-            state.create_spy_event_depencence((*id1).into(), (*id2).into());
-        }
-
-        Record::OperationEvents { uid, pre, post } => {
-            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
-        }
-        Record::RealmCopy { pre, post, .. } => {
-            state.create_spy_event_depencence((*pre).into(), (*post).into());
-        }
-        Record::IndirectCopy { pre, post, .. } => {
-            state.create_spy_event_depencence((*pre).into(), (*post).into());
-        }
-        Record::RealmFill { pre, post, .. } => {
-            state.create_spy_event_depencence((*pre).into(), (*post).into());
-        }
-        Record::RealmDepPart { preid, postid, .. } => {
-            state.create_spy_event_depencence((*preid).into(), (*postid).into());
-        }
-
-        Record::TopTask { ctx, uid, .. } => {
-            state.create_spy_op_parent((*ctx).into(), (*uid).into());
-        }
-        Record::IndividualTask { ctx, uid, .. } => {
-            state.create_spy_op_parent((*ctx).into(), (*uid).into());
-        }
-        Record::IndexTask { ctx, uid, .. } => {
-            state.create_spy_op_parent((*ctx).into(), (*uid).into());
-        }
-        Record::IndexSlice { index, slice, .. } => {
-            state.create_spy_op_parent((*index).into(), (*slice).into());
-        }
-        Record::SliceSlice { slice1, slice2, .. } => {
-            state.create_spy_op_parent((*slice1).into(), (*slice2).into());
-        }
-        Record::SlicePoint {
-            slice, point_id, ..
+        Record::InstanceReadyInfo {
+            result,
+            precondition,
+            fevent,
+            performed,
         } => {
-            state.create_spy_op_parent((*slice).into(), (*point_id).into());
+            let creator_uid = state.create_fevent_reference(*fevent);
+            let dst = state.record_event_node(
+                *result,
+                EventEntryKind::InstanceReady,
+                creator_uid,
+                *performed,
+                false,
+            );
+            if let Some(precondition) = *precondition {
+                state.create_inst(*fevent, insts).set_critical(precondition);
+                let src = state.find_event_node(precondition);
+                state.event_graph.add_edge(src, dst, ());
+            }
         }
-        Record::PointPoint { point1, point2, .. } => {
-            state.create_spy_op_parent((*point1).into(), (*point2).into());
-        }
-        Record::IndexPoint {
-            index, point_id, ..
-        } => {
-            state.create_spy_op_parent((*index).into(), (*point_id).into());
-        }
-        _ => {} // ok, ignore everything else
     }
 }
