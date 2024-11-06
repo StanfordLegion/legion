@@ -7616,6 +7616,7 @@ class Operation(object):
         # at finding dependences of things nearby in the graph
         queue = collections.deque()
         queue.append(self)
+
         if len(previous_deps) > 0:
             # We already started BFS-ing so we can restart from all
             # the operations that we already visited
@@ -7623,14 +7624,19 @@ class Operation(object):
                 queue.append(op)
 
         queue.append(self.index_owner)
+        previous_deps[self] = None
+        previous_deps[self.index_owner] = None
 
         while queue:
             current = queue.popleft()
+            previous_deps[current] = None
+            if current is prev_op:
+                return True
+
             if current.is_index_op():
                 for point in current.points.values():
-                    if point.op in previous_deps:
-                        continue
-                    queue.append(point.op)
+                    if point.op not in previous_deps:
+                        queue.append(point.op)
             else:
                 if current.index_owner and current.index_owner not in previous_deps:
                     queue.append(current.index_owner)
