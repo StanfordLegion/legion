@@ -1189,7 +1189,7 @@ namespace Realm {
         }
         first_generation = first_gen;
 
-        int rel_gen = trigger_gen - first_gen;
+        int rel_gen = trigger_gen - first_generation;
         assert(rel_gen > 0);
         if(value_capacity < (size_t)rel_gen) {
           size_t new_capacity = rel_gen;
@@ -1202,8 +1202,8 @@ namespace Realm {
         // trigger_gen might have changed so make sure you use args.trigger_gen here
         assert(datalen == (redop->sizeof_lhs * (trigger_gen - previous_gen)));
         assert(previous_gen >= first_gen);
-        memcpy(final_values + ((previous_gen - first_gen) * redop->sizeof_lhs), data,
-               datalen);
+        memcpy(final_values + ((previous_gen - first_generation) * redop->sizeof_lhs),
+               data, datalen);
       }
 
       // external waiters need to be signalled inside the lock
