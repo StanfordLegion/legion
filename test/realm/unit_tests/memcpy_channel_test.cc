@@ -49,10 +49,35 @@ INSTANTIATE_TEST_SUITE_P(Foo, MemcpyChannelParamTest,
                          testing::ValuesIn(kMemcpyChannelTestCases));
 
 struct MemcpyXferDescTestCase {
-  std::vector<Memory> memories;
+  std::vector<size_t> src_strides;
+  std::vector<size_t> src_extents;
+
+  std::vector<size_t> dst_strides;
+  std::vector<size_t> dst_extents;
 };
 
 class MemcpyXferDescParamTest : public ::testing::TestWithParam<MemcpyXferDescTestCase> {
+public:
+  size_t set_port(XferDes::XferPort &port, const std::vector<size_t> &strides,
+                  const std::vector<size_t> &extents)
+  {
+    size_t bytes = strides[0] * extents[0];
+
+    size_t *addr_data = port.addrlist.begin_nd_entry(strides.size());
+
+    for(int dim = 1; dim < strides.size(); dim++) {
+      size_t count = extents[dim];
+      addr_data[dim * 2] = count;
+      addr_data[dim * 2 + 1] = strides[dim];
+      bytes *= count;
+    }
+
+    addr_data[0] = (bytes << 4) + strides.size();
+    port.addrlist.commit_nd_entry(strides.size(), bytes);
+    port.addrcursor.set_addrlist(&port.addrlist);
+
+    return bytes;
+  }
 };
 
 template <int N, typename T>
@@ -65,7 +90,7 @@ public:
 
   virtual void reset(void) {}
 
-  virtual bool done(void) { return false; }
+  virtual bool done(void) { return true; }
   virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
                       bool tentative = false)
   {
@@ -76,6 +101,7 @@ public:
   virtual size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
                              bool tentative = false)
   {
+    assert(0);
     return 0;
   }
 
@@ -88,7 +114,7 @@ public:
                              const InstanceLayoutPieceBase *&nonaffine)
   {
     nonaffine = 0;
-    return false;
+    return true;
   }
 
 protected:
@@ -97,24 +123,12 @@ protected:
     assert(0);
     return false;
   }
-
-  bool have_rect, is_done;
-  Rect<N, T> cur_rect;
-  FieldID cur_field_id;
-  size_t cur_field_offset, cur_field_size;
-  Point<N, T> cur_point, next_point;
-  bool carry;
-
-  RegionInstanceImpl *inst_impl;
-  // InstanceLayout<N, T> *inst_layout;
-  size_t inst_offset;
-  bool tentative_valid;
-  int dim_order[N];
 };
 
 TEST_P(MemcpyXferDescParamTest, ProgresXD)
 {
-  // ChannelTestCase test_case = GetParam();
+  auto test_case = GetParam();
+
   NodeID owner = 0;
   Node node;
   std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
@@ -132,63 +146,48 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
       channel.create_xfer_des(0, launch_node, guid, inputs_info, outputs_info, priority,
                               redop_info, nullptr, 0, 0);
 
-  size_t alloc_bytes = 16;
-  void *input_alloc_base = malloc(alloc_bytes);
-  MemoryImpl *input_mem = new LocalCPUMemory(Memory::NO_MEMORY, alloc_bytes, 0,
+  xfer_desc->input_ports.resize(1);
+  XferDes::XferPort &input_port = xfer_desc->input_ports[0];
+
+  size_t src_bytes = set_port(input_port, test_case.src_strides, test_case.src_extents);
+  std::vector<char> in_buffer(src_bytes, 7);
+  void *input_alloc_base = in_buffer.data();
+  MemoryImpl *input_mem = new LocalCPUMemory(Memory::NO_MEMORY, src_bytes, 0,
                                              Memory::SYSTEM_MEM, input_alloc_base);
 
-  void *output_alloc_base = malloc(alloc_bytes);
-  MemoryImpl *output_mem = new LocalCPUMemory(Memory::NO_MEMORY, alloc_bytes, 0,
-                                              Memory::SYSTEM_MEM, output_alloc_base);
-
-  const size_t dim = 1;
-  const size_t bytes = alloc_bytes;
-
-  AddressList inaddrlist;
-  size_t *in_addr_data = inaddrlist.begin_nd_entry(dim);
-  in_addr_data[0] = (bytes << 4) + dim;
-  inaddrlist.commit_nd_entry(dim, bytes);
-
-  AddressListCursor in_addrcursor;
-  in_addrcursor.set_addrlist(&inaddrlist);
-
-  XferDes::XferPort input_port;
   input_port.mem = input_mem;
   input_port.peer_port_idx = 0;
-  input_port.addrlist = inaddrlist;
-  input_port.addrcursor = in_addrcursor;
+
   input_port.iter = new TransferIteratorMock<1, int>();
-  xfer_desc->input_ports.push_back(input_port);
+  input_port.peer_guid = XferDes::XFERDES_NO_GUID;
 
-  AddressList outaddrlist;
-  size_t *out_addr_data = outaddrlist.begin_nd_entry(dim);
-  out_addr_data[0] = (bytes << 4) + dim;
-  outaddrlist.commit_nd_entry(dim, bytes);
+  xfer_desc->output_ports.resize(1);
+  XferDes::XferPort &output_port = xfer_desc->output_ports[0];
 
-  AddressListCursor out_addrcursor;
-  out_addrcursor.set_addrlist(&outaddrlist);
+  size_t dst_bytes = set_port(output_port, test_case.dst_strides, test_case.dst_extents);
+  std::vector<char> out_buffer(dst_bytes, 7);
+  void *output_alloc_base = out_buffer.data();
+  MemoryImpl *output_mem = new LocalCPUMemory(Memory::NO_MEMORY, dst_bytes, 0,
+                                              Memory::SYSTEM_MEM, output_alloc_base);
 
-  XferDes::XferPort output_port;
   output_port.mem = output_mem;
   output_port.peer_port_idx = 0;
   output_port.iter = new TransferIteratorMock<1, int>();
-  output_port.addrlist = outaddrlist;
-  output_port.addrcursor = out_addrcursor;
-  output_port.peer_guid = XferDes::XFERDES_NO_GUID;
-  xfer_desc->output_ports.push_back(output_port);
-
-
-  //xfer_desc->output_control.current_io_port = -1;
 
   auto memcpy_xfer_desc = reinterpret_cast<MemcpyXferDes *>(xfer_desc);
   memcpy_xfer_desc->progress_xd(&channel, TimeLimit::responsive());
+
+  for(size_t i = 0; i < in_buffer.size(); i++) {
+    EXPECT_EQ(in_buffer[i], out_buffer[i]);
+  }
 
   channel.shutdown();
 }
 
 const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
-    MemcpyXferDescTestCase{},
-};
+    // Case 1
+    MemcpyXferDescTestCase{
+        .src_strides = {4}, .src_extents = {4}, .dst_strides = {4}, .dst_extents = {4}}};
 
 INSTANTIATE_TEST_SUITE_P(Foo, MemcpyXferDescParamTest,
                          testing::ValuesIn(kMemcpyXferDescTestCases));

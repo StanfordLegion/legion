@@ -864,8 +864,9 @@ namespace Realm {
             get_runtime()->custom_serdez_table.get(ii.serdez_id, 0);
         assert(op != 0);
         p.serdez_op = op;
-      } else
+      } else {
         p.serdez_op = 0;
+      }
       p.peer_guid = ii.peer_guid;
       p.peer_port_idx = ii.peer_port_idx;
       p.indirect_port_idx = ii.indirect_port_idx;
@@ -921,8 +922,9 @@ namespace Realm {
             get_runtime()->custom_serdez_table.get(oi.serdez_id, 0);
         assert(op != 0);
         p.serdez_op = op;
-      } else
+      } else {
         p.serdez_op = 0;
+      }
       p.peer_guid = oi.peer_guid;
       p.peer_port_idx = oi.peer_port_idx;
       p.indirect_port_idx = oi.indirect_port_idx;
@@ -944,8 +946,9 @@ namespace Realm {
 
       // if we're writing into an IB, the first 'ib_size' byte
       //  locations can be freely written
-      if(p.ib_size > 0)
+      if(p.ib_size > 0) {
         p.seq_remote.add_span(0, p.ib_size);
+      }
     }
 
     if(scatter_control_port >= 0) {
@@ -965,8 +968,9 @@ namespace Realm {
       fill_data = malloc(fill_size);
       assert(fill_data);
     }
-    if(fill_size > 0)
+    if(fill_size > 0) {
       memcpy(fill_data, _fill_data, fill_size);
+    }
 
     nb_update_pre_bytes_total_calls_expected = 0;
     for(size_t i = 0; i < input_ports.size(); i++) {
@@ -985,14 +989,17 @@ namespace Realm {
       available_reqs.pop();
     }
     for(std::vector<XferPort>::const_iterator it = input_ports.begin();
-        it != input_ports.end(); ++it)
+        it != input_ports.end(); ++it) {
       delete it->iter;
+    }
     for(std::vector<XferPort>::const_iterator it = output_ports.begin();
-        it != output_ports.end(); ++it)
+        it != output_ports.end(); ++it) {
       delete it->iter;
+    }
 
-    if(fill_data != &inline_fill_storage)
+    if(fill_data != &inline_fill_storage) {
       free(fill_data);
+    }
   };
 
   Event XferDes::request_metadata()
@@ -1001,14 +1008,16 @@ namespace Realm {
     for(std::vector<XferPort>::iterator it = input_ports.begin(); it != input_ports.end();
         ++it) {
       Event e = it->iter->request_metadata();
-      if(!e.has_triggered())
+      if(!e.has_triggered()) {
         preconditions.push_back(e);
+      }
     }
     for(std::vector<XferPort>::iterator it = output_ports.begin();
         it != output_ports.end(); ++it) {
       Event e = it->iter->request_metadata();
-      if(!e.has_triggered())
+      if(!e.has_triggered()) {
         preconditions.push_back(e);
+      }
     }
     return Event::merge_events(preconditions);
   }
@@ -1016,9 +1025,11 @@ namespace Realm {
   void XferDes::mark_completed()
   {
     for(std::vector<XferPort>::const_iterator it = input_ports.begin();
-        it != input_ports.end(); ++it)
-      if(it->ib_size > 0)
+        it != input_ports.end(); ++it) {
+      if(it->ib_size > 0) {
         free_intermediate_buffer(it->mem->me, it->ib_offset, it->ib_size);
+      }
+    }
 
     // notify owning DmaRequest upon completion of this XferDes
     // printf("complete XD = %lu\n", guid);
@@ -2374,519 +2385,522 @@ namespace Realm {
   // class MemcpyXferDes
   //
 
-      MemcpyXferDes::MemcpyXferDes(uintptr_t _dma_op, Channel *_channel,
-				   NodeID _launch_node, XferDesID _guid,
-				   const std::vector<XferDesPortInfo>& inputs_info,
-				   const std::vector<XferDesPortInfo>& outputs_info,
-				   int _priority)
-	: XferDes(_dma_op, _channel, _launch_node, _guid,
-		  inputs_info, outputs_info,
-		  _priority, 0, 0)
-	, memcpy_req_in_use(false)
-      {
-	kind = XFER_MEM_CPY;
+  MemcpyXferDes::MemcpyXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
+                               XferDesID _guid,
+                               const std::vector<XferDesPortInfo> &inputs_info,
+                               const std::vector<XferDesPortInfo> &outputs_info,
+                               int _priority)
+    : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
+              _priority, 0, 0)
+    , memcpy_req_in_use(false)
+  {
+    kind = XFER_MEM_CPY;
 
-	// scan input and output ports to see if any use serdez ops
-	has_serdez = false;
-	for(size_t i = 0; i < inputs_info.size(); i++)
-	  if(inputs_info[i].serdez_id != 0)
-	    has_serdez = true;
-	for(size_t i = 0; i < outputs_info.size(); i++)
-	  if(outputs_info[i].serdez_id != 0)
-	    has_serdez = true;
-
-	// ignore requested max_nr and always use 1
-	memcpy_req.xd = this;
+    // scan input and output ports to see if any use serdez ops
+    has_serdez = false;
+    for(size_t i = 0; i < inputs_info.size(); i++) {
+      if(inputs_info[i].serdez_id != 0) {
+        has_serdez = true;
       }
+    }
+    for(size_t i = 0; i < outputs_info.size(); i++) {
+      if(outputs_info[i].serdez_id != 0) {
+        has_serdez = true;
+      }
+    }
 
-      long MemcpyXferDes::get_requests(Request** requests, long nr)
-      {
-        MemcpyRequest** reqs = (MemcpyRequest**) requests;
-	// allow 2D and 3D copies
-	unsigned flags = (TransferIterator::LINES_OK |
-			  TransferIterator::PLANES_OK);
-        long new_nr = default_get_requests(requests, nr, flags);
-        for (long i = 0; i < new_nr; i++)
-        {
-	  bool src_is_serdez = (input_ports[reqs[i]->src_port_idx].serdez_op != 0);
-	  bool dst_is_serdez = (output_ports[reqs[i]->dst_port_idx].serdez_op != 0);
-          if(!src_is_serdez && dst_is_serdez) {
-            // source offset is determined later - not safe to call get_direct_ptr now
-            reqs[i]->src_base = 0;
-          } else {
-	    reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(reqs[i]->src_off,
-										       reqs[i]->nbytes);
-	    assert(reqs[i]->src_base != 0);
-          }
-          if(src_is_serdez && !dst_is_serdez) {
-            // dest offset is determined later - not safe to call get_direct_ptr now
-            reqs[i]->dst_base = 0;
-          } else {
-	    reqs[i]->dst_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(reqs[i]->dst_off,
-											reqs[i]->nbytes);
-	    assert(reqs[i]->dst_base != 0);
-          }
-        }
-        return new_nr;
+    // ignore requested max_nr and always use 1
+    memcpy_req.xd = this;
+  }
+
+  long MemcpyXferDes::get_requests(Request **requests, long nr)
+  {
+    MemcpyRequest **reqs = (MemcpyRequest **)requests;
+    // allow 2D and 3D copies
+    unsigned flags = (TransferIterator::LINES_OK | TransferIterator::PLANES_OK);
+    long new_nr = default_get_requests(requests, nr, flags);
+    for(long i = 0; i < new_nr; i++) {
+      bool src_is_serdez = (input_ports[reqs[i]->src_port_idx].serdez_op != 0);
+      bool dst_is_serdez = (output_ports[reqs[i]->dst_port_idx].serdez_op != 0);
+      if(!src_is_serdez && dst_is_serdez) {
+        // source offset is determined later - not safe to call get_direct_ptr now
+        reqs[i]->src_base = 0;
+      } else {
+        reqs[i]->src_base = input_ports[reqs[i]->src_port_idx].mem->get_direct_ptr(
+            reqs[i]->src_off, reqs[i]->nbytes);
+        assert(reqs[i]->src_base != 0);
+      }
+      if(src_is_serdez && !dst_is_serdez) {
+        // dest offset is determined later - not safe to call get_direct_ptr now
+        reqs[i]->dst_base = 0;
+      } else {
+        reqs[i]->dst_base = output_ports[reqs[i]->dst_port_idx].mem->get_direct_ptr(
+            reqs[i]->dst_off, reqs[i]->nbytes);
+        assert(reqs[i]->dst_base != 0);
+      }
+    }
+    return new_nr;
 
 #ifdef TO_BE_DELETE
-        long idx = 0;
-        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-          off_t src_start, dst_start;
-          size_t nbytes;
-          if (DIM == 0) {
-            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
-          } else {
-            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-          }
-          if (nbytes == 0)
-            break;
-          //printf("[MemcpyXferDes] guid = %lx, offset_idx = %lld, oas_vec.size() = %lu, nbytes = %lu\n", guid, offset_idx, oas_vec.size(), nbytes);
-          while (nbytes > 0) {
-            size_t req_size = nbytes;
-            if (src_buf.is_ib) {
-              src_start = src_start % src_buf.buf_size;
-              req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
-            }
-            if (dst_buf.is_ib) {
-              dst_start = dst_start % dst_buf.buf_size;
-              req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
-            }
-            mem_cpy_reqs[idx] = (MemcpyRequest*) available_reqs.front();
-            available_reqs.pop();
-            //printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, nbytes);
-            mem_cpy_reqs[idx]->is_read_done = false;
-            mem_cpy_reqs[idx]->is_write_done = false;
-            mem_cpy_reqs[idx]->src_buf = (char*)(src_buf_base + src_start);
-            mem_cpy_reqs[idx]->dst_buf = (char*)(dst_buf_base + dst_start);
-            mem_cpy_reqs[idx]->nbytes = req_size;
-            src_start += req_size; // here we don't have to mod src_buf.buf_size since it will be performed in next loop
-            dst_start += req_size; //
-            nbytes -= req_size;
-            idx++;
-          }
+    long idx = 0;
+    while(idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
+      off_t src_start, dst_start;
+      size_t nbytes;
+      if(DIM == 0) {
+        simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx,
+                                min(available_reqs.size(), nr - idx));
+      } else {
+        simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx,
+                                min(available_reqs.size(), nr - idx));
+      }
+      if(nbytes == 0) {
+        break;
+      }
+      // printf("[MemcpyXferDes] guid = %lx, offset_idx = %lld, oas_vec.size() = %lu,
+      // nbytes = %lu\n", guid, offset_idx, oas_vec.size(), nbytes);
+      while(nbytes > 0) {
+        size_t req_size = nbytes;
+        if(src_buf.is_ib) {
+          src_start = src_start % src_buf.buf_size;
+          req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
         }
-        return idx;
+        if(dst_buf.is_ib) {
+          dst_start = dst_start % dst_buf.buf_size;
+          req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
+        }
+        mem_cpy_reqs[idx] = (MemcpyRequest *)available_reqs.front();
+        available_reqs.pop();
+        // printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n",
+        // src_start, dst_start, nbytes);
+        mem_cpy_reqs[idx]->is_read_done = false;
+        mem_cpy_reqs[idx]->is_write_done = false;
+        mem_cpy_reqs[idx]->src_buf = (char *)(src_buf_base + src_start);
+        mem_cpy_reqs[idx]->dst_buf = (char *)(dst_buf_base + dst_start);
+        mem_cpy_reqs[idx]->nbytes = req_size;
+        src_start += req_size; // here we don't have to mod src_buf.buf_size since it will
+                               // be performed in next loop
+        dst_start += req_size; //
+        nbytes -= req_size;
+        idx++;
+      }
+    }
+    return idx;
 #endif
-      }
+  }
 
-      void MemcpyXferDes::notify_request_read_done(Request* req)
-      {
-        default_notify_request_read_done(req);
-      }
+  void MemcpyXferDes::notify_request_read_done(Request *req)
+  {
+    default_notify_request_read_done(req);
+  }
 
-      void MemcpyXferDes::notify_request_write_done(Request* req)
-      {
-        default_notify_request_write_done(req);
-      }
+  void MemcpyXferDes::notify_request_write_done(Request *req)
+  {
+    default_notify_request_write_done(req);
+  }
 
-      void MemcpyXferDes::flush()
-      {
-      }
+  void MemcpyXferDes::flush() {}
 
-      bool MemcpyXferDes::request_available()
-      {
-	return !memcpy_req_in_use;
-      }
+  bool MemcpyXferDes::request_available() { return !memcpy_req_in_use; }
 
-      Request* MemcpyXferDes::dequeue_request()
-      {
-	assert(!memcpy_req_in_use);
-	memcpy_req_in_use = true;
-	memcpy_req.is_read_done = false;
-	memcpy_req.is_write_done = false;
-	// memcpy request is handled in-thread, so no need to mess with refcount
-        return &memcpy_req;
-      }
+  Request *MemcpyXferDes::dequeue_request()
+  {
+    assert(!memcpy_req_in_use);
+    memcpy_req_in_use = true;
+    memcpy_req.is_read_done = false;
+    memcpy_req.is_write_done = false;
+    // memcpy request is handled in-thread, so no need to mess with refcount
+    return &memcpy_req;
+  }
 
-      void MemcpyXferDes::enqueue_request(Request* req)
-      {
-	assert(memcpy_req_in_use);
-	assert(req == &memcpy_req);
-	memcpy_req_in_use = false;
-      }
+  void MemcpyXferDes::enqueue_request(Request *req)
+  {
+    assert(memcpy_req_in_use);
+    assert(req == &memcpy_req);
+    memcpy_req_in_use = false;
+  }
 
-      bool MemcpyXferDes::progress_xd(MemcpyChannel *channel, TimeLimit work_until)
-      {
-        if(has_serdez) {
-          Request *rq;
-          bool did_work = false;
-          do {
-            long count = get_requests(&rq, 1);
-            if(count > 0) {
-              channel->submit(&rq, count);
-              did_work = true;
-            } else
-              break;
-          } while(!work_until.is_expired());
-
-          return did_work;
+  bool MemcpyXferDes::progress_xd(MemcpyChannel *channel, TimeLimit work_until)
+  {
+    if(has_serdez) {
+      Request *rq;
+      bool did_work = false;
+      do {
+        long count = get_requests(&rq, 1);
+        if(count > 0) {
+          channel->submit(&rq, count);
+          did_work = true;
+        } else {
+          break;
         }
+      } while(!work_until.is_expired());
 
-        // fast path - assumes no serdez
-        bool did_work = false;
-        ReadSequenceCache rseqcache(this, 2 << 20); // flush after 2MB
-        WriteSequenceCache wseqcache(this, 2 << 20);
+      return did_work;
+    }
 
-        while(true) {
-          size_t min_xfer_size = 4096; // TODO: make controllable
-          size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+    // fast path - assumes no serdez
+    bool did_work = false;
+    ReadSequenceCache rseqcache(this, 2 << 20); // flush after 2MB
+    WriteSequenceCache wseqcache(this, 2 << 20);
 
-          if(max_bytes == 0) {
-            break;
-          }
+    while(true) {
+      size_t min_xfer_size = 4096; // TODO: make controllable
+      size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
 
-          XferPort *in_port = 0, *out_port = 0;
-          size_t in_span_start = 0, out_span_start = 0;
-          if(input_control.current_io_port >= 0) {
-            in_port = &input_ports[input_control.current_io_port];
-            in_span_start = in_port->local_bytes_total;
-          }
-          if(output_control.current_io_port >= 0) {
-            out_port = &output_ports[output_control.current_io_port];
-            out_span_start = out_port->local_bytes_total;
-          }
+      if(max_bytes == 0) {
+        break;
+      }
 
-          size_t total_bytes = 0;
-          if(in_port != 0) {
-            if(out_port != 0) {
-              // input and output both exist - transfer what we can
-              log_xd.info() << "memcpy chunk: min=" << min_xfer_size
-                            << " max=" << max_bytes;
+      XferPort *in_port = 0, *out_port = 0;
+      size_t in_span_start = 0, out_span_start = 0;
+      if(input_control.current_io_port >= 0) {
+        in_port = &input_ports[input_control.current_io_port];
+        in_span_start = in_port->local_bytes_total;
+      }
+      if(output_control.current_io_port >= 0) {
+        out_port = &output_ports[output_control.current_io_port];
+        out_span_start = out_port->local_bytes_total;
+      }
 
-              uintptr_t in_base =
-                  reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
-              uintptr_t out_base =
-                  reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+      size_t total_bytes = 0;
+      if(in_port != 0) {
+        if(out_port != 0) {
+          // input and output both exist - transfer what we can
+          log_xd.info() << "memcpy chunk: min=" << min_xfer_size << " max=" << max_bytes;
 
-              while(total_bytes < max_bytes) {
-                AddressListCursor &in_alc = in_port->addrcursor;
-                AddressListCursor &out_alc = out_port->addrcursor;
+          uintptr_t in_base =
+              reinterpret_cast<uintptr_t>(in_port->mem->get_direct_ptr(0, 0));
+          uintptr_t out_base =
+              reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
 
-                uintptr_t in_offset = in_alc.get_offset();
-                uintptr_t out_offset = out_alc.get_offset();
+          while(total_bytes < max_bytes) {
+            AddressListCursor &in_alc = in_port->addrcursor;
+            AddressListCursor &out_alc = out_port->addrcursor;
 
-                // the reported dim is reduced for partially consumed address
-                //  ranges - whatever we get can be assumed to be regular
-                int in_dim = in_alc.get_dim();
-                int out_dim = out_alc.get_dim();
+            uintptr_t in_offset = in_alc.get_offset();
+            uintptr_t out_offset = out_alc.get_offset();
 
-                size_t bytes = 0;
-                size_t bytes_left = max_bytes - total_bytes;
-                // memcpys don't need to be particularly big to achieve
-                //  peak efficiency, so trim to something that takes
-                //  10's of us to be responsive to the time limit
-                bytes_left = std::min(bytes_left, size_t(256 << 10));
+            // the reported dim is reduced for partially consumed address
+            //  ranges - whatever we get can be assumed to be regular
+            int in_dim = in_alc.get_dim();
+            int out_dim = out_alc.get_dim();
 
-                if(in_dim > 0) {
-                  if(out_dim > 0) {
-                    size_t icount = in_alc.remaining(0);
-                    size_t ocount = out_alc.remaining(0);
+            size_t bytes = 0;
+            size_t bytes_left = max_bytes - total_bytes;
+            // memcpys don't need to be particularly big to achieve
+            //  peak efficiency, so trim to something that takes
+            //  10's of us to be responsive to the time limit
+            bytes_left = std::min(bytes_left, size_t(256 << 10));
 
-                    // contig bytes is always the min of the first dimensions
-                    size_t contig_bytes = std::min(std::min(icount, ocount), bytes_left);
+            if(in_dim > 0) {
+              if(out_dim > 0) {
+                size_t icount = in_alc.remaining(0);
+                size_t ocount = out_alc.remaining(0);
 
-                    // catch simple 1D case first
-                    if((contig_bytes == bytes_left) ||
-                       ((contig_bytes == icount) && (in_dim == 1)) ||
-                       ((contig_bytes == ocount) && (out_dim == 1))) {
-                      bytes = contig_bytes;
-                      memcpy_1d(out_base + out_offset, in_base + in_offset, bytes);
-                      in_alc.advance(0, bytes);
-                      out_alc.advance(0, bytes);
-                    } else {
-                      // grow to a 2D copy
-                      int id;
-                      int iscale;
-                      uintptr_t in_lstride;
-                      if(contig_bytes < icount) {
-                        // second input dim comes from splitting first
-                        id = 0;
-                        in_lstride = contig_bytes;
-                        size_t ilines = icount / contig_bytes;
-                        if((ilines * contig_bytes) != icount)
-                          in_dim = 1; // leftover means we can't go beyond this
-                        icount = ilines;
-                        iscale = contig_bytes;
-                      } else {
-                        assert(in_dim > 1);
-                        id = 1;
-                        icount = in_alc.remaining(id);
-                        in_lstride = in_alc.get_stride(id);
-                        iscale = 1;
-                      }
+                // contig bytes is always the min of the first dimensions
+                size_t contig_bytes = std::min(std::min(icount, ocount), bytes_left);
 
-                      int od;
-                      int oscale;
-                      uintptr_t out_lstride;
-                      if(contig_bytes < ocount) {
-                        // second output dim comes from splitting first
-                        od = 0;
-                        out_lstride = contig_bytes;
-                        size_t olines = ocount / contig_bytes;
-                        if((olines * contig_bytes) != ocount)
-                          out_dim = 1; // leftover means we can't go beyond this
-                        ocount = olines;
-                        oscale = contig_bytes;
-                      } else {
-                        assert(out_dim > 1);
-                        od = 1;
-                        ocount = out_alc.remaining(od);
-                        out_lstride = out_alc.get_stride(od);
-                        oscale = 1;
-                      }
-
-                      size_t lines =
-                          std::min(std::min(icount, ocount), bytes_left / contig_bytes);
-
-                      // see if we need to stop at 2D
-                      if(((contig_bytes * lines) == bytes_left) ||
-                         ((lines == icount) && (id == (in_dim - 1))) ||
-                         ((lines == ocount) && (od == (out_dim - 1)))) {
-                        bytes = contig_bytes * lines;
-                        memcpy_2d(out_base + out_offset, out_lstride, in_base + in_offset,
-                                  in_lstride, contig_bytes, lines);
-                        in_alc.advance(id, lines * iscale);
-                        out_alc.advance(od, lines * oscale);
-                      } else {
-                        uintptr_t in_pstride;
-                        if(lines < icount) {
-                          // third input dim comes from splitting current
-                          in_pstride = in_lstride * lines;
-                          size_t iplanes = icount / lines;
-                          // check for leftovers here if we go beyond 3D!
-                          icount = iplanes;
-                          iscale *= lines;
-                        } else {
-                          id++;
-                          assert(in_dim > id);
-                          icount = in_alc.remaining(id);
-                          in_pstride = in_alc.get_stride(id);
-                          iscale = 1;
-                        }
-
-                        uintptr_t out_pstride;
-                        if(lines < ocount) {
-                          // third output dim comes from splitting current
-                          out_pstride = out_lstride * lines;
-                          size_t oplanes = ocount / lines;
-                          // check for leftovers here if we go beyond 3D!
-                          ocount = oplanes;
-                          oscale *= lines;
-                        } else {
-                          od++;
-                          assert(out_dim > od);
-                          ocount = out_alc.remaining(od);
-                          out_pstride = out_alc.get_stride(od);
-                          oscale = 1;
-                        }
-
-                        size_t planes = std::min(std::min(icount, ocount),
-                                                 (bytes_left / (contig_bytes * lines)));
-
-                        bytes = contig_bytes * lines * planes;
-                        memcpy_3d(out_base + out_offset, out_lstride, out_pstride,
-                                  in_base + in_offset, in_lstride, in_pstride,
-                                  contig_bytes, lines, planes);
-                        in_alc.advance(id, planes * iscale);
-                        out_alc.advance(od, planes * oscale);
-                      }
-                    }
-                  } else {
-                    // scatter adddress list
-                    assert(0);
-                  }
+                // catch simple 1D case first
+                if((contig_bytes == bytes_left) ||
+                   ((contig_bytes == icount) && (in_dim == 1)) ||
+                   ((contig_bytes == ocount) && (out_dim == 1))) {
+                  bytes = contig_bytes;
+                  memcpy_1d(out_base + out_offset, in_base + in_offset, bytes);
+                  in_alc.advance(0, bytes);
+                  out_alc.advance(0, bytes);
                 } else {
-                  if(out_dim > 0) {
-                    // gather address list
-                    assert(0);
+                  // grow to a 2D copy
+                  int id;
+                  int iscale;
+                  uintptr_t in_lstride;
+                  if(contig_bytes < icount) {
+                    // second input dim comes from splitting first
+                    id = 0;
+                    in_lstride = contig_bytes;
+                    size_t ilines = icount / contig_bytes;
+                    if((ilines * contig_bytes) != icount) {
+                      in_dim = 1; // leftover means we can't go beyond this
+                    }
+                    icount = ilines;
+                    iscale = contig_bytes;
                   } else {
-                    // gather and scatter
-                    assert(0);
+                    assert(in_dim > 1);
+                    id = 1;
+                    icount = in_alc.remaining(id);
+                    in_lstride = in_alc.get_stride(id);
+                    iscale = 1;
+                  }
+
+                  int od;
+                  int oscale;
+                  uintptr_t out_lstride;
+                  if(contig_bytes < ocount) {
+                    // second output dim comes from splitting first
+                    od = 0;
+                    out_lstride = contig_bytes;
+                    size_t olines = ocount / contig_bytes;
+                    if((olines * contig_bytes) != ocount) {
+                      out_dim = 1; // leftover means we can't go beyond this
+                    }
+                    ocount = olines;
+                    oscale = contig_bytes;
+                  } else {
+                    assert(out_dim > 1);
+                    od = 1;
+                    ocount = out_alc.remaining(od);
+                    out_lstride = out_alc.get_stride(od);
+                    oscale = 1;
+                  }
+
+                  size_t lines =
+                      std::min(std::min(icount, ocount), bytes_left / contig_bytes);
+
+                  // see if we need to stop at 2D
+                  if(((contig_bytes * lines) == bytes_left) ||
+                     ((lines == icount) && (id == (in_dim - 1))) ||
+                     ((lines == ocount) && (od == (out_dim - 1)))) {
+                    bytes = contig_bytes * lines;
+                    memcpy_2d(out_base + out_offset, out_lstride, in_base + in_offset,
+                              in_lstride, contig_bytes, lines);
+                    in_alc.advance(id, lines * iscale);
+                    out_alc.advance(od, lines * oscale);
+                  } else {
+                    uintptr_t in_pstride;
+                    if(lines < icount) {
+                      // third input dim comes from splitting current
+                      in_pstride = in_lstride * lines;
+                      size_t iplanes = icount / lines;
+                      // check for leftovers here if we go beyond 3D!
+                      icount = iplanes;
+                      iscale *= lines;
+                    } else {
+                      id++;
+                      assert(in_dim > id);
+                      icount = in_alc.remaining(id);
+                      in_pstride = in_alc.get_stride(id);
+                      iscale = 1;
+                    }
+
+                    uintptr_t out_pstride;
+                    if(lines < ocount) {
+                      // third output dim comes from splitting current
+                      out_pstride = out_lstride * lines;
+                      size_t oplanes = ocount / lines;
+                      // check for leftovers here if we go beyond 3D!
+                      ocount = oplanes;
+                      oscale *= lines;
+                    } else {
+                      od++;
+                      assert(out_dim > od);
+                      ocount = out_alc.remaining(od);
+                      out_pstride = out_alc.get_stride(od);
+                      oscale = 1;
+                    }
+
+                    size_t planes = std::min(std::min(icount, ocount),
+                                             (bytes_left / (contig_bytes * lines)));
+
+                    bytes = contig_bytes * lines * planes;
+                    memcpy_3d(out_base + out_offset, out_lstride, out_pstride,
+                              in_base + in_offset, in_lstride, in_pstride, contig_bytes,
+                              lines, planes);
+                    in_alc.advance(id, planes * iscale);
+                    out_alc.advance(od, planes * oscale);
                   }
                 }
+              } else {
+                // scatter adddress list
+                assert(0);
+              }
+            } else {
+              if(out_dim > 0) {
+                // gather address list
+                assert(0);
+              } else {
+                // gather and scatter
+                assert(0);
+              }
+            }
 
 #ifdef DEBUG_REALM
-                assert(bytes <= bytes_left);
+            assert(bytes <= bytes_left);
 #endif
-                total_bytes += bytes;
+            total_bytes += bytes;
 
-                // stop if it's been too long, but make sure we do at least the
-                //  minimum number of bytes
-                if((total_bytes >= min_xfer_size) && work_until.is_expired())
-                  break;
-              }
-            } else {
-              // input but no output, so skip input bytes
-              total_bytes = max_bytes;
-              in_port->addrcursor.skip_bytes(total_bytes);
-            }
-          } else {
-            if(out_port != 0) {
-              // output but no input, so skip output bytes
-              total_bytes = max_bytes;
-              out_port->addrcursor.skip_bytes(total_bytes);
-            } else {
-              // skipping both input and output is possible for simultaneous
-              //  gather+scatter
-              total_bytes = max_bytes;
+            // stop if it's been too long, but make sure we do at least the
+            //  minimum number of bytes
+            if((total_bytes >= min_xfer_size) && work_until.is_expired()) {
+              break;
             }
           }
-
-          // memcpy is always immediate, so handle both skip and copy with the
-          //  same code
-          rseqcache.add_span(input_control.current_io_port, in_span_start, total_bytes);
-          in_span_start += total_bytes;
-          wseqcache.add_span(output_control.current_io_port, out_span_start, total_bytes);
-          out_span_start += total_bytes;
-
-          bool done = record_address_consumption(total_bytes, total_bytes);
-
-          did_work = true;
-
-          if(done || work_until.is_expired())
-            break;
+        } else {
+          // input but no output, so skip input bytes
+          total_bytes = max_bytes;
+          in_port->addrcursor.skip_bytes(total_bytes);
         }
-
-        rseqcache.flush();
-        wseqcache.flush();
-
-        return did_work;
+      } else {
+        if(out_port != 0) {
+          // output but no input, so skip output bytes
+          total_bytes = max_bytes;
+          out_port->addrcursor.skip_bytes(total_bytes);
+        } else {
+          // skipping both input and output is possible for simultaneous
+          //  gather+scatter
+          total_bytes = max_bytes;
+        }
       }
 
-      ////////////////////////////////////////////////////////////////////////
-      //
-      // class MemfillXferDes
-      //
+      // memcpy is always immediate, so handle both skip and copy with the
+      //  same code
+      rseqcache.add_span(input_control.current_io_port, in_span_start, total_bytes);
+      in_span_start += total_bytes;
+      wseqcache.add_span(output_control.current_io_port, out_span_start, total_bytes);
+      out_span_start += total_bytes;
 
-      MemfillXferDes::MemfillXferDes(uintptr_t _dma_op, Channel *_channel,
-                                     NodeID _launch_node, XferDesID _guid,
-                                     const std::vector<XferDesPortInfo> &inputs_info,
-                                     const std::vector<XferDesPortInfo> &outputs_info,
-                                     int _priority, const void *_fill_data,
-                                     size_t _fill_size, size_t _fill_total)
-        : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
-                  _priority, _fill_data, _fill_size)
-      {
-	kind = XFER_MEM_FILL;
+      bool done = record_address_consumption(total_bytes, total_bytes);
 
-	// no direct input data for us, but we know how much data to produce
-        //  (in case the output is an intermediate buffer)
-	assert(input_control.control_port_idx == -1);
-	input_control.current_io_port = -1;
-        input_control.remaining_count = _fill_total;
-        input_control.eos_received = true;
+      did_work = true;
+
+      if(done || work_until.is_expired()) {
+        break;
+      }
+    }
+
+    rseqcache.flush();
+    wseqcache.flush();
+
+    return did_work;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemfillXferDes
+  //
+
+  MemfillXferDes::MemfillXferDes(uintptr_t _dma_op, Channel *_channel,
+                                 NodeID _launch_node, XferDesID _guid,
+                                 const std::vector<XferDesPortInfo> &inputs_info,
+                                 const std::vector<XferDesPortInfo> &outputs_info,
+                                 int _priority, const void *_fill_data, size_t _fill_size,
+                                 size_t _fill_total)
+    : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
+              _priority, _fill_data, _fill_size)
+  {
+    kind = XFER_MEM_FILL;
+
+    // no direct input data for us, but we know how much data to produce
+    //  (in case the output is an intermediate buffer)
+    assert(input_control.control_port_idx == -1);
+    input_control.current_io_port = -1;
+    input_control.remaining_count = _fill_total;
+    input_control.eos_received = true;
+  }
+
+  long MemfillXferDes::get_requests(Request **requests, long nr)
+  {
+    // unused
+    assert(0);
+    return 0;
+  }
+
+  bool MemfillXferDes::request_available()
+  {
+    // unused
+    assert(0);
+    return false;
+  }
+
+  Request *MemfillXferDes::dequeue_request()
+  {
+    // unused
+    assert(0);
+    return 0;
+  }
+
+  void MemfillXferDes::enqueue_request(Request *req)
+  {
+    // unused
+    assert(0);
+  }
+
+  bool MemfillXferDes::progress_xd(MemfillChannel *channel, TimeLimit work_until)
+  {
+    bool did_work = false;
+    ReadSequenceCache rseqcache(this, 2 << 20);
+    WriteSequenceCache wseqcache(this, 2 << 20);
+
+    while(true) {
+      size_t min_xfer_size = 4096; // TODO: make controllable
+      size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
+      if(max_bytes == 0)
+        break;
+
+      XferPort *out_port = 0;
+      size_t out_span_start = 0;
+      if(output_control.current_io_port >= 0) {
+        out_port = &output_ports[output_control.current_io_port];
+        out_span_start = out_port->local_bytes_total;
       }
 
-      long MemfillXferDes::get_requests(Request** requests, long nr)
-      {
-	// unused
-	assert(0);
-	return 0;
-      }
+      size_t total_bytes = 0;
+      if(out_port != 0) {
+        // input and output both exist - transfer what we can
+        log_xd.info() << "memfill chunk: min=" << min_xfer_size << " max=" << max_bytes;
 
-      bool MemfillXferDes::request_available()
-      {
-	// unused
-	assert(0);
-	return false;
-      }
+        uintptr_t out_base =
+            reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
 
-      Request* MemfillXferDes::dequeue_request()
-      {
-	// unused
-	assert(0);
-	return 0;
-      }
+        while(total_bytes < max_bytes) {
+          AddressListCursor &out_alc = out_port->addrcursor;
 
-      void MemfillXferDes::enqueue_request(Request* req)
-      {
-	// unused
-	assert(0);
-      }
+          uintptr_t out_offset = out_alc.get_offset();
 
-      bool MemfillXferDes::progress_xd(MemfillChannel *channel,
-				      TimeLimit work_until)
-      {
-	bool did_work = false;
-	ReadSequenceCache rseqcache(this, 2 << 20);
-	WriteSequenceCache wseqcache(this, 2 << 20);
+          // the reported dim is reduced for partially consumed address
+          //  ranges - whatever we get can be assumed to be regular
+          int out_dim = out_alc.get_dim();
 
-	while(true) {
-	  size_t min_xfer_size = 4096;  // TODO: make controllable
-	  size_t max_bytes = get_addresses(min_xfer_size, &rseqcache);
-	  if(max_bytes == 0)
-	    break;
+          size_t bytes = 0;
+          size_t bytes_left = max_bytes - total_bytes;
+          // memfills don't need to be particularly big to achieve
+          //  peak efficiency, so trim to something that takes
+          //  10's of us to be responsive to the time limit
+          // NOTE: have to be a little careful and make sure the limit
+          //  is a multiple of the fill size - we'll make it a power-of-2
+          const size_t TARGET_CHUNK_SIZE = 256 << 10; // 256KB
+          if(bytes_left > TARGET_CHUNK_SIZE) {
+            size_t max_chunk = fill_size;
+            while(max_chunk < TARGET_CHUNK_SIZE)
+              max_chunk <<= 1;
+            bytes_left = std::min(bytes_left, max_chunk);
+          }
 
-	  XferPort *out_port = 0;
-	  size_t out_span_start = 0;
-	  if(output_control.current_io_port >= 0) {
-	    out_port = &output_ports[output_control.current_io_port];
-	    out_span_start = out_port->local_bytes_total;
-	  }
+          if(out_dim > 0) {
+            size_t ocount = out_alc.remaining(0);
 
-	  size_t total_bytes = 0;
-	  if(out_port != 0) {
-	    // input and output both exist - transfer what we can
-	    log_xd.info() << "memfill chunk: min=" << min_xfer_size
-			  << " max=" << max_bytes;
+            // contig bytes is always the first dimension
+            size_t contig_bytes = std::min(ocount, bytes_left);
 
-	    uintptr_t out_base = reinterpret_cast<uintptr_t>(out_port->mem->get_direct_ptr(0, 0));
+            // catch simple 1D case first
+            if((contig_bytes == bytes_left) ||
+               ((contig_bytes == ocount) && (out_dim == 1))) {
+              bytes = contig_bytes;
+              memset_1d(out_base + out_offset, contig_bytes, fill_data, fill_size);
+              out_alc.advance(0, bytes);
+            } else {
+              // grow to a 2D fill
+              ocount = out_alc.remaining(1);
+              uintptr_t out_lstride = out_alc.get_stride(1);
 
-	    while(total_bytes < max_bytes) {
-	      AddressListCursor& out_alc = out_port->addrcursor;
+              size_t lines = std::min(ocount, bytes_left / contig_bytes);
 
-	      uintptr_t out_offset = out_alc.get_offset();
-
-	      // the reported dim is reduced for partially consumed address
-	      //  ranges - whatever we get can be assumed to be regular
-	      int out_dim = out_alc.get_dim();
-
-	      size_t bytes = 0;
-	      size_t bytes_left = max_bytes - total_bytes;
-	      // memfills don't need to be particularly big to achieve
-	      //  peak efficiency, so trim to something that takes
-	      //  10's of us to be responsive to the time limit
-              // NOTE: have to be a little careful and make sure the limit
-              //  is a multiple of the fill size - we'll make it a power-of-2
-              const size_t TARGET_CHUNK_SIZE = 256 << 10; // 256KB
-              if(bytes_left > TARGET_CHUNK_SIZE) {
-                size_t max_chunk = fill_size;
-                while(max_chunk < TARGET_CHUNK_SIZE) max_chunk <<= 1;
-                bytes_left = std::min(bytes_left, max_chunk);
-              }
-
-	      if(out_dim > 0) {
-		size_t ocount = out_alc.remaining(0);
-
-		// contig bytes is always the first dimension
-		size_t contig_bytes = std::min(ocount, bytes_left);
-
-		// catch simple 1D case first
-		if((contig_bytes == bytes_left) ||
-		   ((contig_bytes == ocount) && (out_dim == 1))) {
-		  bytes = contig_bytes;
-		  memset_1d(out_base + out_offset, contig_bytes,
-                            fill_data, fill_size);
-		  out_alc.advance(0, bytes);
-		} else {
-		  // grow to a 2D fill
-		  ocount = out_alc.remaining(1);
-		  uintptr_t out_lstride = out_alc.get_stride(1);
-
-		  size_t lines = std::min(ocount,
-					  bytes_left / contig_bytes);
-
-		  bytes = contig_bytes * lines;
-                  memset_2d(out_base + out_offset, out_lstride,
-                            contig_bytes, lines,
-                            fill_data, fill_size);
-		  out_alc.advance(1, lines);
-		}
-	      } else {
-		// scatter adddress list
-		assert(0);
-	      }
+              bytes = contig_bytes * lines;
+              memset_2d(out_base + out_offset, out_lstride, contig_bytes, lines,
+                        fill_data, fill_size);
+              out_alc.advance(1, lines);
+            }
+          } else {
+            // scatter adddress list
+            assert(0);
+          }
 
 #ifdef DEBUG_REALM
 	      assert(bytes <= bytes_left);
@@ -4819,22 +4833,26 @@ namespace Realm {
     Node &n = get_runtime()->nodes[Network::my_node_id];
 
     for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
-        it != n.memories.end(); ++it)
+        it != n.memories.end(); ++it) {
       if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
          ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
          ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
          ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
-         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
+         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
         mems.push_back((*it)->me);
+      }
+    }
 
     for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-        it != n.ib_memories.end(); ++it)
+        it != n.ib_memories.end(); ++it) {
       if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
          ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
          ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
          ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
-         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM))
+         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
         mems.push_back((*it)->me);
+      }
+    }
   }
 
   uint64_t MemcpyChannel::supports_path(
@@ -4845,8 +4863,9 @@ namespace Realm {
   {
     // simultaneous serialization/deserialization not
     //  allowed anywhere right now
-    if((src_serdez_id != 0) && (dst_serdez_id != 0))
+    if((src_serdez_id != 0) && (dst_serdez_id != 0)) {
       return 0;
+    }
 
     // fall through to normal checks
     return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
@@ -5051,8 +5070,9 @@ namespace Realm {
                   }
                 }
                 assert(bytes_used <= max_bytes);
-                if(bytes_used < max_bytes)
+                if(bytes_used < max_bytes) {
                   rewind_dst += (max_bytes - bytes_used);
+                }
                 out_port->local_bytes_total += bytes_used;
               }
             } else {
@@ -5212,33 +5232,39 @@ namespace Realm {
                   }
                 }
                 assert(bytes_used <= max_bytes);
-                if(bytes_used < max_bytes)
+                if(bytes_used < max_bytes) {
                   rewind_src += (max_bytes - bytes_used);
+                }
                 in_port->local_bytes_total += bytes_used;
               } else {
                 // normal copy
                 memcpy(dst, src, req->nbytes);
               }
             }
-            if(req->dim == Request::DIM_1D)
+            if(req->dim == Request::DIM_1D) {
               break;
+            }
             // serdez cases update src/dst directly
             // NOTE: this looks backwards, but it's not - a src serdez means it's the
             //  destination that moves unpredictably
-            if(!dst_serdez_op)
+            if(!dst_serdez_op) {
               src += req->src_str;
-            if(!src_serdez_op)
+            }
+            if(!src_serdez_op) {
               dst += req->dst_str;
+            }
           }
-          if((req->dim == Request::DIM_1D) || (req->dim == Request::DIM_2D))
+          if((req->dim == Request::DIM_1D) || (req->dim == Request::DIM_2D)) {
             break;
+          }
           // serdez cases update src/dst directly - copy back to src/dst_p
           src_p = (dst_serdez_op ? src : src_p + req->src_pstr);
           dst_p = (src_serdez_op ? dst : dst_p + req->dst_pstr);
         }
         // clean up our wrap buffer, if we malloc'd it
-        if(wrap_buffer_malloced)
+        if(wrap_buffer_malloced) {
           free(wrap_buffer);
+        }
       }
       if(src_serdez_op && !dst_serdez_op) {
         // we manage write_bytes_total, write_seq_{pos,count}
@@ -5254,8 +5280,9 @@ namespace Realm {
           }
           out_port->local_bytes_cons.fetch_sub(rewind_dst);
         }
-      } else
+      } else {
         assert(rewind_dst == 0);
+      }
       if(!src_serdez_op && dst_serdez_op) {
         // we manage read_bytes_total, read_seq_{pos,count}
         req->read_seq_count = in_port->local_bytes_total - req->read_seq_pos;
@@ -5263,8 +5290,9 @@ namespace Realm {
           // log_request.print() << "rewind src: " << rewind_src;
           in_port->local_bytes_cons.fetch_sub(rewind_src);
         }
-      } else
+      } else {
         assert(rewind_src == 0);
+      }
       req->xd->notify_request_read_done(req);
       req->xd->notify_request_write_done(req);
     }
