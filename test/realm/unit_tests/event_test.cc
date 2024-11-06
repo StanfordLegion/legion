@@ -45,7 +45,12 @@ protected:
 
   void TearDown() override
   {
+
+#ifdef DEBUG_REALM
+    // TODO(apryakhin@): consider mocking event notifier.
     event_notifier->shutdown_work_item();
+#endif
+
     delete event_notifier;
   }
 
