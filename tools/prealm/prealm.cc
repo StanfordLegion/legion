@@ -39,6 +39,14 @@ namespace PRealm {
 
   class Profiler {
   public:
+    struct WrapperArgs {
+      Event wait_on;
+      void *args;
+      size_t arglen;
+      Processor::TaskFuncID task_id;
+      int priority;
+    };
+  public:
     Profiler(void);
     Profiler(const Profiler &rhs) = delete;
     Profiler& operator=(const Profiler &rhs) = delete;
@@ -55,9 +63,13 @@ namespace PRealm {
     static Profiler& get_profiler(void);
     static void callback(const void *args, size_t arglen, const void *user_args,
         size_t user_arglen, Realm::Processor p);
+    static void wrapper(const void *args, size_t arglen, const void *user_args,
+        size_t user_arglen, Realm::Processor p);
     static constexpr Realm::Processor::TaskFuncID CALLBACK_TASK_ID = 
       Realm::Processor::TASK_ID_FIRST_AVAILABLE;
-    static_assert((CALLBACK_TASK_ID+1) == Processor::TASK_ID_FIRST_AVAILABLE);
+    static constexpr Realm::Processor::TaskFuncID WRAPPER_TASK_ID =
+      Realm::Processor::TASK_ID_FIRST_AVAILABLE+1;
+    static_assert((CALLBACK_TASK_ID+2) == Processor::TASK_ID_FIRST_AVAILABLE);
     static constexpr int CALLBACK_TASK_PRIORITY = std::numeric_limits<int>::min();
   public:
 #ifdef DEBUG_REALM
@@ -485,11 +497,16 @@ namespace PRealm {
     profiler.update_footprint(sizeof(info), this);
   }
 
-  void ThreadProfiler::record_instance_ready(RegionInstance inst, Event result, Event precondition)
+  Event ThreadProfiler::record_instance_ready(RegionInstance inst, Event result, Event precondition)
   {
     Profiler &profiler = Profiler::get_profiler();
     if (profiler.no_critical_paths)
-      return;
+      return result;
+    if (!result.exists()) {
+      Realm::UserEvent rename = Realm::UserEvent::create_user_event();
+      rename.trigger();
+      result = rename;
+    }
     InstanceReadyInfo &info = instance_ready_infos.emplace_back(InstanceReadyInfo());
     info.performed = Realm::Clock::current_time_in_nanoseconds();
     info.result = result;
@@ -498,6 +515,7 @@ namespace PRealm {
     if (precondition.is_barrier())
       record_barrier_use(precondition);
     profiler.update_footprint(sizeof(info), this);
+    return result;
   }
 
   void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field)
@@ -1083,6 +1101,8 @@ namespace PRealm {
   {
     Machine machine = Machine::get_machine();
     total_address_spaces = machine.get_address_space_count();
+    // TODO: handle shutdown for multiple address spaces
+    assert(total_address_spaces == 1);
     Realm::Machine::ProcessorQuery local_procs(machine);
     local_procs.local_address_space();
     assert(!local_proc.exists());
@@ -1668,7 +1688,7 @@ namespace PRealm {
   {
     int ID = TASK_INFO_ID;
     pr_fwrite(f, (char*)&ID, sizeof(ID));
-    unsigned long long op_id = task_info.creator.id;
+    unsigned long long op_id = task_info.finish_event.id;
     pr_fwrite(f, (char*)&(op_id),     sizeof(op_id));
     pr_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
     // Use the processor kind as the variant
@@ -1689,7 +1709,7 @@ namespace PRealm {
       pr_fwrite(f, (char*)&ID, sizeof(ID));
       pr_fwrite(f, (char*)&(op_id),     sizeof(op_id));
       pr_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
-      pr_fwrite(f, (char*)&(task_info.task_id),sizeof(task_info.task_id));
+      pr_fwrite(f, (char*)&(variant_id),sizeof(variant_id));
       pr_fwrite(f, (char*)&(wait_info.wait_start),sizeof(wait_info.wait_start));
       pr_fwrite(f, (char*)&(wait_info.wait_ready),sizeof(wait_info.wait_ready));
       pr_fwrite(f, (char*)&(wait_info.wait_end),  sizeof(wait_info.wait_end));
@@ -1701,7 +1721,7 @@ namespace PRealm {
   {
     int ID = GPU_TASK_INFO_ID;
     pr_fwrite(f, (char*)&ID, sizeof(ID));
-    unsigned long long op_id = task_info.creator.id;
+    unsigned long long op_id = task_info.finish_event.id;
     pr_fwrite(f, (char*)&(op_id),     sizeof(op_id));
     pr_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
     // Use the processor kind as the variant
@@ -1725,7 +1745,7 @@ namespace PRealm {
       pr_fwrite(f, (char*)&ID, sizeof(ID));
       pr_fwrite(f, (char*)&(op_id),     sizeof(op_id));
       pr_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
-      pr_fwrite(f, (char*)&(task_info.task_id),sizeof(task_info.task_id));
+      pr_fwrite(f, (char*)&(variant_id),sizeof(variant_id));
       pr_fwrite(f, (char*)&(wait_info.wait_start),sizeof(wait_info.wait_start));
       pr_fwrite(f, (char*)&(wait_info.wait_ready),sizeof(wait_info.wait_ready));
       pr_fwrite(f, (char*)&(wait_info.wait_end),  sizeof(wait_info.wait_end));
@@ -1906,11 +1926,12 @@ namespace PRealm {
 
   void Profiler::record_task(Processor::TaskFuncID task_id)
   {
+    char name[128];
+    snprintf(name, sizeof(name), "Task %d", task_id);
     profiler_lock.wrlock().wait();
     int ID = TASK_KIND_ID;
     pr_fwrite(f, (char*)&ID, sizeof(ID));
     pr_fwrite(f, (char*)&(task_id), sizeof(task_id));
-    const char *name = ""; // No names currently
     pr_fwrite(f, name, strlen(name) + 1);
     bool overwrite = true; // always overwrite
     pr_fwrite(f, (char*)&(overwrite), sizeof(overwrite));  
@@ -1919,13 +1940,19 @@ namespace PRealm {
 
   void Profiler::record_variant(Processor::TaskFuncID task_id, Processor::Kind kind)
   {
+    static const char *proc_names[] = {
+#define PROC_NAMES(name, desc) #name,
+      REALM_PROCESSOR_KINDS(PROC_NAMES)
+#undef PROC_NAMES
+    };
+    char name[128];
+    snprintf(name, sizeof(name), "%s Variant of Task %d", proc_names[kind], task_id);
     profiler_lock.wrlock().wait();
     int ID = TASK_VARIANT_ID;
     pr_fwrite(f, (char*)&ID, sizeof(ID));
     pr_fwrite(f, (char*)&(task_id),sizeof(task_id));
     unsigned variant_id = kind;
     pr_fwrite(f, (char*)&(variant_id), sizeof(variant_id));
-    const char *name = ""; // No names currently
     pr_fwrite(f, name, strlen(name) + 1);
     profiler_lock.unlock();
   }
@@ -2069,6 +2096,17 @@ namespace PRealm {
     thread_profiler.process_response(response);
   }
 
+  /*static*/ void Profiler::wrapper(const void *args, size_t arglen,
+      const void *user_args, size_t user_arglen, Realm::Processor p)
+  {
+    assert(arglen == sizeof(WrapperArgs));
+    const WrapperArgs *wargs = static_cast<const WrapperArgs*>(args);
+    ProfilingRequestSet requests;
+    ThreadProfiler::get_thread_profiler().add_task_request(requests, wargs->task_id, wargs->wait_on);
+    p.spawn(wargs->task_id, wargs->args, wargs->arglen, requests,
+        wargs->wait_on, wargs->priority).wait();
+  }
+
   /*static*/ Profiler& Profiler::get_profiler(void)
   {
     static Profiler singleton;
@@ -2110,11 +2148,15 @@ namespace PRealm {
     std::vector<Realm::Event> registered;
     const Realm::ProfilingRequestSet no_requests;
     const CodeDescriptor callback(Profiler::callback);
+    const CodeDescriptor wrapper(Profiler::wrapper);
     for (Realm::Machine::ProcessorQuery::iterator it = 
           local_procs.begin(); it != local_procs.end(); it++)
     {
-      const Realm::Event done = it->register_task(
+      Realm::Event done = it->register_task(
           Profiler::CALLBACK_TASK_ID, callback, no_requests);
+      if (done.exists())
+        registered.push_back(done);
+      done = it->register_task(Profiler::WRAPPER_TASK_ID, wrapper, no_requests);
       if (done.exists())
         registered.push_back(done);
     }
@@ -2197,6 +2239,51 @@ namespace PRealm {
       std::sort(kinds.begin(), kinds.end());
     }
     return Realm::Runtime::register_task(task_id, altptr);
+  }
+
+  Event Runtime::collective_spawn(Processor target_proc, Processor::TaskFuncID task_id,
+      const void *args, size_t arglen, Event wait_on, int priority)
+  {
+    // Launch a wrapper task that will actually spawn the task on the processor
+    // with extra profiling
+    Profiler::WrapperArgs wrapper_args;
+    wrapper_args.task_id = task_id;
+    wrapper_args.wait_on = wait_on;
+    wrapper_args.priority = priority;
+    if ((arglen > 0) && (target_proc.address_space() ==
+          Profiler::get_profiler().get_local_processor().address_space())) {
+      wrapper_args.arglen = arglen;
+      // TODO: don't leak this
+      wrapper_args.args = malloc(arglen);
+      memcpy(wrapper_args.args, args, arglen);
+    } else {
+      wrapper_args.arglen = 0;
+      wrapper_args.args = nullptr;
+    }
+    return Realm::Runtime::collective_spawn(target_proc, Profiler::WRAPPER_TASK_ID,
+        &wrapper_args, sizeof(wrapper_args), wait_on, priority);
+  }
+
+  Event Runtime::collective_spawn_by_kind(Processor::Kind target_kind, Processor::TaskFuncID task_id,
+      const void *args, size_t arglen, bool one_per_node, Event wait_on, int priority)
+  {
+    // Launch a wrapper task that will actually spawn the tasks on the processor
+    // with extra profiling
+    Profiler::WrapperArgs wrapper_args;
+    wrapper_args.task_id = task_id;
+    wrapper_args.wait_on = wait_on;
+    wrapper_args.priority = priority;
+    if (arglen > 0) {
+      wrapper_args.arglen = arglen;
+      // TODO: don't leak this
+      wrapper_args.args = malloc(arglen);
+      memcpy(wrapper_args.args, args, arglen);
+    } else {
+      wrapper_args.arglen = 0;
+      wrapper_args.args = nullptr;
+    }
+    return Realm::Runtime::collective_spawn_by_kind(target_kind, Profiler::WRAPPER_TASK_ID,
+        &wrapper_args, sizeof(wrapper_args), one_per_node, wait_on, priority);
   }
 
   void Runtime::shutdown(Event wait_on, int result_code)

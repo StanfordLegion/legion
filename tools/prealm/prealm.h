@@ -235,7 +235,7 @@ namespace PRealm {
 	TASK_ID_PROCESSOR_INIT     = Realm::Processor::TASK_ID_PROCESSOR_INIT,
 	TASK_ID_PROCESSOR_SHUTDOWN = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
         // Increment this by 1 to reserve a task ID for our profiling responses
-	TASK_ID_FIRST_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
+	TASK_ID_FIRST_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
     };
 
     static const Processor NO_PROC;
@@ -494,6 +494,14 @@ namespace PRealm {
     void start(void);
     bool init(int *argc, char ***argv);
     bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
+    Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 
+                           const void *args, size_t arglen,
+                           Event wait_on = Event::NO_EVENT, int priority = 0);
+
+    Event collective_spawn_by_kind(Processor::Kind target_kind, Processor::TaskFuncID task_id, 
+                                   const void *args, size_t arglen,
+                                   bool one_per_node = false,
+                                   Event wait_on = Event::NO_EVENT, int priority = 0);
     void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
     int wait_for_shutdown(void);
     static Runtime get_runtime(void);

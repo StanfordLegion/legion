@@ -228,7 +228,7 @@ namespace PRealm {
     void record_barrier_arrival(Event result, Event precondition);
     void record_event_merger(Event result, const Event *preconditions, size_t num_events);
     void record_reservation_acquire(Reservation r, Event result, Event precondition);
-    void record_instance_ready(RegionInstance inst, Event result, Event precondition);
+    Event record_instance_ready(RegionInstance inst, Event result, Event precondition);
     void record_instance_usage(RegionInstance inst, FieldID field_id);
     void process_response(ProfilingResponse &response);
     size_t dump_inter(long long target_latency);
@@ -563,8 +563,7 @@ namespace PRealm {
     ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
     inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
     Event result = Realm::RegionInstance::create_instance(inst, memory, ilg, alt_requests, wait_on);
-    profiler.record_instance_ready(inst, result, wait_on);
-    return result;
+    return profiler.record_instance_ready(inst, result, wait_on);
   }
 
   /*static*/ inline Event RegionInstance::create_external_instance(RegionInstance &inst,
@@ -575,8 +574,7 @@ namespace PRealm {
     ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
     inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
     Event result = Realm::RegionInstance::create_external_instance(inst, memory, ilg, resource, alt_requests, wait_on);
-    profiler.record_instance_ready(inst, result, wait_on);
-    return result;
+    return profiler.record_instance_ready(inst, result, wait_on);
   }
 
   /*static*/ inline Event RegionInstance::create_external(RegionInstance &inst,
