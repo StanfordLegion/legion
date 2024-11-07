@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "realm/transfer/memcpy_channel.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/lowlevel_dma.h"
 

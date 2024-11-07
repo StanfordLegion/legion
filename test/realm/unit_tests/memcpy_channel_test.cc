@@ -1,4 +1,4 @@
-#include "realm/transfer/channel.h"
+#include "realm/transfer/memcpy_channel.h"
 #include <tuple>
 #include <gtest/gtest.h>
 
@@ -62,7 +62,6 @@ public:
                   const std::vector<size_t> &extents)
   {
     size_t bytes = strides[0] * extents[0];
-
     size_t *addr_data = port.addrlist.begin_nd_entry(strides.size());
 
     for(int dim = 1; dim < strides.size(); dim++) {

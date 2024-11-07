@@ -36,6 +36,7 @@
 
 // create xd message and update bytes read/write messages
 #include "realm/transfer/channel.h"
+#include "realm/transfer/memcpy_channel.h"
 #include "realm/transfer/channel_disk.h"
 
 #ifdef REALM_USE_KOKKOS
