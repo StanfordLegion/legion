@@ -446,11 +446,12 @@ namespace PRealm {
 
   /*static*/ inline Event Event::merge_events(Event ev1, Event ev2, Event ev3, Event ev4, Event ev5, Event ev6)
   {
-    size_t num_events = 2;
-    if (ev3.exists()) num_events++;
-    if (ev4.exists()) num_events++;
-    if (ev5.exists()) num_events++;
-    if (ev6.exists()) num_events++;
+    size_t num_events;
+    if (ev6.exists()) num_events = 6;
+    else if (ev5.exists()) num_events = 5;
+    else if (ev4.exists()) num_events = 4;
+    else if (ev3.exists()) num_events = 3;
+    else num_events = 2;
     const Event events[] = { ev1, ev2, ev3, ev4, ev5, ev6 };
     const Event result = Realm::Event::merge_events(events, num_events);
     ThreadProfiler::get_thread_profiler().record_event_merger(result, events, num_events);
@@ -517,6 +518,59 @@ namespace PRealm {
     copy.cancel();
   }
 
+  inline Barrier::operator Realm::Barrier(void) const
+  {
+    Realm::Barrier result;
+    result.id = id;
+    result.timestamp = timestamp;
+    return result;
+  }
+
+  /*static*/ inline Barrier Barrier::create_barrier(unsigned expected_arrivals, ReductionOpID redop,
+      const void *initial_value, size_t initial_value_size)
+  {
+    return Realm::Barrier::create_barrier(expected_arrivals, redop, initial_value, initial_value_size);
+  }
+
+  /*static*/ inline Barrier Barrier::create_barrier(const Barrier::ParticipantInfo *expected_arrivals,
+      size_t num_participants, ReductionOpID redop,
+      const void *initial_value, size_t initial_value_size)
+  {
+    return Realm::Barrier::create_barrier(expected_arrivals, num_participants, redop,
+        initial_value, initial_value_size);
+  }
+
+  inline Barrier Barrier::set_arrival_pattern(const Barrier::ParticipantInfo *expected_arrivals,
+                                       size_t num_participants)
+  {
+    Realm::Barrier barrier = *this;
+    return barrier.set_arrival_pattern(expected_arrivals, num_participants);
+  }
+
+  inline void Barrier::destroy_barrier(void)
+  {
+    Realm::Barrier barrier = *this;
+    barrier.destroy_barrier();
+  }
+
+  inline Barrier Barrier::advance_barrier(void) const
+  {
+    Realm::Barrier barrier = *this;
+    return barrier.advance_barrier();
+  }
+
+  inline Barrier Barrier::alter_arrival_count(int delta) const
+  {
+    Realm::Barrier barrier = *this;
+    return barrier.alter_arrival_count(delta);
+  }
+
+  inline Barrier Barrier::get_previous_phase(void) const
+  {
+    Realm::Barrier barrier = *this;
+    return barrier.get_previous_phase();
+  }
+
   inline void Barrier::arrive(unsigned count, Event wait_on, const void *value, size_t size) const
   {
     ThreadProfiler::get_thread_profiler().record_barrier_arrival(*this, wait_on);
@@ -524,6 +578,12 @@ namespace PRealm {
     copy.id = id;
     copy.timestamp = timestamp;
     copy.arrive(count, wait_on, value, size);
+  }
+
+  inline bool Barrier::get_result(void *value, size_t value_size) const
+  {
+    Realm::Barrier barrier = *this;
+    return barrier.get_result(value, value_size);
   }
 
   inline Event Reservation::acquire(unsigned mode, bool exclusive, Event wait_on) const
@@ -656,6 +716,23 @@ namespace PRealm {
 
     ExternalFileResource res(file_name, file_mode);
     return create_external_instance(inst, res.suggested_memory(), ilg, res, prs, wait_on);
+  }
+
+  inline Event RegionInstance::fetch_metadata(Processor target) const
+  {
+    return Realm::RegionInstance::fetch_metadata(target);
+  }
+
+  template <int N, typename T>
+  inline IndexSpace<N,T> RegionInstance::get_indexspace(void) const
+  {
+    return Realm::RegionInstance::get_indexspace<N,T>();
+  }
+
+  template <int N>
+  inline IndexSpace<N,int> RegionInstance::get_indexspace(void) const
+  {
+    return Realm::RegionInstance::get_indexspace<N,int>();
   }
 
   template <typename FT, int N, typename T>

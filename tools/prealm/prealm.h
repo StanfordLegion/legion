@@ -25,6 +25,7 @@ namespace PRealm {
   // but overload ones that we need to profile
 
   // forward declarations
+  using Realm::Clock;
   using Realm::Logger;
   using Realm::CodeDescriptor;
   // TODO: add profiling to client-level profiling requests
@@ -135,15 +136,36 @@ namespace PRealm {
     Barrier& operator=(const Realm::Barrier &b) { id = b.id; timestamp = b.timestamp; return *this; }
     Barrier& operator=(const Barrier &b) = default;
     Barrier& operator=(Barrier &&b) = default;
+    // Implicit conversion to Realm::Barrier
+    operator Realm::Barrier(void) const;
   public:
     typedef ::realm_barrier_timestamp_t timestamp_t;
     timestamp_t timestamp;
 
     static const Barrier NO_BARRIER;
 
+    static Barrier create_barrier(unsigned expected_arrivals,
+                                  ReductionOpID redop_id = 0,
+                                  const void *initial_value = 0,
+                                  size_t initial_value_size = 0);
+    using ParticipantInfo = Realm::Barrier::ParticipantInfo;
+    static Barrier create_barrier(const Barrier::ParticipantInfo *expected_arrivals,
+                                  size_t num_participants, ReductionOpID redop_id = 0,
+                                  const void *initial_value = 0,
+                                  size_t initial_value_size = 0);
+    Barrier set_arrival_pattern(const Barrier::ParticipantInfo *expected_arrivals,
+                                size_t num_participants);
+    void destroy_barrier(void);
+
+    static const ::realm_event_gen_t MAX_PHASES;
+
+    Barrier advance_barrier(void) const;
+    Barrier alter_arrival_count(int delta) const;
+    Barrier get_previous_phase(void) const;
     void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT,
                   const void* reduce_value = 0,
                   size_t reduce_value_size = 0) const;
+    bool get_result(void *value, size_t value_size) const;
   };
   static_assert(sizeof(Barrier) == sizeof(Realm::Barrier));
 
@@ -355,6 +377,10 @@ namespace PRealm {
 				      Event wait_on = Event::NO_EVENT);
     // TODO: Profile this? Legion prof won't recognize where the event came from
     Event fetch_metadata(Processor target) const;
+    template <int N, typename T>
+    IndexSpace<N,T> get_indexspace(void) const;
+    template <int N>
+    IndexSpace<N,int> get_indexspace(void) const;
     static const RegionInstance NO_INST;
   public:
     // A unique event that acts as a handle for describing this instance for profiling

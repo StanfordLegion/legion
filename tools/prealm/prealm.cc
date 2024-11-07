@@ -28,6 +28,7 @@ namespace PRealm {
   const Event Event::NO_EVENT = Realm::Event::NO_EVENT;
   const UserEvent UserEvent::NO_USER_EVENT = Realm::UserEvent::NO_USER_EVENT;
   const Barrier Barrier::NO_BARRIER = Realm::Barrier::NO_BARRIER;
+  const ::realm_event_gen_t Barrier::MAX_PHASES = Realm::Barrier::MAX_PHASES;
   const CompletionQueue CompletionQueue::NO_QUEUE = Realm::CompletionQueue::NO_QUEUE;
   const Reservation Reservation::NO_RESERVATION = Realm::Reservation::NO_RESERVATION;
   const Processor Processor::NO_PROC = Realm::Processor::NO_PROC;
@@ -465,6 +466,8 @@ namespace PRealm {
   
   void ThreadProfiler::record_event_merger(Event result, const Event *preconditions, size_t num_events)
   {
+    if (!result.exists())
+      return;
     Profiler &profiler = Profiler::get_profiler();
     if (profiler.no_critical_paths)
       return;
