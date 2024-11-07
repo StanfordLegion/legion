@@ -43,16 +43,6 @@
 
 namespace Realm {
 
-  //class XferDes;
-  //class XferDesQueue;
-  //class Channel;
-  //class DmaRequest;
-  //class TransferIterator;
-
-  //extern Logger log_new_dma;
-
-  //typedef unsigned long long XferDesID;
-
   class MemcpyChannel;
 
   class MemcpyXferDes : public XferDes {
@@ -76,7 +66,6 @@ namespace Realm {
     bool memcpy_req_in_use;
     MemcpyRequest memcpy_req;
     bool has_serdez;
-    // const char *src_buf_base, *dst_buf_base;
   };
 
   class MemcpyChannel : public SingleXDQChannel<MemcpyChannel, MemcpyXferDes> {
