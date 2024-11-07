@@ -290,4 +290,3 @@ byfield_%.cc :
 
 .INTERMEDIATE: $(patsubst %.cc.o,%.cc,$(notdir $(REALM_INST_OBJS)))
 endif
-

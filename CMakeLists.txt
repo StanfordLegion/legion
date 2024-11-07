@@ -133,7 +133,7 @@ if (CMAKE_BUILD_TYPE AND ( CMAKE_BUILD_TYPE STREQUAL "Debug"))
   set(DEBUG_LEGION ON)
 endif()
 
-set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
+set(BUILD_SHARED_LIBS OFF  CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
 #------------------------------------------------------------------------------#
 # Architecture
