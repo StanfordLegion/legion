@@ -84,12 +84,13 @@ ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
 TESTS += test_cuhook
 TESTS += cuda_memcpy_test
-TESTS += cuda_transpose_test
+TESTS += transpose_test_gpu
 TESTS += cuda_scatter_test
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
 TESTS += task_stream
+TESTS += transpose_test_gpu
 endif
 
 # can set arguments to be passed to a test when running
