@@ -425,52 +425,6 @@ namespace Realm {
       }
     }
     return new_nr;
-
-#ifdef TO_BE_DELETE
-    long idx = 0;
-    while(idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-      off_t src_start, dst_start;
-      size_t nbytes;
-      if(DIM == 0) {
-        simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx,
-                                min(available_reqs.size(), nr - idx));
-      } else {
-        simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx,
-                                min(available_reqs.size(), nr - idx));
-      }
-      if(nbytes == 0) {
-        break;
-      }
-      // printf("[MemcpyXferDes] guid = %lx, offset_idx = %lld, oas_vec.size() = %lu,
-      // nbytes = %lu\n", guid, offset_idx, oas_vec.size(), nbytes);
-      while(nbytes > 0) {
-        size_t req_size = nbytes;
-        if(src_buf.is_ib) {
-          src_start = src_start % src_buf.buf_size;
-          req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
-        }
-        if(dst_buf.is_ib) {
-          dst_start = dst_start % dst_buf.buf_size;
-          req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
-        }
-        mem_cpy_reqs[idx] = (MemcpyRequest *)available_reqs.front();
-        available_reqs.pop();
-        // printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n",
-        // src_start, dst_start, nbytes);
-        mem_cpy_reqs[idx]->is_read_done = false;
-        mem_cpy_reqs[idx]->is_write_done = false;
-        mem_cpy_reqs[idx]->src_buf = (char *)(src_buf_base + src_start);
-        mem_cpy_reqs[idx]->dst_buf = (char *)(dst_buf_base + dst_start);
-        mem_cpy_reqs[idx]->nbytes = req_size;
-        src_start += req_size; // here we don't have to mod src_buf.buf_size since it will
-                               // be performed in next loop
-        dst_start += req_size; //
-        nbytes -= req_size;
-        idx++;
-      }
-    }
-    return idx;
-#endif
   }
 
   void MemcpyXferDes::notify_request_read_done(Request *req)

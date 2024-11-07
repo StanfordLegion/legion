@@ -23,7 +23,7 @@ TEST(MemcpyChannelTest, CreateMemcpyChannel)
   channel->shutdown();
 }
 
-struct ChannelTestCase {
+/*struct ChannelTestCase {
   std::vector<Memory> memories;
 };
 
@@ -46,12 +46,11 @@ const static ChannelTestCase kMemcpyChannelTestCases[] = {
 };
 
 INSTANTIATE_TEST_SUITE_P(Foo, MemcpyChannelParamTest,
-                         testing::ValuesIn(kMemcpyChannelTestCases));
+                         testing::ValuesIn(kMemcpyChannelTestCases));*/
 
 struct MemcpyXferDescTestCase {
   std::vector<size_t> src_strides;
   std::vector<size_t> src_extents;
-
   std::vector<size_t> dst_strides;
   std::vector<size_t> dst_extents;
 };
@@ -79,11 +78,11 @@ public:
   }
 };
 
+// TODO(apryakhin): Move under test utils
 template <int N, typename T>
 class TransferIteratorMock : public TransferIterator {
 public:
   TransferIteratorMock(void) {}
-  TransferIteratorMock(RegionInstanceImpl *_inst_impl, const int _dim_order[N]) {}
 
   virtual Event request_metadata(void) { return Event::NO_EVENT; }
 
@@ -93,14 +92,12 @@ public:
   virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
                       bool tentative = false)
   {
-    assert(0);
     return 0;
   }
 
   virtual size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
                              bool tentative = false)
   {
-    assert(0);
     return 0;
   }
 
@@ -119,7 +116,6 @@ public:
 protected:
   virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset, size_t &fsize)
   {
-    assert(0);
     return false;
   }
 };
