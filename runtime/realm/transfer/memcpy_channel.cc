@@ -364,12 +364,6 @@ namespace Realm {
     }
   }
 
-#if 0
-      static inline bool cross_ib(off_t start, size_t nbytes, size_t buf_size)
-      {
-        return (nbytes > 0) && (start / buf_size < (start + nbytes - 1) / buf_size);
-      }
-#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
