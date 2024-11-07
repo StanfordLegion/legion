@@ -48,36 +48,6 @@ const static ChannelTestCase kMemcpyChannelTestCases[] = {
 INSTANTIATE_TEST_SUITE_P(Foo, MemcpyChannelParamTest,
                          testing::ValuesIn(kMemcpyChannelTestCases));*/
 
-struct MemcpyXferDescTestCase {
-  std::vector<size_t> src_strides;
-  std::vector<size_t> src_extents;
-  std::vector<size_t> dst_strides;
-  std::vector<size_t> dst_extents;
-};
-
-class MemcpyXferDescParamTest : public ::testing::TestWithParam<MemcpyXferDescTestCase> {
-public:
-  size_t set_port(XferDes::XferPort &port, const std::vector<size_t> &strides,
-                  const std::vector<size_t> &extents)
-  {
-    size_t bytes = strides[0] * extents[0];
-    size_t *addr_data = port.addrlist.begin_nd_entry(strides.size());
-
-    for(int dim = 1; dim < strides.size(); dim++) {
-      size_t count = extents[dim];
-      addr_data[dim * 2] = count;
-      addr_data[dim * 2 + 1] = strides[dim];
-      bytes *= count;
-    }
-
-    addr_data[0] = (bytes << 4) + strides.size();
-    port.addrlist.commit_nd_entry(strides.size(), bytes);
-    port.addrcursor.set_addrlist(&port.addrlist);
-
-    return bytes;
-  }
-};
-
 // TODO(apryakhin): Move under test utils
 template <int N, typename T>
 class TransferIteratorMock : public TransferIterator {
@@ -113,10 +83,39 @@ public:
     return true;
   }
 
-protected:
   virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset, size_t &fsize)
   {
     return false;
+  }
+};
+
+struct MemcpyXferDescTestCase {
+  std::vector<size_t> src_strides;
+  std::vector<size_t> src_extents;
+  std::vector<size_t> dst_strides;
+  std::vector<size_t> dst_extents;
+};
+
+class MemcpyXferDescParamTest : public ::testing::TestWithParam<MemcpyXferDescTestCase> {
+public:
+  size_t configure_port(XferDes::XferPort &port, const std::vector<size_t> &strides,
+                        const std::vector<size_t> &extents)
+  {
+    size_t bytes = strides[0] * extents[0];
+    size_t *addr_data = port.addrlist.begin_nd_entry(strides.size());
+
+    for(int dim = 1; dim < strides.size(); dim++) {
+      size_t count = extents[dim];
+      addr_data[dim * 2] = count;
+      addr_data[dim * 2 + 1] = strides[dim];
+      bytes *= count;
+    }
+
+    addr_data[0] = (bytes << 4) + strides.size();
+    port.addrlist.commit_nd_entry(strides.size(), bytes);
+    port.addrcursor.set_addrlist(&port.addrlist);
+
+    return bytes;
   }
 };
 
@@ -125,10 +124,11 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   auto test_case = GetParam();
 
   NodeID owner = 0;
-  Node node;
+  Node node_data;
   std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
+  // TODO(apryakhin@): Consider mocking bgwork
   BackgroundWorkManager *bgwork = new BackgroundWorkManager();
-  MemcpyChannel channel(bgwork, &node, remote_shared_memory_mappings, owner);
+  MemcpyChannel channel(bgwork, &node_data, remote_shared_memory_mappings, owner);
 
   NodeID launch_node = owner;
   XferDesID guid = 0;
@@ -137,14 +137,15 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   int priority = 0;
   XferDesRedopInfo redop_info;
 
-  XferDes *xfer_desc =
+  MemcpyXferDes *xfer_desc = dynamic_cast<MemcpyXferDes *>(
       channel.create_xfer_des(0, launch_node, guid, inputs_info, outputs_info, priority,
-                              redop_info, nullptr, 0, 0);
+                              redop_info, nullptr, 0, 0));
 
   xfer_desc->input_ports.resize(1);
   XferDes::XferPort &input_port = xfer_desc->input_ports[0];
 
-  size_t src_bytes = set_port(input_port, test_case.src_strides, test_case.src_extents);
+  size_t src_bytes =
+      configure_port(input_port, test_case.src_strides, test_case.src_extents);
   std::vector<char> in_buffer(src_bytes, 7);
   void *input_alloc_base = in_buffer.data();
   MemoryImpl *input_mem = new LocalCPUMemory(Memory::NO_MEMORY, src_bytes, 0,
@@ -159,7 +160,8 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   xfer_desc->output_ports.resize(1);
   XferDes::XferPort &output_port = xfer_desc->output_ports[0];
 
-  size_t dst_bytes = set_port(output_port, test_case.dst_strides, test_case.dst_extents);
+  size_t dst_bytes =
+      configure_port(output_port, test_case.dst_strides, test_case.dst_extents);
   std::vector<char> out_buffer(dst_bytes, 7);
   void *output_alloc_base = out_buffer.data();
   MemoryImpl *output_mem = new LocalCPUMemory(Memory::NO_MEMORY, dst_bytes, 0,
@@ -169,8 +171,8 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   output_port.peer_port_idx = 0;
   output_port.iter = new TransferIteratorMock<1, int>();
 
-  auto memcpy_xfer_desc = reinterpret_cast<MemcpyXferDes *>(xfer_desc);
-  memcpy_xfer_desc->progress_xd(&channel, TimeLimit::responsive());
+  while(!xfer_desc->progress_xd(&channel, TimeLimit::responsive())) {
+  }
 
   for(size_t i = 0; i < in_buffer.size(); i++) {
     EXPECT_EQ(in_buffer[i], out_buffer[i]);
