@@ -234,8 +234,8 @@ namespace PRealm {
 	TASK_ID_PROCESSOR_NOP      = Realm::Processor::TASK_ID_PROCESSOR_NOP,
 	TASK_ID_PROCESSOR_INIT     = Realm::Processor::TASK_ID_PROCESSOR_INIT,
 	TASK_ID_PROCESSOR_SHUTDOWN = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-        // Increment this by 1 to reserve a task ID for our profiling responses
-	TASK_ID_FIRST_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+        // Increment this by 3 to reserve some task IDs for our profiling work
+	TASK_ID_FIRST_AVAILABLE    = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     static const Processor NO_PROC;

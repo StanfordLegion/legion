@@ -46,6 +46,10 @@ namespace PRealm {
       Processor::TaskFuncID task_id;
       int priority;
     };
+    struct ShutdownArgs {
+      Event precondition;
+      int code;
+    };
   public:
     Profiler(void);
     Profiler(const Profiler &rhs) = delete;
@@ -56,7 +60,8 @@ namespace PRealm {
     void parse_command_line(std::vector<std::string> &cmdline, bool remove_args);
     void initialize(void);
     void defer_shutdown(Event precondition, int return_code);
-    void release_shutdown(void);
+    void wait_for_shutdown(void);
+    void perform_shutdown(void);
     void finalize(void);
     void record_thread_profiler(ThreadProfiler *profiler);
     unsigned long long find_backtrace_id(Backtrace &bt);
@@ -65,11 +70,15 @@ namespace PRealm {
         size_t user_arglen, Realm::Processor p);
     static void wrapper(const void *args, size_t arglen, const void *user_args,
         size_t user_arglen, Realm::Processor p);
+    static void shutdown(const void *args, size_t arglen, const void *user_args,
+        size_t user_arglen, Realm::Processor p);
     static constexpr Realm::Processor::TaskFuncID CALLBACK_TASK_ID = 
       Realm::Processor::TASK_ID_FIRST_AVAILABLE;
     static constexpr Realm::Processor::TaskFuncID WRAPPER_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE+1;
-    static_assert((CALLBACK_TASK_ID+2) == Processor::TASK_ID_FIRST_AVAILABLE);
+    static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+      Realm::Processor::TASK_ID_FIRST_AVAILABLE+2;
+    static_assert((CALLBACK_TASK_ID+3) == Processor::TASK_ID_FIRST_AVAILABLE);
     static constexpr int CALLBACK_TASK_PRIORITY = std::numeric_limits<int>::min();
   public:
 #ifdef DEBUG_REALM
@@ -127,9 +136,10 @@ namespace PRealm {
     std::map<uintptr_t,unsigned long long> backtrace_ids;
     unsigned long long next_backtrace_id;
     std::atomic<size_t> total_memory_footprint;
-    Event shutdown_precondition;
-    int return_code;
     unsigned total_address_spaces;
+    Event shutdown_precondition;
+    Realm::UserEvent shutdown_wait;
+    int return_code;
     bool has_shutdown;
   public:
     bool self_profile;
@@ -1055,15 +1065,12 @@ namespace PRealm {
 
   Profiler::Profiler(void) : local_proc(Processor::NO_PROC),
     output_footprint_threshold(128 << 20/*128MB*/), target_latency(100/*us*/),
-    total_memory_footprint(0), return_code(0),
-    has_shutdown(false), self_profile(false), no_critical_paths(false)
+    total_memory_footprint(0), shutdown_wait(Realm::UserEvent::NO_USER_EVENT),
+    return_code(0), has_shutdown(false), self_profile(false), no_critical_paths(false)
   {
 #ifdef DEBUG_REALM
     for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++)
       total_outstanding_requests[idx] = 0;
-    total_outstanding_requests[ThreadProfiler::TASK_PROF] = 1; // guard
-#else
-    total_outstanding_requests.store(1); // guard
 #endif
   }
 
@@ -1101,14 +1108,12 @@ namespace PRealm {
   {
     Machine machine = Machine::get_machine();
     total_address_spaces = machine.get_address_space_count();
-    // TODO: handle shutdown for multiple address spaces
-    assert(total_address_spaces == 1);
     Realm::Machine::ProcessorQuery local_procs(machine);
     local_procs.local_address_space();
     assert(!local_proc.exists());
     local_proc = local_procs.first();
-    next_backtrace_id = local_proc.address_space();
     assert(local_proc.exists());
+    next_backtrace_id = local_proc.address_space();
     done_event = Realm::UserEvent::create_user_event();
     size_t pct = file_name.find_first_of('%', 0);
     if (pct != std::string::npos) {
@@ -1816,16 +1821,54 @@ namespace PRealm {
 
   void Profiler::defer_shutdown(Event precondition, int code)
   {
-    assert(!has_shutdown);
-    has_shutdown = true;
-    shutdown_precondition = precondition;
-    return_code = code;
-    // Remove our guard outstanding request that added in the constructor
-#ifdef DEBUG_REALM
-    decrement_total_outstanding_requests(ThreadProfiler::TASK_PROF); 
-#else
-    decrement_total_outstanding_requests();
-#endif
+    // If we're on node 0 then we can do the work
+    if (local_proc.address_space() == 0) {
+      profiler_lock.wrlock().wait();
+      shutdown_precondition = precondition;
+      return_code = code;
+      has_shutdown = true;
+      if (shutdown_wait.exists())
+        // Protect from application level poison
+        shutdown_wait.trigger(precondition);
+      profiler_lock.unlock();
+    } else {
+      // Send a message to node 0 informing it that we received the shutdown
+      ShutdownArgs args{precondition, code};  
+      // Find a processor on node 0
+      Realm::Machine::ProcessorQuery proc_finder(Machine::get_machine());
+      for (Realm::Machine::ProcessorQuery::iterator it =
+            proc_finder.begin(); it != proc_finder.end(); it++) {
+        if (it->address_space() != 0)
+          continue;
+        const Realm::ProfilingRequestSet no_requests;
+        it->spawn(SHUTDOWN_TASK_ID, &args, sizeof(args), no_requests);
+        return;
+      }
+      std::abort(); // should never get here
+    }
+  }
+
+  void Profiler::wait_for_shutdown(void)
+  {
+    assert(local_proc.address_space() == 0);
+    profiler_lock.wrlock().wait();
+    if (!has_shutdown) {
+      shutdown_wait = Realm::UserEvent::create_user_event();
+      profiler_lock.unlock();
+      bool ignore; // ignore poison from the application
+      shutdown_wait.wait_faultaware(ignore);
+    } else {
+      profiler_lock.unlock();
+      bool ignore; // ignore poison from the application
+      shutdown_precondition.wait_faultaware(ignore);
+    }
+  }
+
+  void Profiler::perform_shutdown(void)
+  {
+    assert(local_proc.address_space() == 0);
+    assert(has_shutdown);
+    Realm::Runtime::get_runtime().shutdown(shutdown_precondition, return_code);
   }
 
 #ifdef DEBUG_REALM
@@ -1871,13 +1914,7 @@ namespace PRealm {
       done_event.trigger(shutdown_precondition);
     }
   }
-#endif
-
-  void Profiler::release_shutdown(void)
-  {
-    if (has_shutdown)
-      Realm::Runtime::get_runtime().shutdown(shutdown_precondition, return_code);
-  }
+#endif 
 
   void Profiler::record_thread_profiler(ThreadProfiler *profiler)
   {
@@ -2107,6 +2144,14 @@ namespace PRealm {
         wargs->wait_on, wargs->priority).wait();
   }
 
+  /*static*/ void Profiler::shutdown(const void *args, size_t arglen,
+      const void *user_args, size_t user_arglen, Realm::Processor p)
+  {
+    assert(arglen == sizeof(ShutdownArgs));
+    const ShutdownArgs *sargs = static_cast<const ShutdownArgs*>(args);
+    Profiler::get_profiler().defer_shutdown(sargs->precondition, sargs->code); 
+  }
+
   /*static*/ Profiler& Profiler::get_profiler(void)
   {
     static Profiler singleton;
@@ -2149,6 +2194,7 @@ namespace PRealm {
     const Realm::ProfilingRequestSet no_requests;
     const CodeDescriptor callback(Profiler::callback);
     const CodeDescriptor wrapper(Profiler::wrapper);
+    const CodeDescriptor shutdown(Profiler::shutdown);
     for (Realm::Machine::ProcessorQuery::iterator it = 
           local_procs.begin(); it != local_procs.end(); it++)
     {
@@ -2157,6 +2203,9 @@ namespace PRealm {
       if (done.exists())
         registered.push_back(done);
       done = it->register_task(Profiler::WRAPPER_TASK_ID, wrapper, no_requests);
+      if (done.exists())
+        registered.push_back(done);
+      done = it->register_task(Profiler::SHUTDOWN_TASK_ID, shutdown, no_requests);
       if (done.exists())
         registered.push_back(done);
     }
@@ -2295,12 +2344,23 @@ namespace PRealm {
   int Runtime::wait_for_shutdown(void)
   {
     Profiler &profiler = Profiler::get_profiler();
+    const AddressSpace local_space = profiler.get_local_processor().address_space();
+    // Make sure node 0 has received the shutdown notification before we try
+    // to finalize any of the profilers
+    if (local_space == 0)
+      profiler.wait_for_shutdown();
+    // Then do a barrier to notify all the other nodes that the shutdown has
+    // been received and they can try to finalize their profiler
+    Realm::Runtime::collective_spawn_by_kind(Processor::Kind::NO_KIND, 
+        Processor::TASK_ID_PROCESSOR_NOP, nullptr, 0, true/*one per process*/).wait();
+    // Now we can finalize the profiler
     profiler.finalize();
     // Do a barrier to make sure that everyone is done reporting their profiling
     Realm::Runtime::collective_spawn_by_kind(Processor::Kind::NO_KIND, 
         Processor::TASK_ID_PROCESSOR_NOP, nullptr, 0, true/*one per process*/).wait();
-    // If we're the node the buffered the shutdown do that now
-    profiler.release_shutdown();
+    // If we're node 0 now we can actually perform the shutdown
+    if (local_space == 0)
+      profiler.perform_shutdown();
     return Realm::Runtime::wait_for_shutdown();
   }
 
