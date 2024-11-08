@@ -98,10 +98,10 @@ size_t fill_address_list(const std::vector<size_t> &strides,
 
 // TODO(apryakhin): Move under test utils
 template <int DIM, typename T>
-class TransferIteratorMock : public TransferIterator {
+class MockIterator : public TransferIterator {
 public:
-  TransferIteratorMock(const std::vector<size_t> &_strides,
-                       const std::vector<size_t> &_extents, int _max_iterations)
+  MockIterator(const std::vector<size_t> &_strides, const std::vector<size_t> &_extents,
+               int _max_iterations)
     : strides(_strides)
     , extents(_extents)
     , max_iterations(_max_iterations)
@@ -199,6 +199,12 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
       channel->create_xfer_des(0, owner, guid, inputs_info, outputs_info, priority,
                                redop_info, nullptr, 0, 0)));
 
+  // TODO:(apryakhin@:): find a better way to populate the address list
+  // and check all bytes
+  AddressList addrlist;
+  size_t check_bytes =
+      fill_address_list(test_case.dst_strides, test_case.dst_extents, addrlist);
+
   xfer_desc->input_ports.resize(1);
   XferDes::XferPort &input_port = xfer_desc->input_ports[0];
 
@@ -209,14 +215,14 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
     total_src_bytes += src_bytes;
   }
 
-  char *in_buffer = new char[total_src_bytes];
-  std::memset(in_buffer, 7, total_src_bytes);
+  std::byte *src_buffer = new std::byte[total_src_bytes];
+  std::memset(src_buffer, 7, total_src_bytes);
   auto input_mem = std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_src_bytes, 0,
-                                                    Memory::SYSTEM_MEM, in_buffer);
+                                                    Memory::SYSTEM_MEM, src_buffer);
   input_port.mem = input_mem.get();
   input_port.peer_port_idx = 0;
-  input_port.iter = new TransferIteratorMock<1, int>(
-      test_case.src_strides, test_case.src_extents, test_case.expected_iterations);
+  input_port.iter = new MockIterator<1, int>(test_case.src_strides, test_case.src_extents,
+                                             test_case.expected_iterations);
   input_port.peer_guid = XferDes::XFERDES_NO_GUID;
   input_port.addrcursor.set_addrlist(&input_port.addrlist);
 
@@ -230,13 +236,13 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
     total_dst_bytes += dst_bytes;
   }
 
-  char *out_buffer = new char[total_dst_bytes];
-  std::memset(out_buffer, 1, total_dst_bytes);
+  std::byte *dst_buffer = new std::byte[total_dst_bytes];
+  std::memset(dst_buffer, 1, total_dst_bytes);
   auto output_mem = std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_dst_bytes,
-                                                     0, Memory::SYSTEM_MEM, out_buffer);
+                                                     0, Memory::SYSTEM_MEM, dst_buffer);
   output_port.mem = output_mem.get();
   output_port.peer_port_idx = 0;
-  output_port.iter = new TransferIteratorMock<1, int>(
+  output_port.iter = new MockIterator<1, int>(
       test_case.dst_strides, test_case.dst_extents, test_case.expected_iterations);
   output_port.addrcursor.set_addrlist(&output_port.addrlist);
 
@@ -247,14 +253,8 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
 
   EXPECT_EQ(iterations, test_case.expected_iterations);
 
-  // TODO:(apryakhin@:): find a better way to populate the address list
-  // and check all bytes
-  AddressList addrlist;
-  size_t check_bytes =
-      fill_address_list(test_case.dst_strides, test_case.dst_extents, addrlist);
-
   for(size_t i = 0; i < check_bytes; i++) {
-    EXPECT_EQ(in_buffer[i], out_buffer[i]);
+    EXPECT_EQ(src_buffer[i], dst_buffer[i]);
   }
 }
 
