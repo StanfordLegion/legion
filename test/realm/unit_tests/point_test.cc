@@ -36,8 +36,9 @@ TYPED_TEST_P(PointTest, Zeroes)
   constexpr int N = TypeParam::value;
   using T = typename TypeParam::type;
   Point<N, T> point = Point<N, T>::ZEROES();
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(point[i], 0);
+  }
 }
 
 TYPED_TEST_P(PointTest, Ones)
@@ -45,8 +46,9 @@ TYPED_TEST_P(PointTest, Ones)
   constexpr int N = TypeParam::value;
   using T = typename TypeParam::type;
   Point<N, T> point = Point<N, T>::ONES();
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(point[i], 1);
+  }
 }
 
 TYPED_TEST_P(PointTest, BaseAccess)
@@ -55,8 +57,9 @@ TYPED_TEST_P(PointTest, BaseAccess)
   using T = typename TypeParam::type;
   Point<N, T> point(this->values1);
 
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(point[i], this->values1[i]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Equality)
@@ -79,8 +82,9 @@ TYPED_TEST_P(PointTest, Add)
   Point<N, T> point2(this->values2);
   Point<N, T> result = point1 + point2;
 
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values1[i] + this->values2[i]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Subtract)
@@ -91,8 +95,9 @@ TYPED_TEST_P(PointTest, Subtract)
   Point<N, T> point2(this->values1);
   Point<N, T> result = point1 - point2;
 
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] - this->values1[i]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Multiply)
@@ -103,8 +108,9 @@ TYPED_TEST_P(PointTest, Multiply)
   Point<N, T> point2(this->values1);
   Point<N, T> result = point1 * point2;
 
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] * this->values1[i]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Divide)
@@ -115,8 +121,9 @@ TYPED_TEST_P(PointTest, Divide)
   Point<N, T> point2(this->values1);
   Point<N, T> result = point1 / point2;
 
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] / this->values1[i]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Modulo)
@@ -127,8 +134,9 @@ TYPED_TEST_P(PointTest, Modulo)
   Point<N, T> point2(this->values1);
   Point<N, T> result = point1 % point2;
 
-  for(int i = 0; i < N; i++)
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] % this->values1[i]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Dot)
