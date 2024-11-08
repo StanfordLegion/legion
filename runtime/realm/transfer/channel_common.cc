@@ -15,14 +15,7 @@
  */
 
 #include "realm/realm_config.h"
-
-#ifdef REALM_ON_WINDOWS
-#define NOMINMAX
-#endif
-
 #include "realm/transfer/channel_common.h"
-#include "realm/utils.h"
-
 #include <algorithm>
 
 namespace Realm {

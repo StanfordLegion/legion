@@ -21,17 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#ifndef REALM_ON_WINDOWS
-#include <unistd.h>
-#include <pthread.h>
-#endif
-#include <fcntl.h>
-#include <map>
-#include <vector>
-#include <deque>
-#include <queue>
-#include <assert.h>
-#include <string.h>
 
 namespace Realm {
 

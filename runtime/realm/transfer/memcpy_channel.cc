@@ -389,21 +389,6 @@ namespace Realm {
   // class MemcpyChannel
   //
 
-  // TODO(apryakhin@): delete
-  static void enumerate_remote_shared_mems(std::vector<Memory> &mems)
-  {
-    RuntimeImpl *runtime = get_runtime();
-    size_t idx = 0;
-    mems.resize(runtime->remote_shared_memory_mappings.size(), Memory::NO_MEMORY);
-    for(std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
-            runtime->remote_shared_memory_mappings.begin();
-        it != runtime->remote_shared_memory_mappings.end(); ++it) {
-      Memory m;
-      m.id = it->first;
-      mems[idx++] = m;
-    }
-  }
-
   static void
   enumerate_remote_shared_mems(std::vector<Memory> &mems,
                                const std::unordered_map<realm_id_t, SharedMemoryInfo>
