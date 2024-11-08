@@ -37,7 +37,7 @@ TYPED_TEST_P(PointTest, Zeroes)
   using T = typename TypeParam::type;
   Point<N, T> point = Point<N, T>::ZEROES();
   for(int i = 0; i < N; i++) {
-    EXPECT_EQ(point[i], 0);
+    EXPECT_EQ(point[i], static_cast<T>(0));
   }
 }
 
@@ -47,7 +47,7 @@ TYPED_TEST_P(PointTest, Ones)
   using T = typename TypeParam::type;
   Point<N, T> point = Point<N, T>::ONES();
   for(int i = 0; i < N; i++) {
-    EXPECT_EQ(point[i], 1);
+    EXPECT_EQ(point[i], static_cast<T>(1));
   }
 }
 
