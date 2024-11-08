@@ -1,5 +1,7 @@
 #include "realm/transfer/transfer_utils.h"
 #include <tuple>
+#include <variant>
+#include <vector>
 #include <gtest/gtest.h>
 
 using namespace Realm;
@@ -76,77 +78,150 @@ TEST(TransferUtilsTest, HigherDomainBounds)
   }
 }
 
-// TODO(apryakhin@): Extend to ND cases
+template <int N>
 struct ComputeTargetSubrectTestCase {
   std::vector<int> dim_order;
-  Rect<2> bounds;
-  Rect<2> cur_rect;
-  Point<2> cur_point;
-  std::vector<Rect<2>> expected_rects;
+  Rect<N> bounds;
+  Rect<N> cur_rect;
+  Point<N> cur_point;
+  std::vector<Rect<N>> expected_rects;
 };
 
+// Define aliases for specific dimensions
+using ComputeTargetSubrectTestCase1D = ComputeTargetSubrectTestCase<1>;
+using ComputeTargetSubrectTestCase2D = ComputeTargetSubrectTestCase<2>;
+using ComputeTargetSubrectTestCase3D = ComputeTargetSubrectTestCase<3>;
+
+// Unified test case variant
+using ComputeTargetSubrectTestVariant =
+    std::variant<ComputeTargetSubrectTestCase1D, ComputeTargetSubrectTestCase2D,
+                 ComputeTargetSubrectTestCase3D>;
+
 class ComputeTargetSubrectTest
-  : public ::testing::TestWithParam<ComputeTargetSubrectTestCase> {
-  void TearDown() {}
+  : public ::testing::TestWithParam<ComputeTargetSubrectTestVariant> {
+protected:
+  void TearDown() override {}
+
+  template <int N>
+  void RunTest(const ComputeTargetSubrectTestCase<N> &test_case)
+  {
+    std::vector<Rect<N>> rects;
+    Point<N> cur_point = test_case.cur_point;
+
+    bool not_done = false;
+    do {
+      Rect<N> next_subrect;
+      not_done = compute_target_subrect(test_case.bounds, test_case.cur_rect, cur_point,
+                                        next_subrect, test_case.dim_order.data());
+      rects.push_back(next_subrect);
+    } while(not_done);
+
+    ASSERT_EQ(test_case.expected_rects.size(), rects.size());
+    for(size_t i = 0; i < test_case.expected_rects.size(); i++) {
+      EXPECT_EQ(test_case.expected_rects[i].lo, rects[i].lo);
+      EXPECT_EQ(test_case.expected_rects[i].hi, rects[i].hi);
+    }
+  }
 };
 
 TEST_P(ComputeTargetSubrectTest, NextTargetSubrectEmpty)
 {
-  auto test_case = GetParam();
-
-  std::vector<Rect<2>> rects;
-  Point<2> cur_point = test_case.cur_point;
-
-  bool not_done = false;
-  do {
-    Rect<2> next_subrect;
-    not_done = compute_target_subrect(test_case.bounds, test_case.cur_rect, cur_point,
-                                      next_subrect, test_case.dim_order.data());
-    rects.push_back(next_subrect);
-
-  } while(not_done);
-
-  EXPECT_EQ(test_case.expected_rects.size(), rects.size());
-  for(size_t i = 0; i < test_case.expected_rects.size(); i++) {
-    EXPECT_EQ(test_case.expected_rects[i].lo, rects[i].lo);
-    EXPECT_EQ(test_case.expected_rects[i].hi, rects[i].hi);
-  }
+  std::visit([this](auto &&test_case) { RunTest(test_case); }, GetParam());
 }
 
-const static ComputeTargetSubrectTestCase kComputeSubrectTestCases[] = {
-    // Case 1 : next target subrect is empty
-    ComputeTargetSubrectTestCase{
-        .dim_order = std::vector<int>{0, 1},
-        .bounds = Rect<2>(Point<2>(1, 1), Point<2>(0, 0)),
-        .cur_rect = Rect<2>(Point<2>(1, 1), Point<2>(0, 0)),
-        .cur_point = Point<2>::ZEROES(),
-        .expected_rects = {Rect<2>(Point<2>(0, 0), Point<2>(0, 0))}},
-
-    // Case 2 : next target full cover
-    ComputeTargetSubrectTestCase{
-        .dim_order = std::vector<int>{0, 1},
-        .bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
-        .cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5)),
-        .cur_point = Point<2>::ZEROES(),
-        .expected_rects = {Rect<2>(Point<2>(0, 0), Point<2>(10, 5))}},
-
-    // Case 3 : middle start
-    ComputeTargetSubrectTestCase{
-        .dim_order = std::vector<int>{0, 1},
-        .bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
-        .cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5)),
-        .cur_point = Point<2>(4, 4),
-        .expected_rects = {Rect<2>(Point<2>(4, 4), Point<2>(10, 4)),
-                           Rect<2>(Point<2>(0, 5), Point<2>(10, 5))}},
-
-    // Case 4 : stopping short
-    /*ComputeTargetSubrectTestCase{
-        .dim_order = std::vector<int>{0, 1},
-        .bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
-        .cur_rect = Rect<2>(Point<2>(11, 11), Point<2>(12, 12)),
-        .cur_point = Point<2>(0, 0),
-        .expected_rects = {Rect<2>(Point<2>(0, 0), Point<2>(10, 0))}},*/
+// 1D test cases
+const static ComputeTargetSubrectTestCase1D kComputeSubrectTestCases1D[] = {
+    // Simple full span in 1D
+    {{0},
+     Rect<1>(Point<1>(0), Point<1>(10)),
+     Rect<1>(Point<1>(0), Point<1>(10)),
+     Point<1>(0),
+     {Rect<1>(Point<1>(0), Point<1>(10))}},
+    // Partial span in 1D
+    {{0},
+     Rect<1>(Point<1>(0), Point<1>(10)),
+     Rect<1>(Point<1>(3), Point<1>(7)),
+     Point<1>(3),
+     {Rect<1>(Point<1>(3), Point<1>(7))}},
+    // Out of bounds starting point in 1D
+    /*{{0},
+     Rect<1>(Point<1>(0), Point<1>(10)),
+     Rect<1>(Point<1>(11), Point<1>(15)),
+     Point<1>(11),
+     {}},*/
 };
 
-INSTANTIATE_TEST_SUITE_P(Test, ComputeTargetSubrectTest,
-                         testing::ValuesIn(kComputeSubrectTestCases));
+// 2D test cases
+const static ComputeTargetSubrectTestCase2D kComputeSubrectTestCases2D[] = {
+    // Full cover in 2D
+    {{0, 1},
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+     Point<2>(0, 0),
+     {Rect<2>(Point<2>(0, 0), Point<2>(10, 10))}},
+    // Partial span in 2D
+    {{0, 1},
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 5)),
+     Point<2>(0, 0),
+     {Rect<2>(Point<2>(0, 0), Point<2>(10, 5))}},
+    // Middle start point in 2D
+    {{0, 1},
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 5)),
+     Point<2>(4, 4),
+     {Rect<2>(Point<2>(4, 4), Point<2>(10, 4)),
+      Rect<2>(Point<2>(0, 5), Point<2>(10, 5))}},
+    // Out of bounds in 2D
+    /*{{0, 1},
+     Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+     Rect<2>(Point<2>(11, 11), Point<2>(12, 12)),
+     Point<2>(11, 11),
+     {}},*/
+};
+
+// 3D test cases
+const static ComputeTargetSubrectTestCase3D kComputeSubrectTestCases3D[] = {
+    // Full cover in 3D
+    {{0, 1, 2},
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 10, 10)),
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 10, 10)),
+     Point<3>(0, 0, 0),
+     {Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 10, 10))}},
+    // Partial span in 3D
+    {{0, 1, 2},
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 10, 10)),
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 5, 5)),
+     Point<3>(0, 0, 0),
+     {Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 5, 5))}},
+    // Middle start in 3D
+    {{0, 1, 2},
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 10, 10)),
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 5, 5)),
+     Point<3>(4, 4, 4),
+     {Rect<3>(Point<3>(4, 4, 4), Point<3>(10, 4, 4)),
+      Rect<3>(Point<3>(0, 5, 4), Point<3>(10, 5, 4)),
+      Rect<3>(Point<3>(0, 0, 5), Point<3>(10, 5, 5))}},
+    // Out of bounds in 3D
+    /*{{0, 1, 2},
+     Rect<3>(Point<3>(0, 0, 0), Point<3>(10, 10, 10)),
+     Rect<3>(Point<3>(11, 11, 11), Point<3>(12, 12, 12)),
+     Point<3>(11, 11, 11),
+     {}},*/
+};
+
+// Concatenate all test cases into one vector
+std::vector<ComputeTargetSubrectTestVariant> allTestCases()
+{
+  std::vector<ComputeTargetSubrectTestVariant> cases;
+  cases.insert(cases.end(), std::begin(kComputeSubrectTestCases1D),
+               std::end(kComputeSubrectTestCases1D));
+  cases.insert(cases.end(), std::begin(kComputeSubrectTestCases2D),
+               std::end(kComputeSubrectTestCases2D));
+  cases.insert(cases.end(), std::begin(kComputeSubrectTestCases3D),
+               std::end(kComputeSubrectTestCases3D));
+  return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(TestAllDimensions, ComputeTargetSubrectTest,
+                         testing::ValuesIn(allTestCases()));
