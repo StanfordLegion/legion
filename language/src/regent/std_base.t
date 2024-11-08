@@ -116,6 +116,7 @@ end
 local c = terralib.includecstring([[
 #include "legion.h"
 #include "regent.h"
+#include "regent_gpu.h"
 #include "regent_partitions.h"
 #include "murmur_hash3.h"
 #include <math.h>

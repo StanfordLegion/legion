@@ -1401,78 +1401,74 @@ fn parse<'a>(
     let (input, _) = newline(input)?;
 
     let mut parsers = BTreeMap::<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>::new();
-    parsers.insert(ids["MapperName"], parse_mapper_name);
-    parsers.insert(ids["MapperCallDesc"], parse_mapper_call_desc);
-    parsers.insert(ids["RuntimeCallDesc"], parse_runtime_call_desc);
-    parsers.insert(ids["MetaDesc"], parse_meta_desc);
-    parsers.insert(ids["OpDesc"], parse_op_desc);
-    parsers.insert(ids["MaxDimDesc"], parse_max_dim_desc);
-    parsers.insert(ids["RuntimeConfig"], parse_runtime_config);
-    parsers.insert(ids["MachineDesc"], parse_machine_desc);
-    parsers.insert(ids["ZeroTime"], parse_zero_time);
-    parsers.insert(ids["Provenance"], parse_provenance);
-    parsers.insert(ids["ProcDesc"], parse_proc_desc);
-    parsers.insert(ids["MemDesc"], parse_mem_desc);
-    parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);
-    parsers.insert(ids["CalibrationErr"], parse_calibration_err);
-    parsers.insert(ids["IndexSpacePointDesc"], parse_index_space_point_desc);
-    parsers.insert(ids["IndexSpaceRectDesc"], parse_index_space_rect_desc);
-    parsers.insert(ids["IndexSpaceEmptyDesc"], parse_index_space_empty_desc);
-    parsers.insert(ids["FieldDesc"], parse_field_desc);
-    parsers.insert(ids["FieldSpaceDesc"], parse_field_space_desc);
-    parsers.insert(ids["PartDesc"], parse_part_desc);
-    parsers.insert(ids["IndexSpaceDesc"], parse_index_space_desc);
-    parsers.insert(ids["IndexSubSpaceDesc"], parse_index_subspace_desc);
-    parsers.insert(ids["IndexPartitionDesc"], parse_index_partition_desc);
-    parsers.insert(ids["IndexSpaceSizeDesc"], parse_index_space_size_desc);
-    parsers.insert(ids["LogicalRegionDesc"], parse_logical_region_desc);
-    parsers.insert(
-        ids["PhysicalInstRegionDesc"],
-        parse_physical_inst_region_desc,
-    );
-    parsers.insert(
-        ids["PhysicalInstLayoutDesc"],
-        parse_physical_inst_layout_desc,
-    );
-    parsers.insert(
-        ids["PhysicalInstDimOrderDesc"],
+    let mut insert = |name, parser| {
+        if let Some(id) = ids.get(name) {
+            parsers.insert(*id, parser);
+        }
+    };
+    insert("MapperName", parse_mapper_name);
+    insert("MapperCallDesc", parse_mapper_call_desc);
+    insert("RuntimeCallDesc", parse_runtime_call_desc);
+    insert("MetaDesc", parse_meta_desc);
+    insert("OpDesc", parse_op_desc);
+    insert("MaxDimDesc", parse_max_dim_desc);
+    insert("RuntimeConfig", parse_runtime_config);
+    insert("MachineDesc", parse_machine_desc);
+    insert("ZeroTime", parse_zero_time);
+    insert("Provenance", parse_provenance);
+    insert("ProcDesc", parse_proc_desc);
+    insert("MemDesc", parse_mem_desc);
+    insert("ProcMDesc", parse_mem_proc_affinity_desc);
+    insert("CalibrationErr", parse_calibration_err);
+    insert("IndexSpacePointDesc", parse_index_space_point_desc);
+    insert("IndexSpaceRectDesc", parse_index_space_rect_desc);
+    insert("IndexSpaceEmptyDesc", parse_index_space_empty_desc);
+    insert("FieldDesc", parse_field_desc);
+    insert("FieldSpaceDesc", parse_field_space_desc);
+    insert("PartDesc", parse_part_desc);
+    insert("IndexSpaceDesc", parse_index_space_desc);
+    insert("IndexSubSpaceDesc", parse_index_subspace_desc);
+    insert("IndexPartitionDesc", parse_index_partition_desc);
+    insert("IndexSpaceSizeDesc", parse_index_space_size_desc);
+    insert("LogicalRegionDesc", parse_logical_region_desc);
+    insert("PhysicalInstRegionDesc", parse_physical_inst_region_desc);
+    insert("PhysicalInstLayoutDesc", parse_physical_inst_layout_desc);
+    insert(
+        "PhysicalInstDimOrderDesc",
         parse_physical_inst_layout_dim_desc,
     );
-    parsers.insert(ids["PhysicalInstanceUsage"], parse_physical_inst_usage);
-    parsers.insert(ids["TaskKind"], parse_task_kind);
-    parsers.insert(ids["TaskVariant"], parse_task_variant);
-    parsers.insert(ids["OperationInstance"], parse_operation);
-    parsers.insert(ids["MultiTask"], parse_multi_task);
-    parsers.insert(ids["SliceOwner"], parse_slice_owner);
-    parsers.insert(ids["TaskWaitInfo"], parse_task_wait_info);
-    parsers.insert(ids["MetaWaitInfo"], parse_meta_wait_info);
-    parsers.insert(ids["TaskInfo"], parse_task_info);
-    parsers.insert(ids["GPUTaskInfo"], parse_gpu_task_info);
-    parsers.insert(ids["ImplicitTaskInfo"], parse_implicit_info);
-    parsers.insert(ids["MetaInfo"], parse_meta_info);
-    parsers.insert(ids["MessageInfo"], parse_message_info);
-    parsers.insert(ids["CopyInfo"], parse_copy_info);
-    parsers.insert(ids["CopyInstInfo"], parse_copy_inst_info);
-    parsers.insert(ids["FillInfo"], parse_fill_info);
-    parsers.insert(ids["FillInstInfo"], parse_fill_inst_info);
-    parsers.insert(ids["InstTimelineInfo"], parse_inst_timeline);
-    parsers.insert(ids["PartitionInfo"], parse_partition_info);
-    parsers.insert(ids["MapperCallInfo"], parse_mapper_call_info);
-    parsers.insert(ids["RuntimeCallInfo"], parse_runtime_call_info);
-    parsers.insert(ids["ApplicationCallInfo"], parse_application_call_info);
-    parsers.insert(ids["ProfTaskInfo"], parse_proftask_info);
-    parsers.insert(ids["BacktraceDesc"], parse_backtrace_desc);
-    parsers.insert(ids["EventWaitInfo"], parse_event_wait_info);
-    parsers.insert(ids["EventMergerInfo"], parse_event_merger_info);
-    parsers.insert(ids["EventTriggerInfo"], parse_event_trigger_info);
-    parsers.insert(ids["EventPoisonInfo"], parse_event_poison_info);
-    parsers.insert(ids["BarrierArrivalInfo"], parse_barrier_arrival_info);
-    parsers.insert(
-        ids["ReservationAcquireInfo"],
-        parse_reservation_acquire_info,
-    );
-    parsers.insert(ids["InstanceReadyInfo"], parse_instance_ready_info);
-    parsers.insert(ids["CompletionQueueInfo"], parse_completion_queue_info);
+    insert("PhysicalInstanceUsage", parse_physical_inst_usage);
+    insert("TaskKind", parse_task_kind);
+    insert("TaskVariant", parse_task_variant);
+    insert("OperationInstance", parse_operation);
+    insert("MultiTask", parse_multi_task);
+    insert("SliceOwner", parse_slice_owner);
+    insert("TaskWaitInfo", parse_task_wait_info);
+    insert("MetaWaitInfo", parse_meta_wait_info);
+    insert("TaskInfo", parse_task_info);
+    insert("GPUTaskInfo", parse_gpu_task_info);
+    insert("ImplicitTaskInfo", parse_implicit_info);
+    insert("MetaInfo", parse_meta_info);
+    insert("MessageInfo", parse_message_info);
+    insert("CopyInfo", parse_copy_info);
+    insert("CopyInstInfo", parse_copy_inst_info);
+    insert("FillInfo", parse_fill_info);
+    insert("FillInstInfo", parse_fill_inst_info);
+    insert("InstTimelineInfo", parse_inst_timeline);
+    insert("PartitionInfo", parse_partition_info);
+    insert("MapperCallInfo", parse_mapper_call_info);
+    insert("RuntimeCallInfo", parse_runtime_call_info);
+    insert("ApplicationCallInfo", parse_application_call_info);
+    insert("ProfTaskInfo", parse_proftask_info);
+    insert("BacktraceDesc", parse_backtrace_desc);
+    insert("EventWaitInfo", parse_event_wait_info);
+    insert("EventMergerInfo", parse_event_merger_info);
+    insert("EventTriggerInfo", parse_event_trigger_info);
+    insert("EventPoisonInfo", parse_event_poison_info);
+    insert("BarrierArrivalInfo", parse_barrier_arrival_info);
+    insert("ReservationAcquireInfo", parse_reservation_acquire_info);
+    insert("InstanceReadyInfo", parse_instance_ready_info);
+    insert("CompletionQueueInfo", parse_completion_queue_info);
 
     let mut input = input;
     let mut max_dim = -1;
