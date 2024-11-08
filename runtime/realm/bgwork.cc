@@ -227,7 +227,10 @@ namespace Realm {
     
     BitMask mask = BitMask(1) << ofs;
     BitMask prev = active_work_item_mask[elem].fetch_or_acqrel(mask);
-    assert((prev & mask) == 0);
+    // this workitem has been advertised before, so early exit
+    if((prev & mask) != 0) {
+      return;
+    }
 
     // increment the active items field in 'worker_state' and see if there are
     //  any sleeping workers that could help out
@@ -401,10 +404,8 @@ namespace Realm {
 #ifdef DEBUG_REALM
     State old_state = state.exchange(STATE_ACTIVE);
     if(old_state != STATE_IDLE) {
-      log_bgwork.fatal() << "invalid make_active: item=" << ((void *)this)
-			 << " name='" << name
-			 << "' oldstate=" << old_state;
-      abort();
+      log_bgwork.debug() << "double make_active: item=" << ((void *)this) << " name='"
+                         << name << "' oldstate=" << old_state;
     }
 #endif
     manager->advertise_work(index);

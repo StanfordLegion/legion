@@ -58,6 +58,12 @@ namespace Realm {
 
       void init(Reservation _me, unsigned _init_owner);
 
+      static Reservation make_id(const ReservationImpl &dummy, int owner,
+                                 ID::IDType index)
+      {
+        return ID::make_reservation(owner, index).convert<Reservation>();
+      }
+
       //protected:
       Reservation me;
       NodeID owner; // which node owns the lock

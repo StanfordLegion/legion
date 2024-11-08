@@ -68,7 +68,7 @@ namespace Realm {
         MAX_NUM_RECTS = MAX_RECTS,
         DIM = N
       };
-      alignas(16) unsigned int fill_value[4];
+      alignas(16) unsigned char fill_value[16];
       unsigned short num_rects;
       AffineFillRect<N, Offset_t> subrects[MAX_RECTS];
     };

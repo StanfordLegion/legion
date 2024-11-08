@@ -617,6 +617,8 @@ namespace Realm {
       alloc_chain_head = ptr[0];
       free(ptr);
     }
+    alloc_chain_head = 0;
+    free_list_head = 0;
   }
 
 

@@ -48,14 +48,19 @@ cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None els
 
 # Find HIP.
 rocm_dir = os.environ.get('ROCM_PATH')
-hip_dir = os.environ.get('HIP_PATH') or (os.path.join(rocm_dir, 'hip') if rocm_dir is not None else None)
-hip_cub_dir = os.path.join(rocm_dir, 'hipcub') if rocm_dir is not None else None
-
-hip_include_dir = os.path.join(hip_dir, 'include') if hip_dir is not None else None
-hip_cub_include_dir = os.path.join(hip_cub_dir, 'include') if hip_cub_dir is not None else None
+rocm_include_dir = os.path.join(rocm_dir, 'include') if rocm_dir is not None else None
 
 # Thrust only needs to be manually located with HIP, where we need an older version to work around a bug.
 thrust_dir = os.environ.get('THRUST_PATH')
+
+# Find LLVM.
+llvm_dir = os.environ.get('REGENT_LLVM_PATH')
+if not llvm_dir:
+    llvm_dir = os.path.join(regent_dir, 'llvm', 'install')
+    if not os.path.exists(llvm_dir):
+        llvm_dir = os.path.join(regent_dir, 'llvm')
+        if not os.path.exists(llvm_dir):
+            llvm_dir = None
 
 # Detect use of CMake.
 if 'USE_CMAKE' in os.environ:
@@ -80,10 +85,8 @@ include_path = (
     ([os.path.join(legion_install_prefix, 'include')] if legion_install_prefix is not None else []))
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)
-if hip_include_dir is not None:
-    include_path.append(hip_include_dir)
-if hip_cub_include_dir is not None:
-    include_path.append(hip_cub_include_dir)
+if rocm_include_dir is not None:
+    include_path.append(rocm_include_dir)
 # per runtime/runtime.mk, has to go ahead of HIP_PATH
 if thrust_dir is not None:
     include_path.insert(0, thrust_dir)
@@ -160,6 +163,9 @@ def regent(args, env={}, cwd=None, **kwargs):
 
     if cuda_dir is not None:
         terra_env['CUDA_HOME'] = cuda_dir
+
+    if llvm_dir is not None:
+        terra_env['REGENT_LLVM_PATH'] = llvm_dir
 
     cmd = []
     if 'LAUNCHER' in os.environ:

@@ -399,17 +399,10 @@ namespace Realm {
     ~RWLock();
 
     // should never be copied (or moved)
-#if REALM_CXX_STANDARD >= 11
     RWLock(const RWLock&) = delete;
     RWLock(RWLock&&) = delete;
     RWLock& operator=(const RWLock&) = delete;
-    RWLock& operator=(RWLock&&) = delete;
-#else
-  private:
-    RWLock(const RWLock&) : writer(*this), reader(*this) {}
-    RWLock& operator=(const RWLock&) { return *this; }
-  public:
-#endif
+    RWLock &operator=(RWLock &&) = delete;
 
     void wrlock();
     bool trywrlock();

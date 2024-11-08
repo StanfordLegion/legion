@@ -24,13 +24,7 @@
 #include <vector>
 #include <iostream>
 
-// we need intptr_t - make it if needed
-#if REALM_CXX_STANDARD >= 11
 #include <stdint.h>
-#else
-#include <stddef.h>
-typedef ptrdiff_t intptr_t;
-#endif
 
 #ifdef REALM_ON_WINDOWS
 // winerror.h defines this, polluting all namespaces, so get it out of the way now

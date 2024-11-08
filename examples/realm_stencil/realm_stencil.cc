@@ -206,15 +206,15 @@ void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t 
 {
   AffineAccessor<DTYPE, 2, coord_t> acc = AffineAccessor<DTYPE, 2, coord_t>(inst, fid);
   base = reinterpret_cast<DTYPE *>(acc.ptr(inst.get_indexspace<2, coord_t>().bounds.lo));
-  assert(acc.strides.x == sizeof(DTYPE));
-  stride = acc.strides.y;
+  assert(acc.strides[0] == sizeof(DTYPE));
+  stride = acc.strides[1];
 }
 
 void dump(RegionInstance inst, FieldID fid, Rect2 bounds, const char *prefix)
 {
   AffineAccessor<DTYPE, 2, coord_t> acc = AffineAccessor<DTYPE, 2, coord_t>(inst, fid);
   for (PointInRectIterator<2, coord_t> it(bounds); it.valid; it.step()) {
-    printf("%s: %2lld %2lld value %8.3f\n", prefix, it.p.x, it.p.y, acc.read(it.p));
+    printf("%s: %2lld %2lld value %8.3f\n", prefix, it.p[0], it.p[1], acc.read(it.p));
   }
 }
 
@@ -253,10 +253,10 @@ void inline_copy_raw(RegionInstance src_inst, RegionInstance dst_inst,
 
   copy2D(src_base, dst_base,
          src_stride/sizeof(DTYPE),
-         src_offset.x, src_offset.x + size.x,
-         src_offset.y, src_offset.y + size.y,
+         src_offset[0], src_offset[0] + size[0],
+         src_offset[1], src_offset[1] + size[1],
          dst_stride/sizeof(DTYPE),
-         dst_offset.x, dst_offset.y);
+         dst_offset[0], dst_offset[1]);
 }
 
 void stencil_task(const void *args, size_t arglen,
@@ -292,10 +292,10 @@ void stencil_task(const void *args, size_t arglen,
 
   stencil(private_base_input, private_base_output, weights,
           private_stride_input/sizeof(DTYPE),
-          interior_offset.x,
-          interior_offset.x + interior_size.x,
-          interior_offset.y,
-          interior_offset.y + interior_size.y);
+          interior_offset[0],
+          interior_offset[0] + interior_size[0],
+          interior_offset[1],
+          interior_offset[1] + interior_size[1]);
 }
 
 void increment_task(const void *args, size_t arglen,
@@ -314,10 +314,10 @@ void increment_task(const void *args, size_t arglen,
 
   increment(private_base_input,
             private_stride_input/sizeof(DTYPE),
-            outer_offset.x,
-            outer_offset.x + outer_size.x,
-            outer_offset.y,
-            outer_offset.y + outer_size.y);
+            outer_offset[0],
+            outer_offset[0] + outer_size[0],
+            outer_offset[1],
+            outer_offset[1] + outer_size[1]);
 
   if (a.xp_inst.exists())
     inline_copy(a.private_inst, a.xp_inst, FID_INPUT,
@@ -734,20 +734,20 @@ void top_level_task(const void *args, size_t arglen,
     std::vector<Event> events;
     for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
       Point2 i(it.p);
-      Rect2 xp_bounds(Point2(x_blocks[i.x].hi + 1,      y_blocks[i.y].lo),
-                      Point2(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi));
-      Rect2 xm_bounds(Point2(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo),
-                      Point2(x_blocks[i.x].lo - 1,      y_blocks[i.y].hi));
-      Rect2 yp_bounds(Point2(x_blocks[i.x].lo,          y_blocks[i.y].hi + 1),
-                      Point2(x_blocks[i.x].hi,          y_blocks[i.y].hi + RADIUS));
-      Rect2 ym_bounds(Point2(x_blocks[i.x].lo,          y_blocks[i.y].lo - RADIUS),
-                      Point2(x_blocks[i.x].hi,          y_blocks[i.y].lo - 1));
+      Rect2 xp_bounds(Point2(x_blocks[i[0]].hi + 1,      y_blocks[i[1]].lo),
+                      Point2(x_blocks[i[0]].hi + RADIUS, y_blocks[i[1]].hi));
+      Rect2 xm_bounds(Point2(x_blocks[i[0]].lo - RADIUS, y_blocks[i[1]].lo),
+                      Point2(x_blocks[i[0]].lo - 1,      y_blocks[i[1]].hi));
+      Rect2 yp_bounds(Point2(x_blocks[i[0]].lo,          y_blocks[i[1]].hi + 1),
+                      Point2(x_blocks[i[0]].hi,          y_blocks[i[1]].hi + RADIUS));
+      Rect2 ym_bounds(Point2(x_blocks[i[0]].lo,          y_blocks[i[1]].lo - RADIUS),
+                      Point2(x_blocks[i[0]].hi,          y_blocks[i[1]].lo - 1));
 
       Processor shard_proc(shard_procs[i]);
       Memory memory(proc_regmems[shard_proc]);
 
       // Region allocation has to be done on the remote node
-      if (i.x != shards.hi.x) {
+      if (i[0] != shards.hi[0]) {
         CreateRegionArgs args;
         args.bounds = xp_bounds;
         args.memory = memory;
@@ -756,7 +756,7 @@ void top_level_task(const void *args, size_t arglen,
         events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
       }
 
-      if (i.x != shards.lo.x) {
+      if (i[0] != shards.lo[0]) {
         CreateRegionArgs args;
         args.bounds = xm_bounds;
         args.memory = memory;
@@ -765,7 +765,7 @@ void top_level_task(const void *args, size_t arglen,
         events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
       }
 
-      if (i.y != shards.hi.y) {
+      if (i[1] != shards.hi[1]) {
         CreateRegionArgs args;
         args.bounds = yp_bounds;
         args.memory = memory;
@@ -774,7 +774,7 @@ void top_level_task(const void *args, size_t arglen,
         events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
       }
 
-      if (i.y != shards.lo.y) {
+      if (i[1] != shards.lo[1]) {
         CreateRegionArgs args;
         args.bounds = ym_bounds;
         args.memory = memory;
@@ -800,15 +800,15 @@ void top_level_task(const void *args, size_t arglen,
   for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
     Point2 i(it.p);
 
-    if (i.x != shards.hi.x) xp_bars_empty[i] = Barrier::create_barrier(1);
-    if (i.x != shards.lo.x) xm_bars_empty[i] = Barrier::create_barrier(1);
-    if (i.y != shards.hi.y) yp_bars_empty[i] = Barrier::create_barrier(1);
-    if (i.y != shards.lo.y) ym_bars_empty[i] = Barrier::create_barrier(1);
+    if (i[0] != shards.hi[0]) xp_bars_empty[i] = Barrier::create_barrier(1);
+    if (i[0] != shards.lo[0]) xm_bars_empty[i] = Barrier::create_barrier(1);
+    if (i[1] != shards.hi[1]) yp_bars_empty[i] = Barrier::create_barrier(1);
+    if (i[1] != shards.lo[1]) ym_bars_empty[i] = Barrier::create_barrier(1);
 
-    if (i.x != shards.hi.x) xp_bars_full[i] = Barrier::create_barrier(1);
-    if (i.x != shards.lo.x) xm_bars_full[i] = Barrier::create_barrier(1);
-    if (i.y != shards.hi.y) yp_bars_full[i] = Barrier::create_barrier(1);
-    if (i.y != shards.lo.y) ym_bars_full[i] = Barrier::create_barrier(1);
+    if (i[0] != shards.hi[0]) xp_bars_full[i] = Barrier::create_barrier(1);
+    if (i[0] != shards.lo[0]) xm_bars_full[i] = Barrier::create_barrier(1);
+    if (i[1] != shards.hi[1]) yp_bars_full[i] = Barrier::create_barrier(1);
+    if (i[1] != shards.lo[1]) ym_bars_full[i] = Barrier::create_barrier(1);
   }
 
   // Create barrier to keep shard launch synchronized
@@ -824,15 +824,15 @@ void top_level_task(const void *args, size_t arglen,
     for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
       Point2 i(it.p);
 
-      Rect2 interior_bounds(Point2(x_blocks[i.x].lo, y_blocks[i.y].lo),
-                            Point2(x_blocks[i.x].hi, y_blocks[i.y].hi));
-      Rect2 exterior_bounds(Point2(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo - RADIUS),
-                            Point2(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi + RADIUS));
+      Rect2 interior_bounds(Point2(x_blocks[i[0]].lo, y_blocks[i[1]].lo),
+                            Point2(x_blocks[i[0]].hi, y_blocks[i[1]].hi));
+      Rect2 exterior_bounds(Point2(x_blocks[i[0]].lo - RADIUS, y_blocks[i[1]].lo - RADIUS),
+                            Point2(x_blocks[i[0]].hi + RADIUS, y_blocks[i[1]].hi + RADIUS));
       // As interior, but bloated only on the outer edges
-      Rect2 outer_bounds(Point2(x_blocks[i.x].lo - (i.x == shards.lo.x ? RADIUS : 0),
-                                y_blocks[i.y].lo - (i.y == shards.lo.y ? RADIUS : 0)),
-                         Point2(x_blocks[i.x].hi + (i.x == shards.hi.x ? RADIUS : 0),
-                                y_blocks[i.y].hi + (i.y == shards.hi.y ? RADIUS : 0)));
+      Rect2 outer_bounds(Point2(x_blocks[i[0]].lo - (i[0] == shards.lo[0] ? RADIUS : 0),
+                                y_blocks[i[1]].lo - (i[1] == shards.lo[1] ? RADIUS : 0)),
+                         Point2(x_blocks[i[0]].hi + (i[0] == shards.hi[0] ? RADIUS : 0),
+                                y_blocks[i[1]].hi + (i[1] == shards.hi[1] ? RADIUS : 0)));
 
       // Pack arguments
       ShardArgs args;

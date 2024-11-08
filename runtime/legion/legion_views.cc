@@ -3809,7 +3809,10 @@ namespace Legion {
               registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
+      {
+        manager->record_instance_user(term_event, applied_events);
         return manager->get_use_event(term_event);
+      }
       if (!is_logical_owner())
       {
         ApUserEvent ready_event;
@@ -5757,7 +5760,10 @@ namespace Legion {
               registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
       if (!symbolic && user_expr->is_empty())
+      {
+        manager->record_instance_user(term_event, applied_events);
         return manager->get_use_event(term_event);
+      }
       if (!is_logical_owner())
       {
         // If we're not the logical owner send a message there 
@@ -9365,7 +9371,7 @@ namespace Legion {
           // Copy-elmination will take care of this for us
           // when the trace is optimized
           ready = Runtime::create_ap_user_event(&trace_info);
-          Runtime::phase_barrier_arrive(bar, 1/*count*/, ready);
+          runtime->phase_barrier_arrive(bar, 1/*count*/, ready);
           trace_info.record_barrier_arrival(bar, ready, 1/*count*/, 
                                             applied_events, sid);
         }
@@ -9815,7 +9821,7 @@ namespace Legion {
         ApEvent arrival;
         if (!done_events.empty())
           arrival = Runtime::merge_events(&local_info, done_events);
-        Runtime::phase_barrier_arrive(all_bar, 1/*count*/, arrival);
+        runtime->phase_barrier_arrive(all_bar, 1/*count*/, arrival);
         local_info.record_barrier_arrival(all_bar, arrival, 1/*count*/,
                                           applied_events, owner_shard);
       }
@@ -10505,7 +10511,7 @@ namespace Legion {
         // Copy-elmination will take care of this for us
         // when the trace is optimized
         ready = Runtime::create_ap_user_event(&trace_info);
-        Runtime::phase_barrier_arrive(broadcast_bar, 1/*count*/, ready);
+        runtime->phase_barrier_arrive(broadcast_bar, 1/*count*/, ready);
         trace_info.record_barrier_arrival(broadcast_bar, ready, 1/*count*/, 
                                           applied_events, broadcast_shard);
         derez.deserialize(all_bar);
@@ -10721,7 +10727,7 @@ namespace Legion {
         ApEvent local_done;
         if (!local_done_events.empty())
           local_done = Runtime::merge_events(&local_info, local_done_events);
-        Runtime::phase_barrier_arrive(all_bar, 1/*count*/, local_done);
+        runtime->phase_barrier_arrive(all_bar, 1/*count*/, local_done);
         local_info.record_barrier_arrival(all_bar, local_done, 1/*count*/,
                                           applied_events, owner_shard);
       }
@@ -11101,7 +11107,7 @@ namespace Legion {
           ApEvent arrival;
           if (!all_done_events.empty())
             arrival = Runtime::merge_events(&trace_info, all_done_events);
-          Runtime::phase_barrier_arrive(all_bar, 1/*count*/, arrival);
+          runtime->phase_barrier_arrive(all_bar, 1/*count*/, arrival);
           trace_info.record_barrier_arrival(all_bar, arrival, 1/*count*/,
                                             applied_events, owner_shard);
           Runtime::trigger_event(&trace_info, all_done, all_bar);
@@ -11432,7 +11438,7 @@ namespace Legion {
         ApEvent arrival;
         if (!done_events.empty())
           arrival = Runtime::merge_events(&local_info, done_events);
-        Runtime::phase_barrier_arrive(all_bar, 1/*count*/, arrival);
+        runtime->phase_barrier_arrive(all_bar, 1/*count*/, arrival);
         local_info.record_barrier_arrival(all_bar, arrival, 1/*count*/,
                                           applied_events, owner_shard);
       }
@@ -12189,7 +12195,7 @@ namespace Legion {
         // Copy-elmination will take care of this for us
         // when the trace is optimized
         ready = Runtime::create_ap_user_event(&trace_info);
-        Runtime::phase_barrier_arrive(bar, 1/*count*/, ready);
+        runtime->phase_barrier_arrive(bar, 1/*count*/, ready);
         trace_info.record_barrier_arrival(bar, ready, 1/*count*/, 
                                           applied_events, sid);
       }
@@ -12401,7 +12407,7 @@ namespace Legion {
         ShardID sid;
         derez.deserialize(sid);
         ready = Runtime::create_ap_user_event(&trace_info);
-        Runtime::phase_barrier_arrive(bar, 1/*count*/, ready);
+        runtime->phase_barrier_arrive(bar, 1/*count*/, ready);
         trace_info.record_barrier_arrival(bar, ready, 1/*count*/,
                                           applied_events, sid);
       }
@@ -13453,7 +13459,7 @@ namespace Legion {
                 dst_inst, copy_mask, copy_mask, redop, applied_events);
           if (it->barrier_postcondition.exists())
           {
-            Runtime::phase_barrier_arrive(
+            runtime->phase_barrier_arrive(
                 it->barrier_postcondition, 1/*count*/, post);
             if (trace_info.recording)
               trace_info.record_barrier_arrival(it->barrier_postcondition,
@@ -13532,7 +13538,7 @@ namespace Legion {
             redop, applied_events);
       if (src_barrier.exists())
       {
-        Runtime::phase_barrier_arrive(src_barrier, 1/*count*/, copy_post);
+        runtime->phase_barrier_arrive(src_barrier, 1/*count*/, copy_post);
         finder->second.trace_info->record_barrier_arrival(src_barrier,
             copy_post, 1/*count*/, applied_events, barrier_shard);
       }

@@ -410,6 +410,9 @@ namespace Legion {
                                     std::deque<PhysicalInstance> &ranking);
       virtual bool default_policy_select_close_virtual(const MapperContext ctx,
                                                        const Close &close);
+      virtual bool default_policy_select_reduction_instance_reuse(const
+							  MapperContext ctx);
+
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;
@@ -495,6 +498,11 @@ namespace Legion {
 			   size_t *footprint,
 			   const bool is_field_constraints,
 			   const bool all_fields_opts=false);
+      void check_valid_task_layout_constraints(
+		           const Task &task, MapperContext ctx,
+			   const TaskLayoutConstraintSet &layout_constraints,
+			   const Processor target_proc, const Memory target_memory,
+			   const RegionRequirement &req, const unsigned index);
 
     protected: // static helper methods
       static const char* create_default_name(Processor p);

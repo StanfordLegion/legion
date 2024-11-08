@@ -49,13 +49,13 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration, mapping),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         executing_processor(Processor::NO_PROC), inlined_tasks(0),
-        overhead_profiler(NULL), implicit_profiler(NULL), task_executed(false),
-        mutable_priority(false), inline_task(inline_t),
+        overhead_profiler(NULL), implicit_task_profiler(NULL), 
+        task_executed(false), mutable_priority(false), inline_task(inline_t),
         implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
       if (implicit_task && (runtime->profiler != NULL))
-        implicit_profiler = new ImplicitProfiler();
+        implicit_task_profiler = new ImplicitTaskProfiler();
     }
 
     //--------------------------------------------------------------------------
@@ -76,8 +76,8 @@ namespace Legion {
       }
       if (overhead_profiler != NULL)
         delete overhead_profiler;
-      if (implicit_profiler != NULL)
-        delete implicit_profiler;
+      if (implicit_task_profiler != NULL)
+        delete implicit_task_profiler;
     }
 
     //--------------------------------------------------------------------------
@@ -537,16 +537,25 @@ namespace Legion {
     {
       if (implicit_runtime == NULL)
         implicit_runtime = this->runtime;
+      
       implicit_context = this;
       implicit_provenance = owner_task->get_unique_op_id();
       if (overhead_profiler != NULL)
         overhead_profiler->previous_profiling_time = 
           Realm::Clock::current_time_in_nanoseconds();
-      if (implicit_profiler != NULL)
-        implicit_profiler->start_time = 
+      if (implicit_task_profiler != NULL)
+        implicit_task_profiler->start_time = 
           Realm::Clock::current_time_in_nanoseconds();
       if (Processor::get_executing_processor().exists())
+      {
         realm_done_event = ApEvent(Processor::get_current_finish_event());
+        implicit_fevent = realm_done_event;
+      }
+      else if (runtime->profiler != NULL)
+        implicit_fevent = owner_task->get_completion_event();
+      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = 
+          runtime->profiler->find_or_create_profiling_instance();
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = proc; 
@@ -572,11 +581,6 @@ namespace Legion {
     {
       PhysicalInstance instance;
       MemoryManager *manager = runtime->find_memory_manager(memory);
-#ifdef LEGION_MALLOC_INSTANCES
-      const Realm::ProfilingRequestSet no_requests;
-      const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
-                                                      no_requests, instance));
-#else
       LgEvent unique_event;
       if (runtime->profiler != NULL)
       {
@@ -585,6 +589,11 @@ namespace Legion {
         Runtime::trigger_event(unique);
         unique_event = unique;
       }
+#ifdef LEGION_MALLOC_INSTANCES
+      const Realm::ProfilingRequestSet no_requests;
+      const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
+                                        no_requests, instance, unique_event));
+#else
       const ApEvent wait_on(manager->create_eager_instance(instance, 
                                               unique_event, layout));
       if (!instance.exists())
@@ -787,13 +796,46 @@ namespace Legion {
           metadatasize, release_callback ? NULL : callback_functor, 
           executing_processor, owned);
       owner_task->complete_execution();
-      post_end_task();
-#ifdef DEBUG_LEGION
-      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
-                                                     false/*meta*/);
-#else
-      runtime_ptr->decrement_total_outstanding_tasks();
+      // If this is an implicit top-level task then we need to finish
+      // the implicit profiling of the execution of that top-level task
+      // now that everything else is done running
+      if (implicit_task_profiler != NULL)
+      {
+        // If we're an implicit top-level task then pull a bunch of
+        // data onto the stack before we do any of the cleanup because
+        // we might end up deleting this 
+        const UniqueID local_uid = get_unique_id();
+#ifndef DEBUG_LEGION
+        const TaskID owner_task_id = owner_task->task_id;
 #endif
+        const ApEvent local_completion = owner_task->get_completion_event();
+        ImplicitTaskProfiler *local_task_profiler = implicit_task_profiler;
+        implicit_task_profiler = NULL; // We take ownership
+        // Cannot invoke any local methods after this call
+        post_end_task();
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        // log this with the profiler 
+        implicit_profiler->process_implicit(local_uid, owner_task_id,
+            local_task_profiler->start_time, stop,
+            local_task_profiler->waits, local_completion);
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+        delete local_task_profiler;
+      }
+      else
+      {
+        post_end_task();
+#ifdef DEBUG_LEGION
+        runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                       false/*meta*/);
+#else
+        runtime_ptr->decrement_total_outstanding_tasks();
+#endif
+      }
       // See if we can release our callback down
       if (release_callback)
       {
@@ -881,7 +923,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      return PhaseBarrier(ApBarrier(Realm::Barrier::create_barrier(arrivals)));
+      return PhaseBarrier(runtime->create_ap_barrier(arrivals));
     }
 
     //--------------------------------------------------------------------------
@@ -927,17 +969,18 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_MISSING_PROFILING_PROVENANCE,
             "Missing provenance string for application profiling range "
             "in task %s (UID %lld)", get_task_name(), get_unique_id())
-      if (runtime->profiler != NULL)
+      if (implicit_profiler != NULL)
       {
         Provenance *provenance = 
           runtime->find_or_create_provenance(prov, strlen(prov));
         if (user_profiling_ranges.empty())
           REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
-              "Detected mismatched profiling range calls, received a stop call "
-              "without a corresponding start call in task %s (UID %lld) at %s",
-              get_task_name(), get_unique_id(), provenance->human_str())
+            "Detected mismatched profiling range calls, received a stop call "
+            "without a corresponding start call in task %s (UID %lld) at %.*s",
+            get_task_name(), get_unique_id(), int(provenance->human.length()),
+            provenance->human.data())
         const long long stop = Realm::Clock::current_time_in_nanoseconds();
-        runtime->profiler->record_application_range(provenance->pid,
+        implicit_profiler->record_application_range(provenance->pid,
             user_profiling_ranges.back(), stop);
         user_profiling_ranges.pop_back();
         if (provenance->remove_reference())
@@ -1130,7 +1173,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(),
-          InnerContext::NO_FUTURE_COORDINATE, provenance);
+          InnerContext::NO_BLOCKING_INDEX, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -1271,7 +1314,7 @@ namespace Legion {
         finished_execution(false), has_inline_accessor(false),
         next_created_index(reqs.size()), parent_req_indexes(parent_indexes),
         virtual_mapped(virt_mapped), total_children_count(0),
-        next_future_coordinate(0), total_tunable_count(0),
+        next_blocking_index(0), total_tunable_count(0),
         outstanding_prepipeline_tasks(0),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
@@ -3537,7 +3580,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Will take ownership of provenance if not NULL
       runtime->forest->create_index_space(handle, bounds, did, provenance); 
       register_index_space_creation(handle);
@@ -3635,7 +3678,7 @@ namespace Legion {
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       return handle;
     }
 
@@ -3668,7 +3711,7 @@ namespace Legion {
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       return handle;
     }
 
@@ -3693,7 +3736,7 @@ namespace Legion {
       register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.get_id(), runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       return handle;
     }
 
@@ -3712,7 +3755,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
@@ -5182,7 +5225,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
 
       runtime->forest->create_field_space(space, did, provenance);
       register_field_space_creation(space);
@@ -5206,7 +5249,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_space(space.id, runtime->address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
 
       FieldSpaceNode *node =
         runtime->forest->create_field_space(space, did, provenance);
@@ -5227,7 +5270,8 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() : 
+             provenance->human);
       }
       node->initialize_fields(sizes, resulting_fields, serdez_id, provenance);
       register_all_field_creations(space, false/*local*/, resulting_fields);
@@ -5449,7 +5493,7 @@ namespace Legion {
 #endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
 
       std::set<RtEvent> done_events;
       if (local)
@@ -5492,7 +5536,8 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() :
+             provenance->human);
       }
       std::set<RtEvent> done_events;
       if (local)
@@ -5900,7 +5945,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_region(index_space.id, field_space.id, tid,
             runtime->address_space, (provenance == NULL) ? 
-            NULL : provenance->human_str());
+            std::string_view() : provenance->human);
       const DistributedID did = runtime->get_available_distributed_id();
       runtime->forest->create_logical_region(region, did, provenance);
       // Register the creation of a top-level region with the context
@@ -6303,10 +6348,13 @@ namespace Legion {
               deleted_regions.begin(); it != deleted_regions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed for region (%x,%x,%x) "
-              "in task tree rooted by %s (provenance %s)", 
+              "in task tree rooted by %s (provenance %.*s)", 
               it->region.index_space.id, it->region.field_space.id, 
-              it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              it->region.tree_id, get_task_name(), 
+              (it->provenance == NULL) ? 7 : 
+                int(it->provenance->human.length()),
+              (it->provenance == NULL) ? "unknown" : 
+                it->provenance->human.data())
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
@@ -6315,9 +6363,10 @@ namespace Legion {
               deleted_fields.begin(); it != deleted_fields.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field %d of "
-              "field space %x in task tree rooted by %s (provenance %s)", 
+              "field space %x in task tree rooted by %s (provenance %.*s)",
               it->fid, it->space.id, get_task_name(), 
-              (it->provenance != NULL) ? it->provenance->human_str() :
+              (it->provenance != NULL) ? int(it->provenance->human.length()) : 
+              7, (it->provenance != NULL) ? it->provenance->human.data() :
               "unknown")
         deleted_fields.clear();
       }
@@ -6328,9 +6377,10 @@ namespace Legion {
               deleted_field_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on field space %x "
-              "in task tree rooted by %s (provenance %s)", it->space.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              "in task tree rooted by %s (provenance %.*s)", it->space.id,
+              get_task_name(), (it->provenance == NULL) ? 7 :
+              int(it->provenance->human.length()), (it->provenance != NULL) ?
+              it->provenance->human.data() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
@@ -6340,9 +6390,10 @@ namespace Legion {
               deleted_index_spaces.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index space %x "
-              "in task tree rooted by %s (provenance %s)", it->space.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              "in task tree rooted by %s (provenance %.*s)", it->space.id,
+              get_task_name(), (it->provenance == NULL) ? 7 :
+              int(it->provenance->human.length()), (it->provenance != NULL) ?
+              it->provenance->human.data() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
@@ -6352,9 +6403,10 @@ namespace Legion {
               deleted_index_partitions.end(); it++)
           REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_DELETION,
               "Duplicate deletions were performed on index partition %x "
-              "in task tree rooted by %s (provenance %s)", it->partition.id,
-              get_task_name(), (it->provenance != NULL) ?
-              it->provenance->human_str() : "unknown")
+              "in task tree rooted by %s (provenance %.*s)", it->partition.id,
+              get_task_name(), (it->provenance == NULL) ? 7 :
+              int(it->provenance->human.length()), (it->provenance != NULL) ?
+              it->provenance->human.data() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -6773,7 +6825,7 @@ namespace Legion {
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
           mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
           mid, tag, false/*leaf region*/, virtual_mapped, 
-          false/*never collective*/, runtime);
+          false/*never collective*/, NO_BLOCKING_INDEX, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
       if (!virtual_mapped)
       {
@@ -6828,10 +6880,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    uint64_t InnerContext::get_next_future_coordinate(void)
+    uint64_t InnerContext::get_next_blocking_index(void)
     //--------------------------------------------------------------------------
     {
-      return next_future_coordinate++;
+      return next_blocking_index++;
     }
 
     //--------------------------------------------------------------------------
@@ -6992,7 +7044,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-        NO_FUTURE_COORDINATE, provenance);
+        NO_BLOCKING_INDEX, provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -8487,6 +8539,7 @@ namespace Legion {
 #endif
       bool issue_task = false;
       RtEvent precondition;
+      long long performed = 0;
       {
         AutoLock l_lock(lock);
         // Issue a task if there isn't one running right now
@@ -8505,13 +8558,17 @@ namespace Legion {
         queue.push_back(entry);
         comp_queue.add_event(entry.ready);
         if (issue_task)
+        {
+          if (implicit_profiler != NULL)
+            performed = Realm::Clock::current_time_in_nanoseconds();
           precondition = RtEvent(comp_queue.get_nonempty_event());
+        }
       }
       if (issue_task)
       {
         // Add a reference to the context the first time we defer this
         add_base_resource_ref(META_TASK_REF);
-        ARGS args(entry.op, this);
+        ARGS args(entry.op, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
@@ -8537,10 +8594,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    T InnerContext::process_queue(LocalLock &lock, RtEvent &next_ready, 
+    T InnerContext::process_queue(LocalLock &lock, RtEvent &precondition, 
                                   std::list<QueueEntry<T> > &queue,
                                   CompletionQueue &comp_queue,
-                                  std::vector<T> &to_perform) const
+                                  std::vector<T> &to_perform,
+                                  LgEvent previous_fevent,
+                                  long long &performed) const
     //--------------------------------------------------------------------------
     {
       T next{};
@@ -8548,40 +8607,41 @@ namespace Legion {
       to_perform.reserve(vector_width);
       AutoLock l_lock(lock);
       std::vector<RtEvent> ready_events(vector_width);
-      size_t num_ready =
+      const size_t num_ready =
         comp_queue.pop_events(&ready_events.front(), vector_width);
-      // Realm permits spurious wake-ups sometimes on completion queues where
-      // no events are actually ready. The number of times this can happen is
-      // bounded by the number of events that are added into the queue so we
-      // don't need to worry about indefinite starvation.
-      if (num_ready > 0)
-      {
-        ready_events.resize(num_ready);
-        std::sort(ready_events.begin(), ready_events.end());
-        // Find the entries
-        for (typename std::list<QueueEntry<T> >::iterator it =
-              queue.begin(); it != queue.end(); /*nothing*/)
-        {
-          std::vector<RtEvent>::iterator finder = 
-            std::lower_bound(ready_events.begin(),ready_events.end(),it->ready);
-          if ((finder != ready_events.end()) && (*finder == it->ready))
-          {
-            to_perform.push_back(it->op);
-            it = queue.erase(it);
-            ready_events.erase(finder);
-            if (ready_events.empty())
-              break;
-          }
-          else
-            it++;
-        }
 #ifdef DEBUG_LEGION
-        assert(ready_events.empty());
+      assert(num_ready > 0);
 #endif
+      ready_events.resize(num_ready);
+      std::sort(ready_events.begin(), ready_events.end());
+      if (precondition.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_completion_queue_event(precondition,
+            previous_fevent, performed, &ready_events.front(), num_ready);
+      // Find the entries
+      for (typename std::list<QueueEntry<T> >::iterator it =
+            queue.begin(); it != queue.end(); /*nothing*/)
+      {
+        std::vector<RtEvent>::iterator finder = 
+          std::lower_bound(ready_events.begin(),ready_events.end(),it->ready);
+        if ((finder != ready_events.end()) && (*finder == it->ready))
+        {
+          to_perform.push_back(it->op);
+          it = queue.erase(it);
+          ready_events.erase(finder);
+          if (ready_events.empty())
+            break;
+        }
+        else
+          it++;
       }
+#ifdef DEBUG_LEGION
+      assert(ready_events.empty());
+#endif
       if (!queue.empty())
       {
-        next_ready = RtEvent(comp_queue.get_nonempty_event());
+        if (implicit_profiler != NULL)
+          performed = Realm::Clock::current_time_in_nanoseconds();
+        precondition = RtEvent(comp_queue.get_nonempty_event());
         next = queue.front().op;
       }
       return next;
@@ -8663,13 +8723,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_enqueue_task_queue(void)
+    bool InnerContext::process_enqueue_task_queue(RtEvent precondition,
+                                                  LgEvent previous_fevent,
+                                                  long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<TaskOp*> to_perform;
       TaskOp *next = process_queue<TaskOp*>(enqueue_task_lock, precondition,
-                    enqueue_task_queue, enqueue_task_comp_queue, to_perform);
+          enqueue_task_queue, enqueue_task_comp_queue,
+          to_perform, previous_fevent, performed);
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8678,7 +8740,7 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        DeferredEnqueueTaskArgs args(next, this);
+        DeferredEnqueueTaskArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -8697,13 +8759,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_distribute_task_queue(void)
+    bool InnerContext::process_distribute_task_queue(RtEvent precondition,
+                                                     LgEvent previous_fevent,
+                                                     long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<TaskOp*> to_perform;
       TaskOp *next = process_queue<TaskOp*>(distribute_task_lock, precondition,
-                distribute_task_queue, distribute_task_comp_queue, to_perform);
+                distribute_task_queue, distribute_task_comp_queue,
+                to_perform, previous_fevent, performed);
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8713,7 +8777,7 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        DeferredDistributeTaskArgs args(next, this);
+        DeferredDistributeTaskArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -8732,13 +8796,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_launch_task_queue(void)
+    bool InnerContext::process_launch_task_queue(RtEvent precondition,
+                                                 LgEvent previous_fevent,
+                                                 long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<TaskOp*> to_perform;
       TaskOp *next = process_queue<TaskOp*>(launch_task_lock, precondition,
-                    launch_task_queue, launch_task_comp_queue, to_perform);
+                    launch_task_queue, launch_task_comp_queue,
+                    to_perform, previous_fevent, performed);
       for (std::vector<TaskOp*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8747,7 +8813,7 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        DeferredLaunchTaskArgs args(next, this);
+        DeferredLaunchTaskArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -8767,14 +8833,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_trigger_execution_queue(void)
+    bool InnerContext::process_trigger_execution_queue(RtEvent precondition,
+                                                       LgEvent previous_fevent,
+                                                       long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<Operation*> to_perform;
       Operation *next = process_queue<Operation*>(trigger_execution_lock,
-          precondition, trigger_execution_queue, 
-          trigger_execution_comp_queue, to_perform);
+          precondition, trigger_execution_queue, trigger_execution_comp_queue,
+          to_perform, previous_fevent, performed);
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8783,7 +8850,7 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        TriggerExecutionArgs args(next, this);
+        TriggerExecutionArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -8803,14 +8870,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_execution_queue(void)
+    bool InnerContext::process_deferred_execution_queue(RtEvent precondition,
+                                                        LgEvent previous_fevent,
+                                                        long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<Operation*> to_perform;
       Operation *next = process_queue<Operation*>(deferred_execution_lock,
-          precondition, deferred_execution_queue, 
-          deferred_execution_comp_queue, to_perform);
+          precondition, deferred_execution_queue, deferred_execution_comp_queue,
+          to_perform, previous_fevent, performed);
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8819,7 +8887,7 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        DeferredExecutionArgs args(next, this);
+        DeferredExecutionArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -8839,14 +8907,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_mapped_queue(void)
+    bool InnerContext::process_deferred_mapped_queue(RtEvent precondition,
+                                                     LgEvent previous_fevent,
+                                                     long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<Operation*> to_perform;
       Operation *next = process_queue<Operation*>(deferred_mapped_lock,
-          precondition, deferred_mapped_queue,
-          deferred_mapped_comp_queue, to_perform);
+          precondition, deferred_mapped_queue, deferred_mapped_comp_queue,
+          to_perform, previous_fevent, performed);
       for (std::vector<Operation*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -8855,7 +8924,7 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        DeferredMappedArgs args(next, this);
+        DeferredMappedArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -8873,6 +8942,7 @@ namespace Legion {
       assert(effects.exists());
 #endif
       bool issue_task = false;
+      long long performed = 0;
       RtEvent precondition;
       {
         AutoLock child_lock(child_op_lock);
@@ -8899,24 +8969,28 @@ namespace Legion {
         deferred_completion_queue.emplace_back(CompletionEntry(op, effects));
         deferred_completion_comp_queue.add_event_faultaware(effects);
         if (issue_task)
+        {
+          if (implicit_profiler != NULL)
+            performed = Realm::Clock::current_time_in_nanoseconds();
           precondition =
             RtEvent(deferred_completion_comp_queue.get_nonempty_event());
+        }
       }
       if (issue_task)
       {
         // Add a reference to the context the first time we defer this
         add_base_resource_ref(META_TASK_REF);
-        DeferredCompletionArgs args(op, this);
+        DeferredCompletionArgs args(op, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
       }
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_completion_queue(void)
+    bool InnerContext::process_deferred_completion_queue(RtEvent precondition,
+                                   LgEvent previous_fevent, long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent next_ready;
       Operation *next = NULL;
       std::vector<CompletionEntry> to_perform;
       {
@@ -8925,41 +8999,42 @@ namespace Legion {
         to_perform.reserve(vector_width);
         AutoLock child_lock(child_op_lock);
         std::vector<ApEvent> ready_events(vector_width);
-        size_t num_ready = deferred_completion_comp_queue.pop_events(
+        const size_t num_ready = deferred_completion_comp_queue.pop_events(
             &ready_events.front(), vector_width);
-        // Realm permits spurious wake-ups sometimes on completion queues where
-        // no events are actually ready. The number of times this can happen is
-        // bounded by the number of events that are added into the queue so we
-        // don't need to worry about indefinite starvation.
-        if (num_ready > 0)
-        {
-          ready_events.resize(num_ready);
-          std::sort(ready_events.begin(), ready_events.end());
-          // Find the entries
-          for (std::list<CompletionEntry>::iterator it =
-                deferred_completion_queue.begin(); it !=
-                deferred_completion_queue.end(); /*nothing*/)
-          {
-            std::vector<ApEvent>::iterator finder = std::lower_bound(
-                ready_events.begin(), ready_events.end(),it->effects);
-            if ((finder != ready_events.end()) && (*finder == it->effects))
-            {
-              to_perform.emplace_back(*it);
-              it = deferred_completion_queue.erase(it);
-              ready_events.erase(finder);
-              if (ready_events.empty())
-                break;
-            }
-            else
-              it++;
-          }
 #ifdef DEBUG_LEGION
-          assert(ready_events.empty());
+        assert(num_ready > 0);
 #endif
+        ready_events.resize(num_ready);
+        std::sort(ready_events.begin(), ready_events.end());
+        if (precondition.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_completion_queue_event(precondition,
+              previous_fevent, performed, &ready_events.front(), num_ready);
+        // Find the entries
+        for (std::list<CompletionEntry>::iterator it =
+              deferred_completion_queue.begin(); it !=
+              deferred_completion_queue.end(); /*nothing*/)
+        {
+          std::vector<ApEvent>::iterator finder = std::lower_bound(
+              ready_events.begin(), ready_events.end(),it->effects);
+          if ((finder != ready_events.end()) && (*finder == it->effects))
+          {
+            to_perform.emplace_back(*it);
+            it = deferred_completion_queue.erase(it);
+            ready_events.erase(finder);
+            if (ready_events.empty())
+              break;
+          }
+          else
+            it++;
         }
+#ifdef DEBUG_LEGION
+        assert(ready_events.empty());
+#endif
         if (!deferred_completion_queue.empty())
         {
-          next_ready =
+          if (implicit_profiler != NULL)
+            performed = Realm::Clock::current_time_in_nanoseconds();
+          precondition =
             RtEvent(deferred_completion_comp_queue.get_nonempty_event());
           next = deferred_completion_queue.front().op;
         }
@@ -8976,9 +9051,9 @@ namespace Legion {
       }
       if (next != NULL)
       {
-        DeferredCompletionArgs args(next, this);
+        DeferredCompletionArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_WORK_PRIORITY, next_ready);
+            LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
       }
       else
@@ -9047,15 +9122,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::process_deferred_commit_queue(void)
+    bool InnerContext::process_deferred_commit_queue(RtEvent precondition,
+                                                     LgEvent previous_fevent,
+                                                     long long performed)
     //--------------------------------------------------------------------------
     {
-      RtEvent precondition;
       std::vector<std::pair<Operation*,bool> > to_perform;
       std::pair<Operation*,bool> next =
         process_queue<std::pair<Operation*,bool> >(deferred_commit_lock,
-          precondition, deferred_commit_queue, 
-          deferred_commit_comp_queue, to_perform);
+          precondition, deferred_commit_queue, deferred_commit_comp_queue,
+          to_perform, previous_fevent, performed);
       for (std::vector<std::pair<Operation*,bool> >::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
@@ -9064,7 +9140,7 @@ namespace Legion {
       }
       if (next.first != NULL)
       {
-        DeferredCommitArgs args(next, this);
+        DeferredCommitArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -9975,7 +10051,7 @@ namespace Legion {
       add_to_dependence_queue(trace_op);
       // Now mark that we are starting a trace
       current_trace = trace;
-      current_trace_future_coordinate = next_future_coordinate;
+      current_trace_blocking_index = next_blocking_index;
     }
 
     //--------------------------------------------------------------------------
@@ -10048,7 +10124,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_blocking_call(uint64_t future_coordinate)
+    void InnerContext::record_blocking_call(uint64_t blocking_index)
     //--------------------------------------------------------------------------
     {
       // It's only a blocking call if the wait occurs from an operation 
@@ -10057,8 +10133,8 @@ namespace Legion {
       // we know those operations are not traceable so they had to be 
       // issued before we started capturing the trace
       if ((current_trace != NULL) && 
-          (future_coordinate != NO_FUTURE_COORDINATE) &&
-          (current_trace_future_coordinate <= future_coordinate))
+          (blocking_index != NO_BLOCKING_INDEX) &&
+          (current_trace_blocking_index <= blocking_index))
       {
         if (is_replaying_physical_trace())
           REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
@@ -10333,6 +10409,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if ((runtime->profiler != NULL) && !runtime->profiler->no_critical_paths
+          && !runtime->profiler->all_critical_arrivals)
+        REPORT_LEGION_FATAL(LEGION_FATAL_NO_CRITICAL_PATH_DYNAMIC_COLLECTIVES,
+            "Task %s (UID %lld) requested the creation of a dynamic "
+            "collective while profiling for critical paths without recording "
+            "all critical barrier arrivals. Critical path analysis with "
+            "dynamic collectives requires that you use the "
+            "'-lg:prof_all_critical_arrivals' flag.",
+            get_task_name(), get_unique_id())
       return DynamicCollective(
           ApBarrier(Realm::Barrier::create_barrier(arrivals, redop, 
                                     init_value, init_size)), redop);
@@ -10353,7 +10438,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Runtime::phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
+      runtime->phase_barrier_arrive(dc,count,ApEvent::NO_AP_EVENT,buffer,size);
     }
 
     //--------------------------------------------------------------------------
@@ -10936,10 +11021,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool InnerContext::has_interfering_shards(ProjectionSummary *one,
-                                              ProjectionSummary *two)
+        ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
-      return one->get_tree()->interferes(two->get_tree(), 0/*local shard*/);
+#ifdef DEBUG_LEGION
+      assert(dominates);
+#endif
+      return one->get_tree()->interferes(
+          two->get_tree(), 0/*local shard*/, dominates);
     }
 
     //--------------------------------------------------------------------------
@@ -11788,14 +11877,6 @@ namespace Legion {
           InnerContext::destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       } 
-      if (implicit_profiler != NULL)
-      {
-        const long long stop = Realm::Clock::current_time_in_nanoseconds();
-        // log this with the profiler 
-        runtime->profiler->record_implicit(get_unique_id(), owner_task->task_id,
-            executing_processor, implicit_profiler->start_time, stop,
-            implicit_profiler->waits, owner_task->get_completion_event());
-      }
       // See if there are any runtime warnings to issue
       if (runtime->runtime_warnings)
       {
@@ -11982,7 +12063,8 @@ namespace Legion {
     {
       const DeferredEnqueueTaskArgs *dargs = 
         (const DeferredEnqueueTaskArgs*)args;
-      if (dargs->context->process_enqueue_task_queue() &&
+      if (dargs->context->process_enqueue_task_queue(
+            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -11993,7 +12075,8 @@ namespace Legion {
     {
       const DeferredDistributeTaskArgs *dargs = 
         (const DeferredDistributeTaskArgs*)args;
-      if (dargs->context->process_distribute_task_queue() &&
+      if (dargs->context->process_distribute_task_queue(
+            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12004,7 +12087,8 @@ namespace Legion {
     {
       const DeferredLaunchTaskArgs *dargs = 
         (const DeferredLaunchTaskArgs*)args;
-      if (dargs->context->process_launch_task_queue() &&
+      if (dargs->context->process_launch_task_queue(
+            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12015,7 +12099,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const TriggerExecutionArgs *targs = (const TriggerExecutionArgs*)args;
-      if (targs->context->process_trigger_execution_queue() &&
+      if (targs->context->process_trigger_execution_queue(
+            targs->precondition, targs->previous_fevent, targs->performed) &&
           targs->context->remove_base_resource_ref(META_TASK_REF))
         delete targs->context;
     }
@@ -12026,7 +12111,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredExecutionArgs *dargs = (const DeferredExecutionArgs*)args;
-      if (dargs->context->process_deferred_execution_queue() &&
+      if (dargs->context->process_deferred_execution_queue(
+            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12036,7 +12122,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredMappedArgs *targs = (const DeferredMappedArgs*)args;
-      if (targs->context->process_deferred_mapped_queue() &&
+      if (targs->context->process_deferred_mapped_queue(
+            targs->precondition, targs->previous_fevent, targs->performed) &&
           targs->context->remove_base_resource_ref(META_TASK_REF))
         delete targs->context;
     }
@@ -12047,7 +12134,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredCompletionArgs *dargs = (const DeferredCompletionArgs*)args;
-      if (dargs->context->process_deferred_completion_queue() &&
+      if (dargs->context->process_deferred_completion_queue(
+            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -12067,7 +12155,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredCommitArgs *dargs = (const DeferredCommitArgs*)args;
-      if (dargs->context->process_deferred_commit_queue() &&
+      if (dargs->context->process_deferred_commit_queue(
+            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;
     }
@@ -13070,7 +13159,7 @@ namespace Legion {
       // Before we do anything else here, we need to make sure that all
       // the shards are done reading before we attempt to mutate the value
       const RtBarrier bar = semantic_attach_barrier.next(this);
-      Runtime::phase_barrier_arrive(bar, 1/*count*/);
+      runtime->phase_barrier_arrive(bar, 1/*count*/);
       // Check to see if we can downgrade this to a local_only update
       if (global && shard_manager->is_total_sharding())
         global = false;
@@ -13102,7 +13191,7 @@ namespace Legion {
       if (inside_registration_callback)
         return;
       const RtBarrier bar = semantic_attach_barrier.next(this);
-      Runtime::phase_barrier_arrive(bar, 1/*count*/);
+      runtime->phase_barrier_arrive(bar, 1/*count*/);
       if (!bar.has_triggered())
         bar.wait();
     }
@@ -13142,7 +13231,7 @@ namespace Legion {
     {
       if (map.impl == NULL)
         return;
-      hasher.hash(map.impl->future_coordinate, description);
+      hasher.hash(map.impl->blocking_index, description);
     }
 
     //--------------------------------------------------------------------------
@@ -13495,12 +13584,13 @@ namespace Legion {
         if (finder->second == owner_shard->shard_id)
           log_run.error(
            "Detected control replication violation when invoking %s in "
-           "task %s (UID %lld) on shard %d [Provenance: %s]. The hash summary "
-           "for the function does not align with the hash summaries from other "
-           "call sites. We'll run the hash algorithm again to try to recognize "
-           "what value differs between the shards, hang tight...",
+           "task %s (UID %lld) on shard %d [Provenance: %.*s]. The hash summary"
+           " for the function does not align with the hash summaries from other"
+           " call sites. We'll run the hash algorithm again to try to recognize"
+           " what value differs between the shards, hang tight...",
            description, get_task_name(), get_unique_id(), owner_shard->shard_id,
-           (provenance == NULL) ? "unknown" : provenance->human_str());
+           (provenance == NULL) ? 7 : int(provenance->human.length()),
+           (provenance == NULL) ? "unknown" : provenance->human.data());
       }
       else
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
@@ -13754,7 +13844,7 @@ namespace Legion {
         runtime->forest->create_index_space(handle, domain, value.did, 
             provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -13762,7 +13852,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -13782,7 +13872,7 @@ namespace Legion {
             provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -13901,7 +13991,7 @@ namespace Legion {
                                 provenance, &collective_mapping, value.expr_id,
                                 ready, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -13909,7 +13999,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -13929,7 +14019,7 @@ namespace Legion {
                                 provenance, &collective_mapping, value.expr_id,
                                 ready, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       creator_op->initialize_index_space(this, node, future, provenance,
           shard_manager->is_first_local_shard(owner_shard), 
@@ -14086,7 +14176,7 @@ namespace Legion {
         runtime->forest->create_union_space(handle, value.did, provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -14094,7 +14184,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14113,7 +14203,7 @@ namespace Legion {
         runtime->forest->create_union_space(handle, value.did, provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -14187,7 +14277,7 @@ namespace Legion {
         runtime->forest->create_intersection_space(handle, value.did,provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -14195,7 +14285,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14214,7 +14304,7 @@ namespace Legion {
         runtime->forest->create_intersection_space(handle, value.did,provenance,
             spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -14278,7 +14368,7 @@ namespace Legion {
         runtime->forest->create_difference_space(handle, value.did, provenance,
             left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)",
@@ -14286,7 +14376,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -14305,7 +14395,7 @@ namespace Legion {
         runtime->forest->create_difference_space(handle, value.did, provenance,
             left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Record this in our context
       register_index_space_creation(handle);
@@ -14662,7 +14752,7 @@ namespace Legion {
           color_collective.broadcast(partition_color);
         }
         // Signal that we're done our creation
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
         runtime->forest->revoke_pending_partition(value.pid);
       }
       else
@@ -14696,7 +14786,7 @@ namespace Legion {
                                          value.did, provenance,
                                          &collective_mapping, creation_bar);
         // Signal that we're done our creation
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       }
       if (++pending_index_partition_check == pending_index_partitions.size()) 
         pending_index_partition_check = 0;
@@ -15231,7 +15321,7 @@ namespace Legion {
       if (!safe_events.empty())
         safe_event = Runtime::merge_events(safe_events);
       const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+      runtime->phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       part_op->initialize_cross_product(this, handle1, handle2, partition_color,
@@ -16335,7 +16425,7 @@ namespace Legion {
         runtime->forest->create_field_space(space, value.did, provenance,
                                       &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
@@ -16343,7 +16433,7 @@ namespace Legion {
 #endif
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_space(space.id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -16362,7 +16452,7 @@ namespace Legion {
         runtime->forest->create_field_space(space, value.did, provenance,
                                       &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       if (++pending_field_space_check == pending_field_spaces.size())
         pending_field_space_check = 0;
@@ -16471,14 +16561,15 @@ namespace Legion {
         FieldSpaceNode *node = runtime->forest->get_node(space);
         node->initialize_fields(sizes, resulting_fields, serdez_id, 
                                 provenance, true/*collective*/);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         if (runtime->legion_spy_enabled && !non_owner)
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() : 
+             provenance->human);
       }
       else
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       register_all_field_creations(space, false/*loca*/, resulting_fields);
       // Make sure all the field allocations are done on all shards
       creation_bar.wait();
@@ -16585,13 +16676,13 @@ namespace Legion {
         const bool owner = (creator_shard == owner_shard->shard_id);
         node->initialize_fields(ready, resulting_fields, serdez_id,
                                 provenance, true/*collective*/);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, provenance, owner);
       }
       else
       {
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, provenance, false/*owner*/);
       }
@@ -16842,10 +16933,10 @@ namespace Legion {
                                              serdez_id, provenance, non_owner);
         if (runtime->legion_spy_enabled && !non_owner)
           LegionSpy::log_field_creation(space.id, fid, field_size,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+      runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
       register_field_creation(space, fid, local);
       // Make sure the field IDs are valid everywhere
       creation_bar.wait();
@@ -16978,12 +17069,12 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_field(space, ready,
             fid, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
         creator_op->initialize_field(this, node, fid, field_size, 
                                      provenance, owner);
       }
       else
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       register_field_creation(space, fid, local);
       // Make sure the IDs are valid everywhere
       creation_bar.wait();
@@ -17152,10 +17243,11 @@ namespace Legion {
         if (runtime->legion_spy_enabled && !non_owner)
           for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
-             sizes[idx], (provenance == NULL) ? NULL : provenance->human_str());
+             sizes[idx], (provenance == NULL) ? std::string_view() :
+             provenance->human);
       }
       const RtBarrier creation_bar = creation_barrier.next(this);
-      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+      runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
       register_all_field_creations(space, local, resulting_fields);
       // Make sure all the field IDs are valid everywhere
       creation_bar.wait();
@@ -17264,12 +17356,12 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
                 resulting_fields, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, provenance, owner);
       }
       else
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       register_all_field_creations(space, local, resulting_fields);
       // Make sure the field IDs are valid everywhere
       creation_bar.wait();
@@ -17398,7 +17490,7 @@ namespace Legion {
         runtime->forest->create_logical_region(handle, value.did, provenance,
             &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -17409,7 +17501,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_top_region(index_space.id, field_space.id,
               handle.tree_id, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->human_str());
+              (provenance == NULL) ? std::string_view() : provenance->human);
       }
       else
       {
@@ -17428,7 +17520,7 @@ namespace Legion {
         runtime->forest->create_logical_region(handle, value.did, provenance,
             &collective_mapping, creation_bar);
         // Signal that we are done our creation
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       // Register the creation of a top-level region with the context
       const unsigned created_index =
@@ -18344,7 +18436,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              NO_FUTURE_COORDINATE, provenance));
+              NO_BLOCKING_INDEX, provenance));
       }
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -19707,7 +19799,7 @@ namespace Legion {
       add_to_dependence_queue(trace_op);
       // Now mark that we are starting a trace
       current_trace = trace;
-      current_trace_future_coordinate = next_future_coordinate;
+      current_trace_blocking_index = next_blocking_index;
     }
 
     //--------------------------------------------------------------------------
@@ -19743,7 +19835,7 @@ namespace Legion {
           break;
       }
       const RtBarrier wait_bar = get_next_future_wait_barrier();
-      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, ready);
+      runtime->phase_barrier_arrive(wait_bar, 1/*count*/, ready);
       wait_bar.wait();
     }
 
@@ -19760,7 +19852,7 @@ namespace Legion {
           break;
       }
       const RtBarrier wait_bar = get_next_future_wait_barrier();
-      Runtime::phase_barrier_arrive(wait_bar, 1/*count*/, ready);
+      runtime->phase_barrier_arrive(wait_bar, 1/*count*/, ready);
       wait_bar.wait();
     }
 
@@ -19945,7 +20037,7 @@ namespace Legion {
         InnerContext::add_to_dependence_queue(op, dependences,
                                               unordered, false/*outermost*/);
         const RtBarrier inorder_bar = inorder_barrier.next(this);
-        Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, commit_event); 
+        runtime->phase_barrier_arrive(inorder_bar, 1/*count*/, commit_event); 
         inorder_bar.wait();
         // Issue any unordered operations now
         AutoLock d_lock(dependence_lock);
@@ -19976,7 +20068,7 @@ namespace Legion {
     PredicateImpl* ReplicateContext::create_predicate_impl(Operation *op)
     //--------------------------------------------------------------------------
     {
-      return new ReplPredicateImpl(op, get_next_future_coordinate(),
+      return new ReplPredicateImpl(op, get_next_blocking_index(),
           get_next_collective_index(COLLECTIVE_LOC_1));
     }
 
@@ -20088,16 +20180,46 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::has_interfering_shards(ProjectionSummary *one,
-                                                  ProjectionSummary *two)
+                                      ProjectionSummary *two, bool &dominates)
     //--------------------------------------------------------------------------
     {
-      bool result = one->get_tree()->interferes(two->get_tree(), 
-                                          owner_shard->shard_id);
+#ifdef DEBUG_LEGION
+      assert(dominates);
+#endif
+      const bool result = one->get_tree()->interferes(two->get_tree(),
+          owner_shard->shard_id, dominates);
+      // This is a bit tricky so pay attention: we're going to exchange both
+      // the interference result and the dominates result using a single 
+      // all-reduce collective. We can do this because the interfering shards
+      // result is a bool OR all-reduce and the result of dominates is a
+      // bool AND all-reduce. Therefore we can encode this as a single max
+      // all-reduce computation. The states will be:
+      // 0: not-interfering and dominating
+      // 1: not-interfering and not-dominating
+      // 2: interfering (dominate doesn't matter in this case)
+      // We can then do a max all-reduce and determine if all the shards
+      // are non-interfering and dominating
+      uint32_t code = (result ? 2 : (dominates ? 0 : 1));
       // Now we need to perform a collective to make sure that all the 
       // shards agree on the result of the interference
-      AllReduceCollective<SumReduction<bool>,false> any_interfering(this,
+      AllReduceCollective<MaxReduction<uint32_t>,false> any_interfering(this,
           get_next_collective_index(COLLECTIVE_LOC_105, true/*logical*/));
-      return any_interfering.sync_all_reduce(result);
+      code = any_interfering.sync_all_reduce(code);
+#ifdef DEBUG_LEGION
+      assert(code <= 2);
+#endif
+      if (code == 0)
+      {
+        dominates = true;
+        return false;
+      }
+      else if (code == 1)
+      {
+        dominates = false;
+        return false;
+      }
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -20357,7 +20479,7 @@ namespace Legion {
       const RtBarrier close_check_bar = close_check_barrier.next(this,
           CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY,
           sizeof(CloseCheckReduction::IDENTITY));
-      Runtime::phase_barrier_arrive(close_check_bar, 1/*count*/,
+      runtime->phase_barrier_arrive(close_check_bar, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
       close_check_bar.wait();
       CloseCheckReduction::RHS actual_barrier;
@@ -20388,7 +20510,7 @@ namespace Legion {
       const RtBarrier refinement_check_bar = refinement_check_barrier.next(this,
           CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY, 
           sizeof(CloseCheckReduction::IDENTITY));
-      Runtime::phase_barrier_arrive(refinement_check_bar, 1/*count*/,
+      runtime->phase_barrier_arrive(refinement_check_bar, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
       refinement_check_bar.wait();
       CloseCheckReduction::RHS actual_barrier;
@@ -20834,14 +20956,14 @@ namespace Legion {
           !deleted_partitions.empty())
       {
         if (!returned_resource_ready_barrier.exists())
-          returned_resource_ready_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(shard_manager->total_shards));
+          returned_resource_ready_barrier =
+            runtime->create_rt_barrier(total_shards);
         if (!returned_resource_mapped_barrier.exists())
-          returned_resource_mapped_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(shard_manager->total_shards));
+          returned_resource_mapped_barrier =
+            runtime->create_rt_barrier(total_shards);
         if (!returned_resource_execution_barrier.exists())
-          returned_resource_execution_barrier = RtBarrier(
-              Realm::Barrier::create_barrier(shard_manager->total_shards));
+          returned_resource_execution_barrier =
+            runtime->create_rt_barrier(total_shards);
       }
       rez.serialize(return_index);
       rez.serialize(returned_resource_ready_barrier);
@@ -21444,7 +21566,7 @@ namespace Legion {
               &CollectiveCheckReduction::IDENTITY,
               sizeof(CollectiveCheckReduction::IDENTITY));
           logical_guard_reentrant = false;
-          Runtime::phase_barrier_arrive(logical_check_bar, 1/*count*/,
+          runtime->phase_barrier_arrive(logical_check_bar, 1/*count*/,
                              RtEvent::NO_RT_EVENT, &location, sizeof(location));
           logical_check_bar.wait();
           CollectiveCheckReduction::RHS actual_location;
@@ -21471,7 +21593,7 @@ namespace Legion {
               &CollectiveCheckReduction::IDENTITY,
               sizeof(CollectiveCheckReduction::IDENTITY));
           collective_guard_reentrant = false;
-          Runtime::phase_barrier_arrive(collective_check_bar, 1/*count*/,
+          runtime->phase_barrier_arrive(collective_check_bar, 1/*count*/,
                              RtEvent::NO_RT_EVENT, &location, sizeof(location));
           collective_check_bar.wait();
           CollectiveCheckReduction::RHS actual_location;
@@ -22138,7 +22260,7 @@ namespace Legion {
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_rt_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -22172,7 +22294,7 @@ namespace Legion {
         bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_ap_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -22207,7 +22329,7 @@ namespace Legion {
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_rt_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -22242,7 +22364,7 @@ namespace Legion {
         bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
                                                        init, init_size));
 #else
-        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+        bar = runtime->create_ap_barrier(arrivals);
 #endif
         collective.broadcast(bar);
         created = true;
@@ -24346,7 +24468,8 @@ namespace Legion {
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
           ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
-          true/*leaf region*/, virtual_mapped, false/*collective*/, runtime);
+          true/*leaf region*/, virtual_mapped, false/*collective*/,
+          InnerContext::NO_BLOCKING_INDEX, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
       if (mapped)
         impl->set_references(physical_instances, true/*safe*/);
@@ -24879,7 +25002,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_blocking_call(uint64_t future_coordinate)
+    void LeafContext::record_blocking_call(uint64_t blocking_index)
     //--------------------------------------------------------------------------
     {
     }

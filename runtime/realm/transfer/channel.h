@@ -53,30 +53,47 @@ namespace Realm {
 
     typedef unsigned long long XferDesID;
 
+#define REALM_XFERDES_KINDS(__op__) \
+  __op__(XFER_NONE) \
+  __op__(XFER_DISK_READ) \
+  __op__(XFER_DISK_WRITE) \
+  __op__(XFER_SSD_READ) \
+  __op__(XFER_SSD_WRITE) \
+  __op__(XFER_GPU_TO_FB) \
+  __op__(XFER_GPU_FROM_FB) \
+  __op__(XFER_GPU_IN_FB) \
+  __op__(XFER_GPU_PEER_FB) \
+  __op__(XFER_MEM_CPY) \
+  __op__(XFER_GASNET_READ) \
+  __op__(XFER_GASNET_WRITE) \
+  __op__(XFER_REMOTE_WRITE) \
+  __op__(XFER_HDF5_READ) \
+  __op__(XFER_HDF5_WRITE) \
+  __op__(XFER_FILE_READ) \
+  __op__(XFER_FILE_WRITE) \
+  __op__(XFER_ADDR_SPLIT) \
+  __op__(XFER_MEM_FILL) \
+  __op__(XFER_GPU_SC_IN_FB) \
+  __op__(XFER_GPU_SC_PEER_FB)
+
     enum XferDesKind
     {
-      XFER_NONE,
-      XFER_DISK_READ,
-      XFER_DISK_WRITE,
-      XFER_SSD_READ,
-      XFER_SSD_WRITE,
-      XFER_GPU_TO_FB,
-      XFER_GPU_FROM_FB,
-      XFER_GPU_IN_FB,
-      XFER_GPU_PEER_FB,
-      XFER_MEM_CPY,
-      XFER_GASNET_READ,
-      XFER_GASNET_WRITE,
-      XFER_REMOTE_WRITE,
-      XFER_HDF5_READ,
-      XFER_HDF5_WRITE,
-      XFER_FILE_READ,
-      XFER_FILE_WRITE,
-      XFER_ADDR_SPLIT,
-      XFER_MEM_FILL,
-      XFER_GPU_SC_IN_FB,
-      XFER_GPU_SC_PEER_FB,
+#define C_ENUMS(name) name,
+      REALM_XFERDES_KINDS(C_ENUMS)
+#undef C_ENUMS
     };
+
+    inline std::ostream &operator<<(std::ostream &os, XferDesKind kind)
+    {
+#define STRING_KIND_CASE(kind)                                                           \
+  case XferDesKind::kind:                                                                \
+    return os << #kind;
+      switch(kind) {
+        REALM_XFERDES_KINDS(STRING_KIND_CASE)
+      }
+#undef STRING_KIND_CASE
+      return os << "UNKNOWN_KIND";
+    }
 
     class Request {
     public:
@@ -328,6 +345,10 @@ namespace Realm {
 
       atomic<unsigned> reference_count;
 
+      unsigned nb_update_pre_bytes_total_calls_expected;
+
+      atomic<unsigned> nb_update_pre_bytes_total_calls_received;
+
       // intrusive list for queued XDs in a channel
       IntrusivePriorityListLink<XferDes> xd_link;
       REALM_PMTA_DEFN(XferDes,IntrusivePriorityListLink<XferDes>,xd_link);
@@ -351,6 +372,8 @@ namespace Realm {
       //  deleted
       void add_reference(void);
       void remove_reference(void);
+
+      void add_update_pre_bytes_total_received(void);
 
     protected:
       virtual ~XferDes();
@@ -692,6 +715,7 @@ namespace Realm {
     class RemoteChannelInfo;
     class RemoteChannel;
 
+    // TODO(apryakhin): Deprecate ChannelCopyInfo
     struct ChannelCopyInfo {
       ChannelCopyInfo(Memory _src_mem, Memory _dst_mem,
                       Memory _ind_mem = Memory::NO_MEMORY, size_t _num_spaces = 1,
@@ -718,6 +742,9 @@ namespace Realm {
       bool oor_possible;
       size_t addr_size;
     };
+
+    std::ostream &operator<<(std::ostream &os, const ChannelCopyInfo &info);
+    bool operator==(const ChannelCopyInfo &lhs, const ChannelCopyInfo &rhs);
 
     class Channel {
     public:
@@ -823,8 +850,13 @@ namespace Realm {
                                      XferDesKind *kind_ret = 0,
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
 
-      virtual Memory suggest_ib_memories(Memory memory) const;
+      virtual Memory suggest_ib_memories() const;
+      virtual Memory suggest_ib_memories_for_node(NodeID node) const;
 
       virtual bool needs_wrapping_iterator() const { return false; }
 
@@ -906,6 +938,9 @@ namespace Realm {
 
     class SimpleRemoteChannelInfo : public RemoteChannelInfo {
     public:
+      SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+                              const std::vector<Channel::SupportedPath> &_paths,
+                              const std::vector<Memory> &indirect_memories);
       SimpleRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
                               uintptr_t _remote_ptr,
                               const std::vector<Channel::SupportedPath>& _paths);
@@ -927,12 +962,14 @@ namespace Realm {
       XferDesKind kind;
       uintptr_t remote_ptr;
       std::vector<Channel::SupportedPath> paths;
+      std::vector<Memory> indirect_memories;
     };
 
     class RemoteChannel : public Channel {
     protected:
       friend class SimpleRemoteChannelInfo;
 
+      RemoteChannel(uintptr_t _remote_ptr, const std::vector<Memory> &indirect_memories);
       RemoteChannel(uintptr_t _remote_ptr);
 
       virtual void shutdown();
@@ -970,11 +1007,17 @@ namespace Realm {
                                      unsigned *bw_ret = 0,
                                      unsigned *lat_ret = 0);
 
+      /// @brief Queries if a given \p mem can be used as an indirection buffer
+      /// @param mem Memory to be used as an indirection buffer
+      /// @return True if the given \p mem can be used as an indirection buffer for a copy
+      virtual bool supports_indirection_memory(Memory mem) const;
+
       virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
       virtual void wakeup_xd(XferDes *xd) { assert(0); }
 
     protected:
       SimpleXferDesFactory factory_singleton;
+      const std::set<Memory> indirect_memories;
     };
 
     template <typename CHANNEL, typename XD>
@@ -1380,10 +1423,15 @@ namespace Realm {
 
       void set_real_xd(XferDes *_xd);
 
+      void add_update_pre_bytes_total_received(void);
+
+      unsigned get_update_pre_bytes_total_received(void);
+
     protected:
       static const int INLINE_PORTS = 4;
       atomic<unsigned> refcount;
       XferDes *xd;
+      atomic<unsigned> nb_update_pre_bytes_total_calls_received;
       size_t inline_bytes_total[INLINE_PORTS];
       SequenceAssembler inline_pre_write[INLINE_PORTS];
       Mutex extra_mutex;
@@ -1405,6 +1453,7 @@ namespace Realm {
       }
 
       ~XferDesQueue() {
+        assert(guid_to_xd.empty());
       }
 
       static XferDesQueue* get_singleton();

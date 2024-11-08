@@ -21,13 +21,7 @@
 
 #include "realm/realm_config.h"
 
-#if (REALM_CXX_STANDARD >= 11) && !defined(REALM_NO_USE_STD_ATOMIC)
-#define REALM_USE_STD_ATOMIC
-#endif
-
-#ifdef REALM_USE_STD_ATOMIC
 #include <atomic>
-#endif
 
 namespace Realm {
 
@@ -40,8 +34,8 @@ namespace Realm {
     explicit atomic(T _value);
 
     // copy constructors are needed if atomics are put in a container
-    atomic(const atomic<T>& copy_from);
-    atomic<T>& operator=(const atomic<T>& copy_from);
+    atomic(const atomic<T> &copy_from);
+    atomic<T> &operator=(const atomic<T> &copy_from);
 
     T load(void) const;
     T load_acquire(void) const;
@@ -53,9 +47,9 @@ namespace Realm {
 
     // atomic ops
     T exchange(T newval);
-    bool compare_exchange(T& expected, T newval);
-    bool compare_exchange_relaxed(T& expected, T newval);
-    bool compare_exchange_weak(T& expected, T newval);
+    bool compare_exchange(T &expected, T newval);
+    bool compare_exchange_relaxed(T &expected, T newval);
+    bool compare_exchange_weak(T &expected, T newval);
 
     // these updates use relaxed semantics, guaranteeing atomicity, but
     //  imposing no constraints on other loads and stores - use *_acqrel
@@ -77,14 +71,10 @@ namespace Realm {
     T fetch_max_acqrel(T to_max);
 
   protected:
-#ifdef REALM_USE_STD_ATOMIC
     std::atomic<T> value;
-#else
-    T value;
-#endif
   };
 
-};
+}; // namespace Realm
 
 #include "realm/atomics.inl"
 

@@ -1213,6 +1213,8 @@ namespace Legion {
             is_valid = true; \
             p = rect_itr.p; \
             memcpy(rect_iterator, &rect_itr, sizeof(rect_itr)); \
+          } else { \
+            is_valid = false; \
           } \
           break; \
         }

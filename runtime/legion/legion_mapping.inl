@@ -26,7 +26,7 @@ namespace Legion {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*)>
     VariantID MapperRuntime::register_task_variant(MapperContext ctx,
-                                          const TaskVariantRegistrar &registrar)
+                                    const TaskVariantRegistrar &registrar) const
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
@@ -39,7 +39,7 @@ namespace Legion {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*, const UDT&)>
     VariantID MapperRuntime::register_task_variant(MapperContext ctx,
-                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+              const TaskVariantRegistrar &registrar, const UDT &user_data) const
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(
@@ -53,7 +53,7 @@ namespace Legion {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*)>
     VariantID MapperRuntime::register_task_variant(MapperContext ctx,
-                                          const TaskVariantRegistrar &registrar)
+                                    const TaskVariantRegistrar &registrar) const
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
@@ -66,7 +66,7 @@ namespace Legion {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*, const UDT&)>
     VariantID MapperRuntime::register_task_variant(MapperContext ctx,
-                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+              const TaskVariantRegistrar &registrar, const UDT &user_data) const
     //--------------------------------------------------------------------------
     {
       CodeDescriptor desc(
@@ -304,4 +304,22 @@ namespace Legion {
     };
   };
 };
+
+namespace std {
+
+  template<>
+  struct hash<Legion::Mapping::PhysicalInstance> {
+    inline std::size_t operator()(
+        const Legion::Mapping::PhysicalInstance &instance) const
+    { return instance.hash(); }
+  };
+
+  template<>
+  struct hash<Legion::Mapping::CollectiveView> {
+    inline std::size_t operator()(
+        const Legion::Mapping::CollectiveView &view) const
+    { return view.hash(); }
+  };
+
+}; // namespace std
 

@@ -117,40 +117,43 @@ namespace Realm {
 	while(true) {
 	  FT val = a_data.read(p);
 	  Point<N,T> p2 = p;
-	  while(p2.x < r.hi.x) {
-	    Point<N,T> p3 = p2;
-	    p3.x++;
-	    FT val2 = a_data.read(p3);
-	    if(val != val2) {
-	      // record old strip
-	      BM *&bmp = bitmasks[val];
-	      if(!bmp) bmp = new BM;
-	      bmp->add_rect(Rect<N,T>(p,p2));
-	      //std::cout << val << ": " << p << ".." << p2 << std::endl;
-	      val = val2;
-	      p = p3;
-	    }
-	    p2 = p3;
-	  }
-	  // record whatever strip we have at the end
-	  BM *&bmp = bitmasks[val];
-	  if(!bmp) bmp = new BM;
-	  bmp->add_rect(Rect<N,T>(p,p2));
-	  //std::cout << val << ": " << p << ".." << p2 << std::endl;
+          while(p2[0] < r.hi[0]) {
+            Point<N, T> p3 = p2;
+            p3[0]++;
+            FT val2 = a_data.read(p3);
+            if(val != val2) {
+              // record old strip
+              BM *&bmp = bitmasks[val];
+              if(!bmp)
+                bmp = new BM;
+              bmp->add_rect(Rect<N, T>(p, p2));
+              // std::cout << val << ": " << p << ".." << p2 << std::endl;
+              val = val2;
+              p = p3;
+            }
+            p2 = p3;
+          }
+          // record whatever strip we have at the end
+          BM *&bmp = bitmasks[val];
+          if(!bmp)
+            bmp = new BM;
+          bmp->add_rect(Rect<N, T>(p, p2));
+          // std::cout << val << ": " << p << ".." << p2 << std::endl;
 
-	  // are we done?
-	  if(p2 == r.hi) break;
+          // are we done?
+          if(p2 == r.hi)
+            break;
 
-	  // now go to the next span, if there is one (can't be in 1-D)
-	  assert(N > 1);
-	  for(int i = 0; i < (N - 1); i++) {
-	    p[i] = r.lo[i];
-	    if(p[i + 1] < r.hi[i+1]) {
-	      p[i + 1] += 1;
-	      break;
-	    }
-	  }
-	}
+          // now go to the next span, if there is one (can't be in 1-D)
+          assert(N > 1);
+          for(int i = 0; i < (N - 1); i++) {
+            p[i] = r.lo[i];
+            if(p[i + 1] < r.hi[i + 1]) {
+              p[i + 1] += 1;
+              break;
+            }
+          }
+        }
       }
     }
   }

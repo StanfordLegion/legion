@@ -13,6 +13,9 @@
 -- limitations under the License.
 
 import "regent"
+local launcher = require("std/launcher")
+local cmapper = launcher.build_library("reduc_mapper")
+local c = regentlib.c
 
 task g_plus(r : region(complex32), p : ptr(complex32, r))
 where reduces+(r) do
@@ -81,5 +84,5 @@ task main()
   v -= complex32 { 1300, 0 }
   regentlib.assert(f().real == v.real, "test failed")
 end
+launcher.launch(main, "region_reduce_complex", cmapper.register_mappers, {"-lreduc_mapper"})
 
-regentlib.start(main)

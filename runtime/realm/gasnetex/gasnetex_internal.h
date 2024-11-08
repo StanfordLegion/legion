@@ -20,89 +20,28 @@
 
 #include "realm/gasnetex/gasnetex_module.h"
 
+#ifdef REALM_USE_GASNETEX_WRAPPER
+// Disable the definitions and importing of symbols we're not going to use
+#define GEX_NO_PROTOTYPES 1
+#endif
+
+#include "realm/gasnetex/gasnetex_wrapper/gasnetex_wrapper.h"
+
 #include "realm/bgwork.h"
 #include "realm/atomics.h"
 #include "realm/activemsg.h"
 #include "realm/lists.h"
 
-#ifndef GASNET_PAR
-  #if defined(GASNET_SEQ) || defined(GASNET_PARSYNC)
-    #error Realm requires GASNet-EX be used in parallel threading mode!
-  #else
-    #define GASNET_PAR
-  #endif
-#endif
-#include <gasnetex.h>
-
-// there are two independent "version" that we may need to consider for
-//  conditional compilation:
-//
-// 1) REALM_GEX_RELEASE refers to specific releases - GASNet-EX uses year.month
-//      for major.minor, and we'll assume no more than 100 patch levels to
-//      avoid conflicts, but there is no guarantee of chronological
-//      monotonicity of behavior, so tests should be either equality against
-//      a specific release or a bounded comparison when two or more consecutive
-//      releases are of interest.  However, there should never be anything of
-//      form: if REALM_GEX_RELEASE >= xyz
-#define REALM_GEX_RELEASE ((10000*GASNET_RELEASE_VERSION_MAJOR)+(100*GASNET_RELEASE_VERSION_MINOR)+GASNET_RELEASE_VERSION_PATCH)
-
-// 2) REALM_GEX_API refers to versioning of the GASNet-EX specification -
-//      currently this is defined in terms of major.minor, but we'll include
-//      space for a patch level if that ever becomes important.  In contrast to
-//      the release numbering, we will assume that the specification is
-//      roughly monotonic in that a change is expected to remain in future
-//      specs except for hopefully-uncommon cases where it changes again
-#define REALM_GEX_API  ((10000*GEX_SPEC_VERSION_MAJOR)+(100*GEX_SPEC_VERSION_MINOR))
-
-#if REALM_GEX_API < 1200
-#error Realm depends on GASNet-EX features that first appeared in the 0.12 spec, first available in the 2020.11.0 release.  For earlier versions of GASNet-EX, use the legacy API via the gasnet1 network layer.
-  #include <stop_compilation_due_to_gasnetex_version_mismatch>
-#endif
-
-// post 2020.11.0, GASNet has defines that say which operations are native
-//  rather than emulated by their reference implementation - those defines
-//  aren't there for 2020.11.0, but the only one that version has that we
-//  care about is NPAM medium
-#if REALM_GEX_RELEASE == 20201100
-  // NOTE: technically it's only native for the IBV/ARIES/SMP conduits,
-  //  but enable it as well on the MPI conduit so that we get more test
-  //  coverage of the code paths (and it's probably not making the MPI
-  //  conduit performance any worse)
-  #if defined(GASNET_CONDUIT_IBV) || defined(GASNET_CONDUIT_ARIES) || defined(GASNET_CONDUIT_SMP) || defined(GASNET_CONDUIT_MPI)
-    #define GASNET_NATIVE_NP_ALLOC_REQ_MEDIUM
-  #endif
-#endif
-
-// the GASNet-EX API defines the GEX_FLAG_IMMEDIATE flag to be a best-effort
-//  thing, with calls that accept the flag still being allowed to block -
-//  as of 2022.3.0, for any conduit other than aries "best effort" is actually
-//  "no effort" for RMA operations and we want to avoid using them in
-//  immediate-mode situations
-// NOTE: as with the NPAM stuff above, we'll pretend that MPI honors it as
-//  well so that we get code coverage in CI tests
-#if defined(GASNET_CONDUIT_ARIES) || defined(GASNET_CONDUIT_MPI)
-  #define REALM_GEX_RMA_HONORS_IMMEDIATE_FLAG
-#endif
-
-// eliminate GASNet warnings for unused static functions
-#include <gasnet_tools.h>
-REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning1) = (void *)_gasneti_threadkey_init;
-REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_trace_printf_noop;
-
-#define CHECK_GEX(cmd) do { \
-  int ret = (cmd); \
-  if(ret != GASNET_OK) { \
-    fprintf(stderr, "GEX: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
-    exit(1); \
-  } \
-} while(0)
-
 namespace Realm {
+
+#define REALM_GEX_MODULE_VERSION 20240301
+
+  extern gex_wrapper_handle_t gex_wrapper_handle;
 
   // rdma pointers need to identify which endpoint they belong to
   struct GASNetEXRDMAInfo {
     uintptr_t base;
-    gex_EP_Index_t ep_index;
+    gex_ep_index_t ep_index;
   };
 
   class OutbufManager;
@@ -352,15 +291,15 @@ namespace Realm {
       STRAT_PUT_PBUF,
     };
     Strategy strategy;
-    gex_Rank_t target;
-    gex_EP_Index_t source_ep_index, target_ep_index;
+    gex_rank_t target;
+    gex_ep_index_t source_ep_index, target_ep_index;
     unsigned short msgid;
     uintptr_t dest_payload_addr;
     void *temp_buffer;
     OutbufMetadata *databuf;
     OutbufMetadata *pktbuf;
     int pktidx;
-    gex_AM_SrcDesc_t srcdesc;
+    gex_am_src_desc_opaque_t srcdesc;
     PendingPutHeader *put;
   };
 
@@ -370,9 +309,8 @@ namespace Realm {
   //  path
   class XmitSrcDestPair {
   public:
-    XmitSrcDestPair(GASNetEXInternal *_internal,
-		    gex_EP_Index_t _src_ep_index,
-		    gex_Rank_t _tgt_rank, gex_EP_Index_t _tgt_ep_index);
+    XmitSrcDestPair(GASNetEXInternal *_internal, gex_ep_index_t _src_ep_index,
+                    gex_rank_t _tgt_rank, gex_ep_index_t _tgt_ep_index);
     ~XmitSrcDestPair();
 
     // indicates whether any packets are pending, including those that
@@ -396,29 +334,23 @@ namespace Realm {
 				void *&hdr_base);
     bool reserve_pbuf_put(bool overflow_ok,
                           OutbufMetadata *&pktbuf, int& pktidx);
-    void commit_pbuf_inline(OutbufMetadata *pktbuf, int pktidx,
-			    const void *hdr_base,
-			    gex_AM_Arg_t arg0, size_t act_payload_bytes);
-    void commit_pbuf_long(OutbufMetadata *pktbuf, int pktidx,
-			  const void *hdr_base,
-			  gex_AM_Arg_t arg0,
-			  const void *payload_base, size_t payload_bytes,
-			  uintptr_t dest_addr,
-			  OutbufMetadata *databuf);
-    void commit_pbuf_rget(OutbufMetadata *pktbuf, int pktidx,
-			  const void *hdr_base,
-			  gex_AM_Arg_t arg0,
-			  const void *payload_base, size_t payload_bytes,
-			  uintptr_t dest_addr,
-			  gex_EP_Index_t src_ep_index,
-			  gex_EP_Index_t tgt_ep_index);
+    void commit_pbuf_inline(OutbufMetadata *pktbuf, int pktidx, const void *hdr_base,
+                            gex_am_arg_t arg0, size_t act_payload_bytes);
+    void commit_pbuf_long(OutbufMetadata *pktbuf, int pktidx, const void *hdr_base,
+                          gex_am_arg_t arg0, const void *payload_base,
+                          size_t payload_bytes, uintptr_t dest_addr,
+                          OutbufMetadata *databuf);
+    void commit_pbuf_rget(OutbufMetadata *pktbuf, int pktidx, const void *hdr_base,
+                          gex_am_arg_t arg0, const void *payload_base,
+                          size_t payload_bytes, uintptr_t dest_addr,
+                          gex_ep_index_t src_ep_index, gex_ep_index_t tgt_ep_index);
     void commit_pbuf_put(OutbufMetadata *pktbuf, int pktidx,
                          PendingPutHeader *put,
                          const void *payload_base, size_t payload_bytes,
                          uintptr_t dest_addr);
     void cancel_pbuf(OutbufMetadata *pktbuf, int pktidx);
 
-    void enqueue_completion_reply(gex_AM_Arg_t comp_info);
+    void enqueue_completion_reply(gex_am_arg_t comp_info);
 
     void enqueue_put_header(PendingPutHeader *put);
 
@@ -451,8 +383,8 @@ namespace Realm {
 	} l;
 	struct {
 	  // rget needs to give both src and target ep index for data
-	  gex_EP_Index_t src_ep_index, tgt_ep_index;
-	} r;
+          gex_ep_index_t src_ep_index, tgt_ep_index;
+        } r;
       };
     };
 
@@ -473,9 +405,9 @@ namespace Realm {
 			    const void *hdr_base, uintptr_t& baseptr);
 
     GASNetEXInternal *internal;
-    gex_EP_Index_t src_ep_index;
-    gex_Rank_t tgt_rank;
-    gex_EP_Index_t tgt_ep_index;
+    gex_ep_index_t src_ep_index;
+    gex_rank_t tgt_rank;
+    gex_ep_index_t tgt_ep_index;
     atomic<size_t> packets_reserved, packets_sent;
     Mutex mutex;
     // we don't hold the mutex while pushing packets, but we need definitely
@@ -489,7 +421,7 @@ namespace Realm {
     atomic<PendingPutHeader *> put_head;  // read without mutex
     atomic<PendingPutHeader *> *put_tailp;
     // circular queue of pending completion replys
-    gex_AM_Arg_t *comp_reply_data;
+    gex_am_arg_t *comp_reply_data;
     unsigned comp_reply_wrptr, comp_reply_rdptr;
     atomic<unsigned> comp_reply_count;  // read without mutex
     unsigned comp_reply_capacity;
@@ -499,17 +431,16 @@ namespace Realm {
 
   class XmitSrc {
   public:
-    XmitSrc(GASNetEXInternal *_internal, gex_EP_Index_t _src_ep_index);
+    XmitSrc(GASNetEXInternal *_internal, gex_ep_index_t _src_ep_index);
     ~XmitSrc();
 
-    XmitSrcDestPair *lookup_pair(gex_Rank_t tgt_rank,
-				 gex_EP_Index_t tgt_ep_index);
+    XmitSrcDestPair *lookup_pair(gex_rank_t tgt_rank, gex_ep_index_t tgt_ep_index);
 
   protected:
     friend class GASNetEXInternal;
 
     GASNetEXInternal *internal;
-    gex_EP_Index_t src_ep_index;
+    gex_ep_index_t src_ep_index;
 
     // we'll allocate XmitSrcDestPair's on demand - atomics allow nonblocking
     //  lookup
@@ -529,9 +460,9 @@ namespace Realm {
     ~GASNetEXEvent() {}
 
   public:
-    gex_Event_t get_event() const;
+    gex_event_opaque_t get_event() const;
 
-    GASNetEXEvent& set_event(gex_Event_t _event);
+    GASNetEXEvent &set_event(gex_event_opaque_t _event);
     GASNetEXEvent& set_local_comp(PendingCompletion *_local_comp);
     GASNetEXEvent& set_pktbuf(OutbufMetadata *_pktbuf);
     GASNetEXEvent& set_databuf(OutbufMetadata *_databuf);
@@ -548,7 +479,7 @@ namespace Realm {
     typedef IntrusiveList<GASNetEXEvent, REALM_PMTA_USE(GASNetEXEvent,event_list_link), DummyLock> EventList;
 
   protected:
-    gex_Event_t event;
+    gex_ep_opaque_t event;
     PendingCompletion *local_comp;
     OutbufMetadata *pktbuf;
     OutbufMetadata *databuf;
@@ -596,6 +527,7 @@ namespace Realm {
     void wait_for_full_poll_cycle();
 
   protected:
+    bool started = false;
     GASNetEXInternal *internal;
     Mutex mutex;
     atomic<bool> shutdown_flag;  // set/cleared inside mutex, but tested outside
@@ -632,9 +564,9 @@ namespace Realm {
     ~PendingPutHeader() {}
 
   public:
-    gex_Rank_t target;
-    gex_EP_Index_t src_ep_index, tgt_ep_index;
-    gex_AM_Arg_t arg0;
+    gex_rank_t target;
+    gex_ep_index_t src_ep_index, tgt_ep_index;
+    gex_am_arg_t arg0;
     static const size_t MAX_HDR_SIZE = 128;
     size_t hdr_size;
     unsigned char hdr_data[MAX_HDR_SIZE];
@@ -662,9 +594,9 @@ namespace Realm {
   public:
     ReverseGetter *rgetter;
     PendingReverseGet *next_rget;
-    gex_Rank_t srcrank;
-    gex_EP_Index_t src_ep_index, tgt_ep_index;
-    gex_AM_Arg_t arg0;
+    gex_rank_t srcrank;
+    gex_ep_index_t src_ep_index, tgt_ep_index;
+    gex_am_arg_t arg0;
     static const size_t MAX_HDR_SIZE = 128;
     size_t hdr_size;
     unsigned char hdr_data[MAX_HDR_SIZE];
@@ -676,12 +608,10 @@ namespace Realm {
   public:
     ReverseGetter(GASNetEXInternal *_internal);
 
-    void add_reverse_get(gex_Rank_t srcrank, gex_EP_Index_t src_ep_index,
-			 gex_EP_Index_t tgt_ep_index,
-			 gex_AM_Arg_t arg0,
-			 const void *hdr, size_t hdr_bytes,
-			 uintptr_t src_ptr, uintptr_t tgt_ptr,
-			 size_t payload_bytes);
+    void add_reverse_get(gex_rank_t srcrank, gex_ep_index_t src_ep_index,
+                         gex_ep_index_t tgt_ep_index, gex_am_arg_t arg0, const void *hdr,
+                         size_t hdr_bytes, uintptr_t src_ptr, uintptr_t tgt_ptr,
+                         size_t payload_bytes);
 
     bool has_work_remaining();
 
@@ -704,21 +634,20 @@ namespace Realm {
 
     ~GASNetEXInternal();
 
-    void init(int *argc, const char ***argv);
+    bool init(int *argc, const char ***argv);
     uintptr_t attach(size_t size);
 
-    bool attempt_binding(void *base, size_t size,
-			 NetworkSegmentInfo::MemoryType memtype,
-			 NetworkSegmentInfo::MemoryTypeExtraData memextra,
-			 gex_EP_Index_t *ep_indexp);
+    bool attempt_binding(void *base, size_t size, NetworkSegmentInfo::MemoryType memtype,
+                         NetworkSegmentInfo::MemoryTypeExtraData memextra,
+                         gex_ep_index_t *ep_indexp);
     void publish_bindings();
 
     void detach();
 
     void get_shared_peers(Realm::NodeSet &shared_peers);
     void barrier();
-    void broadcast(gex_Rank_t root, const void *val_in, void *val_out, size_t bytes);
-    void gather(gex_Rank_t root, const void *val_in, void *vals_out, size_t bytes);
+    void broadcast(gex_rank_t root, const void *val_in, void *val_out, size_t bytes);
+    void gather(gex_rank_t root, const void *val_in, void *vals_out, size_t bytes);
     void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
                     std::vector<size_t> &lengths);
 
@@ -728,52 +657,40 @@ namespace Realm {
     PendingCompletion *get_available_comp();
     PendingCompletion *early_local_completion(PendingCompletion *comp);
 
-    size_t recommended_max_payload(gex_Rank_t target,
-				   gex_EP_Index_t target_ep_index,
-				   bool with_congestion,
-				   size_t header_size,
-				   uintptr_t dest_payload_addr);
-    size_t recommended_max_payload(gex_Rank_t target,
-				   gex_EP_Index_t target_ep_index,
-				   const void *data, size_t bytes_per_line,
-				   size_t lines, size_t line_stride,
-				   bool with_congestion,
-				   size_t header_size,
-				   uintptr_t dest_payload_addr);
+    size_t recommended_max_payload(gex_rank_t target, gex_ep_index_t target_ep_index,
+                                   bool with_congestion, size_t header_size,
+                                   uintptr_t dest_payload_addr);
+    size_t recommended_max_payload(gex_rank_t target, gex_ep_index_t target_ep_index,
+                                   const void *data, size_t bytes_per_line, size_t lines,
+                                   size_t line_stride, bool with_congestion,
+                                   size_t header_size, uintptr_t dest_payload_addr);
     size_t recommended_max_payload(bool with_congestion,
 				   size_t header_size);
 
-    PreparedMessage *prepare_message(gex_Rank_t target, gex_EP_Index_t target_ep_index,
-				     unsigned short msgid,
-				     void *&header_base, size_t header_size,
-				     void *&payload_base, size_t payload_size,
-				     uintptr_t dest_payload_addr);
+    PreparedMessage *prepare_message(gex_rank_t target, gex_ep_index_t target_ep_index,
+                                     unsigned short msgid, void *&header_base,
+                                     size_t header_size, void *&payload_base,
+                                     size_t payload_size, uintptr_t dest_payload_addr);
     void commit_message(PreparedMessage *msg,
 			PendingCompletion *comp,
 			void *header_base, size_t header_size,
 			void *payload_base, size_t payload_size);
     void cancel_message(PreparedMessage *msg);
 
-    gex_AM_Arg_t handle_short(gex_Rank_t srcrank, gex_AM_Arg_t arg0,
-			      const void *hdr, size_t hdr_bytes);
-    gex_AM_Arg_t handle_medium(gex_Rank_t srcrank, gex_AM_Arg_t arg0,
-			       const void *hdr, size_t hdr_bytes,
-			       const void *data, size_t data_bytes);
-    gex_AM_Arg_t handle_long(gex_Rank_t srcrank, gex_AM_Arg_t arg0,
-			     const void *hdr, size_t hdr_bytes,
-			     const void *data, size_t data_bytes);
-    void handle_reverse_get(gex_Rank_t srcrank, gex_EP_Index_t src_ep_index,
-			    gex_EP_Index_t tgt_ep_index,
-			    gex_AM_Arg_t arg0,
-			    const void *hdr, size_t hdr_bytes,
-			    uintptr_t src_ptr, uintptr_t tgt_ptr,
-			    size_t payload_bytes);
-    size_t handle_batch(gex_Rank_t srcrank, gex_AM_Arg_t arg0,
-                        gex_AM_Arg_t cksum,
-			const void *data, size_t data_bytes,
-			gex_AM_Arg_t *comps);
-    void handle_completion_reply(gex_Rank_t srcrank,
-				 const gex_AM_Arg_t *args, size_t nargs);
+    gex_am_arg_t handle_short(gex_rank_t srcrank, gex_am_arg_t arg0, const void *hdr,
+                              size_t hdr_bytes);
+    gex_am_arg_t handle_medium(gex_rank_t srcrank, gex_am_arg_t arg0, const void *hdr,
+                               size_t hdr_bytes, const void *data, size_t data_bytes);
+    gex_am_arg_t handle_long(gex_rank_t srcrank, gex_am_arg_t arg0, const void *hdr,
+                             size_t hdr_bytes, const void *data, size_t data_bytes);
+    void handle_reverse_get(gex_rank_t srcrank, gex_ep_index_t src_ep_index,
+                            gex_ep_index_t tgt_ep_index, gex_am_arg_t arg0,
+                            const void *hdr, size_t hdr_bytes, uintptr_t src_ptr,
+                            uintptr_t tgt_ptr, size_t payload_bytes);
+    size_t handle_batch(gex_rank_t srcrank, gex_am_arg_t arg0, gex_am_arg_t cksum,
+                        const void *data, size_t data_bytes, gex_am_arg_t *comps);
+    void handle_completion_reply(gex_rank_t srcrank, const gex_am_arg_t *args,
+                                 size_t nargs);
 
   protected:
     friend class ReverseGetter;
@@ -791,22 +708,22 @@ namespace Realm {
     static void long_message_complete(NodeID sender, uintptr_t objptr,
 				      uintptr_t comp_info);
 
-    PendingCompletion *extract_arg0_local_comp(gex_AM_Arg_t& arg0);
+    PendingCompletion *extract_arg0_local_comp(gex_am_arg_t &arg0);
 
     GASNetEXModule *module;
     RuntimeImpl *runtime;
-    gex_Client_t client;
+    gex_client_opaque_t client;
     // order in 'eps' should match GASNet's indexing
-    std::vector<gex_EP_t> eps;
-    gex_TM_t prim_tm;
-    gex_Rank_t prim_rank, prim_size;
-    gex_Segment_t prim_segment;
+    std::vector<gex_ep_opaque_t> eps;
+    gex_tm_opaque_t prim_tm;
+    gex_rank_t prim_rank, prim_size;
+    gex_segment_opaque_t prim_segment;
     size_t prim_segsize;
 
     struct SegmentInfo {
       uintptr_t base, limit;
-      gex_EP_Index_t ep_index;
-      gex_Segment_t segment;
+      gex_ep_index_t ep_index;
+      gex_segment_opaque_t segment;
       NetworkSegmentInfo::MemoryType memtype;
       NetworkSegmentInfo::MemoryTypeExtraData memextra;
     };
@@ -831,6 +748,7 @@ namespace Realm {
     // manage a single open databuf for all endpoints
     Mutex databuf_mutex;
     OutbufMetadata *databuf_md;
+    gex_callback_handle_t gex_callback_handle;
 
     // allocator/managers for various objects we want to reuse
     ChunkedRecycler<GASNetEXEvent, 64> event_alloc;

@@ -23,11 +23,7 @@
 #endif
 
 // need std::swap
-#if REALM_CXX_STANDARD >= 11
 #include <utility>
-#else
-#include <algorithm>
-#endif
 
 namespace Realm {
 
@@ -43,8 +39,7 @@ namespace Realm {
 
   inline NodeSet::~NodeSet()
   {
-    if((count > 0) && (enc_format == ENC_BITMASK))
-      NodeSetBitmask::release_bitmask(data.bitmask, false /*!already_empty*/);
+    clear();
   }
 
   inline NodeSet::NodeSet(const NodeSet& copy_from)

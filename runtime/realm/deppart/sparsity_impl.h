@@ -188,9 +188,17 @@ namespace Realm {
 
     void init(ID _me, unsigned _init_owner);
     void destroy(void);
+    void recycle(void);
+    void subscribe(NodeID node);
+    void unsubscribe(NodeID node);
 
     void add_references(unsigned count);
     void remove_references(unsigned count);
+
+    static ID make_id(const SparsityMapImplWrapper &dummy, int owner, ID::IDType index)
+    {
+      return ID::make_sparsity(owner, 0, index);
+    }
 
     ID me;
     unsigned owner;
@@ -198,6 +206,7 @@ namespace Realm {
     atomic<DynamicTemplates::TagType> type_tag;
     atomic<void *> map_impl;  // actual implementation
     atomic<unsigned> references;
+    NodeSet subscribers;
 
     bool need_refcount;
 
@@ -209,8 +218,15 @@ namespace Realm {
 
     template <int N, typename T>
     SparsityMapImpl<N, T> *get_or_create(SparsityMap<N, T> me);
-  };
 
+    struct SubscribeDeleteMessage {
+      ::realm_id_t id;
+      static void handle_message(NodeID sender, const SubscribeDeleteMessage &msg,
+                                 const void *data, size_t datalen);
+    };
+    static ActiveMessageHandlerReg<SubscribeDeleteMessage>
+        subscribe_delete_message_handler_reg;
+  };
 
 }; // namespace Realm
 

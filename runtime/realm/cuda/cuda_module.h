@@ -136,6 +136,7 @@ namespace Realm {
       size_t cfg_hostreg_limit = 1 << 30;
       int cfg_d2d_stream_priority = -1;
       bool cfg_use_cuda_ipc = true;
+      int cfg_pageable_access = 0;
 
       // resources
       bool resource_discovered = false;
@@ -225,7 +226,8 @@ namespace Realm {
 
       Mutex cudaipc_mutex;
       Mutex::CondVar cudaipc_condvar;
-      atomic<size_t> cudaipc_responses_received;
+      atomic<size_t> cudaipc_responses_received{0};
+      int cuda_api_version = 0;
     };
 
   }; // namespace Cuda

@@ -67,7 +67,7 @@ void writer_task(const void *args, size_t arglen,
   AffineAccessor<int, 1> acc(wargs.inst, FID_DATA);
   for(IndexSpaceIterator<1> it(wargs.is); it.valid; it.step())
     for(PointInRectIterator<1> it2(it.rect); it2.valid; it2.step()) {
-      acc[it2.p] = it2.p.x + wargs.wrval;
+      acc[it2.p] = it2.p[0] + wargs.wrval;
     }
 }
 
@@ -80,7 +80,7 @@ void reader_task(const void *args, size_t arglen,
   AffineAccessor<int, 1> acc(rargs.inst, FID_DATA);
   for(IndexSpaceIterator<1> it(rargs.is); it.valid; it.step())
     for(PointInRectIterator<1> it2(it.rect); it2.valid; it2.step()) {
-      int expval = it2.p.x + rargs.rdval;
+      int expval = it2.p[0] + rargs.rdval;
       int actval = acc[it2.p];
       if(expval == actval)
 	correct++;

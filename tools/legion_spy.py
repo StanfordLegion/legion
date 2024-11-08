@@ -4937,15 +4937,15 @@ class DataflowTraverser(object):
                 # See a multi-node run of region_reduce_aliased.rg for example
                 self.dataflow_traversal.append(False)
             else:
-                if src in self.state.valid_instances:
+                if src in self.state.previous_instances:
+                    # Still need to traverse to find pending reductions
+                    self.found_previous_dataflow_path = True
+                elif src in self.state.valid_instances:
                     # We found the dataflow path
                     self.found_dataflow_path = True
                     # No need to continue traverse after we found the dataflow path
                     self.perform_copy_analysis(copy, src, dst)
                     return False
-                elif src in self.state.previous_instances:
-                    # Still need to traverse to find pending reductions
-                    self.found_previous_dataflow_path = True
                 self.dataflow_stack.append(src)
                 self.dataflow_traversal.append(True)
                 # Once we traverse through an across copy we don't do it again
@@ -5644,7 +5644,7 @@ class EquivalenceSet(object):
             fill.record_version_number(self)
             preconditions = inst.find_verification_copy_dependences(
                 self.field, self.point, op, req.index, False, 0, self.version_number)
-            add_precondition(preconditions, fill, self.depth)
+            add_preconditions(preconditions, fill)
             inst.add_verification_copy_user(self.field, 
                 self.point, fill, req.index, False, 0, self.version_number)
             return True
@@ -7100,6 +7100,12 @@ class Operation(object):
                 for req in itervalues(point_task.op.reqs):
                     all_reqs.append((req,point_task.op))
         else:
+            # Check to see if this is an indirection copy, if it is then we're
+            # just going to assume that things are non-interfering since there
+            # is no way to prove that it is non-interfering without knowing 
+            # what the data is in the indirection field(s)
+            if self.kind == COPY_OP_KIND and self.copy_kind > 0:
+                return False
             for point in itervalues(self.points):
                 for req in itervalues(point.reqs):
                     all_reqs.append((req,point))
@@ -9282,6 +9288,8 @@ class Task(object):
         if self.op.reqs:
             # Find which region requirement privileges were derived from
             for idx,our_req in iteritems(self.op.reqs):
+                if our_req.is_no_access():
+                    continue
                 if child_req.parent is not our_req.logical_node:
                     continue
                 fields_good = True
@@ -12825,10 +12833,14 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         p1 = state.get_task(int(m.group('point1')))
         p2 = state.get_task(int(m.group('point2')))
-        assert p1 not in state.point_point
-        assert p2 not in state.point_point
         # Holdoff on doing the merge until after parsing
-        state.point_point[p1] = p2
+        if p1 in state.point_point:
+            if state.point_point[p1] is not p2:
+                state.point_point[p2] = state.point_point[p1]
+            # No matter what remove the intermediate
+            del state.point_point[p1]
+        else:
+            state.point_point[p2] = p1
         return True
     m = index_point_pat.match(line)
     if m is not None:

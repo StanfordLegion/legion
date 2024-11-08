@@ -205,6 +205,49 @@ const char* LoggingWrapper::get_mapper_name(void) const {
   return name.c_str();
 }
 
+void LoggingWrapper::select_task_options(const MapperContext ctx,
+                                         const Task &task,
+                                         TaskOptions &output)
+{
+  mapper->select_task_options(ctx, task, output);
+  if (!logger->want_info()) return;
+  MessageBuffer buf(runtime, ctx, logger);
+  std::stringstream& ss = buf.line();
+  ss << "SELECT_TASK_OPTIONS for "
+     << to_string(runtime, ctx, task, false /*include_index_point*/)
+     << ": initial_proc=" << output.initial_proc;
+  if (output.inline_task) {
+    ss << " inline_task=true";
+  }
+  if (output.stealable) {
+    ss << " stealable=true";
+  }
+  if (output.map_locally) {
+    ss << " map_locally=true";
+  }
+  if (!output.valid_instances) {
+    ss << " valid_instances=false";
+  }
+  if (output.memoize) {
+    ss << " memoize=true";
+  }
+  if (output.replicate) {
+    ss << " replicate=true";
+  }
+  if (!output.check_collective_regions.empty()) {
+    ss << " check_collective_regions=";
+    bool past_first = false;
+    for (unsigned i : output.check_collective_regions) {
+      if (past_first) {
+        ss << ",";
+      } else {
+        past_first = true;
+      }
+      ss << i;
+    }
+  }
+}
+
 void LoggingWrapper::slice_task(const MapperContext ctx,
                                 const Task& task,
                                 const SliceTaskInput& input,

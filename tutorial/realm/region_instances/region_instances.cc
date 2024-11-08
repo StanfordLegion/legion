@@ -51,8 +51,8 @@ void update(RegionInstance inst, Rect<1, int> bounds, FieldID fid, int add) {
   AffineAccessor<FT, 1, int> accessor(inst, fid);
   PointInRectIterator<1, int> pit(bounds);
   while (pit.valid) {
-    accessor[pit.p].x = static_cast<T0>(pit.p.x + add);
-    accessor[pit.p].y = static_cast<T1>(pit.p.x + add + 1);
+    accessor[pit.p].x = static_cast<T0>(pit.p[0] + add);
+    accessor[pit.p].y = static_cast<T1>(pit.p[0] + add + 1);
     pit.step();
   }
 }
@@ -62,8 +62,8 @@ void verify(RegionInstance inst, Rect<1, int> bounds, FieldID fid, int add) {
   AffineAccessor<FT, 1, int> accessor(inst, fid);
   PointInRectIterator<1, int> pit(bounds);
   while (pit.valid) {
-    assert(accessor[pit.p].x == static_cast<T0>(pit.p.x + add));
-    assert(accessor[pit.p].y == static_cast<T1>(pit.p.x + add + 1));
+    assert(accessor[pit.p].x == static_cast<T0>(pit.p[0] + add));
+    assert(accessor[pit.p].y == static_cast<T1>(pit.p[0] + add + 1));
     log_app.info() << "p=" << pit.p << " x=" << accessor[pit.p].x
                    << " y=" << accessor[pit.p].y;
     pit.step();

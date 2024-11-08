@@ -107,31 +107,33 @@ namespace TestConfig {
 };                              // namespace TestConfig
 
 template <int N, typename T, typename DT>
-void dump_and_verify(RegionInstance inst, FieldID fid,
-                     const IndexSpace<N, T> &is, size_t row_size,
-                     std::vector<DT> test_data, bool verbose = false,
-                     bool verify = true) {
-  if (verify || verbose) {
+void dump_and_verify(RegionInstance inst, FieldID fid, const IndexSpace<N, T> &is,
+                     std::vector<DT> test_data, bool verbose = false, bool verify = true)
+{
+  const size_t row_size = is.bounds.hi[N - 1] - is.bounds.lo[N - 1];
+  if(verify || verbose) {
     GenericAccessor<DT, N, T> acc(inst, fid);
     size_t i = 0;
-    for (IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
-      for (PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
+    for(IndexSpaceIterator<N, T> it(is); it.valid; it.step()) {
+      for(PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
         DT v = acc[it2.p];
-        if (verify) {
-          if (v != test_data[i]) {
-            std::cout << "Mismatch at " << it2.p << ": " << v
-                      << " != " << test_data[i] << std::endl;
+        if(verify) {
+          if(v != test_data[i]) {
+            std::cout << "Mismatch at " << it2.p << ": " << v << " != " << test_data[i]
+                      << '\n';
             assert(0);
           }
           assert(v == test_data[i]);
         }
-        if (verbose) {
-          if ((i) % row_size == 0) std::cout << std::endl;
+        if(verbose) {
+          if((i) % row_size == 0)
+            std::cout << '\n';
           std::cout << it2.p << ": " << v << " ";
         }
         i++;
       }
-      if (verbose) std::cout << "\n";
+      if(verbose)
+        std::cout << '\n';
     }
   }
 }
@@ -356,11 +358,10 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       wait_for = is.copy(srcs, dsts, prs, wait_for);
       wait_for.wait();
 
-      dump_and_verify<N, T, FT>(src_inst, 0, src_is, is.bounds.hi[i] + 1, test_data,
-                                TestConfig::verbose, 0);
+      dump_and_verify<N, T, FT>(src_inst, 0, src_is, test_data, TestConfig::verbose, 0);
 
-      dump_and_verify<N, T, FT>(dst_inst, /*field_id=*/0, is, is.bounds.hi[i] + 1,
-                                test_data, TestConfig::verbose, TestConfig::verify);
+      dump_and_verify<N, T, FT>(dst_inst, /*field_id=*/0, is, test_data,
+                                TestConfig::verbose, TestConfig::verify);
 
       dst_inst.destroy(wait_for);
     }

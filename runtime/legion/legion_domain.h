@@ -481,7 +481,7 @@ namespace Legion {
           memcpy(functor->iterator.is_iterator, &is_itr, sizeof(is_itr));
         }
         else
-          functor->iterator.rect_valid = false; \
+          functor->iterator.rect_valid = false;
       }
     public:
       const Domain &domain;

@@ -441,7 +441,11 @@ namespace Realm {
   //  will clear the sparsity map of this index space if it exists
   template <int N, typename T>
   inline void IndexSpace<N,T>::destroy(Event wait_on /*= Event::NO_EVENT*/)
-  {}
+  {
+    if(sparsity.exists()) {
+      sparsity.destroy(wait_on);
+    }
+  }
 
   // true if we're SURE that there are no points in the space (may be imprecise due to
   //  lazy loading of sparsity data)
@@ -573,9 +577,9 @@ namespace Realm {
     int hi = entries.size();
     while(lo < hi) {
       size_t mid = (lo + hi) >> 1;  // rounding down keeps up from picking hi
-      if(p.x < entries[mid].bounds.lo.x) 
+      if(p[0] < entries[mid].bounds.lo[0]) 
 	hi = mid;
-      else if(p.x > entries[mid].bounds.hi.x)
+      else if(p[0] > entries[mid].bounds.hi[0])
 	lo = mid + 1;
       else
 	return mid;
@@ -606,7 +610,7 @@ namespace Realm {
 
       // the search guaranteed we're below the upper bound of the returned entry,
       //  but we might be below the lower bound
-      if(p.x < e.bounds.lo.x)
+      if(p[0] < e.bounds.lo[0])
 	return false;
 
       if(e.sparsity.exists()) {

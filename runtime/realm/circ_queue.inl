@@ -19,6 +19,7 @@
 #include "realm/circ_queue.h"
 
 #include <cassert>
+#include <algorithm>
 
 namespace Realm {
 
@@ -142,7 +143,7 @@ namespace Realm {
       external_buffer = 0;
     }
 
-    current_size = INTSIZE;
+    current_size = 0;
     head = 1;
     tail = 0;
   }

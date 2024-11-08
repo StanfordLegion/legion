@@ -33,7 +33,7 @@
 
 template <size_t N, typename Offset_t = size_t>
 static __device__ inline void index_to_coords(Offset_t *coords, Offset_t index,
-                                              Offset_t *extents)
+                                              const Offset_t *extents)
 {
   size_t div = index;
 #pragma unroll
@@ -46,7 +46,7 @@ static __device__ inline void index_to_coords(Offset_t *coords, Offset_t index,
 }
 
 template <size_t N, typename Offset_t = size_t>
-static __device__ inline size_t coords_to_index(Offset_t *coords, Offset_t *strides)
+static __device__ inline size_t coords_to_index(Offset_t *coords, const Offset_t *strides)
 {
   size_t i = 0;
   size_t vol = 1;
@@ -175,8 +175,8 @@ memcpy_affine_batch(Realm::Cuda::AffineCopyPair<N, Offset_t> *info,
       offset += i * grid_stride;
     }
 
-    // Skip this rectangle as it's covered by another thread isn't the one we're working
-    // on This can split the warp, and it may not coalesce again unless we sync them
+    // Skip this rectangle as it's covered by another thread
+    // This can split the warp, and it may not coalesce again unless we sync them
     offset -= vol;
   }
 }
@@ -238,6 +238,38 @@ memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<3, Offset_t> info)
   }
 }
 
+template <int N, typename T, typename Offset_t = size_t>
+static __device__ inline void
+memfill_affine_batch(const Realm::Cuda::AffineFillInfo<N, Offset_t>& info)
+{
+  Offset_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+  const unsigned grid_stride = gridDim.x * blockDim.x;
+  T fill_value = *reinterpret_cast<const T *>(info.fill_value);
+  for(size_t rect = 0; rect < info.num_rects; rect++) {
+    const Realm::Cuda::AffineFillRect<N, Offset_t> &current_info = info.subrects[rect];
+    const Offset_t vol = current_info.volume;
+    __restrict__ T *addr = reinterpret_cast<T *>(current_info.addr);
+    while(offset < vol) {
+      unsigned i = 0;
+#pragma unroll
+      for(i = 0; i < MAX_UNROLL; i++) {
+        Offset_t coords[N];
+        if((offset + i * grid_stride) >= vol) {
+          break;
+        }
+        index_to_coords<N, Offset_t>(coords, offset + i * grid_stride,
+                                     current_info.extents);
+        const size_t idx = coords_to_index<N, Offset_t>(coords, current_info.strides);
+        addr[idx] = fill_value;
+      }
+      offset += i * grid_stride;
+    }
+    // Skip this rectangle as it's covered by another thread
+    // This can split the warp, and it may not coalesce again unless we sync them
+    offset -= vol;
+  }
+}
+
 #define MEMCPY_TEMPLATE_INST(type, dim, offt, name)                            \
   extern "C" __global__ __launch_bounds__(256, 4) void                         \
       memcpy_affine_batch##name(Realm::Cuda::AffineCopyInfo<dim, offt> info) { \
@@ -246,8 +278,8 @@ memcpy_indirect_points(Realm::Cuda::MemcpyIndirectInfo<3, Offset_t> info)
 
 #define FILL_TEMPLATE_INST(type, dim, offt, name)                                        \
   extern "C" __global__ void fill_affine_batch##name(                                    \
-      Realm::Cuda::AffineFillInfo<dim, offt> info)                                       \
-  {                                                                                      \
+      Realm::Cuda::AffineFillInfo<dim, offt> info) {                                     \
+    memfill_affine_batch<dim, type, offt>(info);                                         \
   }
 
 #define FILL_LARGE_TEMPLATE_INST(type, dim, offt, name)                                  \

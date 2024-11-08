@@ -605,8 +605,9 @@ namespace Legion {
                      FieldMaskSet<IndexSpaceExpression> > &non_dominated) const;
       void filter_independent_fields(IndexSpaceExpression *expr,
                                      FieldMask &mask) const;
-      bool subsumed_by(const TraceViewSet &set, bool allow_independent,
-                       FailedPrecondition *condition = NULL) const;
+      bool subsumed_by(TraceViewSet &set, 
+          const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+          FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
                        FailedPrecondition *condition = NULL) const; 
       void record_first_failed(FailedPrecondition *condition = NULL) const;
@@ -840,19 +841,20 @@ namespace Legion {
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
       virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
-      virtual void finish_replay(std::set<ApEvent> &postconditions);
+      virtual void finish_replay(FenceOp *op,std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
     public:
       ReplayableStatus finalize(CompleteOp *op, bool has_blocking_call);
       IdempotencyStatus capture_conditions(CompleteOp *op);
       void receive_trace_conditions(TraceViewSet *preconditions,
           TraceViewSet *anticonditions, TraceViewSet *postconditions,
+          const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
           unsigned parent_req_index, RegionTreeID tree_id,
           std::atomic<unsigned> *result);
       void refresh_condition_sets(FenceOp *op,
           std::set<RtEvent> &ready_events) const;
       bool acquire_instance_references(void) const;
-      void release_instance_references(void) const;
+      void release_instance_references(std::set<RtEvent> &applied) const;
     public:
       void optimize(CompleteOp *op, bool do_transitive_reduction);
     private:
@@ -1159,6 +1161,7 @@ namespace Legion {
     protected:
       RtEvent                         replay_precondition;
       RtUserEvent                     replay_postcondition;
+      ApEvent                         replay_complete;
       std::atomic<unsigned>           remaining_replays;
       std::atomic<unsigned>           total_logical;
       std::vector<ApEvent>            events;
@@ -1316,7 +1319,7 @@ namespace Legion {
       virtual void initialize_replay(ApEvent fence_completion, bool recurrent);
       virtual void start_replay(void);
       virtual RtEvent refresh_managed_barriers(void);
-      virtual void finish_replay(std::set<ApEvent> &postconditions);
+      virtual void finish_replay(FenceOp *op,std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
                                         const TraceLocalID &tlid);

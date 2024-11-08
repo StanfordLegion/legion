@@ -132,30 +132,9 @@ def run_gc(logfiles, verbose, py_exe_path):
     if retcode != 0:
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
-def run_prof(out_dir, logfiles, verbose, py_exe_path):
-    result_dir = os.path.join(out_dir, 'legion_prof')
-    cmd = [
-        py_exe_path,
-        os.path.join(regent.root_dir(), 'tools', 'legion_prof.py'),
-        '-o', result_dir,
-    ] + logfiles
-    if verbose: print('Running', ' '.join(cmd))
-    cmd_env = dict(os.environ.items())
-    cmd_env["USE_TYPE_CHECK"] = "1"
-    proc = subprocess.Popen(
-        cmd,
-        stdout=None if verbose else subprocess.PIPE,
-        stderr=None if verbose else subprocess.STDOUT,
-        env=cmd_env)
-    output, _ = proc.communicate()
-    retcode = proc.wait()
-    if retcode != 0:
-        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
-    return result_dir
-
 def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
     result_dir = os.path.join(out_dir, 'legion_prof_rs')
-    cmd = [legion_prof_rs, '-o', result_dir,] + logfiles
+    cmd = [legion_prof_rs, 'legacy', '-o', result_dir,] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -169,35 +148,12 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
 
 def run_prof_rs_archive(out_dir, logfiles, verbose, legion_prof_rs):
     result_dir = os.path.join(out_dir, 'legion_prof_rs_archive')
-    cmd = [legion_prof_rs, '--archive', '--levels', '3', '--zstd-compression', '1', '-o', result_dir,] + logfiles
+    cmd = [legion_prof_rs, 'archive', '--levels', '3', '--zstd-compression', '1', '-o', result_dir,] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
         stdout=None if verbose else subprocess.PIPE,
         stderr=None if verbose else subprocess.STDOUT)
-    output, _ = proc.communicate()
-    retcode = proc.wait()
-    if retcode != 0:
-        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
-    return result_dir
-
-def run_prof_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path):
-    result_dir = os.path.join(out_dir, 'legion_prof_filter_input')
-    cmd = [
-        py_exe_path,
-        os.path.join(regent.root_dir(), 'tools', 'legion_prof_verify_subnodes.py'),
-        '--outdir', out_dir,
-        '--nodes', str(subnodes),
-    ] + logfiles
-    if verbose: 
-        print('Running', ' '.join(cmd))
-    cmd_env = dict(os.environ.items())
-    cmd_env["USE_TYPE_CHECK"] = "1"
-    proc = subprocess.Popen(
-        cmd,
-        stdout=None if verbose else subprocess.PIPE,
-        stderr=None if verbose else subprocess.STDOUT,
-        env=cmd_env)
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
@@ -225,20 +181,6 @@ def run_prof_rs_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path, legio
     if retcode != 0:
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
     return result_dir
-
-def compare_prof_results(verbose, py_exe_path, profile_dirs):
-    cmd = ['diff', '-r', '-u',
-           '--exclude', 'critical_path.json',
-           ] + profile_dirs
-    if verbose: print('Running', ' '.join(cmd))
-    proc = subprocess.Popen(
-        cmd,
-        stdout=None if verbose else subprocess.PIPE,
-        stderr=None if verbose else subprocess.STDOUT)
-    output, _ = proc.communicate()
-    retcode = proc.wait()
-    if retcode != 0:
-        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_text(filename, label):
@@ -302,9 +244,6 @@ def test_spy(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, l
             spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
             assert len(spy_logs) > 0
             run_spy(spy_logs, verbose, py_exe_path)
-            # Run legion_prof_rs too so that we can be sure it's at least parsing all the logs
-            if legion_prof_rs is not None:
-                run_prof_rs(spy_dir, spy_logs, verbose, legion_prof_rs)
     except:
         raise
     else:
@@ -343,15 +282,11 @@ def test_prof(filename, debug, verbose, out_dir, short, timelimit, py_exe_path, 
 
             prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
             assert len(prof_logs) > 0
-            result_py = run_prof(prof_dir, prof_logs, verbose, py_exe_path)
-            result_rs = run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
-            compare_prof_results(verbose, py_exe_path, [result_py, result_rs])
+            run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
             run_prof_rs_archive(prof_dir, prof_logs, verbose, legion_prof_rs)
             # we only test subnodes when running on multi-node
             if os.environ.get('LAUNCHER'):
-                result_subnodes_py = run_prof_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path)
-                result_subnodes_rs = run_prof_rs_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path, legion_prof_rs)
-                compare_prof_results(verbose, py_exe_path, [result_subnodes_py, result_subnodes_rs])
+                run_prof_rs_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path, legion_prof_rs)
     except:
         raise
     else:

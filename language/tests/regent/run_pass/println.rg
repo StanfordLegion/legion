@@ -73,5 +73,8 @@ task main()
   var buffer = [rawstring](regentlib.c.malloc(size+1))
   format.snprint(buffer, size+1, "{} {}", 123, 456)
   format.println("{}", buffer)
+
+  var stderr = regentlib.c.fdopen(2, "w")
+  format.fprintln(stderr, "printing to stderr")
 end
 regentlib.start(main)

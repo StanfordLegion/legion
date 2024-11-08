@@ -20,6 +20,7 @@
 
 #include "realm/realm_c.h"
 #include "realm/utils.h"
+#include "realm/memory.h"
 
 #include <vector>
 #include <set>
@@ -239,8 +240,39 @@ namespace Realm {
 
       static const Barrier NO_BARRIER;
 
-      static Barrier create_barrier(unsigned expected_arrivals, ReductionOpID redop_id = 0,
-				    const void *initial_value = 0, size_t initial_value_size = 0);
+      static Barrier create_barrier(unsigned expected_arrivals,
+                                    ReductionOpID redop_id = 0,
+                                    const void *initial_value = 0,
+                                    size_t initial_value_size = 0);
+
+      struct ParticipantInfo {
+        AddressSpace address_space;
+        unsigned count;
+      };
+
+      /**
+       * Creates a barrier
+       * \param expected_arrivals information about the arrival pattern
+       * \param num_participants the size of expected arrivals
+       * \param redop_id ID of a reduction operator
+       * \param initial_value initial reduction value
+       * \param initial_value_size size of the initial reduction value.
+       * \return barrier handle
+       */
+      static Barrier create_barrier(const Barrier::ParticipantInfo *expected_arrivals,
+                                    size_t num_participants, ReductionOpID redop_id = 0,
+                                    const void *initial_value = 0,
+                                    size_t initial_value_size = 0);
+
+      /**
+       * Sets the arrival pattern
+       * \param expected_arrivals information about the arrival pattern
+       * \param num_participants the size of expected arrivals
+       * \return barrier handle
+       */
+      Barrier set_arrival_pattern(const Barrier::ParticipantInfo *expected_arrivals,
+                                  size_t num_participants);
+
       void destroy_barrier(void);
 
       static const ::realm_event_gen_t MAX_PHASES;

@@ -12,14 +12,14 @@ using namespace Realm;
 template <typename T>
 __device__ Point<1,T> choose_thread_point(Rect<1,T> bounds)
 {
-  return Point<1,T>(bounds.lo.x + (blockIdx.x * blockDim.x) + threadIdx.x);
+  return Point<1,T>(bounds.lo[0] + (blockIdx.x * blockDim.x) + threadIdx.x);
 }
 
 template <typename T>
 __device__ Point<2,T> choose_thread_point(Rect<2,T> bounds)
 {
-  return Point<2,T>(bounds.lo.x + (blockIdx.x * blockDim.x) + threadIdx.x,
-		    bounds.lo.y + (blockIdx.y * blockDim.y) + threadIdx.y);
+  return Point<2,T>(bounds.lo[0] + (blockIdx.x * blockDim.x) + threadIdx.x,
+		    bounds.lo[1] + (blockIdx.y * blockDim.y) + threadIdx.y);
 }
 
 template <int N, typename T>
