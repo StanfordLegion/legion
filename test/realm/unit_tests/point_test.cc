@@ -155,11 +155,20 @@ TYPED_TEST_P(PointTest, Dot)
   EXPECT_EQ(dot, product);
 }
 
+// Register the Dot test
 REGISTER_TYPED_TEST_SUITE_P(PointTest, BaseAccess, Equality, Dot, Zeroes, Ones, Add,
                             Subtract, Multiply, Divide, Modulo);
 
-using test_types =
-    ::testing::Types<ValueAndType<1, int>, ValueAndType<2, int>, ValueAndType<3, int>,
-                     ValueAndType<1, long long>, ValueAndType<2, long long>,
-                     ValueAndType<2, long long>>;
-INSTANTIATE_TYPED_TEST_SUITE_P(Instantiation, PointTest, test_types);
+template <typename T, int... Ns>
+auto GenerateTypesForDimensions(std::integer_sequence<int, Ns...>)
+{
+  return ::testing::Types<ValueAndType<Ns + 1, T>...>{};
+}
+
+using TestTypesInt = decltype(GenerateTypesForDimensions<int>(
+    std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+using TestTypesLongLong = decltype(GenerateTypesForDimensions<long long>(
+    std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+
+INSTANTIATE_TYPED_TEST_SUITE_P(IntInstantiation, PointTest, TestTypesInt);
+INSTANTIATE_TYPED_TEST_SUITE_P(LongLongInstantiation, PointTest, TestTypesLongLong);
