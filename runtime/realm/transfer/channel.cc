@@ -1184,7 +1184,6 @@ namespace Realm {
     if(control_count == 0) {
       in_nonaffine = 0;
       out_nonaffine = 0;
-      assert(0);
       return 0;
     }
     if(control_count < min_xfer_size)
