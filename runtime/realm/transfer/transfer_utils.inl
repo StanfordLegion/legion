@@ -131,8 +131,9 @@ namespace Realm {
         //  (rewinding previous dimensions)
         target_subrect.hi[d] = layout_bounds.hi[d];
         have_rect = true;
-        for(int d2 = 0; d2 < di; d2++)
+        for(int d2 = 0; d2 < di; d2++) {
           cur_point[dim_order[d2]] = cur_rect.lo[dim_order[d2]];
+        }
         cur_point[d] = layout_bounds.hi[d] + 1;
         break;
       }

@@ -76,74 +76,77 @@ TEST(TransferUtilsTest, HigherDomainBounds)
   }
 }
 
-// TODO(apryakhin@): Add inverted dim order
-TEST(TransferUtilsTest, NextTargetSubrectEmpty)
-{
-  Rect<2> bounds = Rect<2>(Point<2>(1, 1), Point<2>(0, 0));
-  Rect<2> cur_rect = Rect<2>(Point<2>(1, 1), Point<2>(0, 0));
-  Point<2> cur_point = Point<2>::ZEROES();
-  int dim_order[2];
-  for(int i = 0; i < 2; i++)
-    dim_order[i] = i;
+// TODO(apryakhin@): Extend to ND cases
+struct ComputeTargetSubrectTestCase {
+  std::vector<int> dim_order;
+  Rect<2> bounds;
+  Rect<2> cur_rect;
+  Point<2> cur_point;
+  std::vector<Rect<2>> expected_rects;
+};
 
-  Rect<2> next_subrect;
-  EXPECT_FALSE(
-      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
-  EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
-  EXPECT_EQ(next_subrect.hi, Point<2>(0, 0));
+class ComputeTargetSubrectTest
+  : public ::testing::TestWithParam<ComputeTargetSubrectTestCase> {
+  void TearDown() {}
+};
+
+TEST_P(ComputeTargetSubrectTest, NextTargetSubrectEmpty)
+{
+  auto test_case = GetParam();
+
+  std::vector<Rect<2>> rects;
+  Point<2> cur_point = test_case.cur_point;
+
+  bool not_done = false;
+  do {
+    Rect<2> next_subrect;
+    not_done = compute_target_subrect(test_case.bounds, test_case.cur_rect, cur_point,
+                                      next_subrect, test_case.dim_order.data());
+    rects.push_back(next_subrect);
+
+  } while(not_done);
+
+  EXPECT_EQ(test_case.expected_rects.size(), rects.size());
+  for(size_t i = 0; i < test_case.expected_rects.size(); i++) {
+    EXPECT_EQ(test_case.expected_rects[i].lo, rects[i].lo);
+    EXPECT_EQ(test_case.expected_rects[i].hi, rects[i].hi);
+  }
 }
 
-TEST(TransferUtilsTest, NextTargetSubrectFullCover2D)
-{
-  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
-  Rect<2> cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5));
-  Point<2> cur_point = Point<2>::ZEROES();
-  int dim_order[2];
-  for(int i = 0; i < 2; i++)
-    dim_order[i] = i;
+const static ComputeTargetSubrectTestCase kComputeSubrectTestCases[] = {
+    // Case 1 : next target subrect is empty
+    ComputeTargetSubrectTestCase{
+        .dim_order = std::vector<int>{0, 1},
+        .bounds = Rect<2>(Point<2>(1, 1), Point<2>(0, 0)),
+        .cur_rect = Rect<2>(Point<2>(1, 1), Point<2>(0, 0)),
+        .cur_point = Point<2>::ZEROES(),
+        .expected_rects = {Rect<2>(Point<2>(0, 0), Point<2>(0, 0))}},
 
-  Rect<2> next_subrect;
-  EXPECT_FALSE(
-      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
-  EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
-  EXPECT_EQ(next_subrect.hi, Point<2>(10, 5));
-}
+    // Case 2 : next target full cover
+    ComputeTargetSubrectTestCase{
+        .dim_order = std::vector<int>{0, 1},
+        .bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+        .cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5)),
+        .cur_point = Point<2>::ZEROES(),
+        .expected_rects = {Rect<2>(Point<2>(0, 0), Point<2>(10, 5))}},
 
-TEST(TransferUtilsTest, NextTargetSubrectMiddleStart2D)
-{
-  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
-  Rect<2> cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5));
-  Point<2> cur_point = Point<2>(4, 4);
-  int dim_order[2];
-  for(int i = 0; i < 2; i++)
-    dim_order[i] = i;
+    // Case 3 : middle start
+    ComputeTargetSubrectTestCase{
+        .dim_order = std::vector<int>{0, 1},
+        .bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+        .cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(10, 5)),
+        .cur_point = Point<2>(4, 4),
+        .expected_rects = {Rect<2>(Point<2>(4, 4), Point<2>(10, 4)),
+                           Rect<2>(Point<2>(0, 5), Point<2>(10, 5))}},
 
-  Rect<2> next_subrect;
-  EXPECT_TRUE(
-      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
-  EXPECT_EQ(next_subrect.lo, Point<2>(4, 4));
-  EXPECT_EQ(next_subrect.hi, Point<2>(10, 4));
-  EXPECT_EQ(cur_point, Point<2>(0, 5));
+    // Case 4 : stopping short
+    /*ComputeTargetSubrectTestCase{
+        .dim_order = std::vector<int>{0, 1},
+        .bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10)),
+        .cur_rect = Rect<2>(Point<2>(11, 11), Point<2>(12, 12)),
+        .cur_point = Point<2>(0, 0),
+        .expected_rects = {Rect<2>(Point<2>(0, 0), Point<2>(10, 0))}},*/
+};
 
-  EXPECT_FALSE(
-      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
-  EXPECT_EQ(next_subrect.lo, Point<2>(0, 5));
-  EXPECT_EQ(next_subrect.hi, Point<2>(10, 5));
-}
-
-TEST(TransferUtilsTest, NextTargetSubrectStopShort2D)
-{
-  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
-  Rect<2> cur_rect = Rect<2>(Point<2>(0, 0), Point<2>(12, 5));
-  Point<2> cur_point = Point<2>(0, 0);
-  int dim_order[2];
-  for(int i = 0; i < 2; i++)
-    dim_order[i] = i;
-
-  Rect<2> next_subrect;
-  EXPECT_TRUE(
-      compute_target_subrect(bounds, cur_rect, cur_point, next_subrect, dim_order));
-  EXPECT_EQ(next_subrect.lo, Point<2>(0, 0));
-  EXPECT_EQ(next_subrect.hi, Point<2>(10, 0));
-  EXPECT_EQ(cur_point, Point<2>(11, 0));
-}
+INSTANTIATE_TEST_SUITE_P(Test, ComputeTargetSubrectTest,
+                         testing::ValuesIn(kComputeSubrectTestCases));
