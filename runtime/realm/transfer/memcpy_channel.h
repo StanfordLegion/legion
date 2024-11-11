@@ -26,10 +26,7 @@
 #include <pthread.h>
 #endif
 #include <fcntl.h>
-#include <map>
 #include <vector>
-#include <deque>
-#include <queue>
 #include <assert.h>
 #include <string.h>
 

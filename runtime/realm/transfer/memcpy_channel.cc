@@ -22,9 +22,7 @@
 
 #include "realm/transfer/channel_common.h"
 #include "realm/transfer/memcpy_channel.h"
-#include "realm/transfer/channel_disk.h"
 #include "realm/transfer/transfer.h"
-#include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/ib_memory.h"
 #include "realm/utils.h"
 
