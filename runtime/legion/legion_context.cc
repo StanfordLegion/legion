@@ -10928,7 +10928,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapping == NULL);
       assert(created_nodes.size() == created_trees.size());
 #endif
       AutoLock priv_lock(privilege_lock);
