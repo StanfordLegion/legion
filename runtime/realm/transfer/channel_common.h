@@ -26,7 +26,7 @@
 
 namespace Realm {
 
-  class Node;
+  struct Node;
 
   void memcpy_1d(uintptr_t dst_base, uintptr_t src_base, size_t bytes);
 
