@@ -77,11 +77,6 @@ namespace Realm {
 
     ~MemcpyChannel();
 
-    // helper to list all memories that can be reached by load/store instructions
-    //  on the cpu in the current process
-    static void enumerate_local_cpu_memories(std::vector<Memory> &mems);
-    void enumerate_local_cpu_memories_internal(std::vector<Memory> &mems);
-
     virtual uint64_t
     supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
                   CustomSerdezID dst_serdez_id, ReductionOpID redop_id,

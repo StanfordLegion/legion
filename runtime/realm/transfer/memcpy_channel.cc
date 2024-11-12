@@ -23,7 +23,6 @@
 #include "realm/transfer/channel_common.h"
 #include "realm/transfer/memcpy_channel.h"
 #include "realm/transfer/transfer.h"
-#include "realm/transfer/ib_memory.h"
 #include "realm/utils.h"
 
 #include <algorithm>
@@ -420,7 +419,7 @@ namespace Realm {
     unsigned frag_overhead = 100; // HACK - estimate at 100ns
 
     std::vector<Memory> local_cpu_mems;
-    enumerate_local_cpu_memories_internal(local_cpu_mems);
+    enumerate_local_cpu_memories(node, local_cpu_mems);
     std::vector<Memory> remote_shared_mems;
 
     if(!remote_shared_memory_mappings.empty()) {
@@ -443,58 +442,6 @@ namespace Realm {
   MemcpyChannel::~MemcpyChannel()
   {
     // free(cbs);
-  }
-
-  void MemcpyChannel::enumerate_local_cpu_memories_internal(std::vector<Memory> &mems)
-  {
-    for(std::vector<MemoryImpl *>::const_iterator it = node->memories.begin();
-        it != node->memories.end(); ++it) {
-      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
-         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
-         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
-         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
-         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
-        mems.push_back((*it)->me);
-      }
-    }
-
-    for(std::vector<IBMemory *>::const_iterator it = node->ib_memories.begin();
-        it != node->ib_memories.end(); ++it) {
-      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
-         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
-         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
-         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
-         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
-        mems.push_back((*it)->me);
-      }
-    }
-  }
-
-  /*static*/ void MemcpyChannel::enumerate_local_cpu_memories(std::vector<Memory> &mems)
-  {
-    Node &n = get_runtime()->nodes[Network::my_node_id];
-
-    for(std::vector<MemoryImpl *>::const_iterator it = n.memories.begin();
-        it != n.memories.end(); ++it) {
-      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
-         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
-         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
-         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
-         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
-        mems.push_back((*it)->me);
-      }
-    }
-
-    for(std::vector<IBMemory *>::const_iterator it = n.ib_memories.begin();
-        it != n.ib_memories.end(); ++it) {
-      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
-         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
-         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
-         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
-         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
-        mems.push_back((*it)->me);
-      }
-    }
   }
 
   uint64_t MemcpyChannel::supports_path(
@@ -941,4 +888,3 @@ namespace Realm {
     return nr;
   }
 }; // namespace Realm
-

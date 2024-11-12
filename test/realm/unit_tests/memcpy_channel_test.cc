@@ -60,7 +60,7 @@ struct MemcpyXferDescTestCase {
 size_t fill_address_list(const std::vector<size_t> &strides,
                          const std::vector<size_t> &extents, AddressList &addrlist)
 {
-  size_t num_dims = strides.size();
+  int num_dims = static_cast<int>(strides.size());
   size_t *addr_data = addrlist.begin_nd_entry(num_dims);
   size_t bytes = strides[0];
   int cur_dim = 1, di = 0;

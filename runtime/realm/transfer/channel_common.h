@@ -22,7 +22,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#include "realm/transfer/ib_memory.h"
+
 namespace Realm {
+
+  class Node;
 
   void memcpy_1d(uintptr_t dst_base, uintptr_t src_base, size_t bytes);
 
@@ -43,7 +47,8 @@ namespace Realm {
                  size_t bytes, size_t lines, size_t planes, const void *fill_data,
                  size_t fill_size);
 
+  void enumerate_local_cpu_memories(const Node *node, std::vector<Memory> &mems);
+
 }; // namespace Realm
 
 #endif
-

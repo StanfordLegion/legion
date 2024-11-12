@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "realm/transfer/channel_common.h"
 #include "realm/transfer/memcpy_channel.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/lowlevel_dma.h"
@@ -256,7 +257,7 @@ namespace Realm {
 
       // all local cpu memories are valid sources/dests
       std::vector<Memory> local_cpu_mems;
-      MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+      enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id], local_cpu_mems);
 
       add_path(Memory::FILE_MEM, false,
                local_cpu_mems,
@@ -324,7 +325,7 @@ namespace Realm {
 
       // all local cpu memories are valid sources/dests
       std::vector<Memory> local_cpu_mems;
-      MemcpyChannel::enumerate_local_cpu_memories(local_cpu_mems);
+      enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id], local_cpu_mems);
 
       add_path(Memory::DISK_MEM, false,
                local_cpu_mems,

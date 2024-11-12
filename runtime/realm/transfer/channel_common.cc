@@ -16,6 +16,7 @@
 
 #include "realm/realm_config.h"
 #include "realm/transfer/channel_common.h"
+#include "realm/runtime_impl.h"
 #include <algorithm>
 
 namespace Realm {
@@ -345,5 +346,29 @@ namespace Realm {
                   bytes / fill_size, lines);
     }
   }
-}; // namespace Realm
 
+  void enumerate_local_cpu_memories(const Node *node, std::vector<Memory> &mems)
+  {
+    for(std::vector<MemoryImpl *>::const_iterator it = node->memories.begin();
+        it != node->memories.end(); ++it) {
+      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
+         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
+        mems.push_back((*it)->me);
+      }
+    }
+
+    for(std::vector<IBMemory *>::const_iterator it = node->ib_memories.begin();
+        it != node->ib_memories.end(); ++it) {
+      if(((*it)->lowlevel_kind == Memory::SYSTEM_MEM) ||
+         ((*it)->lowlevel_kind == Memory::REGDMA_MEM) ||
+         ((*it)->lowlevel_kind == Memory::Z_COPY_MEM) ||
+         ((*it)->lowlevel_kind == Memory::SOCKET_MEM) ||
+         ((*it)->lowlevel_kind == Memory::GPU_MANAGED_MEM)) {
+        mems.push_back((*it)->me);
+      }
+    }
+  }
+}; // namespace Realm
