@@ -82,8 +82,9 @@ namespace Realm {
     assert(MAX_PHASES <= nextid.barrier_generation().MAXVAL);
 #endif
     // return NO_BARRIER if the count overflows
-    if(gen > MAX_PHASES)
+    if(gen > MAX_PHASES) {
       return Barrier::NO_BARRIER;
+    }
     nextid.barrier_generation() = ID(id).barrier_generation() + 1;
 
     Barrier nextgen = nextid.convert<Barrier>();
@@ -188,52 +189,127 @@ namespace Realm {
 
   // active messages
 
-  struct BarrierSubscribeMessage {
-    NodeID subscriber;
-    ID::IDType barrier_id;
-    EventImpl::gen_t subscribe_gen;
-    bool forwarded;
+  namespace {
+    struct BarrierSubscribeMessage {
+      NodeID subscriber;
+      ID::IDType barrier_id;
+      EventImpl::gen_t subscribe_gen;
+      bool forwarded;
 
-    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
-                               const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const BarrierSubscribeMessage &args,
+                                 const void *data, size_t datalen)
+      {
+        ID id(args.barrier_id);
+        id.barrier_generation() = args.subscribe_gen;
+        Barrier b = id.convert<Barrier>();
+        BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
-    static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t subscribe_gen, NodeID subscriber,
-                             bool forwarded);
-  };
+        impl->handle_remote_subscription(sender, args.subscribe_gen, args.forwarded, data,
+                                         datalen);
+      }
 
-  struct BarrierTriggerMessage {
-    ID::IDType barrier_id;
-    EventImpl::gen_t trigger_gen;
-    EventImpl::gen_t previous_gen;
-    EventImpl::gen_t first_generation;
-    ReductionOpID redop_id;
-    NodeID migration_target;
-    unsigned base_arrival_count;
+      static void send_request(NodeID target, ID::IDType barrier_id,
+                               EventImpl::gen_t subscribe_gen, NodeID subscriber,
+                               bool forwarded)
+      {
+        ActiveMessage<BarrierSubscribeMessage> amsg(target);
+        amsg->subscriber = subscriber;
+        amsg->forwarded = forwarded;
+        amsg->barrier_id = barrier_id;
+        amsg->subscribe_gen = subscribe_gen;
+        amsg.commit();
+      }
+    };
 
-    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
+    struct BarrierTriggerMessage {
+      ID::IDType barrier_id;
+      EventImpl::gen_t trigger_gen;
+      EventImpl::gen_t previous_gen;
+      EventImpl::gen_t first_generation;
+      ReductionOpID redop_id;
+      NodeID migration_target;
+      unsigned base_arrival_count;
 
-    static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
-                             NodeID migration_target, unsigned base_arrival_count,
-                             const void *data, size_t datalen);
-  };
+      static void handle_message(NodeID sender, const BarrierTriggerMessage &args,
+                                 const void *data, size_t datalen, TimeLimit work_until)
+      {
+        log_barrier.info("received remote barrier trigger: " IDFMT "/%d -> %d",
+                         args.barrier_id, args.previous_gen, args.trigger_gen);
 
-  struct BarrierAdjustMessage {
-    NodeID sender;
-    int forwarded;
-    int delta;
-    Barrier barrier;
-    Event wait_on;
+        EventImpl::gen_t trigger_gen = args.trigger_gen;
 
-    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
-                             NodeID sender, bool forwarded, const void *data,
-                             size_t datalen);
-  };
+        ID id(args.barrier_id);
+        id.barrier_generation() = trigger_gen;
+        Barrier b = id.convert<Barrier>();
+        BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
+
+        if(datalen > 0) {
+          assert(args.redop_id != 0);
+          impl->redop_id = args.redop_id;
+          impl->redop = get_runtime()->reduce_op_table.get(args.redop_id, 0);
+        }
+
+        impl->handle_remote_trigger(sender, args.barrier_id, args.trigger_gen,
+                                    args.previous_gen, args.first_generation,
+                                    args.redop_id, args.migration_target,
+                                    args.base_arrival_count, data, datalen, work_until);
+      }
+
+      static void send_request(NodeID target, ID::IDType barrier_id,
+                               EventImpl::gen_t trigger_gen,
+                               EventImpl::gen_t previous_gen,
+                               EventImpl::gen_t first_generation, ReductionOpID redop_id,
+                               NodeID migration_target, unsigned base_arrival_count,
+                               const void *data, size_t datalen)
+      {
+        ActiveMessage<BarrierTriggerMessage> amsg(target, datalen);
+        amsg->barrier_id = barrier_id;
+        amsg->trigger_gen = trigger_gen;
+        amsg->previous_gen = previous_gen;
+        amsg->first_generation = first_generation;
+        amsg->redop_id = redop_id;
+        amsg->migration_target = migration_target;
+        amsg->base_arrival_count = base_arrival_count;
+        amsg.add_payload(data, datalen);
+        amsg.commit();
+      }
+    };
+
+    struct BarrierAdjustMessage {
+      NodeID sender;
+      int forwarded;
+      int delta;
+      Barrier barrier;
+      Event wait_on;
+
+      static void handle_message(NodeID sender, const BarrierAdjustMessage &args,
+                                 const void *data, size_t datalen, TimeLimit work_until)
+      {
+        log_barrier.info() << "received barrier arrival: delta=" << args.delta
+                           << " in=" << args.wait_on << " out=" << args.barrier << " ("
+                           << args.barrier.timestamp << ")";
+        BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
+        EventImpl::gen_t gen = ID(args.barrier).barrier_generation();
+        impl->adjust_arrival(gen, args.delta, args.barrier.timestamp, args.wait_on,
+                             args.sender, args.forwarded, datalen ? data : 0, datalen,
+                             work_until);
+      }
+
+      static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
+                               NodeID sender, bool forwarded, const void *data,
+                               size_t datalen)
+      {
+        ActiveMessage<BarrierAdjustMessage> amsg(target, datalen);
+        amsg->barrier = barrier;
+        amsg->delta = delta;
+        amsg->wait_on = wait_on;
+        amsg->sender = sender;
+        amsg->forwarded = forwarded;
+        amsg.add_payload(data, datalen);
+        amsg.commit();
+      }
+    };
+  } // namespace
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -317,72 +393,12 @@ namespace Realm {
     generation.store_release(0);
   }
 
-  /*static*/ void BarrierAdjustMessage::handle_message(NodeID sender,
-                                                       const BarrierAdjustMessage &args,
-                                                       const void *data, size_t datalen,
-                                                       TimeLimit work_until)
-  {
-    log_barrier.info() << "received barrier arrival: delta=" << args.delta
-                       << " in=" << args.wait_on << " out=" << args.barrier << " ("
-                       << args.barrier.timestamp << ")";
-    BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
-    EventImpl::gen_t gen = ID(args.barrier).barrier_generation();
-    impl->adjust_arrival(gen, args.delta, args.barrier.timestamp, args.wait_on,
-                         args.sender, args.forwarded, datalen ? data : 0, datalen,
-                         work_until);
-  }
-
-  /*static*/ void BarrierAdjustMessage::send_request(NodeID target, Barrier barrier,
-                                                     int delta, Event wait_on,
-                                                     NodeID sender, bool forwarded,
-                                                     const void *data, size_t datalen)
-  {
-    ActiveMessage<BarrierAdjustMessage> amsg(target, datalen);
-    amsg->barrier = barrier;
-    amsg->delta = delta;
-    amsg->wait_on = wait_on;
-    amsg->sender = sender;
-    amsg->forwarded = forwarded;
-    amsg.add_payload(data, datalen);
-    amsg.commit();
-  }
-
-  /*static*/ void BarrierSubscribeMessage::send_request(NodeID target,
-                                                        ID::IDType barrier_id,
-                                                        EventImpl::gen_t subscribe_gen,
-                                                        NodeID subscriber, bool forwarded)
-  {
-    ActiveMessage<BarrierSubscribeMessage> amsg(target);
-    amsg->subscriber = subscriber;
-    amsg->forwarded = forwarded;
-    amsg->barrier_id = barrier_id;
-    amsg->subscribe_gen = subscribe_gen;
-    amsg.commit();
-  }
-
-  /*static*/ void BarrierTriggerMessage::send_request(
-      NodeID target, ID::IDType barrier_id, EventImpl::gen_t trigger_gen,
-      EventImpl::gen_t previous_gen, EventImpl::gen_t first_generation,
-      ReductionOpID redop_id, NodeID migration_target, unsigned base_arrival_count,
-      const void *data, size_t datalen)
-  {
-    ActiveMessage<BarrierTriggerMessage> amsg(target, datalen);
-    amsg->barrier_id = barrier_id;
-    amsg->trigger_gen = trigger_gen;
-    amsg->previous_gen = previous_gen;
-    amsg->first_generation = first_generation;
-    amsg->redop_id = redop_id;
-    amsg->migration_target = migration_target;
-    amsg->base_arrival_count = base_arrival_count;
-    amsg.add_payload(data, datalen);
-    amsg.commit();
-  }
-
   // like strdup, but works on arbitrary byte arrays
   static void *bytedup(const void *data, size_t datalen)
   {
-    if(datalen == 0)
+    if(datalen == 0) {
       return 0;
+    }
     void *dst = malloc(datalen);
     assert(dst != 0);
     memcpy(dst, data, datalen);
@@ -403,8 +419,9 @@ namespace Realm {
 
     virtual ~DeferredBarrierArrival(void)
     {
-      if(data)
+      if(data) {
         free(data);
+      }
     }
 
     virtual void event_triggered(bool poisoned, TimeLimit work_until)
@@ -443,8 +460,9 @@ namespace Realm {
   BarrierImpl::Generation::~Generation(void)
   {
     for(std::map<int, PerNodeUpdates *>::iterator it = pernode.begin();
-        it != pernode.end(); it++)
+        it != pernode.end(); it++) {
       delete(it->second);
+    }
   }
 
   void BarrierImpl::Generation::handle_adjustment(Barrier::timestamp_t ts, int delta)
@@ -514,10 +532,11 @@ namespace Realm {
       if(owner != Network::my_node_id) {
         ID wait_id(wait_on);
         int wait_node;
-        if(wait_id.is_event())
+        if(wait_id.is_event()) {
           wait_node = wait_id.event_creator_node();
-        else
+        } else {
           wait_node = wait_id.barrier_creator_node();
+        }
         if(wait_node != (int)Network::my_node_id) {
           // let deferral happen on owner node (saves latency if wait_on event
           //   gets triggered there)
@@ -547,9 +566,10 @@ namespace Realm {
 #ifdef DEBUG_BARRIER_REDUCTIONS
     if(reduce_value_size) {
       char buffer[129];
-      for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
+      for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++) {
         snprintf(buffer + 2 * i, sizeof buffer - 2 * i, "%02x",
                  ((const unsigned char *)reduce_value)[i]);
+      }
       log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s", me.id(),
                        barrier_gen, reduce_value_size, buffer);
     }
@@ -579,8 +599,9 @@ namespace Realm {
         // if this message had to be forwarded to get here, tell the original sender we
         // are the
         //  new owner
-        if(forwarded && (sender != Network::my_node_id))
+        if(forwarded && (sender != Network::my_node_id)) {
           inform_migration = sender;
+        }
       }
 
       // sanity checks - is this a valid barrier?
@@ -744,9 +765,10 @@ namespace Realm {
       log_barrier.info() << "barrier trigger: event=" << me << "/" << trigger_gen;
 
       // notify local waiters first
-      if(!local_notifications.empty())
+      if(!local_notifications.empty()) {
         get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
                                                              POISON_FIXME, work_until);
+      }
 
       // now do remote notifications
       for(std::vector<RemoteNotification>::const_iterator it =
@@ -756,8 +778,9 @@ namespace Realm {
         //  generation they asked for - the exception is the target of a
         //  migration, who must get up to date data
         gen_t tgt_trigger_gen = (*it).trigger_gen;
-        if((*it).node == migration_target)
+        if((*it).node == migration_target) {
           tgt_trigger_gen = trigger_gen;
+        }
         log_barrier.info() << "sending remote trigger notification: " << me << "/"
                            << (*it).previous_gen << " -> " << tgt_trigger_gen
                            << ", dest=" << (*it).node;
@@ -776,8 +799,9 @@ namespace Realm {
     }
 
     // free our copy of the final values, if we had one
-    if(final_values_copy)
+    if(final_values_copy) {
       free(final_values_copy);
+    }
   }
 
   bool BarrierImpl::has_triggered(gen_t needed_gen, bool &poisoned)
@@ -785,8 +809,9 @@ namespace Realm {
     poisoned = POISON_FIXME;
 
     // no need to take lock to check current generation
-    if(needed_gen <= generation.load_acquire())
+    if(needed_gen <= generation.load_acquire()) {
       return true;
+    }
 
 #ifdef BARRIER_HAS_TRIGGERED_DOES_SUBSCRIBE
     // update the subscription (even on the local node), but do a
@@ -864,8 +889,9 @@ namespace Realm {
     poisoned = POISON_FIXME;
 
     // early out for now without taking lock (TODO: fix for poisoning)
-    if(gen_needed <= generation.load_acquire())
+    if(gen_needed <= generation.load_acquire()) {
       return;
+    }
 
     // make sure we're subscribed to a (potentially-remote) trigger
     this->subscribe(gen_needed);
@@ -894,8 +920,9 @@ namespace Realm {
     poisoned = POISON_FIXME;
 
     // early out for now without taking lock (TODO: fix for poisoning)
-    if(gen_needed <= generation.load_acquire())
+    if(gen_needed <= generation.load_acquire()) {
       return true;
+    }
 
     // make sure we're subscribed to a (potentially-remote) trigger
     this->subscribe(gen_needed);
@@ -907,8 +934,9 @@ namespace Realm {
       // wait until the generation has advanced far enough
       while(gen_needed > generation.load()) {
         long long now = Clock::current_time_in_nanoseconds();
-        if(now >= deadline)
+        if(now >= deadline) {
           return false; // trigger has not occurred
+        }
         has_external_waiters = true;
         // we don't actually care what timedwait returns - we'll recheck
         //  the generation ourselves
@@ -1036,10 +1064,11 @@ namespace Realm {
           // a valid subscription should always be for a generation that hasn't
           //  triggered yet
           assert(it->second > generation.load());
-          if(it->second >= subscribe_gen)
+          if(it->second >= subscribe_gen) {
             already_subscribed = true;
-          else
+          } else {
             it->second = subscribe_gen;
+          }
         } else {
           // new subscription - don't reset remote_trigger_gens because the node may have
           //  been subscribed in the past
@@ -1101,20 +1130,6 @@ namespace Realm {
     }
   }
 
-  /*static*/ void
-  BarrierSubscribeMessage::handle_message(NodeID sender,
-                                          const BarrierSubscribeMessage &args,
-                                          const void *data, size_t datalen)
-  {
-    ID id(args.barrier_id);
-    id.barrier_generation() = args.subscribe_gen;
-    Barrier b = id.convert<Barrier>();
-    BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
-
-    impl->handle_remote_subscription(sender, args.subscribe_gen, args.forwarded, data,
-                                     datalen);
-  }
-
   void BarrierImpl::handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
                                           EventImpl::gen_t trigger_gen,
                                           EventImpl::gen_t previous_gen,
@@ -1147,8 +1162,9 @@ namespace Realm {
           std::map<EventImpl::gen_t, EventImpl::gen_t>::iterator it =
               held_triggers.begin();
           // if it's not contiguous, we're done
-          if(it->first != trigger_gen)
+          if(it->first != trigger_gen) {
             break;
+          }
           // it is contiguous, so absorb it into this message and remove the held trigger
           log_barrier.info("collapsing future trigger: " IDFMT "/%d -> %d -> %d",
                            barrier_id, previous_gen, trigger_gen, it->second);
@@ -1166,8 +1182,9 @@ namespace Realm {
         while(!generations.empty()) {
           std::map<EventImpl::gen_t, BarrierImpl::Generation *>::iterator it =
               generations.begin();
-          if(it->first > trigger_gen)
+          if(it->first > trigger_gen) {
             break;
+          }
 
           local_notifications.absorb_append(it->second->local_waiters);
           delete it->second;
@@ -1220,33 +1237,6 @@ namespace Realm {
       get_runtime()->event_triggerer.trigger_event_waiters(local_notifications,
                                                            POISON_FIXME, work_until);
     }
-  }
-
-  /*static*/ void BarrierTriggerMessage::handle_message(NodeID sender,
-                                                        const BarrierTriggerMessage &args,
-                                                        const void *data, size_t datalen,
-                                                        TimeLimit work_until)
-  {
-    log_barrier.info("received remote barrier trigger: " IDFMT "/%d -> %d",
-                     args.barrier_id, args.previous_gen, args.trigger_gen);
-
-    EventImpl::gen_t trigger_gen = args.trigger_gen;
-
-    ID id(args.barrier_id);
-    id.barrier_generation() = trigger_gen;
-    Barrier b = id.convert<Barrier>();
-    BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
-
-    if(datalen > 0) {
-      assert(args.redop_id != 0);
-      impl->redop_id = args.redop_id;
-      impl->redop = get_runtime()->reduce_op_table.get(args.redop_id, 0);
-    }
-
-    impl->handle_remote_trigger(sender, args.barrier_id, args.trigger_gen,
-                                args.previous_gen, args.first_generation, args.redop_id,
-                                args.migration_target, args.base_arrival_count, data,
-                                datalen, work_until);
   }
 
   bool BarrierImpl::get_result(gen_t result_gen, void *value, size_t value_size)

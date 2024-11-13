@@ -19,6 +19,7 @@
 #define REALM_BARRIER_IMPL_H
 
 #include "realm/event.h"
+#include "realm/event_impl.h"
 #include "realm/id.h"
 #include "realm/nodeset.h"
 #include "realm/faults.h"
