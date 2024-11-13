@@ -165,7 +165,7 @@ namespace Realm {
     unsigned base_arrival_count = 0;
     ReductionOpID redop_id;
     const ReductionOpUntyped *redop = nullptr;
-    char *initial_value = nullptr;
+    std::unique_ptr<char[]> initial_value{};
 
     unsigned value_capacity = 0;
     char *final_values = nullptr;

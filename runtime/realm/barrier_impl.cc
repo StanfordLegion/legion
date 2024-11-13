@@ -170,8 +170,8 @@ namespace Realm {
       assert(initial_value != 0);
       assert(initial_value_size == impl->redop->sizeof_lhs);
 
-      impl->initial_value = (char *)malloc(initial_value_size);
-      memcpy(impl->initial_value, initial_value, initial_value_size);
+      impl->initial_value = std::make_unique<char[]>(initial_value_size);
+      memcpy(impl->initial_value.get(), initial_value, initial_value_size);
 
       impl->value_capacity = 0;
       impl->final_values = 0;
@@ -365,16 +365,7 @@ namespace Realm {
     remote_trigger_gens.clear();
   }
 
-  BarrierImpl::~BarrierImpl(void)
-  {
-    if(initial_value) {
-      free(initial_value);
-    }
-
-    if(final_values) {
-      free(final_values);
-    }
-  }
+  BarrierImpl::~BarrierImpl(void) { free(final_values); }
 
   void BarrierImpl::init(ID _me, unsigned _init_owner)
   {
@@ -717,8 +708,8 @@ namespace Realm {
           size_t new_capacity = rel_gen;
           final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
           while(value_capacity < new_capacity) {
-            memcpy(final_values + (value_capacity * redop->sizeof_lhs), initial_value,
-                   redop->sizeof_lhs);
+            memcpy(final_values + (value_capacity * redop->sizeof_lhs),
+                   initial_value.get(), redop->sizeof_lhs);
             value_capacity += 1;
           }
         }
@@ -1047,9 +1038,8 @@ namespace Realm {
           // local waiter
           if(subscriber == Network::my_node_id) {
             break;
-          } else {
-            inform_migration = subscriber;
           }
+          inform_migration = subscriber;
         }
       }
 

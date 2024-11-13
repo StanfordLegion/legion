@@ -433,7 +433,7 @@ TEST_F(BarrierRedopTest, GetResultForTriggeredGen)
   BarrierImpl barrier(barrier_comm);
 
   barrier.init(barrier_id, owner);
-  barrier.initial_value = (char *)calloc(sizeof(int), 0);
+  barrier.initial_value = std::make_unique<char[]>(sizeof(int));
   barrier.redop = redop;
   barrier.redop_id = redop_id;
   barrier.base_arrival_count = 2;
@@ -465,7 +465,7 @@ TEST_F(BarrierRedopTest, GetResultForRemoteTriggeredGen)
   BarrierImpl barrier(barrier_comm);
 
   barrier.init(barrier_id, owner);
-  barrier.initial_value = (char *)calloc(sizeof(int), 0);
+  barrier.initial_value = std::make_unique<char[]>(sizeof(int));
   barrier.redop = redop;
   barrier.redop_id = redop_id;
   barrier.base_arrival_count = 2;
@@ -498,7 +498,7 @@ TEST_F(BarrierRedopTest, GetResultRemoteTriggeredGens)
   BarrierImpl barrier(barrier_comm);
 
   barrier.init(barrier_id, owner);
-  barrier.initial_value = (char *)calloc(sizeof(int), 0);
+  barrier.initial_value = std::make_unique<char[]>(sizeof(int));
   barrier.redop = redop;
   barrier.redop_id = redop_id;
   barrier.base_arrival_count = 2;
