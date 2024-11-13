@@ -16587,10 +16587,6 @@ namespace Legion {
                         static_cast<TaskOp*>(prev.op)->get_task_kind() ==
                         TaskOp::INDEX_TASK_KIND)
                     {
-                      if(logical_analysis.bail_point_wise_analysis)
-                      {
-                        //printf("bailing!!!! %lld %lld\n", prev.uid, user.uid);
-                      }
                       if (static_cast<IndexTask*>(prev.op)->
                           region_has_collective(prev.idx, prev.gen) ||
                           static_cast<IndexTask*>(user.op)->

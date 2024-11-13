@@ -4040,8 +4040,8 @@ class LogicalVerificationState(object):
                 if has_mapping_dependence:
                     return dominates, True
                 else:
-                    if not op.has_verification_point_wise_mapping_dependence(
-                            op.reqs[req.index], prev_op,
+                    if not logical_op.has_verification_point_wise_mapping_dependence(
+                            op.reqs[req.index], prev_logical,
                             prev_op.reqs[prev_req.index], dep_type,
                             self.field, previous_deps):
                         return dominates, False
@@ -7612,44 +7612,39 @@ class Operation(object):
     def has_verification_transitive_point_wise_mapping_dependence(self, prev_op,
                                                     field, tree_id, previous_deps):
 
-        # If we don't need a close then we can do BFS which is much more efficient
-        # at finding dependences of things nearby in the graph
         queue = collections.deque()
         queue.append(self)
+        previous_deps[self] = None
 
         if len(previous_deps) > 0:
-            # We already started BFS-ing so we can restart from all
-            # the operations that we already visited
             for op in iterkeys(previous_deps):
                 queue.append(op)
 
-        queue.append(self.index_owner)
-        previous_deps[self] = None
-        previous_deps[self.index_owner] = None
-
         while queue:
             current = queue.popleft()
-            previous_deps[current] = None
+
             if current is prev_op:
                 return True
 
-            if current.is_index_op():
+            if current.is_index_op() and current.points:
                 for point in current.points.values():
                     if point.op not in previous_deps:
                         queue.append(point.op)
+                        previous_deps[point.op] = None
             else:
                 if current.index_owner and current.index_owner not in previous_deps:
                     queue.append(current.index_owner)
+                    previous_deps[current.index_owner] = None
 
             if not current.logical_incoming:
                 continue
             for next_op in current.logical_incoming:
-                if next_op in previous_deps:
-                    continue
-                previous_deps[next_op] = None
-                if next_op is prev_op:
-                    return True
-                queue.append(next_op)
+                if next_op not in previous_deps:
+                    previous_deps[next_op] = None
+                    if next_op is prev_op:
+                        return True
+                    queue.append(next_op)
+                    previous_deps[next_op] = None
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
                                             field, need_fence, previous_deps,
