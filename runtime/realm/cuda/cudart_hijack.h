@@ -25,6 +25,10 @@
 
 #include <set>
 #include <vector>
+#include <unordered_map>
+
+struct CUmod_st;
+struct CUfunc_st;
 
 namespace Realm {
   namespace Cuda {
@@ -43,6 +47,7 @@ namespace Realm {
     // files compiled with nvcc will use global registrations of modules, variables, etc.
     //  that get broadcast to all contexts
 
+    // Reverse engineered structure contents from cudart
     struct FatBin {
       int magic; // magic number
       int version;
@@ -50,28 +55,37 @@ namespace Realm {
       void *filename_or_fatbins;
     };
 
-    struct RegisteredFunction {
-      const FatBin *fat_bin;
-      const void *host_fun;
-      const char *device_fun;
+    struct RegisteredModule {
+      const FatBin *fat_bin = nullptr;
+      std::vector<CUmod_st *> gpu_modules;
+    };
 
+    struct RegisteredFunction {
+      const FatBin *fat_bin = nullptr;
+      const void *host_fun = nullptr;
+      const char *device_fun = nullptr;
+      std::vector<CUfunc_st *> gpu_functions;
+
+      RegisteredFunction() = default;
       RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
 			 const char *_device_fun);
     };
      
     struct RegisteredVariable {
-      const FatBin *fat_bin;
-      const void *host_var;
-      const char *device_name;
-      bool external;
-      int size;
-      bool constant;
-      bool global;
-      bool managed;
+      const FatBin *fat_bin = nullptr;
+      const void *host_var = nullptr;
+      const char *device_name = nullptr;
+      bool external = false;
+      int size = 0;
+      bool constant = false;
+      bool global = false;
+      bool managed = false;
+      std::vector<uintptr_t> gpu_addresses;
 
-      RegisteredVariable(const FatBin  *_fat_bin, const void *_host_var,
-			 const char *_device_name, bool _external,
-			 int _size, bool _constant, bool _global, bool _managed);
+      RegisteredVariable() = default;
+      RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
+                         const char *_device_name, bool _external, int _size,
+                         bool _constant, bool _global, bool _managed);
     };
 
     class GPU;
@@ -90,21 +104,28 @@ namespace Realm {
       static void remove_gpu_context(GPU *gpu);
 
       // called by __cuda(un)RegisterFatBinary
-      static void register_fat_binary(FatBin *fatbin);
-      static void unregister_fat_binary(FatBin *fatbin);
+      static void register_fat_binary(const FatBin *fatbin);
+      static void unregister_fat_binary(const FatBin *fatbin);
 
       // called by __cudaRegisterVar
-      static void register_variable(RegisteredVariable *var);
+      static void register_variable(const RegisteredVariable &var);
 
       // called by __cudaRegisterFunction
-      static void register_function(RegisteredFunction *func);
+      static void register_function(const RegisteredFunction &func);
+
+      static CUfunc_st *lookup_function(const void *func, GPU *gpu);
+      static uintptr_t lookup_variable(const void *var, GPU *gpu);
 
     protected:
-      Mutex mutex;
+      void register_variable_under_lock(RegisteredVariable &var, GPU *gpu);
+      void register_function_under_lock(RegisteredFunction &func, GPU *gpu);
+      void load_module_under_lock(RegisteredModule &mod, GPU *gpu);
+
+      RWLock rwlock;
       std::set<GPU *> active_gpus;
-      std::vector<FatBin *> fat_binaries;
-      std::vector<RegisteredVariable *> variables;
-      std::vector<RegisteredFunction *> functions;
+      std::unordered_map<const FatBin *, RegisteredModule> modules;
+      std::unordered_map<const void *, RegisteredVariable> variables;
+      std::unordered_map<const void *, RegisteredFunction> functions;
     };
   };
 };

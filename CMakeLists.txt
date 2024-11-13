@@ -133,7 +133,7 @@ if (CMAKE_BUILD_TYPE AND ( CMAKE_BUILD_TYPE STREQUAL "Debug"))
   set(DEBUG_LEGION ON)
 endif()
 
-set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
+set(BUILD_SHARED_LIBS OFF  CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
 #------------------------------------------------------------------------------#
 # Architecture
@@ -413,7 +413,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(GASNet_GITREPO ${Legion_EMBED_GASNet_GITREPO})
 
     set(Legion_EMBED_GASNet_GITREF
-      "d7cc06907cc66e2a3f968e19ea17a80650b16a3b" # master as of 2024-07-19
+      "872ff31858c4ed97fd92a4855fc53f8037c097a8" # master as of 2024-11-08
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(GASNet_GITREF ${Legion_EMBED_GASNet_GITREF})
 

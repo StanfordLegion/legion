@@ -211,8 +211,10 @@ namespace Realm {
       }
     };
 
+    static const CUstream INVALID_STREAM = reinterpret_cast<CUstream>(-1);
+
     namespace ThreadLocal {
-      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = nullptr;
+      static REALM_THREAD_LOCAL CUstream current_stream = INVALID_STREAM;
       static REALM_THREAD_LOCAL std::unordered_map<
           CUstream, std::pair<CUHookSymbol, CUevent>> *cuhook_stream_status = nullptr;
       static REALM_THREAD_LOCAL int nb_hooked_functions_per_task = 0;
@@ -776,7 +778,7 @@ namespace Realm {
     {
       CUHookStreamCallbackData *cb_data =
           reinterpret_cast<CUHookStreamCallbackData *>(data);
-      if(!ThreadLocal::current_gpu_proc) {
+      if(ThreadLocal::current_stream == INVALID_STREAM) {
         cudahook_print(
             "[CUDAHOOK]: callback outside task, symbol %s, stream %p, event %p, "
             "version %d\n",
@@ -1088,19 +1090,20 @@ REALM_PUBLIC_API void cuhook_register_callback(void)
   }
 }
 
-REALM_PUBLIC_API void cuhook_start_task(Realm::Cuda::GPUProcessor *gpu_proc)
+REALM_PUBLIC_API void cuhook_start_task(CUstream current_stream)
 {
   assert(ThreadLocal::cuhook_stream_status == nullptr);
   ThreadLocal::cuhook_stream_status =
       new std::unordered_map<CUstream, std::pair<CUHookSymbol, CUevent>>();
   ThreadLocal::nb_hooked_functions_per_task = 0;
-  ThreadLocal::current_gpu_proc = gpu_proc;
+  ThreadLocal::current_stream = current_stream;
 }
 
 REALM_PUBLIC_API void cuhook_end_task(CUstream current_task_stream)
 {
+  assert(ThreadLocal::current_stream == current_task_stream);
   cuhook_stream_sanity_check(current_task_stream);
-  ThreadLocal::current_gpu_proc = nullptr;
+  ThreadLocal::current_stream = INVALID_STREAM;
   delete ThreadLocal::cuhook_stream_status;
   ThreadLocal::cuhook_stream_status = nullptr;
 }
