@@ -40,9 +40,6 @@ import subprocess
 import sys
 import tempfile
 
-import io
-from contextlib import redirect_stdout
-
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
 TRUE_DEPENDENCE = 1

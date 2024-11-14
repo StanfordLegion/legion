@@ -89,19 +89,18 @@ namespace Legion {
       public:
         TracePointWisePreviousIndexTaskInfo(ProjectionSummary *shard_proj,
             Domain &index_domain,
-            TraceLocalID prev_op_trace_idx, unsigned op_idx,
+            unsigned op_idx,
             GenerationID prev_op_gen, size_t ctx_index, unsigned dep_type,
             unsigned region_idx)
           : shard_proj(shard_proj),
             index_domain(index_domain),
-          prev_op_trace_idx(prev_op_trace_idx), op_idx(op_idx),
+          op_idx(op_idx),
           prev_op_gen(prev_op_gen),
           ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
       {}
       public:
         ProjectionSummary *shard_proj;
         Domain index_domain;
-        TraceLocalID prev_op_trace_idx;
         unsigned op_idx;
         GenerationID prev_op_gen;
         size_t ctx_index;
@@ -263,10 +262,8 @@ namespace Legion {
       size_t replay_index;
       std::deque<OperationInfo> replay_info;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
-      //std::vector<std::pair<Operation*,GenerationID> > operations;
       std::vector<OpInfo > operations;
       // Only need this backwards lookup for trace capture
-      //std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
       std::map<std::pair<Operation*,GenerationID>,
         std::pair<unsigned,unsigned>> op_map;
       FenceOp *trace_fence;

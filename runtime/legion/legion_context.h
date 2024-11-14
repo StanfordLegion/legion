@@ -2048,17 +2048,8 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     protected:
       mutable LocalLock point_wise_lock;
-      // We always use point of "prev IndexTask" as key
-      std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtEvent,int>> ready_point_wise_deps;
+      std::map<std::pair<uint64_t,DomainPoint>,RtEvent> ready_point_wise_deps;
       std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>> pending_point_wise_deps;
-/*#ifdef LEGION_SPY
-      struct point_task_info {
-        public:
-          UniqueId task_id;
-          unsigned idx;
-      };
-      std::map<std::pair<uint64_t,DomainPoint>,point_task_info> point_task_infos;
-#endif*/
 #endif
     protected:
       // Dependence tracking information for phase barriers

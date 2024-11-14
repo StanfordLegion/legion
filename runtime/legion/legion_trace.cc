@@ -361,18 +361,13 @@ namespace Legion {
       OpInfo op_info = {op, gen, op->get_context_index()};
       if (recording)
       {
-        //printf("RECORD: %lld\n", op->get_context_index());
         // Recording
         if (op->is_internal_op())
           // We don't need to register internal operations
           return SIZE_MAX;
         const size_t index = replay_info.size();
         const size_t op_index = operations.size();
-#ifdef DEBUG_LEGION
-      //assert(op_index == index);
-#endif
         op_map[key] = std::make_pair(op_index,index);
-        //operations.push_back(key);
         operations.push_back(op_info);
         replay_info.push_back(OperationInfo());
         if (static_translator != NULL)
@@ -402,7 +397,6 @@ namespace Legion {
                         context->get_task_name(), 
                         context->get_unique_id(), index+1)
 
-        //printf("REPLAY: %lld\n", op->get_context_index());
         // Check to see if the meta-data alignes
         OperationInfo &info = replay_info[index];
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
@@ -410,7 +404,6 @@ namespace Legion {
 #endif
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
-        //operations.push_back(key);
         operations.push_back(op_info);
         frontiers.insert(key);
         // First make any close operations needed for this operation and
@@ -430,7 +423,6 @@ namespace Legion {
                                                              close_gen);
           OpInfo close_op_info = {close_op, close_gen, close_op->get_context_index()};
           close_op->add_mapping_reference(close_gen);
-          //operations.push_back(close_key);
           operations.push_back(close_op_info);
 #ifdef LEGION_SPY
           current_uids[close_key] = close_op->get_unique_op_id();
@@ -460,7 +452,6 @@ namespace Legion {
       const std::pair<Operation*,GenerationID> key(op, op->get_generation());
       const std::pair<Operation*,GenerationID> creator_key(
           op->get_creator_op(), op->get_creator_gen());
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         finder = op_map.find(creator_key);
 #ifdef DEBUG_LEGION
@@ -488,9 +479,7 @@ namespace Legion {
       std::pair<Operation*,GenerationID> key(op, op->get_generation());
       OpInfo op_info = {op, op->get_generation(), op->get_context_index()};
       const size_t index = operations.size();
-      //operations.push_back(key);
       operations.push_back(op_info);
-      //op_map[key] = index;
       op_map[key] = std::make_pair(index, replay_info.size());
       OperationInfo &info = replay_info.back();
       info.closes.emplace_back(CloseInfo(op, creator_idx,
@@ -513,8 +502,6 @@ namespace Legion {
         assert(((size_t)it->operation_idx) < operations.size());
         assert(it->dtype != LEGION_NO_DEPENDENCE);
 #endif
-        //const std::pair<Operation*,GenerationID> &target = 
-        //                                      operations[it->operation_idx];
         std::pair<Operation*,GenerationID> target = std::make_pair(
             operations[it->operation_idx].op, operations[it->operation_idx].gen);
         std::set<std::pair<Operation*,GenerationID> >::iterator finder =
@@ -560,14 +547,12 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> target_key(target, target_gen);
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
         return false;
       const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
@@ -586,7 +571,6 @@ namespace Legion {
         return true;
       }
       OperationInfo &info = replay_info.back();
-      //DependenceRecord record(target_finder->second);
       DependenceRecord record(target_finder->second.first);
       if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
@@ -665,7 +649,6 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> prev_key(prev_op, prev_gen);
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         prev_finder = op_map.find(prev_key);
       if (prev_finder == op_map.end()) {
@@ -682,7 +665,6 @@ namespace Legion {
                               TracePointWisePreviousIndexTaskInfo(
                                   shard_proj,
                                   index_domain,
-                                  prev_op->get_trace_local_id(),
                                   prev_finder->second.first,
                                   prev_gen, prev_ctx_index, dep_type,
                                   prev_region_idx)
@@ -703,7 +685,6 @@ namespace Legion {
           info.connect_to_next_points.find(i);
         if (next_finder != info.connect_to_next_points.end())
         {
-          //printf("REplaying connecting to next point for task: %lld region_idx: %d context_index: %lld name: %s\n", op->get_unique_op_id(), i, op->get_context_index(), static_cast<IndexTask*>(op)->get_task_name());
           bool rc = static_cast<IndexTask*>(op)->set_next_point_wise_user(NULL, 0, op->get_generation(), i);
           assert(rc != false);
         }
@@ -717,8 +698,6 @@ namespace Legion {
           assert(prev_info_finder != info.prev_ops.end());
 
           OpInfo &op_info = operations[prev_info_finder->second.op_idx];
-
-          //printf("REplaying connecting to prev point for task: %lld region_idx: %d context_index: %lld prev_context_index: %lld name: %s\n", op->get_unique_op_id(), i, op->get_context_index(), op_info.context_index, static_cast<IndexTask*>(op)->get_task_name());
 
           static_cast<IndexTask*>(op)->set_prev_point_wise_user(
               op_info.op, op_info.gen, op_info.context_index,
@@ -746,7 +725,6 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> target_key(target, target_gen);
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         target_finder = op_map.find(target_key);
       // The target is not part of the trace so there's no need to record it
@@ -784,7 +762,6 @@ namespace Legion {
         return false;
       }
       const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      //std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
         source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
@@ -803,7 +780,6 @@ namespace Legion {
         return true;
       }
       OperationInfo &info = replay_info.back();
-      //DependenceRecord record(target_finder->second, target_idx, source_idx,
       DependenceRecord record(target_finder->second.first, target_idx, source_idx,
                               dtype, dep_mask);
       if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
@@ -918,10 +894,8 @@ namespace Legion {
           delete static_translator;
           static_translator = NULL;
           // Also remove the mapping references from all the operations
-          //for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
           for (std::vector<OpInfo>::const_iterator
                 it = operations.begin(); it != operations.end(); it++)
-            //it->first->remove_mapping_reference(it->second);
             it->op->remove_mapping_reference(it->gen);
           // Remove mapping fences on the frontiers which haven't been removed 
           for (std::set<std::pair<Operation*,GenerationID> >::const_iterator 
@@ -943,8 +917,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(op_idx < operations.size());
-      //const std::pair<Operation*,GenerationID> &key = operations[op_idx];
-      const std::pair<Operation*,GenerationID> key = std::make_pair(operations[op_idx].op, operations[op_idx].gen);
+      const std::pair<Operation*,GenerationID> key =
+        std::make_pair(operations[op_idx].op, operations[op_idx].gen);
       std::map<std::pair<Operation*,GenerationID>,UniqueID>::const_iterator
         finder = current_uids.find(key);
       assert(finder != current_uids.end());

@@ -24,8 +24,6 @@
 namespace Legion {
   namespace Internal {
 
-//#define POINT_WISE_LOGICAL_ANALYSIS 1
-
     /**
      * \struct ContextCoordinate
      * A struct that can uniquely identify an operation inside

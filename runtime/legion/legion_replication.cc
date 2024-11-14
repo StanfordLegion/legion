@@ -1957,7 +1957,6 @@ namespace Legion {
         else
           return;
 
-
         for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
         {
           points.push_back((*dpi));
@@ -2002,7 +2001,6 @@ namespace Legion {
 
         if (previous_index_task_points.size() > 1)
         {
-          // throw _error
           assert(false);
         }
         assert(!previous_index_task_points.empty());
@@ -2047,7 +2045,7 @@ namespace Legion {
             previous_index_task_points[0]);
       }
 
-      assert(0);
+      assert(false);
       return RtUserEvent::NO_RT_USER_EVENT;
     }
 #endif

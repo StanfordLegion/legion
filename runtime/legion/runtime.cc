@@ -15793,11 +15793,6 @@ namespace Legion {
                       std::vector<DomainPoint> &ordered_points)
     //--------------------------------------------------------------------------
     {
-      // This should never get called
-      //assert(false);
-      // TODO : Add
-      // Get color of the partition
-      // ordered_points should have exactly one point that corresponds to the color we find above
       ordered_points.push_back(runtime->get_logical_region_color_point(region));
       assert(launch_domain.contains(ordered_points[0]));
     }

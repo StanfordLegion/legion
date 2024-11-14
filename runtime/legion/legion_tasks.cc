@@ -31,7 +31,6 @@
 namespace Legion {
   namespace Internal {
 
-
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
@@ -5507,8 +5506,6 @@ namespace Legion {
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-      //this->connect_to_prev_point = rhs->connect_to_prev_point;
-      //this->connect_to_next_point = rhs->connect_to_next_point;
       this->connect_to_prev_points = rhs->connect_to_prev_points;
       this->connect_to_next_points = rhs->connect_to_next_points;
 #endif
@@ -10405,7 +10402,6 @@ namespace Legion {
         ProjectionSummary *shard_proj, uint64_t context_index)
     //--------------------------------------------------------------------------
     {
-      printf("======PREV TASK OVER CASE====!!!!\n");
       std::vector<DomainPoint> prev_index_task_points;
 
       Domain local_domain;
@@ -10488,13 +10484,10 @@ namespace Legion {
 
       if (!completed_point_list.empty())
       {
-        printf("======COMPLEX CASE====!!!!\n");
-
         for(std::vector<std::pair<DomainPoint,RtEvent>>::iterator it =
             completed_point_list.begin(); it !=
             completed_point_list.end(); it++)
         {
-
           parent_ctx->record_point_wise_dependence(context_index,
               (*it).first, (*it).second);
         }
@@ -10565,12 +10558,9 @@ namespace Legion {
 
         if (previous_index_task_points.size() > 1)
         {
-          // throw _error
           assert(false);
         }
         assert(!previous_index_task_points.empty());
-
-          //printf("BLA context_index: %ld, current task: %lld, region_idx: %d, point: %lld, context_index: %ld, previous task: %lld, region_idx: %d, point: %lld\n", context_index, get_unique_id(), region_idx, point.point_data[0], finder->second.ctx_index, prev_index_task->get_unique_id(), finder->second.region_idx, previous_index_task_points[0].point_data[0]);
 
 #ifdef LEGION_SPY
         LegionSpy::log_mapping_point_wise_dependence(
@@ -10585,7 +10575,6 @@ namespace Legion {
         if (prev_task_gen < prev_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
 #endif
-
 
         return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
             previous_index_task_points[0]);
@@ -12571,7 +12560,6 @@ namespace Legion {
     bool SliceTask::need_forward_progress(void)
     //--------------------------------------------------------------------------
     {
-      //return connect_to_prev_point || connect_to_next_point;
       return connect_to_prev_points.size() > 0 ||
         connect_to_next_points.size() > 0;
     }
