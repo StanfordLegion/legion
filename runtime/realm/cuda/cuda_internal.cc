@@ -2240,27 +2240,40 @@ namespace Realm {
       GPU *gpu = checked_cast<GPUreduceChannel *>(channel)->gpu;
       stream = gpu->get_next_d2d_stream();
 
-      // select reduction kernel now - translate to CUfunction if possible
-      void *host_proxy =
-          (redop_info.is_fold ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
-                                                         : redop->cuda_fold_nonexcl_fn)
-                              : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
-                                                         : redop->cuda_apply_nonexcl_fn));
-      if (redop->cudaGetFuncBySymbol_fn != 0) {
-        // we can ask the runtime to perform the mapping for us
-        gpu->push_context();
+      std::unordered_map<ReductionOpID, GPU::GPUReductionOpEntry>::const_iterator
+          gpu_red_it = gpu->gpu_reduction_table.find(redop_info.id);
+      if(gpu_red_it != gpu->gpu_reduction_table.end()) {
+        kernel = (redop_info.is_fold
+                      ? (redop_info.is_exclusive ? gpu_red_it->second.fold_excl
+                                                 : gpu_red_it->second.fold_nonexcl)
+                      : (redop_info.is_exclusive ? gpu_red_it->second.apply_excl
+                                                 : gpu_red_it->second.apply_nonexcl));
+      }
+
+      if(kernel == nullptr) {
+        // select reduction kernel now - translate to CUfunction if possible
+        void *host_proxy =
+            (redop_info.is_fold
+                 ? (redop_info.is_exclusive ? redop->cuda_fold_excl_fn
+                                            : redop->cuda_fold_nonexcl_fn)
+                 : (redop_info.is_exclusive ? redop->cuda_apply_excl_fn
+                                            : redop->cuda_apply_nonexcl_fn));
+        if(redop->cudaGetFuncBySymbol_fn != 0) {
+          // we can ask the runtime to perform the mapping for us
+          gpu->push_context();
 #ifdef REALM_USE_CUDART_HIJACK
-        ThreadLocal::current_gpu_stream = stream;
+          ThreadLocal::current_gpu_stream = stream;
 #endif
-        CHECK_CUDART(reinterpret_cast<PFN_cudaGetFuncBySymbol>(
-            redop->cudaGetFuncBySymbol_fn)((void **)&kernel, host_proxy));
-        gpu->pop_context();
-      } else {
-        // no way to ask the runtime to perform the mapping, so we'll have
-        //  to actually launch the kernels with the runtime API using the launch
-        //  kernel function provided
-        kernel_host_proxy = host_proxy;
-        assert(redop->cudaLaunchKernel_fn != 0);
+          CHECK_CUDART(reinterpret_cast<PFN_cudaGetFuncBySymbol>(
+              redop->cudaGetFuncBySymbol_fn)((void **)&kernel, host_proxy));
+          gpu->pop_context();
+        } else {
+          // no way to ask the runtime to perform the mapping, so we'll have
+          //  to actually launch the kernels with the runtime API using the launch
+          //  kernel function provided
+          kernel_host_proxy = host_proxy;
+          assert(redop->cudaLaunchKernel_fn != 0);
+        }
       }
     }
 
@@ -2627,43 +2640,25 @@ namespace Realm {
       xdq.add_to_manager(bgwork);
     }
 
-    /*static*/ bool GPUreduceChannel::is_gpu_redop(ReductionOpID redop_id)
+    bool GPUreduceChannel::supports_redop(ReductionOpID redop_id) const
     {
-      if(redop_id == 0)
+      // This channel can only handle redops, not normal copies
+      if(redop_id == 0) {
         return false;
+      }
 
+      // Is this redop in our gpu's reduction table? (i.e. registered with a CUfunc)
+      if(gpu->gpu_reduction_table.find(redop_id) != gpu->gpu_reduction_table.end()) {
+        return true;
+      }
+
+      // Now check if it was registered along with the host pointer with a valid cuda
+      // runtime host proxy pointer
       ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
-      assert(redop);
 
       // there's four different kernels, but they should be all or nothing, so
       //  just check one
-      if(!redop->cuda_apply_excl_fn)
-        return false;
-
-      return true;
-    }
-
-    uint64_t GPUreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
-                                             CustomSerdezID src_serdez_id,
-                                             CustomSerdezID dst_serdez_id,
-                                             ReductionOpID redop_id,
-                                             size_t total_bytes,
-                                             const std::vector<size_t> *src_frags,
-                                             const std::vector<size_t> *dst_frags,
-                                             XferDesKind *kind_ret /*= 0*/,
-                                             unsigned *bw_ret /*= 0*/,
-                                             unsigned *lat_ret /*= 0*/)
-    {
-      // first check that we have a reduction op (if not, we want the cudamemcpy
-      //   path to pick this up instead) and that it has cuda kernels available
-      if(!is_gpu_redop(redop_id))
-        return 0;
-
-      // then delegate to the normal supports_path logic
-      return Channel::supports_path(channel_copy_info,
-                                    src_serdez_id, dst_serdez_id, redop_id,
-                                    total_bytes, src_frags, dst_frags,
-                                    kind_ret, bw_ret, lat_ret);
+      return (redop != nullptr) && (redop->cuda_apply_excl_fn != nullptr);
     }
 
     RemoteChannelInfo *GPUreduceChannel::construct_remote_info() const
@@ -2760,30 +2755,6 @@ namespace Realm {
     GPUreduceRemoteChannel::GPUreduceRemoteChannel(uintptr_t _remote_ptr)
       : RemoteChannel(_remote_ptr)
     {}
-
-    uint64_t GPUreduceRemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
-                                                   CustomSerdezID src_serdez_id,
-                                                   CustomSerdezID dst_serdez_id,
-                                                   ReductionOpID redop_id,
-                                                   size_t total_bytes,
-                                                   const std::vector<size_t> *src_frags,
-                                                   const std::vector<size_t> *dst_frags,
-                                                   XferDesKind *kind_ret /*= 0*/,
-                                                   unsigned *bw_ret /*= 0*/,
-                                                   unsigned *lat_ret /*= 0*/)
-    {
-      // check first that we have a reduction op (if not, we want the cudamemcpy
-      //   path to pick this up instead) and that it has cuda kernels available
-      if(!GPUreduceChannel::is_gpu_redop(redop_id))
-        return 0;
-
-      // then delegate to the normal supports_path logic
-      return Channel::supports_path(channel_copy_info,
-                                    src_serdez_id, dst_serdez_id, redop_id,
-                                    total_bytes, src_frags, dst_frags,
-                                    kind_ret, bw_ret, lat_ret);
-    }
-
 
     ////////////////////////////////////////////////////////////////////////
     //
