@@ -639,7 +639,7 @@ namespace Legion {
       void record_event_trigger(LgEvent result, LgEvent precondition);
       void record_event_poison(LgEvent result);
       void record_barrier_arrival(LgEvent barrier, LgEvent precondition);
-      void record_barrier_arrival(LgEvent barrier, UniqueID uid);
+      void record_barrier_use(LgEvent barrier, UniqueID uid);
       void record_reservation_acquire(Reservation r, LgEvent result,
           LgEvent precondition);
       void record_instance_ready(LgEvent result, LgEvent unique_event,

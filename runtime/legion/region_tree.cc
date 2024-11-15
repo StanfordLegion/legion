@@ -16539,7 +16539,7 @@ namespace Legion {
             if (TRACK_DOM)
               observed_mask |= overlap;
             const DependenceType dtype = 
-              check_dependence_type<true>(prev.usage, user.usage);
+              check_dependence_type<true,true>(prev.usage, user.usage);
             switch (dtype)
             {
               case LEGION_NO_DEPENDENCE:

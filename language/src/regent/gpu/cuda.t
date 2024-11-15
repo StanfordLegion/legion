@@ -147,6 +147,7 @@ local supported_archs = {
   ["volta"]   = 70,
   ["turing"]  = 75,
   ["ampere"]  = 80,
+  ["hopper"]  = 90,
 }
 
 local function parse_cuda_arch(arch)
