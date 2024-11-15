@@ -10394,7 +10394,8 @@ namespace Legion {
 
       if (finder != pending_point_wise_deps.end())
       {
-        if (finder->second.first.exists() && !finder->second.first.has_triggered() && finder->second.second != 0)
+        if (finder->second.first.exists() &&
+            !finder->second.first.has_triggered() && finder->second.second != 0)
         {
           Runtime::trigger_event(finder->second.first, point_mapped);
           finder->second.second = 0;

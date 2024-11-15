@@ -10385,7 +10385,6 @@ namespace Legion {
       prev_index_tasks.insert({
                               region_idx,
                               PointWisePreviousIndexTaskInfo(
-                                  shard_proj->domain,
                                   shard_proj->projection,
                                   shard_proj->sharding,
                                   shard_proj->sharding_domain,
@@ -13129,13 +13128,6 @@ namespace Legion {
     {
       {
         AutoLock o_lock(op_lock);
-/*#ifndef LEGION_SPY
-        std::map<DomainPoint,RtEvent>::const_iterator finder =
-          point_wise_dependences.find(point);
-        // If we've already got it then we're done
-        if (finder != point_wise_dependences.end())
-          return finder->second;
-#endif*/
         // If we're remote, make up an event and send a message to index_owner.
         if (is_remote())
         {
@@ -13161,8 +13153,6 @@ namespace Legion {
       // index_owner so we can just as it what the answer and save it
       const RtEvent result = index_owner->find_point_wise_dependence(point, lr,
                                     region_idx);
-      AutoLock o_lock(op_lock);
-      point_wise_dependences[point] = result;
       return result;
     }
 #endif

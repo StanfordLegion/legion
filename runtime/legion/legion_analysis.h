@@ -1448,19 +1448,18 @@ namespace Legion {
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
     struct PointWisePreviousIndexTaskInfo : public LegionHeapify<PointWisePreviousIndexTaskInfo> {
       public:
-        PointWisePreviousIndexTaskInfo(IndexSpaceNode *domain, ProjectionFunction *projection,
+        PointWisePreviousIndexTaskInfo(ProjectionFunction *projection,
             ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
             Operation *previous_index_task,
             GenerationID previous_index_task_generation, size_t ctx_index, unsigned dep_type,
             unsigned region_idx)
-          : domain(domain), projection(projection), sharding(sharding), sharding_domain(sharding_domain),
+          : projection(projection), sharding(sharding), sharding_domain(sharding_domain),
           index_domain(index_domain),
-          previous_index_task(previous_index_task), //index_domain(index_domain),
+          previous_index_task(previous_index_task),
           previous_index_task_generation(previous_index_task_generation),
           ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
       {}
       public:
-        IndexSpaceNode *domain;
         ProjectionFunction *projection;
         ShardingFunction *sharding;
         IndexSpaceNode *sharding_domain;
