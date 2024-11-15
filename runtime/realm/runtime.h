@@ -74,20 +74,36 @@ namespace Realm {
       //  that
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
 
-      bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+      bool register_reduction(Event &event, ReductionOpID redop_id,
+                              const ReductionOpUntyped *redop);
+      bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop)
+      {
+        Event event = Event::NO_EVENT;
+        if(register_reduction(event, redop_id, redop)) {
+          event.wait();
+          return true;
+        }
+        return false;
+      }
       template <typename REDOP>
       bool register_reduction(ReductionOpID redop_id)
       {
-	const ReductionOp<REDOP> redop;
-	return register_reduction(redop_id, &redop);
+        const ReductionOp<REDOP> redop;
+        return register_reduction(redop_id, &redop);
+      }
+      template <typename REDOP>
+      bool register_reduction(Event &event, ReductionOpID redop_id)
+      {
+        const ReductionOp<REDOP> redop;
+        return register_reduction(redop_id, &redop);
       }
 
       bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
       template <typename SERDEZ>
       bool register_custom_serdez(CustomSerdezID serdez_id)
       {
-	const CustomSerdezWrapper<SERDEZ> serdez;
-	return register_custom_serdez(serdez_id, &serdez);
+        const CustomSerdezWrapper<SERDEZ> serdez;
+        return register_custom_serdez(serdez_id, &serdez);
       }
 
       Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 
