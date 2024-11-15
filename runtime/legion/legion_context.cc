@@ -517,7 +517,7 @@ namespace Legion {
       // Finally if everything has overlapped, do a dependence analysis
       // on the privileges and coherence
       RegionUsage usage(req);
-      switch (check_dependence_type<true>(our_usage,usage))
+      switch (check_dependence_type<false,true>(our_usage,usage))
       {
         // Only allow no-dependence, or simultaneous dependence through
         case LEGION_NO_DEPENDENCE:
@@ -10928,7 +10928,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapping == NULL);
       assert(created_nodes.size() == created_trees.size());
 #endif
       AutoLock priv_lock(privilege_lock);

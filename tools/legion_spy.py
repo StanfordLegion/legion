@@ -63,7 +63,8 @@ READ_WRITE    = 0x00000007
 WRITE_ONLY    = 0x10000002
 WRITE_DISCARD = 0x10000007
 REDUCE        = 0x00000004
-DISCARD_MASK  = 0x10000000
+INPUT_DISCARD_MASK  = 0x10000000
+OUTPUT_DISCARD_MASK = 0x20000000
 
 EXCLUSIVE = 0
 ATOMIC = 1
@@ -179,11 +180,14 @@ def check_for_anti_dependence(req1, req2, actual):
         else:
             return actual
 
-def compute_dependence_type(req1, req2):
+def compute_dependence_type(req1, req2, exclusive_discard=True):
     if req1.is_no_access() or req2.is_no_access():
         return NO_DEPENDENCE
     elif req1.is_read_only() and req2.is_read_only():
-        return NO_DEPENDENCE
+        if exclusive_discard and req2.is_output_discard():
+            return TRUE_DEPENDENCE
+        else:
+            return NO_DEPENDENCE
     elif req1.is_reduce() and req2.is_reduce():
         if req1.redop == req2.redop:
             return NO_DEPENDENCE
@@ -6098,7 +6102,7 @@ class Requirement(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY) and not self.is_discard()
+        return bool(self.priv & READ_ONLY) and not self.is_input_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -6115,8 +6119,11 @@ class Requirement(object):
     def is_reduce(self):
         return self.priv == REDUCE_PRIV
 
-    def is_discard(self):
-        return bool(self.priv & DISCARD_MASK)
+    def is_input_discard(self):
+        return bool(self.priv & INPUT_DISCARD_MASK)
+
+    def is_output_discard(self):
+        return bool(self.priv & OUTPUT_DISCARD_MASK)
 
     def is_collective(self):
         return bool(self.coher & COLLECTIVE_MASK)
@@ -6152,14 +6159,17 @@ class Requirement(object):
             return "NO-ACCESS"
         elif bool(self.priv & WRITE_PRIV):
             if bool(self.priv & READ_PRIV):
-                if bool(self.priv & DISCARD_MASK):
+                if bool(self.priv & INPUT_DISCARD_MASK):
                     return "WRITE-DISCARD"
                 else:
                     return "READ-WRITE"
             else:
                 return "WRITE-ONLY"
         elif bool(self.priv & READ_PRIV):
-            return "READ-ONLY"
+            if bool(self.priv & OUTPUT_DISCARD_MASK):
+                return "READ-ONLY-DISCARD"
+            else:
+                return "READ-ONLY"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
@@ -9969,7 +9979,7 @@ class PointUser(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY) and not self.is_discard()
+        return bool(self.priv & READ_ONLY) and not self.is_input_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -9986,8 +9996,11 @@ class PointUser(object):
     def is_reduce(self):
         return self.priv == REDUCE
 
-    def is_discard(self):
-        return bool(self.priv & DISCARD_MASK)
+    def is_input_discard(self):
+        return bool(self.priv & INPUT_DISCARD_MASK)
+
+    def is_output_discard(self):
+        return bool(self.priv & OUTPUT_DISCARD_MASK)
 
     def is_collective(self):
         return bool(self.coher & COLLECTIVE_MASK)
@@ -10303,7 +10316,7 @@ class Instance(object):
                 if logical_user.index_owner is not None and \
                         logical_user.index_owner is logical_op.index_owner:
                     continue
-            dep = compute_dependence_type(user, req)
+            dep = compute_dependence_type(user, req, exclusive_discard=False)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 result.add(user.op)
                 # If the previous was an exclusive user there is no
@@ -10333,7 +10346,7 @@ class Instance(object):
             if logical_op is user.logical_op and index != user.index:
                 if not user.is_realm_op() or not reading or user.is_read_only():
                     continue
-            dep = compute_dependence_type(user, inst)
+            dep = compute_dependence_type(user, inst, exclusive_discard=False)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 # We can safely write the same version number on top of a reader
                 if dep == ANTI_DEPENDENCE and redop == 0 and version == user.version:

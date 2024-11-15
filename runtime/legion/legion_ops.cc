@@ -15081,7 +15081,7 @@ namespace Legion {
                 continue;
               // Update the dependence type
               DependenceType internal_dtype = 
-                check_dependence_type<true/*reductions interfere*/>(
+                check_dependence_type<true,true/*reductions interfere*/>(
                                 RegionUsage(src_req), RegionUsage(dst_req));
               record_intra_must_epoch_dependence(src_index, src_idx, it->first,
                                                  it->second, internal_dtype);
@@ -15131,7 +15131,7 @@ namespace Legion {
         if (runtime->forest->are_disjoint_tree_only(src_node, dst_node, dummy))
           return false;
         // Update the dependence type
-        dtype = check_dependence_type<true/*reductions interfere*/>(
+        dtype = check_dependence_type<true,true/*reductions interfere*/>(
                           RegionUsage(src_req), RegionUsage(dst_req));
       }
       else
