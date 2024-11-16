@@ -1465,7 +1465,7 @@ namespace Legion {
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) = 0;
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
-          LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
+          LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
           RtEvent &use_event) = 0;
       virtual bool contains_instance(PhysicalInstance instance) const = 0;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
@@ -1508,7 +1508,7 @@ namespace Legion {
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) override;
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
-          LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
+          LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
           RtEvent &use_event) override;
       virtual bool contains_instance(PhysicalInstance instance) const override;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
@@ -1572,7 +1572,7 @@ namespace Legion {
     class UnboundPool : public MemoryPool {
     public:
       UnboundPool(MemoryManager *manager, UnboundPoolScope scope,
-                  TaskTreeCoordinates &coordinates);
+                  TaskTreeCoordinates &coordinates, size_t max_free_bytes);
       virtual ~UnboundPool(void) override;
       virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
@@ -1580,7 +1580,7 @@ namespace Legion {
       virtual FutureInstance* allocate_future(UniqueID creator_uid,
                                               size_t size) override;
       virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
-          LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
+          LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
           RtEvent &use_event) override;
       virtual bool contains_instance(PhysicalInstance instance) const override;
       virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
@@ -1593,8 +1593,13 @@ namespace Legion {
       virtual void finalize_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
+      PhysicalInstance find_local_freed_hole(size_t size, size_t &prev_size);
+    private:
       TaskTreeCoordinates coordinates;
+      std::map<size_t,std::vector<PhysicalInstance> > freed_instances;
       MemoryManager *const manager;
+      const size_t max_freed_bytes;
+      size_t freed_bytes;
       const UnboundPoolScope scope;
       bool released;
     };
@@ -1807,7 +1812,7 @@ namespace Legion {
                                 RtEvent free_event);
       PhysicalInstance create_task_local_instance(UniqueID creator_uid,
           const TaskTreeCoordinates &coordinates, LgEvent unique_event,
-          Realm::InstanceLayoutGeneric *layout, RtEvent &use_event,
+          const Realm::InstanceLayoutGeneric *layout, RtEvent &use_event,
           RtEvent *safe_for_unbounded_pools);
       void free_task_local_instance(PhysicalInstance instance,
                                   RtEvent precondition = RtEvent::NO_RT_EVENT);

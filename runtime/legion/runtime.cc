@@ -8588,11 +8588,13 @@ namespace Legion {
       }
       else
       {
+        size_t max_free_bytes;
+        derez.deserialize(max_free_bytes);
         UnboundPoolScope scope;
         derez.deserialize(scope);
         TaskTreeCoordinates coordinates;
         coordinates.deserialize(derez);
-        return new UnboundPool(manager, scope, coordinates);
+        return new UnboundPool(manager, scope, coordinates, max_free_bytes);
       }
     }
 
@@ -8706,7 +8708,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance ConcretePool::allocate_instance(UniqueID creator_uid,
-        LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
+        LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
         RtEvent &use_event)
     //--------------------------------------------------------------------------
     {
@@ -8722,7 +8724,7 @@ namespace Legion {
         PhysicalInstance instance;
         const Realm::ProfilingRequestSet empty_requests;
         use_event = RtEvent(PhysicalInstance::create_instance(
-              instance, manager->memory, layout, empty_requests));
+              instance, manager->memory, layout->clone(), empty_requests));
 #ifdef DEBUG_LEGION
         assert(instance.exists());
         assert(allocated.find(instance) == allocated.end());
@@ -8755,7 +8757,7 @@ namespace Legion {
         // name the memory but since we know this pool is backed by
         // a normal Realm instance we can use that memory
         use_event = RtEvent(PhysicalInstance::create_external_instance(
-              instance, manager->memory, layout, *external_resource,
+              instance, manager->memory, layout->clone(), *external_resource,
               empty_requests, backing_instances[range.instance]));
 #ifdef DEBUG_LEGION
         assert(instance.exists());
@@ -9627,9 +9629,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     UnboundPool::UnboundPool(MemoryManager *man, UnboundPoolScope s,
-                             TaskTreeCoordinates &coords)
-      : MemoryPool(std::numeric_limits<size_t>::max()), manager(man), 
-        scope(s), released(false)
+                             TaskTreeCoordinates &coords, size_t max_bytes)
+      : MemoryPool(std::numeric_limits<size_t>::max()), manager(man),
+        max_freed_bytes(max_bytes), freed_bytes(0), scope(s), released(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9677,6 +9679,87 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!released);
 #endif
+      // Check to see if we have a local freed instance that is big enough
+      // to use for this instance
+      if (!freed_instances.empty())
+      {
+        size_t previous_size = 0;
+        Realm::InstanceLayoutGeneric *layout = NULL;
+        PhysicalInstance previous = find_local_freed_hole(size, previous_size);
+        while (previous.exists())
+        {
+          // Redistrict the previously freed instance into a future instance
+          if (layout == NULL)
+          {
+            // Create the layout description for this instance
+            const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+            const std::vector<size_t> sizes(1, size);
+            const int dim_order[1] = { 0 };
+            const Realm::Point<1,coord_t> zero(0);
+            const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+            const Realm::IndexSpace<1,coord_t> rect_space(
+                                           Realm::Rect<1,coord_t>(zero, zero));
+            layout =
+              Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+                  rect_space, constraints, dim_order);
+          }
+          LgEvent unique_event;
+          if (manager->runtime->legion_spy_enabled || 
+              (manager->runtime->profiler != NULL))
+          {
+            RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            unique_event = unique;
+          }
+          // Try to do the redistrict the previous instance into a new one
+          MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
+          ProfilingResponseBase base(&allocator, creator_uid, false);
+          Realm::ProfilingRequestSet requests;
+          Realm::ProfilingRequest &req = requests.add_request(
+              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              &base, sizeof(base), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+          if (manager->runtime->profiler != NULL)
+            manager->runtime->profiler->add_inst_request(requests, creator_uid,
+                                                         unique_event);
+          PhysicalInstance instance;
+          RtEvent use_event(previous.redistrict(instance, layout, requests));
+          if (allocator.succeeded())
+          {
+            size_t bytes_used = instance.get_layout()->bytes_used;
+#ifdef DEBUG_LEGION
+            assert(bytes_used <= previous_size);
+#endif
+            if (bytes_used < previous_size)
+              manager->update_remaining_capacity(previous_size - bytes_used);
+            delete layout;
+            return new FutureInstance(NULL/*data*/, size, false/*external*/,
+                true/*own allocation*/, unique_event, instance,
+                Processor::NO_PROC, use_event);
+          }
+          else
+            manager->update_remaining_capacity(previous_size);
+          previous = find_local_freed_hole(size, previous_size);
+        }
+        if (layout != NULL)
+          delete layout;
+        // Try to do the allocation normal way
+        FutureInstance *instance = manager->create_future_instance(creator_uid,
+            coordinates, size, NULL/*safe_for_unbounded_pools*/);
+        if (instance != NULL)
+          return instance;
+        // If it doesn't work, free all our freed instances (which are all
+        // smaller than the size or we would have found a hole to use) and
+        // then try again
+        for (std::map<size_t,std::vector<PhysicalInstance> >::const_iterator
+             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::vector<PhysicalInstance>::const_iterator it = 
+                fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(*it);
+        freed_instances.clear();
+        freed_bytes = 0;
+      }
       // This is safe for unbounded pools because we are the unbounded pool :)
       return manager->create_future_instance(creator_uid, coordinates, size,
           NULL/*safe_for_unbounded_pools*/);
@@ -9684,16 +9767,89 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance UnboundPool::allocate_instance(UniqueID creator_uid,
-        LgEvent unique_event, Realm::InstanceLayoutGeneric *layout,
+        LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
         RtEvent &use_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!released);
 #endif
+      if (!freed_instances.empty())
+      {
+        size_t previous_size = 0;
+        PhysicalInstance previous =
+          find_local_freed_hole(layout->bytes_used, previous_size);
+        while (previous.exists())
+        {
+          // Redistrict the previously freed instance into a new instance
+          MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
+          ProfilingResponseBase base(&allocator, creator_uid, false);
+          Realm::ProfilingRequestSet requests;
+          Realm::ProfilingRequest &req = requests.add_request(
+              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              &base, sizeof(base), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+          if (manager->runtime->profiler != NULL)
+            manager->runtime->profiler->add_inst_request(requests, creator_uid,
+                                                         unique_event);
+          PhysicalInstance instance;
+          use_event = RtEvent(previous.redistrict(instance, layout, requests));
+          if (allocator.succeeded())
+          {
+            size_t bytes_used = instance.get_layout()->bytes_used;
+#ifdef DEBUG_LEGION
+            assert(bytes_used <= previous_size);
+#endif
+            if (bytes_used < previous_size)
+              manager->update_remaining_capacity(previous_size - bytes_used);
+            return instance;
+          }
+          else
+            manager->update_remaining_capacity(previous_size);
+          previous = find_local_freed_hole(layout->bytes_used, previous_size);
+        }
+        // Try to do the allocation the normal way
+        PhysicalInstance instance = manager->create_task_local_instance(
+            creator_uid, coordinates, unique_event, layout, use_event, 
+            NULL/*safe_for_unbound_pools*/); 
+        if (instance.exists())
+          return instance;
+        // If it doesn't work, free all our freed instances (which are all
+        // smaller than the size or we would have found a hole to use) and
+        // then try again
+        for (std::map<size_t,std::vector<PhysicalInstance> >::const_iterator
+             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::vector<PhysicalInstance>::const_iterator it = 
+                fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(*it);
+        freed_instances.clear();
+        freed_bytes = 0;
+      }
       // We are the unbound pool so it is always safe for us
       return manager->create_task_local_instance(creator_uid, coordinates,
           unique_event, layout, use_event, NULL/*safe_for_unbound_pools*/);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance UnboundPool::find_local_freed_hole(size_t size,
+                                                        size_t &previous_size)
+    //--------------------------------------------------------------------------
+    {
+      std::map<size_t,std::vector<PhysicalInstance> >::iterator finder =
+        freed_instances.lower_bound(size);
+      if (finder == freed_instances.end())
+        return PhysicalInstance::NO_INST;
+#ifdef DEBUG_LEGION
+      assert(!finder->second.empty());
+      assert(finder->first <= freed_bytes);
+#endif
+      PhysicalInstance result = finder->second.back();
+      finder->second.pop_back();
+      freed_bytes -= finder->first;
+      if (finder->second.empty())
+        freed_instances.erase(finder);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9720,7 +9876,38 @@ namespace Legion {
     void UnboundPool::free_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      manager->free_task_local_instance(instance);   
+      if (!released && (max_freed_bytes > 0))
+      {
+        // Add it to the freed instances 
+        const size_t size = instance.get_layout()->bytes_used;
+        freed_instances[size].push_back(instance);
+        freed_bytes += size;
+        if (max_freed_bytes < freed_bytes)
+        {
+          // Start releasing the smallest instances to reduce fragmentation
+          // until we're back under the limit of bytes we can buffer
+          while (!freed_instances.empty())
+          {
+            std::map<size_t,std::vector<PhysicalInstance> >::iterator it =
+              freed_instances.begin();
+            while (!it->second.empty())
+            {
+              manager->free_task_local_instance(it->second.back());
+              it->second.pop_back();
+              freed_bytes -= it->first;
+              if (freed_bytes <= max_freed_bytes)
+              {
+                if (it->second.empty())
+                  freed_instances.erase(it);
+                return;
+              }
+            }
+            freed_instances.erase(it);
+          }
+        }
+      }
+      else // Release it right away
+        manager->free_task_local_instance(instance);   
     }
 
     //--------------------------------------------------------------------------
@@ -9736,7 +9923,14 @@ namespace Legion {
     {
       if (!released)
       {
+        for (std::map<size_t,std::vector<PhysicalInstance> >::const_iterator
+             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::vector<PhysicalInstance>::const_iterator it = 
+                fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(*it);
         manager->release_unbound_pool();
+        freed_instances.clear();
+        freed_bytes = 0;
         released = true;
       }
     }
@@ -9745,8 +9939,7 @@ namespace Legion {
     void UnboundPool::finalize_pool(RtEvent done)
     //--------------------------------------------------------------------------
     {
-      if (!released)
-        manager->release_unbound_pool();
+      release_pool(0);
     }
 
     //--------------------------------------------------------------------------
@@ -9758,6 +9951,7 @@ namespace Legion {
 #endif
       rez.serialize(manager->memory);
       rez.serialize<bool>(false); // bounded;
+      rez.serialize(max_freed_bytes);
       rez.serialize(scope);
       coordinates.serialize(rez);
     }
@@ -12734,6 +12928,7 @@ namespace Legion {
         PhysicalInstance instance = create_task_local_instance(creator_uid,
             coordinates, unique_event, layout, use_event, 
             safe_for_unbounded_pools);
+        delete layout;
         if (!instance.exists())
           return NULL;
         return new ConcretePool(instance, bounds.size, bounds.alignment,
@@ -12840,7 +13035,7 @@ namespace Legion {
             unbounded_coordinates = coordinates;
           }
         } while (wait_on.exists());
-        return new UnboundPool(this, bounds.scope, coordinates);
+        return new UnboundPool(this, bounds.scope, coordinates, bounds.size);
       }
     }
 
@@ -13151,7 +13346,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalInstance MemoryManager::create_task_local_instance(
         UniqueID creator_uid, const TaskTreeCoordinates &coordinates,
-        LgEvent unique_event, Realm::InstanceLayoutGeneric *layout, 
+        LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout, 
         RtEvent &use_event, RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
@@ -13288,7 +13483,6 @@ namespace Legion {
       } while (!collector->collection_complete());
       if (collector != NULL)
         delete collector;
-      delete layout;
       // Retake the lock and mark that our allocation is done
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -13396,6 +13590,7 @@ namespace Legion {
       RtEvent use_event;
       PhysicalInstance instance = create_task_local_instance(creator_uid,
           coordinates, unique_event, ilg, use_event, safe_for_unbounded_pools);
+      delete ilg;
       if (!instance.exists())
         return NULL;
       return new FutureInstance(NULL/*data*/, size,

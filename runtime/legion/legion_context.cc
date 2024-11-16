@@ -11996,6 +11996,7 @@ namespace Legion {
               manager->get_name(), layout->bytes_used)
       }
       task_local_instances[instance] = unique_event;
+      delete layout;
       // Make sure that it is safe to use this instance before handing it back
       if (use_event.exists())
         use_event.wait();
@@ -25493,6 +25494,7 @@ namespace Legion {
           assert(!use_event.exists());
 #endif
           task_local_instances[instance] = unique_event;
+          delete layout;
           return instance;
         }
         if (instance.exists())
@@ -25626,6 +25628,7 @@ namespace Legion {
               get_unique_id(), manager->get_name(), memory_limit)
       }
       task_local_instances[instance] = unique_event;
+      delete layout;
       if (use_event.exists())
         use_event.wait();
       return instance;
