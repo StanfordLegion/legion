@@ -1296,10 +1296,10 @@ namespace Realm {
       pending_allocs.clear();
       std::deque<PendingRelease>::iterator it3 = pending_releases.begin();
       while(it3 != pending_releases.end()) {
-	if(it3->is_ready) {
-	  it3 = pending_releases.erase(it3);
+        if(it3->is_ready) {
+            it3 = pending_releases.erase(it3);
         } else {
-	  ++it3;
+            ++it3;
         }
       }
 
@@ -1313,10 +1313,10 @@ namespace Realm {
 	// first apply any non-ready releases older than this alloc
 	while((it3 != pending_releases.end()) &&
 	      (it3->seqid <= a_future->last_release_seqid)) {
-	  if(!it3->is_ready) {
-            it3->release(test_future_allocator, true /*missing ok*/);
-          }
-          ++it3;
+            if(!it3->is_ready) {
+              it3->release(test_future_allocator, true /*missing ok*/);
+            }
+            ++it3;
         }
 
         // and now try allocation
@@ -1324,9 +1324,9 @@ namespace Realm {
         bool ok = test_future_allocator.allocate(a_future->inst->me, a_future->bytes,
                                                  a_future->alignment, offset);
         if(ok) {
-          ++a_future;
+            ++a_future;
         } else {
-          break;
+            break;
         }
       }
 
@@ -1336,20 +1336,20 @@ namespace Realm {
 
 	// don't forget to apply any remaining pending releases
 	while(it3 != pending_releases.end()) {
-	  if(!it3->is_ready) {
-            it3->release(test_future_allocator, true /*missing ok*/);
-          }
-          ++it3;
+            if(!it3->is_ready) {
+              it3->release(test_future_allocator, true /*missing ok*/);
+            }
+            ++it3;
         }
 
         // now go back through and erase any ready ones
         it3 = pending_releases.begin();
         while(it3 != pending_releases.end()) {
-          if(it3->is_ready) {
-            it3 = pending_releases.erase(it3);
-          } else {
-            ++it3;
-          }
+            if(it3->is_ready) {
+              it3 = pending_releases.erase(it3);
+            } else {
+              ++it3;
+            }
         }
 
         // erase the allocations we succeeded on
@@ -1633,28 +1633,28 @@ namespace Realm {
   void LocalManagedMemory::PendingRelease::record_redistrict(
       const std::vector<RegionInstanceImpl *> &insts)
   {
-    assert(redistrict_insts.empty());
-    redistrict_insts = insts;
+      assert(redistrict_insts.empty());
+      redistrict_insts = insts;
   }
 
   void LocalManagedMemory::PendingRelease::release(RangeAllocator &allocator,
                                                    bool missing_ok)
   {
-    if(!redistrict_insts.empty()) {
-      const size_t num_insts = redistrict_insts.size();
-      std::vector<RegionInstance> tags(num_insts);
-      std::vector<size_t> sizes(num_insts);
-      std::vector<size_t> alignments(num_insts);
-      for(size_t i = 0; i < num_insts; i++) {
-        sizes[i] = redistrict_insts[i]->metadata.layout->bytes_used;
-        alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
-        tags[i] = redistrict_insts[i]->me;
+      if(!redistrict_insts.empty()) {
+        const size_t num_insts = redistrict_insts.size();
+        std::vector<RegionInstance> tags(num_insts);
+        std::vector<size_t> sizes(num_insts);
+        std::vector<size_t> alignments(num_insts);
+        for(size_t i = 0; i < num_insts; i++) {
+          sizes[i] = redistrict_insts[i]->metadata.layout->bytes_used;
+          alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
+          tags[i] = redistrict_insts[i]->me;
+        }
+        std::vector<size_t> offsets(num_insts, 0);
+        allocator.split_range(inst->me, tags, sizes, alignments, offsets);
+      } else {
+        allocator.deallocate(inst->me, missing_ok);
       }
-      std::vector<size_t> offsets(num_insts, 0);
-      allocator.split_range(inst->me, tags, sizes, alignments, offsets);
-    } else {
-      allocator.deallocate(inst->me, missing_ok);
-    }
   }
 
   ////////////////////////////////////////////////////////////////////////
