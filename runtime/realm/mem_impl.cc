@@ -1295,11 +1295,13 @@ namespace Realm {
       current_allocator.swap(test_allocator);
       pending_allocs.clear();
       std::deque<PendingRelease>::iterator it3 = pending_releases.begin();
-      while(it3 != pending_releases.end())
-	if(it3->is_ready)
+      while(it3 != pending_releases.end()) {
+	if(it3->is_ready) {
 	  it3 = pending_releases.erase(it3);
-	else
+        } else {
 	  ++it3;
+        }
+      }
 
       return true;
     } else {
@@ -1311,8 +1313,9 @@ namespace Realm {
 	// first apply any non-ready releases older than this alloc
 	while((it3 != pending_releases.end()) &&
 	      (it3->seqid <= a_future->last_release_seqid)) {
-	  if(!it3->is_ready)
+	  if(!it3->is_ready) {
             it3->release(test_future_allocator, true /*missing ok*/);
+          }
           ++it3;
         }
 
@@ -1333,8 +1336,9 @@ namespace Realm {
 
 	// don't forget to apply any remaining pending releases
 	while(it3 != pending_releases.end()) {
-	  if(!it3->is_ready)
+	  if(!it3->is_ready) {
             it3->release(test_future_allocator, true /*missing ok*/);
+          }
           ++it3;
         }
 
@@ -1480,8 +1484,9 @@ namespace Realm {
                 // actually, include all pending releases
                 // if(it->seqid > pending_allocs.front().last_release_seqid)
                 //  break;
-                if(it->is_ready)
+                if(it->is_ready) {
                   it->release(release_allocator);
+                }
               }
             }
           } else {
@@ -1508,8 +1513,9 @@ namespace Realm {
           // a couple different ways to get to a state where the ready releases
           //  allow allocations to proceed but we could not be sure above, so
           //  check now
-          if(!pending_allocs.empty())
+          if(!pending_allocs.empty()) {
             attempt_release_reordering(successful_allocs);
+          }
         } else {
           // special case: if there are no pending allocation requests, we
           //  just forget this destruction request ever happened - there is
