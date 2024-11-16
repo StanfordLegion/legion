@@ -35,6 +35,7 @@
 #include "realm/transfer/lowlevel_dma.h"
 
 // create xd message and update bytes read/write messages
+#include "realm/transfer/addrsplit_channel.h"
 #include "realm/transfer/channel.h"
 #include "realm/transfer/channel_disk.h"
 
