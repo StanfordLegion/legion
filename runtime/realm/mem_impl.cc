@@ -218,10 +218,11 @@ namespace Realm {
         if(poisoned) {
           // If this was poisoned we can just tell all the new instances that
           // we failed to allocated them
-          for(unsigned idx = 0; idx < num_insts; idx++)
+          for(unsigned idx = 0; idx < num_insts; idx++) {
             new_insts[idx]->notify_allocation(ALLOC_CANCELLED,
                                               RegionInstanceImpl::INSTOFFSET_FAILED,
                                               TimeLimit::responsive());
+          }
           return ALLOC_CANCELLED;
         }
         triggered = true;
@@ -248,13 +249,15 @@ namespace Realm {
           size_t offset = 0;
           if(alignment) {
             const size_t remainder = inst_offset % alignment;
-            if(remainder)
+            if(remainder) {
               offset = alignment - remainder;
+            }
           }
           bytes_used += (offset + size);
           // Check to see if this instance is going to fit
-          if(res->size_in_bytes < bytes_used)
+          if(res->size_in_bytes < bytes_used) {
             break;
+          }
           inst_offset += offset;
           // underflow is ok here - it'll work itself out when we add the mem_base
           //  back in on accesses
@@ -267,12 +270,13 @@ namespace Realm {
         log_inst.warning() << "attempt to redistrict unsupported external resource: mem="
                            << me << " resource=" << *(old_inst->metadata.ext_resource);
       }
-      for(unsigned idx = 0; idx < num_insts; idx++)
+      for(unsigned idx = 0; idx < num_insts; idx++) {
         new_insts[idx]->notify_allocation(
             (idx < allocated)
                 ? (triggered ? ALLOC_INSTANT_SUCCESS : ALLOC_EVENTUAL_SUCCESS)
                 : (triggered ? ALLOC_INSTANT_FAILURE : ALLOC_EVENTUAL_FAILURE),
             offsets[idx], TimeLimit::responsive());
+      }
       if(triggered) {
         unregister_external_resource(old_inst);
         old_inst->notify_deallocation();
@@ -946,10 +950,11 @@ namespace Realm {
         if(poisoned) {
           // If this was poisoned we can just tell all the new instances that
           // we failed to allocated them
-          for(unsigned idx = 0; idx < num_insts; idx++)
+          for(unsigned idx = 0; idx < num_insts; idx++) {
             new_insts[idx]->notify_allocation(ALLOC_CANCELLED,
                                               RegionInstanceImpl::INSTOFFSET_FAILED,
                                               TimeLimit::responsive());
+          }
           return ALLOC_CANCELLED;
         }
         triggered = true;
@@ -1058,12 +1063,13 @@ namespace Realm {
                                                new_insts.begin() + allocated);
         } else {
           // This instance has been allocated
-          if(pending_allocs.empty())
+          if(pending_allocs.empty()) {
             // No pending allocs means we need to make the future allocator valid
             // and it will become immediately invalid once we're done doing this
             // but we still need to do it to know how many of the new instances
             // can be allocated
             future_allocator = current_allocator;
+          }
           allocated = future_allocator.split_range(old_inst->me, tags, sizes, alignments,
                                                    offsets);
         }
@@ -1168,8 +1174,9 @@ namespace Realm {
             // a successful (now or later) allocation should update the future
             //  state, if we have one
             if(((result == ALLOC_INSTANT_SUCCESS) || (result == ALLOC_DEFERRED)) &&
-               !pending_allocs.empty())
+               !pending_allocs.empty()) {
               back.release(future_allocator, true /*missing ok*/);
+            }
           }
           if(deferred_redistrict_exists) {
             assert(!inst->deferred_redistrict.empty());
@@ -1191,12 +1198,13 @@ namespace Realm {
                 tags[i] = inst->deferred_redistrict[i]->me;
               }
               // See which allocator we need to do this on
-              if(pending_allocs.empty())
+              if(pending_allocs.empty()) {
                 allocated = current_allocator.split_range(inst->me, tags, sizes,
                                                           alignments, offsets);
-              else
+              } else {
                 allocated = future_allocator.split_range(inst->me, tags, sizes,
                                                          alignments, offsets);
+              }
             }
           }
         }
@@ -1287,11 +1295,13 @@ namespace Realm {
       current_allocator.swap(test_allocator);
       pending_allocs.clear();
       std::deque<PendingRelease>::iterator it3 = pending_releases.begin();
-      while(it3 != pending_releases.end())
-	if(it3->is_ready)
-	  it3 = pending_releases.erase(it3);
-	else
-	  ++it3;
+      while(it3 != pending_releases.end()) {
+        if(it3->is_ready) {
+            it3 = pending_releases.erase(it3);
+        } else {
+            ++it3;
+        }
+      }
 
       return true;
     } else {
@@ -1303,19 +1313,21 @@ namespace Realm {
 	// first apply any non-ready releases older than this alloc
 	while((it3 != pending_releases.end()) &&
 	      (it3->seqid <= a_future->last_release_seqid)) {
-	  if(!it3->is_ready)
-            it3->release(test_future_allocator, true /*missing ok*/);
-          ++it3;
+            if(!it3->is_ready) {
+              it3->release(test_future_allocator, true /*missing ok*/);
+            }
+            ++it3;
         }
 
         // and now try allocation
         size_t offset;
         bool ok = test_future_allocator.allocate(a_future->inst->me, a_future->bytes,
                                                  a_future->alignment, offset);
-        if(ok)
-          ++a_future;
-        else
-          break;
+        if(ok) {
+            ++a_future;
+        } else {
+            break;
+        }
       }
 
       // did we get all the way through?
@@ -1324,18 +1336,21 @@ namespace Realm {
 
 	// don't forget to apply any remaining pending releases
 	while(it3 != pending_releases.end()) {
-	  if(!it3->is_ready)
-            it3->release(test_future_allocator, true /*missing ok*/);
-          ++it3;
+            if(!it3->is_ready) {
+              it3->release(test_future_allocator, true /*missing ok*/);
+            }
+            ++it3;
         }
 
         // now go back through and erase any ready ones
         it3 = pending_releases.begin();
-        while(it3 != pending_releases.end())
-          if(it3->is_ready)
-            it3 = pending_releases.erase(it3);
-          else
-            ++it3;
+        while(it3 != pending_releases.end()) {
+            if(it3->is_ready) {
+              it3 = pending_releases.erase(it3);
+            } else {
+              ++it3;
+            }
+        }
 
         // erase the allocations we succeeded on
         pending_allocs.erase(pending_allocs.begin(), a_now);
@@ -1394,8 +1409,9 @@ namespace Realm {
           // special case: if we're the oldest pending item (and we're not
           //  poisoned), we unclog things in the order we planned
           if(it->inst == inst) {
-            if(!pending_allocs.empty())
+            if(!pending_allocs.empty()) {
               it->release(release_allocator);
+            }
 
             // catch up the current state
             do {
@@ -1468,8 +1484,9 @@ namespace Realm {
                 // actually, include all pending releases
                 // if(it->seqid > pending_allocs.front().last_release_seqid)
                 //  break;
-                if(it->is_ready)
+                if(it->is_ready) {
                   it->release(release_allocator);
+                }
               }
             }
           } else {
@@ -1496,8 +1513,9 @@ namespace Realm {
           // a couple different ways to get to a state where the ready releases
           //  allow allocations to proceed but we could not be sure above, so
           //  check now
-          if(!pending_allocs.empty())
+          if(!pending_allocs.empty()) {
             attempt_release_reordering(successful_allocs);
+          }
         } else {
           // special case: if there are no pending allocation requests, we
           //  just forget this destruction request ever happened - there is
@@ -1615,28 +1633,28 @@ namespace Realm {
   void LocalManagedMemory::PendingRelease::record_redistrict(
       const std::vector<RegionInstanceImpl *> &insts)
   {
-    assert(redistrict_insts.empty());
-    redistrict_insts = insts;
+      assert(redistrict_insts.empty());
+      redistrict_insts = insts;
   }
 
   void LocalManagedMemory::PendingRelease::release(RangeAllocator &allocator,
                                                    bool missing_ok)
   {
-    if(!redistrict_insts.empty()) {
-      const size_t num_insts = redistrict_insts.size();
-      std::vector<RegionInstance> tags(num_insts);
-      std::vector<size_t> sizes(num_insts);
-      std::vector<size_t> alignments(num_insts);
-      for(size_t i = 0; i < num_insts; i++) {
-        sizes[i] = redistrict_insts[i]->metadata.layout->bytes_used;
-        alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
-        tags[i] = redistrict_insts[i]->me;
+      if(!redistrict_insts.empty()) {
+        const size_t num_insts = redistrict_insts.size();
+        std::vector<RegionInstance> tags(num_insts);
+        std::vector<size_t> sizes(num_insts);
+        std::vector<size_t> alignments(num_insts);
+        for(size_t i = 0; i < num_insts; i++) {
+          sizes[i] = redistrict_insts[i]->metadata.layout->bytes_used;
+          alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
+          tags[i] = redistrict_insts[i]->me;
+        }
+        std::vector<size_t> offsets(num_insts, 0);
+        allocator.split_range(inst->me, tags, sizes, alignments, offsets);
+      } else {
+        allocator.deallocate(inst->me, missing_ok);
       }
-      std::vector<size_t> offsets(num_insts, 0);
-      allocator.split_range(inst->me, tags, sizes, alignments, offsets);
-    } else {
-      allocator.deallocate(inst->me, missing_ok);
-    }
   }
 
   ////////////////////////////////////////////////////////////////////////
