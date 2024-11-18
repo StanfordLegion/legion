@@ -219,7 +219,6 @@ namespace Realm {
     initial_value = 0;
     value_capacity = 0;
     final_values = 0;
-    needs_ordering = false;
   }
 
   BarrierImpl::~BarrierImpl(void)
