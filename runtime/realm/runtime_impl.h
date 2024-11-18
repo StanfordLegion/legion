@@ -31,6 +31,7 @@
 
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)
+#include "realm/comp_queue_impl.h"
 #include "realm/event_impl.h"
 #include "realm/barrier_impl.h"
 #include "realm/rsrv_impl.h"
@@ -63,45 +64,45 @@ namespace Realm {
 
   class Channel; // from transfer/channel.h
 
-    // use a wide tree for local events - max depth will be 2
-    typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
-    // use a narrow tree for remote events - depth is 3, leaves have 128 events
-    typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
-    typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
-    typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
-    typedef DynamicTableAllocator<ProcessorGroupImpl, 10, 4> ProcessorGroupTableAllocator;
-    typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
-    typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
-    typedef DynamicTableAllocator<SubgraphImpl, 10, 4> SubgraphTableAllocator;
+  // use a wide tree for local events - max depth will be 2
+  // use a narrow tree for remote events - depth is 3, leaves have 128 events
+  typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
+  typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
+  typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
+  typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
+  typedef DynamicTableAllocator<ProcessorGroupImpl, 10, 4> ProcessorGroupTableAllocator;
+  typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
+  typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
+  typedef DynamicTableAllocator<SubgraphImpl, 10, 4> SubgraphTableAllocator;
 
-    // for each of the ID-based runtime objects, we're going to have an
-    //  implementation class and a table to look them up in
-    struct Node {
-      Node(void);
-      ~Node(void);
+  // for each of the ID-based runtime objects, we're going to have an
+  //  implementation class and a table to look them up in
+  struct Node {
+    Node(void);
+    ~Node(void);
 
-      Node(const Node &) = delete;
-      Node &operator=(const Node &) = delete;
-      Node(Node &&) noexcept = delete;
-      Node &operator=(Node &&) noexcept = delete;
+    Node(const Node &) = delete;
+    Node &operator=(const Node &) = delete;
+    Node(Node &&) noexcept = delete;
+    Node &operator=(Node &&) noexcept = delete;
 
-      // not currently resizable
-      std::vector<MemoryImpl *> memories;
-      std::vector<IBMemory *> ib_memories;
-      std::vector<ProcessorImpl *> processors;
-      std::vector<Channel *> dma_channels;
+    // not currently resizable
+    std::vector<MemoryImpl *> memories;
+    std::vector<IBMemory *> ib_memories;
+    std::vector<ProcessorImpl *> processors;
+    std::vector<Channel *> dma_channels;
 
-      DynamicTable<RemoteEventTableAllocator> remote_events;
-      DynamicTable<BarrierTableAllocator> barriers;
-      DynamicTable<ReservationTableAllocator> reservations;
-      DynamicTable<CompQueueTableAllocator> compqueues;
+    DynamicTable<RemoteEventTableAllocator> remote_events;
+    DynamicTable<BarrierTableAllocator> barriers;
+    DynamicTable<ReservationTableAllocator> reservations;
+    DynamicTable<CompQueueTableAllocator> compqueues;
 
-      // sparsity maps can be created by other nodes, so keep a
-      //  map per-creator_node
-      std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> > sparsity_maps;
-      std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> > subgraphs;
-      std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> > proc_groups;
-    };
+    // sparsity maps can be created by other nodes, so keep a
+    //  map per-creator_node
+    std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *>> sparsity_maps;
+    std::vector<atomic<DynamicTable<SubgraphTableAllocator> *>> subgraphs;
+    std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *>> proc_groups;
+  };
 
     // the "core" module provides the basic memories and processors used by Realm
     class CoreModuleConfig : public ModuleConfig {

@@ -1394,9 +1394,13 @@ namespace Realm {
 
   LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, int _numa_node,
                                  Memory::Kind _lowlevel_kind, void *prealloc_base /*= 0*/,
-                                 NetworkSegment *_segment /*= 0*/)
+                                 NetworkSegment *_segment /*= 0*/,
+                                 bool enable_ipc /*= true*/)
     : LocalManagedMemory(_me, _size, MKIND_SYSMEM, ALIGNMENT, _lowlevel_kind, _segment)
-    , numa_node(_numa_node), base(nullptr), base_orig(nullptr), prealloced(false)
+    , numa_node(_numa_node)
+    , base(nullptr)
+    , base_orig(nullptr)
+    , prealloced(false)
   {
     if(prealloc_base) {
       base = (char *)prealloc_base;
@@ -1406,10 +1410,12 @@ namespace Realm {
       SharedMemoryInfo shared_memory;
       log_malloc.debug() << "Trying to create shm for " << me;
 #if defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
-      if(SharedMemoryInfo::create(shared_memory, size, nullptr, numa_node))
+      if(enable_ipc &&
+         (SharedMemoryInfo::create(shared_memory, size, nullptr, numa_node)))
 #else
       std::string name = get_shm_name(mem->memory_id);
-      if(SharedMemoryInfo::create(shared_memory, size, name.c_str(), numa_node))
+      if(enable_ipc &&
+         (SharedMemoryInfo::create(shared_memory, size, name.c_str(), numa_node)))
 #endif
       {
         base = shared_memory.get_ptr<char>();

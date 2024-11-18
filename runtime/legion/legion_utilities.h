@@ -292,15 +292,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<bool REDUCTIONS_INTERFERE>
+    template<bool READ_DISCARD_EXCLUSIVE, bool REDUCTIONS_INTERFERE>
     static inline DependenceType check_dependence_type(const RegionUsage &u1,
                                                        const RegionUsage &u2)
     //--------------------------------------------------------------------------
     {
-      // Two readers are never a dependence
       if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
       {
-        return LEGION_NO_DEPENDENCE;
+        // Two readers are never a dependence unless the second is discarding
+        if (READ_DISCARD_EXCLUSIVE && IS_READ_DISCARD(u2))
+          return LEGION_TRUE_DEPENDENCE;
+        else
+          return LEGION_NO_DEPENDENCE;
       }
       else if (!REDUCTIONS_INTERFERE && IS_REDUCE(u1) && IS_REDUCE(u2))
       {

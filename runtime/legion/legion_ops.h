@@ -50,9 +50,6 @@ namespace Legion {
       static void serialize_null(Serializer &rez);
       static Provenance* deserialize(Deserializer &derez);
     public:
-      inline const char* human_str(void) const { return human.data(); }
-      inline const char* machine_str(void) const { return machine.data(); }
-    public:
       const ProvenanceID pid;
     public:
       std::string full;
@@ -3524,7 +3521,7 @@ namespace Legion {
       std::vector<FieldDataDescriptor>  instances;
       std::vector<ApEvent>              index_preconditions;
       std::vector<PointDepPartOp*>      points; 
-      std::atomic<unsigned>             points_completed;
+      std::atomic<int>                  points_completed;
       unsigned                          points_committed;
       bool                              commit_request;
       std::set<RtEvent>                 commit_preconditions;

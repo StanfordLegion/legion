@@ -42,9 +42,7 @@ namespace Realm {
       size_t cfg_stack_size = 2 << 20;
 
       // resources
-      bool resource_discovered = false;
-      bool res_numa_available = false;
-      size_t res_numa_nodes = 0;
+      std::vector<size_t> res_numa_mems; // the size of total memory of each numa domain.
     };
 
     // our interface to the rest of the runtime

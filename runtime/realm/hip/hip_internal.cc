@@ -1018,6 +1018,8 @@ namespace Realm {
                                                        (p * pstride));
                         CHECK_HIP( hipMemcpy2DAsync(dstDevice, lstride, srcDevice, lstride, bytes, lines, hipMemcpyDeviceToDevice, stream->get_stream()) );
                       }
+                      out_alc.advance(2, planes);
+                      total_bytes += bytes * lines * planes;
                     }
                   }
                 }
