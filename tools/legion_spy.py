@@ -4038,7 +4038,7 @@ class LogicalVerificationState(object):
                     return dominates, True
                 else:
                     if not logical_op.has_verification_point_wise_mapping_dependence(
-                            op.reqs[req.index], prev_logical,
+                            op.reqs[req.index], prev_op, prev_logical,
                             prev_op.reqs[prev_req.index], dep_type,
                             self.field, previous_deps):
                         return dominates, False
@@ -7583,7 +7583,8 @@ class Operation(object):
                 queue.append(next_op)
         return False
 
-    def has_verification_point_wise_mapping_dependence(self, req, prev_op, prev_req, dtype,
+    def has_verification_point_wise_mapping_dependence(self, req, prev_op, prev_logical,
+                                            prev_req, dtype,
                                             field, previous_deps):
         tree_id = req.logical_node.tree_id
         # Do a quick check to see if it is in the previous deps
@@ -7591,9 +7592,10 @@ class Operation(object):
             # We already found this prev_op as a previous dependence
             return True
         self.has_verification_transitive_point_wise_mapping_dependence(prev_op,
+                                                    prev_logical,
                                                     field, tree_id, previous_deps)
         # Did not find it so issue the error and return false
-        if prev_op not in previous_deps:
+        if prev_op not in previous_deps and prev_logical not in previous_deps:
             print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
                   "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
@@ -7607,30 +7609,35 @@ class Operation(object):
         return False
 
     def has_verification_transitive_point_wise_mapping_dependence(self, prev_op,
-                                                    field, tree_id, previous_deps):
-
+                                                prev_logical,
+                                                field, tree_id, previous_deps):
         queue = collections.deque()
-        queue.append(self)
+        queue.append((self, prev_op))
         previous_deps[self] = None
 
         if len(previous_deps) > 0:
             for op in iterkeys(previous_deps):
-                queue.append(op)
+                queue.append((op, prev_op))
 
         while queue:
-            current = queue.popleft()
+            current, target = queue.pop()
 
-            if current is prev_op:
+            if current is target:
                 return True
+
+            if (current.kind == MAPPING_FENCE_OP_KIND or
+                    current.kind == EXECUTION_FENCE_OP_KIND or
+                    current.kind == INTER_CLOSE_OP_KIND):
+                target = prev_logical
 
             if current.is_index_op() and current.points:
                 for point in current.points.values():
                     if point.op not in previous_deps:
-                        queue.append(point.op)
+                        queue.append((point.op, target))
                         previous_deps[point.op] = None
             else:
                 if current.index_owner and current.index_owner not in previous_deps:
-                    queue.append(current.index_owner)
+                    queue.append((current.index_owner, target))
                     previous_deps[current.index_owner] = None
 
             if not current.logical_incoming:
@@ -7638,9 +7645,9 @@ class Operation(object):
             for next_op in current.logical_incoming:
                 if next_op not in previous_deps:
                     previous_deps[next_op] = None
-                    if next_op is prev_op:
+                    if next_op is target:
                         return True
-                    queue.append(next_op)
+                    queue.append((next_op, target))
                     previous_deps[next_op] = None
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
