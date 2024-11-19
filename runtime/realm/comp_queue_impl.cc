@@ -364,9 +364,6 @@ namespace Realm {
       delete batches;
       batches = next_batch;
     }
-    if(completed_events) {
-      free(completed_events);
-    }
   }
 
   void CompQueueImpl::init(CompletionQueue _me, int _owner)
@@ -397,9 +394,7 @@ namespace Realm {
       max_events <<= 1;
     }
 
-    void *ptr = malloc(sizeof(Event) * max_events);
-    assert(ptr != 0);
-    completed_events = reinterpret_cast<Event *>(ptr);
+    completed_events = std::make_unique<Event[]>(max_events);
   }
 
   size_t CompQueueImpl::get_capacity() const { return max_events; }
@@ -412,11 +407,6 @@ namespace Realm {
     // ok to have completed events leftover, but no pending events
     assert(pending_events.load() == 0);
     max_events = 0;
-
-    if(completed_events) {
-      free(completed_events);
-      completed_events = 0;
-    }
   }
 
   void CompQueueImpl::add_event(Event event, EventImpl *ev_impl, bool faultaware)
@@ -584,12 +574,12 @@ namespace Realm {
           if((rd_ofs + count) > max_events) {
             size_t before_wrap = max_events - rd_ofs;
             // yes, two memcpy's needed
-            memcpy(events, completed_events + rd_ofs, before_wrap * sizeof(Event));
-            memcpy(events + before_wrap, completed_events,
+            memcpy(events, completed_events.get() + rd_ofs, before_wrap * sizeof(Event));
+            memcpy(events + before_wrap, completed_events.get(),
                    (count - before_wrap) * sizeof(Event));
           } else {
             // no, single memcpy does the job
-            memcpy(events, completed_events + rd_ofs, count * sizeof(Event));
+            memcpy(events, completed_events.get() + rd_ofs, count * sizeof(Event));
           }
         }
 
@@ -626,12 +616,12 @@ namespace Realm {
         if((rd_ofs + count) > max_events) {
           size_t before_wrap = max_events - rd_ofs;
           // yes, two memcpy's needed
-          memcpy(events, completed_events + rd_ofs, before_wrap * sizeof(Event));
-          memcpy(events + before_wrap, completed_events,
+          memcpy(events, completed_events.get() + rd_ofs, before_wrap * sizeof(Event));
+          memcpy(events + before_wrap, completed_events.get(),
                  (count - before_wrap) * sizeof(Event));
         } else {
           // no, single memcpy does the job
-          memcpy(events, completed_events + rd_ofs, count * sizeof(Event));
+          memcpy(events, completed_events.get() + rd_ofs, count * sizeof(Event));
         }
       }
 
@@ -663,19 +653,18 @@ namespace Realm {
         // should detect it precisely
         assert(cur_events == max_events);
         size_t new_size = max_events * 2;
-        Event *new_events = reinterpret_cast<Event *>(malloc(new_size * sizeof(Event)));
-        assert(new_events != 0);
+        std::unique_ptr<Event[]> new_events = std::make_unique<Event[]>(new_size);
         size_t rd_ofs = rd_ptr.load() & (max_events - 1);
         if(rd_ofs > 0) {
           // most cases wrap around
-          memcpy(new_events, completed_events + rd_ofs,
+          memcpy(new_events.get(), completed_events.get() + rd_ofs,
                  (cur_events - rd_ofs) * sizeof(Event));
-          memcpy(new_events + (cur_events - rd_ofs), completed_events,
+          memcpy(new_events.get() + (cur_events - rd_ofs), completed_events.get(),
                  rd_ofs * sizeof(Event));
-        } else
-          memcpy(new_events, completed_events, cur_events * sizeof(Event));
-        free(completed_events);
-        completed_events = new_events;
+        } else {
+          memcpy(new_events.get(), completed_events.get(), cur_events * sizeof(Event));
+        }
+        completed_events = std::move(new_events);
         rd_ptr.store(0);
         wr_ptr.store(cur_events);
         max_events = new_size;

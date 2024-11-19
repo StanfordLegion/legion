@@ -117,7 +117,7 @@ namespace Realm {
     atomic<size_t> consume_ptr = atomic<size_t>(0);
     size_t cur_events = 0;
 
-    Event *completed_events = nullptr;
+    std::unique_ptr<Event[]> completed_events = nullptr;
 
     atomic<bool> has_progress_events = atomic<bool>(0);
     GenEventImpl *local_progress_event = nullptr;
