@@ -539,12 +539,8 @@ namespace Legion {
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
         return false;
-      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
-        source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
-      assert(source_finder != op_map.end());
 #endif
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second);
