@@ -15,11 +15,8 @@
 
 #include "realm/comp_queue_impl.h"
 
-#include "realm/proc_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
-#include "realm/threads.h"
-#include "realm/profiling.h"
 
 namespace Realm {
 

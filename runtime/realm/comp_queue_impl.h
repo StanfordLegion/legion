@@ -18,24 +18,10 @@
 
 #include "realm/event.h"
 #include "realm/id.h"
-#include "realm/nodeset.h"
-#include "realm/faults.h"
-
-#include "realm/network.h"
 #include <realm/activemsg.h>
-
-#include "realm/lists.h"
-#include "realm/threads.h"
-#include "realm/logging.h"
-#include "realm/redop.h"
-#include "realm/bgwork.h"
-#include "realm/dynamic_table.h"
-
 #include "realm/event_impl.h"
 
 #include <vector>
-#include <map>
-#include <memory>
 
 namespace Realm {
 
