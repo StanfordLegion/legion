@@ -16,11 +16,10 @@
 #include "realm/event_impl.h"
 #include "realm/barrier_impl.h"
 
-#include "realm/proc_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
-#include "realm/threads.h"
-#include "realm/profiling.h"
+
+#include <cstring>
 
 namespace Realm {
 
@@ -158,7 +157,7 @@ namespace Realm {
       impl->redop = 0;
       impl->initial_value = 0;
       impl->value_capacity = 0;
-      impl->final_values = 0;
+      impl->final_values.clear();
     } else {
       impl->redop_id = redopid; // keep the ID too so we can share it
       impl->redop = get_runtime()->reduce_op_table.get(redopid, 0);
@@ -174,7 +173,7 @@ namespace Realm {
       memcpy(impl->initial_value.get(), initial_value, initial_value_size);
 
       impl->value_capacity = 0;
-      impl->final_values = 0;
+      impl->final_values.clear();
     }
 
     // and let the barrier rearm as many times as necessary without being released
@@ -365,7 +364,7 @@ namespace Realm {
     remote_trigger_gens.clear();
   }
 
-  BarrierImpl::~BarrierImpl(void) { free(final_values); }
+  BarrierImpl::~BarrierImpl(void) {}
 
   void BarrierImpl::init(ID _me, unsigned _init_owner)
   {
@@ -380,7 +379,7 @@ namespace Realm {
     redop = 0;
     initial_value = 0;
     value_capacity = 0;
-    final_values = 0;
+    final_values.clear();
     generation.store_release(0);
   }
 
@@ -704,18 +703,21 @@ namespace Realm {
         int rel_gen = barrier_gen - first_generation;
         assert(rel_gen > 0);
 
-        if((size_t)rel_gen > value_capacity) {
+        if(value_capacity < static_cast<size_t>(rel_gen)) {
           size_t new_capacity = rel_gen;
-          final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
-          while(value_capacity < new_capacity) {
-            memcpy(final_values + (value_capacity * redop->sizeof_lhs),
-                   initial_value.get(), redop->sizeof_lhs);
-            value_capacity += 1;
+          size_t old_capacity = value_capacity;
+          final_values.resize(new_capacity * redop->sizeof_lhs);
+          for(size_t i = old_capacity; i < new_capacity; ++i) {
+            std::memcpy(&final_values[i * redop->sizeof_lhs], initial_value.get(),
+                        redop->sizeof_lhs);
           }
+
+          value_capacity = new_capacity;
         }
 
-        (redop->cpu_apply_excl_fn)(final_values + ((rel_gen - 1) * redop->sizeof_lhs), 0,
-                                   reduce_value, 0, 1, redop->userdata);
+        (redop->cpu_apply_excl_fn)(final_values.data() +
+                                       ((rel_gen - 1) * redop->sizeof_lhs),
+                                   0, reduce_value, 0, 1, redop->userdata);
       }
 
       // do this AFTER we actually update the reduction value above :)
@@ -726,8 +728,9 @@ namespace Realm {
         int rel_gen = oldest_previous + 1 - first_generation;
         assert(rel_gen > 0);
         int count = trigger_gen - oldest_previous;
-        final_values_copy = bytedup(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
-                                    count * redop->sizeof_lhs);
+        final_values_copy =
+            bytedup(final_values.data() + ((rel_gen - 1) * redop->sizeof_lhs),
+                    count * redop->sizeof_lhs);
       }
 
       // external waiters need to be signalled inside the lock
@@ -975,8 +978,8 @@ namespace Realm {
           cur_owner = owner;
         }
       } else {
-        // needed generation has already occurred - trigger this waiter once we let go of
-        // lock
+        // needed generation has already occurred - trigger this waiter once we let go
+        // of lock
         trigger_now = true;
       }
     }
@@ -1016,7 +1019,8 @@ namespace Realm {
                                                bool forwarded, const void *data,
                                                size_t datalen)
   {
-    // take the lock and add the subscribing node - notice if they need to be notified for
+    // take the lock and add the subscribing node - notice if they need to be notified
+    // for
     //  any generations that have already triggered
     EventImpl::gen_t trigger_gen = 0;
     EventImpl::gen_t previous_gen = 0;
@@ -1034,8 +1038,8 @@ namespace Realm {
         break;
       } else {
         if(forwarded) {
-          // our own request wrapped back around can be ignored - we've already added the
-          // local waiter
+          // our own request wrapped back around can be ignored - we've already added
+          // the local waiter
           if(subscriber == Network::my_node_id) {
             break;
           }
@@ -1060,7 +1064,8 @@ namespace Realm {
             it->second = subscribe_gen;
           }
         } else {
-          // new subscription - don't reset remote_trigger_gens because the node may have
+          // new subscription - don't reset remote_trigger_gens because the node may
+          // have
           //  been subscribed in the past
           // NOTE: remote_subscribe_gens should only hold subscriptions for
           //  generations that haven't triggered, so if we're subscribing to
@@ -1086,8 +1091,9 @@ namespace Realm {
             int rel_gen = previous_gen + 1 - first_generation;
             assert(rel_gen > 0);
             final_values_size = (trigger_gen - previous_gen) * redop->sizeof_lhs;
-            final_values_copy = bytedup(
-                final_values + ((rel_gen - 1) * redop->sizeof_lhs), final_values_size);
+            final_values_copy =
+                bytedup(final_values.data() + ((rel_gen - 1) * redop->sizeof_lhs),
+                        final_values_size);
           }
         }
       }
@@ -1155,7 +1161,8 @@ namespace Realm {
           if(it->first != trigger_gen) {
             break;
           }
-          // it is contiguous, so absorb it into this message and remove the held trigger
+          // it is contiguous, so absorb it into this message and remove the held
+          // trigger
           log_barrier.info("collapsing future trigger: " IDFMT "/%d -> %d -> %d",
                            barrier_id, previous_gen, trigger_gen, it->second);
           trigger_gen = it->second;
@@ -1198,9 +1205,11 @@ namespace Realm {
 
         int rel_gen = trigger_gen - first_generation;
         assert(rel_gen > 0);
-        if(value_capacity < (size_t)rel_gen) {
+        if(value_capacity < static_cast<size_t>(rel_gen)) {
           size_t new_capacity = rel_gen;
-          final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
+          final_values.resize(new_capacity * redop->sizeof_lhs);
+          // final_values =
+          //   (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
           // no need to initialize new entries - we'll overwrite them now or when data
           // does show up
           value_capacity = new_capacity;
@@ -1209,7 +1218,8 @@ namespace Realm {
         // trigger_gen might have changed so make sure you use args.trigger_gen here
         assert(datalen == (redop->sizeof_lhs * (trigger_gen - previous_gen)));
         assert(previous_gen >= first_gen);
-        memcpy(final_values + ((previous_gen - first_generation) * redop->sizeof_lhs),
+        memcpy(final_values.data() +
+                   ((previous_gen - first_generation) * redop->sizeof_lhs),
                data, datalen);
       }
 
@@ -1247,7 +1257,13 @@ namespace Realm {
     assert(redop != 0);
     assert(value_size == redop->sizeof_lhs);
     assert(value != 0);
-    memcpy(value, final_values + ((rel_gen - 1) * redop->sizeof_lhs), redop->sizeof_lhs);
+
+    std::memcpy(value, &final_values[(rel_gen - 1) * redop->sizeof_lhs],
+                redop->sizeof_lhs);
+
+    // memcpy(value, final_values + ((rel_gen - 1) * redop->sizeof_lhs),
+    //      redop->sizeof_lhs);
+
     return true;
   }
 

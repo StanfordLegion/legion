@@ -22,15 +22,7 @@
 #include "realm/event_impl.h"
 #include "realm/id.h"
 #include "realm/nodeset.h"
-#include "realm/faults.h"
-
-#include "realm/network.h"
-
-#include "realm/lists.h"
-#include "realm/threads.h"
-#include "realm/logging.h"
 #include "realm/redop.h"
-#include "realm/bgwork.h"
 
 #include <vector>
 #include <map>
@@ -166,9 +158,8 @@ namespace Realm {
     ReductionOpID redop_id;
     const ReductionOpUntyped *redop = nullptr;
     std::unique_ptr<char[]> initial_value{};
-
     unsigned value_capacity = 0;
-    char *final_values = nullptr;
+    std::vector<char> final_values;
   };
 
   // active messages
