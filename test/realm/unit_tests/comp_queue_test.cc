@@ -1,7 +1,5 @@
 #include "realm/event_impl.h"
 #include "realm/comp_queue_impl.h"
-#include "realm/activemsg.h"
-#include <tuple>
 #include <gtest/gtest.h>
 
 using namespace Realm;
