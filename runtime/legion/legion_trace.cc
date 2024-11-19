@@ -544,10 +544,6 @@ namespace Legion {
 #endif
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second);
-      // Note that if the source is a non-close internal operation then
-      // we also come through this pathway so that we record dependences
-      // on anything that the operation records any transitive dependences
-      // on things that its internal operations dependended on
       for (LegionVector<DependenceRecord>::iterator it =
             info.dependences.begin(); it != info.dependences.end(); it++)
         if (it->merge(record))
