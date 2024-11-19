@@ -1233,8 +1233,6 @@ namespace Realm {
         if(value_capacity < static_cast<size_t>(rel_gen)) {
           size_t new_capacity = rel_gen;
           final_values.resize(new_capacity * redop->sizeof_lhs);
-          // final_values =
-          //   (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
           // no need to initialize new entries - we'll overwrite them now or when data
           // does show up
           value_capacity = new_capacity;
