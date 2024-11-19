@@ -161,18 +161,6 @@ namespace Realm {
     unsigned value_capacity = 0;
     std::vector<char> final_values;
   };
-
-  // active messages
-
-  struct BarrierMigrationMessage {
-    Barrier barrier;
-    NodeID current_owner;
-
-    static void handle_message(NodeID sender, const BarrierMigrationMessage &msg,
-                               const void *data, size_t datalen);
-    static void send_request(NodeID target, Barrier barrier, NodeID owner);
-  };
-
 }; // namespace Realm
 
 #include "realm/barrier_impl.inl"

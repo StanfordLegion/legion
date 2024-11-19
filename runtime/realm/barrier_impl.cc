@@ -308,6 +308,31 @@ namespace Realm {
         amsg.commit();
       }
     };
+
+    struct BarrierMigrationMessage {
+      Barrier barrier;
+      NodeID current_owner;
+
+      static void handle_message(NodeID sender, const BarrierMigrationMessage &args,
+                                 const void *data, size_t datalen)
+      {
+        log_barrier.info() << "received barrier migration: barrier=" << args.barrier
+                           << " owner=" << args.current_owner;
+        BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
+        {
+          AutoLock<> a(impl->mutex);
+          impl->owner = args.current_owner;
+        }
+      }
+
+      static void send_request(NodeID target, Barrier barrier, NodeID owner)
+      {
+        ActiveMessage<BarrierMigrationMessage> amsg(target);
+        amsg->barrier = barrier;
+        amsg->current_owner = owner;
+        amsg.commit();
+      }
+    };
   } // namespace
 
   ////////////////////////////////////////////////////////////////////////
@@ -1265,29 +1290,6 @@ namespace Realm {
     //      redop->sizeof_lhs);
 
     return true;
-  }
-
-  /*static*/ void
-  BarrierMigrationMessage::handle_message(NodeID sender,
-                                          const BarrierMigrationMessage &args,
-                                          const void *data, size_t datalen)
-  {
-    log_barrier.info() << "received barrier migration: barrier=" << args.barrier
-                       << " owner=" << args.current_owner;
-    BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
-    {
-      AutoLock<> a(impl->mutex);
-      impl->owner = args.current_owner;
-    }
-  }
-
-  /*static*/ void BarrierMigrationMessage::send_request(NodeID target, Barrier barrier,
-                                                        NodeID owner)
-  {
-    ActiveMessage<BarrierMigrationMessage> amsg(target);
-    amsg->barrier = barrier;
-    amsg->current_owner = owner;
-    amsg.commit();
   }
 
   ActiveMessageHandlerReg<BarrierAdjustMessage> barrier_adjust_message_handler;
