@@ -538,6 +538,9 @@ if(Legion_USE_CUDA)
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
   target_compile_definitions(RealmStatic INTERFACE USE_CUDA)
 
+  target_include_directories(RealmRuntime PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  target_include_directories(RealmStatic PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
   set_target_cuda_standard(RealmStatic STANDARD ${Legion_CUDA_STANDARD})
@@ -553,9 +556,9 @@ if(Legion_USE_CUDA)
   endif()
   target_include_directories(realm_cuhook PRIVATE
                             ${CMAKE_CURRENT_SOURCE_DIR}
-                            ${PROJECT_BINARY_DIR}/runtime)
+                            ${PROJECT_BINARY_DIR}/runtime
+                            ${CUDAToolkit_CUPTI_INCLUDE_DIR})
   target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
-  add_dependencies(RealmRuntime realm_cuhook)
   install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
@@ -648,6 +651,9 @@ if(Legion_USE_Kokkos)
   get_property(kokkos_include_dirs
                TARGET Kokkos::kokkoscore
                PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  if(Legion_USE_CUDA)
+    list(APPEND kokkos_include_dirs ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  endif()
   list(TRANSFORM kokkos_include_dirs PREPEND "-I")
   list(APPEND kokkos_compile_options ${kokkos_include_dirs}
                                      "-I${CMAKE_CURRENT_SOURCE_DIR}"

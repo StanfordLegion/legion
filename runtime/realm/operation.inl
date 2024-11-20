@@ -77,7 +77,7 @@ namespace Realm {
 
   inline Event Operation::get_finish_event(void) const
   {
-    return finish_event->make_event(finish_gen);
+    return finish_event != nullptr ? finish_event->make_event(finish_gen) : Event::NO_EVENT;
   }
 
   // used to record event wait intervals, if desired
