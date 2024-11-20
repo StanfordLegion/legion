@@ -16045,7 +16045,8 @@ namespace Legion {
         for (FieldMaskSet<RefinementOp,UNTRACKED_ALLOC,true>::const_iterator
               it = refinements.begin(); it != refinements.end(); it++)
         {
-          const LogicalUser refinement_user(it->first, 0/*index*/, ref_usage);
+          const LogicalUser refinement_user(it->first,
+              it->first->get_internal_index(), ref_usage);
           // Recording refinement dependences will record dependences on 
           // anything in an interfering sub-tree without changing the
           // state of the region tree states
