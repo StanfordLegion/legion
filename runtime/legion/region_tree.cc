@@ -5334,22 +5334,32 @@ namespace Legion {
         return rhs;
       if (rhs->is_empty())
         return lhs;
-      IndexSpaceExpression *lhs_canon = lhs->get_canonical_expression(this);
-      IndexSpaceExpression *rhs_canon = rhs->get_canonical_expression(this);
-      if (lhs_canon == rhs_canon)
-        return lhs;
-      std::vector<IndexSpaceExpression*> exprs(2);
-      if (compare_expressions(lhs_canon, rhs_canon))
+      IndexSpaceExpression *result = lhs->inline_union(rhs);
+      if (result == NULL)
       {
-        exprs[0] = lhs_canon;
-        exprs[1] = rhs_canon;
+        IndexSpaceExpression *lhs_canon = lhs->get_canonical_expression(this);
+        IndexSpaceExpression *rhs_canon = rhs->get_canonical_expression(this);
+        if (lhs_canon == rhs_canon)
+          return lhs;
+        std::vector<IndexSpaceExpression*> exprs(2);
+        if (compare_expressions(lhs_canon, rhs_canon))
+        {
+          exprs[0] = lhs_canon;
+          exprs[1] = rhs_canon;
+        }
+        else
+        {
+          exprs[0] = rhs_canon;
+          exprs[1] = lhs_canon;
+        }
+        result = union_index_spaces(exprs);
       }
-      else
+      else if ((result != lhs) && (result != rhs))
       {
-        exprs[0] = rhs_canon;
-        exprs[1] = lhs_canon;
+        result->add_base_expression_reference(LIVE_EXPR_REF);
+        ImplicitReferenceTracker::record_live_expression(result);
       }
-      return union_index_spaces(exprs);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5365,6 +5375,16 @@ namespace Legion {
 #endif
       if (exprs.size() == 1)
         return *(exprs.begin());
+      IndexSpaceExpression *result = (*exprs.begin())->inline_union(exprs);
+      if (result != NULL)
+      {
+        if (exprs.find(result) == exprs.end())
+        {
+          result->add_base_expression_reference(LIVE_EXPR_REF);
+          ImplicitReferenceTracker::record_live_expression(result);
+        }
+        return result;
+      }
       std::vector<IndexSpaceExpression*> expressions;
       expressions.reserve(exprs.size());
       for (std::set<IndexSpaceExpression*>::const_iterator it = 
@@ -5484,7 +5504,7 @@ namespace Legion {
               it != unique_expressions.end(); it++)
           expressions[index++] = *it;
       }
-      IndexSpaceExpression *result = union_index_spaces(expressions);
+      result = union_index_spaces(expressions);
       if (exprs.find(result) == exprs.end())
       {
         result->add_base_expression_reference(LIVE_EXPR_REF);
@@ -5594,22 +5614,32 @@ namespace Legion {
         return lhs;
       if (rhs->is_empty())
         return rhs;
-      IndexSpaceExpression *lhs_canon = lhs->get_canonical_expression(this);
-      IndexSpaceExpression *rhs_canon = rhs->get_canonical_expression(this);
-      if (lhs_canon == rhs_canon)
-        return lhs;
-      std::vector<IndexSpaceExpression*> exprs(2);
-      if (compare_expressions(lhs_canon, rhs_canon))
+      IndexSpaceExpression *result = lhs->inline_intersection(rhs);
+      if (result == NULL)
       {
-        exprs[0] = lhs_canon;
-        exprs[1] = rhs_canon;
+        IndexSpaceExpression *lhs_canon = lhs->get_canonical_expression(this);
+        IndexSpaceExpression *rhs_canon = rhs->get_canonical_expression(this);
+        if (lhs_canon == rhs_canon)
+          return lhs;
+        std::vector<IndexSpaceExpression*> exprs(2);
+        if (compare_expressions(lhs_canon, rhs_canon))
+        {
+          exprs[0] = lhs_canon;
+          exprs[1] = rhs_canon;
+        }
+        else
+        {
+          exprs[0] = rhs_canon;
+          exprs[1] = lhs_canon;
+        }
+        result = intersect_index_spaces(exprs);
       }
-      else
+      else if ((result != lhs) && (result != rhs))
       {
-        exprs[0] = rhs_canon;
-        exprs[1] = lhs_canon;
+        result->add_base_expression_reference(LIVE_EXPR_REF);
+        ImplicitReferenceTracker::record_live_expression(result);
       }
-      return intersect_index_spaces(exprs);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5625,6 +5655,17 @@ namespace Legion {
 #endif
       if (exprs.size() == 1)
         return *(exprs.begin());
+      IndexSpaceExpression *result = 
+        (*exprs.begin())->inline_intersection(exprs);
+      if (result != NULL)
+      {
+        if (exprs.find(result) == exprs.end())
+        {
+          result->add_base_expression_reference(LIVE_EXPR_REF);
+          ImplicitReferenceTracker::record_live_expression(result);
+        }
+        return result;
+      }
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
       // Do a quick pass to see if any of them are empty in which case we
       // know that the result of the whole intersection is empty
@@ -5754,7 +5795,7 @@ namespace Legion {
               it != unique_expressions.end(); it++)
           expressions[index++] = *it;
       }
-      IndexSpaceExpression *result = intersect_index_spaces(expressions);
+      result = intersect_index_spaces(expressions);
       if (exprs.find(result) == exprs.end())
       {
         result->add_base_expression_reference(LIVE_EXPR_REF);
@@ -5870,12 +5911,21 @@ namespace Legion {
         if (rhs->is_empty())
           return lhs;
       }
+      IndexSpaceExpression *result = lhs->inline_subtraction(rhs);
+      if (result != NULL)
+      {
+        if (result != lhs)
+        {
+          result->add_base_expression_reference(LIVE_EXPR_REF);
+          ImplicitReferenceTracker::record_live_expression(result);
+        }
+        return result;
+      }
       std::vector<IndexSpaceExpression*> expressions(2);
       expressions[0] = lhs->get_canonical_expression(this);
       expressions[1] = rhs->get_canonical_expression(this);
       const IndexSpaceExprID key = expressions[0]->expr_id;
       // See if we can find it in read-only mode
-      IndexSpaceExpression *result = NULL;
       {
         AutoLock l_lock(lookup_is_op_lock,1,false/*exclusive*/);
         std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 

@@ -86,6 +86,242 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceExpression::inline_union_internal(
+        IndexSpaceExpression *rhs, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      // Disable the fast path for Legion Spy to avoid creating too many
+      // index space expressions for it to deal with
+      if (implicit_runtime->legion_spy_enabled)
+        return NULL;
+      DomainT<DIM,T> domain;
+      get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      Rect<DIM,T> bounds = domain.bounds;
+      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      if (bounds.contains(domain.bounds))
+        return this;
+      if (domain.bounds.contains(bounds))
+        return rhs;
+      // The union bbox is the union if the volume of the union bbox is the 
+      // same as the volume of each rect added together and subtracted by
+      // their overlap
+      const Rect<DIM,T> result = bounds.union_bbox(domain.bounds);
+      if (result.volume() == (bounds.volume() + domain.bounds.volume() -
+            bounds.intersection(domain.bounds).volume()))
+        return new IndexSpaceUnion<DIM,T>(result, context);
+      else
+        return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceExpression::inline_union_internal(
+        const std::set<IndexSpaceExpression*> &exprs, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      // Disable the fast path for Legion Spy to avoid creating too many
+      // index space expressions for it to deal with
+      if (implicit_runtime->legion_spy_enabled)
+        return NULL;
+      if (exprs.size() == 2)
+        return this->inline_union_internal<DIM,T>(*exprs.rbegin(), context);
+      DomainT<DIM,T> domain;
+      get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      Rect<DIM,T> result = domain.bounds;
+      std::vector<Rect<DIM,T> > previous;
+      previous.reserve(exprs.size());
+      size_t total_volume = 0;
+      // Try to use the union bbox, we'll only be able to use this if all
+      // the rects are disjoint or contained by each other and then we can
+      // sum up the points that we should expect to find
+      for (std::set<IndexSpaceExpression*>::const_iterator eit =
+            exprs.begin(); eit != exprs.end(); eit++)
+      {
+        (*eit)->get_expr_index_space(&domain, type_tag, true/*tight*/);
+        if (!domain.dense())
+          return NULL;
+        bool dominated = false;
+        for (typename std::vector<Rect<DIM,T> >::iterator it =
+              previous.begin(); it != previous.end(); /*nothing*/)
+        {
+          if (!domain.bounds.overlaps(*it))
+          {
+            it++;
+            continue;
+          }
+          if (it->contains(domain.bounds))
+          {
+            dominated = true;
+            break;
+          }
+          else if (domain.bounds.contains(*it))
+          {
+            // subtract out the old volume since it no longer will count
+            total_volume -= it->volume();
+            // Remove the entry from the list since it's no longer needed
+            it = previous.erase(it);
+            // still need to keep going to check for overlaps
+            continue;
+          }
+          // If we get here it overlaps without dominating which is bad
+          // and we can't handle that case with union bbox at the moment
+          return NULL;
+        }
+        if (!dominated)
+        {
+          result = result.union_bbox(domain.bounds);
+          previous.push_back(domain.bounds);
+          total_volume += domain.bounds.volume();
+        }
+      }
+      if (result.volume() == total_volume)
+        return new IndexSpaceUnion<DIM,T>(result, context);
+      else
+        return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceExpression::inline_intersection_internal(
+        IndexSpaceExpression *rhs, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      // Disable the fast path for Legion Spy to avoid creating too many
+      // index space expressions for it to deal with
+      if (implicit_runtime->legion_spy_enabled)
+        return NULL;
+      DomainT<DIM,T> domain;
+      get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      const Rect<DIM,T> bounds = domain.bounds;
+      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      const Rect<DIM,T> result = bounds.intersection(domain.bounds);
+      if (result == bounds)
+        return this;
+      if (result == domain.bounds)
+        return rhs;
+      // Make a new Intersection space that is a value of this space
+      return new IndexSpaceIntersection<DIM,T>(result, context); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceExpression::inline_intersection_internal(
+        const std::set<IndexSpaceExpression*> &exprs, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      // Disable the fast path for Legion Spy to avoid creating too many
+      // index space expressions for it to deal with
+      if (implicit_runtime->legion_spy_enabled)
+        return NULL;
+      DomainT<DIM,T> domain;
+      get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      Rect<DIM,T> result = domain.bounds;
+      IndexSpaceExpression *smallest = NULL;
+      for (std::set<IndexSpaceExpression*>::const_iterator it =
+            exprs.begin(); it != exprs.end(); it++)
+      {
+        (*it)->get_expr_index_space(&domain, type_tag, true/*tight*/);
+        if (!domain.dense())
+          return NULL;
+        const Rect<DIM,T> next = result.intersection(domain.bounds);
+        if (next != result)
+        {
+          if (next == domain.bounds)
+            smallest = (*it);
+          else
+            smallest = NULL;
+          result = next;
+        }
+      }
+      if (smallest != NULL)
+        return smallest;
+      return new IndexSpaceIntersection<DIM,T>(result, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceExpression::inline_subtraction_internal(
+        IndexSpaceExpression *rhs, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      // Disable the fast path for Legion Spy to avoid creating too many
+      // index space expressions for it to deal with
+      if (implicit_runtime->legion_spy_enabled)
+        return NULL;
+      DomainT<DIM,T> domain;
+      get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      Rect<DIM,T> bounds = domain.bounds;
+      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
+      if (!domain.dense())
+        return NULL;
+      // Handle the common case of equivalency
+      if (bounds == domain.bounds)
+      {
+        const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
+        return new IndexSpaceDifference<DIM,T>(empty, context);
+      }
+      // If they don't overlap then the subtraction is easy
+      if (!bounds.overlaps(domain.bounds))
+        return this;
+      // We can find up to one non-dominating dimension and still easily
+      // compute the difference, as soon as we have more than one then 
+      // this gets hard and we'll need to use Realm to compute all the
+      // different rectangles and put them in a sparsity map
+      // Note that even the non-dominating dimension still has to dominate
+      // on one side for this to work at all
+      int non_dominating_dim = -1;
+      for (int i = 0; i < DIM; i++)
+      {
+        if ((domain.bounds.lo[i] <= bounds.lo[i]) &&
+            (bounds.hi[i] <= domain.bounds.hi[i]))
+          continue;
+        if (domain.bounds.lo[i] <= bounds.lo[i])
+        {
+          // Check if dominated on both sides
+          if (bounds.hi[i] <= domain.bounds.hi[i])
+            continue;
+          // Just dominated on the low-side
+          if (non_dominating_dim > -1)
+            return NULL;
+          bounds.lo[i] = domain.bounds.hi[i]+1;
+        }
+        else if (bounds.hi[i] <= domain.bounds.hi[i])
+        {
+          // Just dominated on the high side
+          if (non_dominating_dim > -1)
+            return NULL;
+          bounds.hi[i] = domain.bounds.lo[i]-1;
+        }
+        else // Not dominated on either side
+          return NULL;
+        non_dominating_dim = i;
+      }
+      if (non_dominating_dim == -1)
+      {
+        // If all the dimensions were dominated then the result is empty
+        const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
+        return new IndexSpaceDifference<DIM,T>(empty, context);
+      }
+      else
+        return new IndexSpaceDifference<DIM,T>(bounds, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceExpression::issue_fill_internal(
                                  RegionTreeForest *forest, Operation *op,
                                  const Realm::IndexSpace<DIM,T> &space,
@@ -1345,6 +1581,51 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::inline_union(
+        IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_union_internal<DIM,T>(rhs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::inline_union(
+        const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_union_internal<DIM,T>(exprs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::inline_intersection(
+        IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_intersection_internal<DIM,T>(rhs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::inline_intersection(
+        const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_intersection_internal<DIM,T>(exprs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceOperationT<DIM,T>::inline_subtraction(
+        IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_subtraction_internal<DIM,T>(rhs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1667,6 +1948,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
+        const Rect<DIM,T> &bounds, RegionTreeForest *ctx)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::UNION_OP_KIND, ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Shouldn't be here if Legion Spy is enabled since we don't have
+      // logging for this and we don't want to make too many index space
+      // expressions for Legion Spy to deal with
+      assert(!implicit_runtime->legion_spy_enabled);
+#endif
+      this->realm_index_space = DomainT<DIM,T>(bounds);
+      this->tight_index_space = this->realm_index_space;
+      this->is_index_space_tight.store(true);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs)
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::UNION_OP_KIND, NULL)
     //--------------------------------------------------------------------------
@@ -1738,7 +2037,8 @@ namespace Legion {
     void IndexSpaceUnion<DIM,T>::remove_operation(void)
     //--------------------------------------------------------------------------
     {
-      this->context->remove_union_operation(this, sub_expressions);
+      if (!sub_expressions.empty())
+        this->context->remove_union_operation(this, sub_expressions);
     }
 
     //--------------------------------------------------------------------------
@@ -1817,6 +2117,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
+        const Rect<DIM,T> &bounds, RegionTreeForest *ctx)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::INTERSECT_OP_KIND, ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Shouldn't be here if Legion Spy is enabled since we don't have
+      // logging for this and we don't want to make too many index space
+      // expressions for Legion Spy to deal with
+      assert(!implicit_runtime->legion_spy_enabled);
+#endif
+      this->realm_index_space = DomainT<DIM,T>(bounds);
+      this->tight_index_space = this->realm_index_space;
+      this->is_index_space_tight.store(true);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceIntersection<DIM,T>::IndexSpaceIntersection(
                                       const IndexSpaceIntersection<DIM,T> &rhs)
       : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::INTERSECT_OP_KIND,NULL)
     //--------------------------------------------------------------------------
@@ -1888,7 +2206,8 @@ namespace Legion {
     void IndexSpaceIntersection<DIM,T>::remove_operation(void)
     //--------------------------------------------------------------------------
     {
-      this->context->remove_intersection_operation(this, sub_expressions);
+      if (!sub_expressions.empty())
+        this->context->remove_intersection_operation(this, sub_expressions);
     }
 
     //--------------------------------------------------------------------------
@@ -1968,6 +2287,25 @@ namespace Legion {
       if (ctx->runtime->legion_spy_enabled)
         LegionSpy::log_index_space_difference(this->expr_id,
                                               lhs->expr_id, rhs->expr_id);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceDifference<DIM,T>::IndexSpaceDifference(
+        const Rect<DIM,T> &bounds, RegionTreeForest *ctx)
+      : IndexSpaceOperationT<DIM,T>(IndexSpaceOperation::DIFFERENCE_OP_KIND,ctx)
+        , lhs(NULL), rhs(NULL)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Shouldn't be here if Legion Spy is enabled since we don't have
+      // logging for this and we don't want to make too many index space
+      // expressions for Legion Spy to deal with
+      assert(!implicit_runtime->legion_spy_enabled);
+#endif
+      this->realm_index_space = DomainT<DIM,T>(bounds);
+      this->tight_index_space = this->realm_index_space;
+      this->is_index_space_tight.store(true);
     }
 
     //--------------------------------------------------------------------------
@@ -4967,6 +5305,51 @@ namespace Legion {
       assert(false); // should never get here
       return NULL;
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::inline_union(
+        IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_union_internal<DIM,T>(rhs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::inline_union(
+        const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_union_internal<DIM,T>(exprs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::inline_intersection(
+        IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_intersection_internal<DIM,T>(rhs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::inline_intersection(
+        const std::set<IndexSpaceExpression*> &exprs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_intersection_internal<DIM,T>(exprs, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceNodeT<DIM,T>::inline_subtraction(
+        IndexSpaceExpression *rhs)
+    //--------------------------------------------------------------------------
+    {
+      return inline_subtraction_internal<DIM,T>(rhs, context);
     }
 
     //--------------------------------------------------------------------------

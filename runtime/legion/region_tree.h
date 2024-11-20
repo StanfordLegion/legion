@@ -1307,6 +1307,17 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,
                                          AddressSpaceID target) = 0;
     public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs) = 0;
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs) = 0;
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs) = 0;
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs) = 0;
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs) = 0;
+    public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) = 0;
 #endif
@@ -1434,6 +1445,24 @@ namespace Legion {
       // Convert this index space expression to the canonical one that
       // represents all expressions that are all congruent
       IndexSpaceExpression* get_canonical_expression(RegionTreeForest *forest);
+    protected:
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_union_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_union_internal(
+          const std::set<IndexSpaceExpression*> &exprs,
+          RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_intersection_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_intersection_internal(
+          const std::set<IndexSpaceExpression*> &exprs,
+          RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_subtraction_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
     protected:
       template<int DIM, typename T>
       inline ApEvent issue_fill_internal(RegionTreeForest *forest,Operation *op,
@@ -1670,6 +1699,17 @@ namespace Legion {
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
     public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs);
+    public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1758,6 +1798,7 @@ namespace Legion {
     public:
       IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
                       RegionTreeForest *context);
+      IndexSpaceUnion(const Rect<DIM,T> &bounds, RegionTreeForest *context);
       IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
       virtual ~IndexSpaceUnion(void);
     public:
@@ -1797,6 +1838,8 @@ namespace Legion {
       static const AllocationType alloc_type = INTERSECTION_EXPR_ALLOC;
     public:
       IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
+                             RegionTreeForest *context);
+      IndexSpaceIntersection(const Rect<DIM,T> &bounds, 
                              RegionTreeForest *context);
       IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
       virtual ~IndexSpaceIntersection(void);
@@ -1838,6 +1881,7 @@ namespace Legion {
     public:
       IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
                            RegionTreeForest *context);
+      IndexSpaceDifference(const Rect<DIM,T> &bounds, RegionTreeForest *ctx);
       IndexSpaceDifference(const IndexSpaceDifference &rhs);
       virtual ~IndexSpaceDifference(void);
     public:
@@ -2633,6 +2677,17 @@ namespace Legion {
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<std::string> &field_files,
                                    const OrderingConstraint &dimension_order);
+    public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs);
     public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
