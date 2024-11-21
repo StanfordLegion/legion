@@ -368,12 +368,10 @@ namespace Legion {
           }
         }
       }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      else if (static_cast<SliceTask*>(this)->need_forward_progress())
+      else if (need_forward_progress())
       {
         is_forward_progress = true;
       }
-#endif
       else
         is_forward_progress = true;
       forward_progress_cached = true;
@@ -2257,16 +2255,16 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Single Task 
+    // Single Task
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     SingleTask::SingleTask(Runtime *rt)
-      : TaskOp(rt)
+      : SinglePointWiseAnalysable<TaskOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
-    
+
     //--------------------------------------------------------------------------
     SingleTask::~SingleTask(void)
     //--------------------------------------------------------------------------
@@ -2278,7 +2276,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_SINGLE_CALL);
-      TaskOp::activate();
+      SinglePointWiseAnalysable<TaskOp>::activate();
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
@@ -2301,7 +2299,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_SINGLE_CALL);
-      TaskOp::deactivate(freeop);
+      SinglePointWiseAnalysable<TaskOp>::deactivate(freeop);
       target_processors.clear();
       physical_instances.clear();
       region_preconditions.clear();
@@ -2310,9 +2308,6 @@ namespace Legion {
       virtual_mapped.clear();
       no_access_regions.clear();
       intra_space_mapping_dependences.clear();
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      point_wise_mapping_dependences.clear();
-#endif
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
@@ -2385,10 +2380,8 @@ namespace Legion {
       this->physical_instances = rhs->physical_instances;
       this->intra_space_mapping_dependences = 
         rhs->intra_space_mapping_dependences;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
       this->point_wise_mapping_dependences =
         rhs->point_wise_mapping_dependences;
-#endif
       // no need to copy the control replication map
       this->selected_variant  = rhs->selected_variant;
       this->task_priority     = rhs->task_priority;
@@ -4168,7 +4161,6 @@ namespace Legion {
         record_completion_effect(single_task_termination);
       }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
       // If we have any point-wise mapping dependences that haven't triggered
       // then we need to defer ourselves until they have occurred, do this
       // before we invoke the mapper since the mapper might make instances
@@ -4183,7 +4175,6 @@ namespace Legion {
           return defer_perform_mapping(ready, must_epoch_op,
                                        defer_args, 1/*invocation count*/);
       }
-#endif
 
       // If we have any intra-space mapping dependences that haven't triggered
       // then we need to defer ourselves until they have occurred, do this
@@ -5218,7 +5209,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MultiTask::MultiTask(Runtime *rt)
-      : CollectiveViewCreator<TaskOp>(rt)
+      : PointWiseAnalysable<CollectiveViewCreator<TaskOp>>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -5234,7 +5225,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
-      CollectiveViewCreator<TaskOp>::activate();
+      PointWiseAnalysable<CollectiveViewCreator<TaskOp> >::activate();
       launch_space = NULL;
       future_map_coordinate = 0;
       future_handles = NULL;
@@ -5267,7 +5258,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, DEACTIVATE_MULTI_CALL);
       if (implicit_profiler != NULL)
         implicit_profiler->register_multi_task(this, task_id);
-      CollectiveViewCreator<TaskOp>::deactivate(freeop);
+      PointWiseAnalysable<CollectiveViewCreator<TaskOp> >::deactivate(freeop);
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       if ((future_handles != NULL) && future_handles->remove_reference())
@@ -5307,11 +5298,6 @@ namespace Legion {
       }
       predicate_false_future = Future();
       intra_space_dependences.clear();
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      point_wise_dependences.clear();
-      connect_to_prev_points.clear();
-      connect_to_next_points.clear();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5505,10 +5491,10 @@ namespace Legion {
       this->future_map = rhs->future_map;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
+
       this->connect_to_prev_points = rhs->connect_to_prev_points;
       this->connect_to_next_points = rhs->connect_to_next_points;
-#endif
+
       this->redop = rhs->redop;
       if (this->redop != 0)
       {
@@ -5786,25 +5772,25 @@ namespace Legion {
       }
 
 #ifdef POINT_WISE_LOGICAL_ANALYSIS
-        size_t num_connect_to_prev_points;
-        derez.deserialize(num_connect_to_prev_points);
-        connect_to_prev_points.resize(num_connect_to_prev_points);
-        for (unsigned idx = 0; idx < num_connect_to_prev_points; idx++)
-        {
-          bool result;
-          derez.deserialize(result);
-          connect_to_prev_points[idx] = result;
-        }
+      size_t num_connect_to_prev_points;
+      derez.deserialize(num_connect_to_prev_points);
+      connect_to_prev_points.resize(num_connect_to_prev_points);
+      for (unsigned idx = 0; idx < num_connect_to_prev_points; idx++)
+      {
+        bool result;
+        derez.deserialize(result);
+        connect_to_prev_points[idx] = result;
+      }
 
-        size_t num_connect_to_next_points;
-        derez.deserialize(num_connect_to_next_points);
-        connect_to_next_points.resize(num_connect_to_next_points);
-        for (unsigned idx = 0; idx < num_connect_to_next_points; idx++)
-        {
-          bool result;
-          derez.deserialize(result);
-          connect_to_next_points[idx];
-        }
+      size_t num_connect_to_next_points;
+      derez.deserialize(num_connect_to_next_points);
+      connect_to_next_points.resize(num_connect_to_next_points);
+      for (unsigned idx = 0; idx < num_connect_to_next_points; idx++)
+      {
+        bool result;
+        derez.deserialize(result);
+        connect_to_next_points[idx];
+      }
 #endif
     }
 
@@ -7780,7 +7766,6 @@ namespace Legion {
         SingleTask::convert_replicate_collective_views(key, rendezvous);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void PointTask::record_point_wise_dependence(LogicalRegion lr,
         unsigned region_idx)
@@ -7810,7 +7795,6 @@ namespace Legion {
             get_mapped_event());
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void PointTask::record_intra_space_dependences(unsigned index,
@@ -8418,14 +8402,12 @@ namespace Legion {
       get_replicate_context()->handle_intra_space_dependence(derez);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void ShardTask::handle_point_wise_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       get_replicate_context()->handle_point_wise_dependence(derez);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_resource_update(Deserializer &derez,
@@ -8591,9 +8573,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
       reduction_instance = NULL; // we don't own this so clear it
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      clear_context_maps();
-#endif
       MultiTask::deactivate(false/*free*/);
       if (!origin_mapped_slices.empty())
       {
@@ -8618,11 +8597,6 @@ namespace Legion {
       output_preconditions.clear();
       commit_preconditions.clear();
       version_infos.clear();
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      pending_point_wise_dependences.clear();
-      prev_index_tasks.clear();
-      completed_point_list.clear();
-#endif
       interfering_requirements.clear();
       point_requirements.clear();
       concurrent_slices.clear();
@@ -10324,7 +10298,6 @@ namespace Legion {
         intra_space_dependences[point] = point_mapped;
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     bool IndexTask::region_has_collective(unsigned region_idx, GenerationID gen)
     //--------------------------------------------------------------------------
@@ -10357,89 +10330,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::prev_point_wise_user_set(unsigned region_req_idx)
-    //--------------------------------------------------------------------------
-    {
-      return prev_index_tasks.find(region_req_idx)
-          != prev_index_tasks.end();
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexTask::set_prev_point_wise_user(Operation *prev_op,
-        GenerationID prev_gen, uint64_t prev_ctx_index,
-        ProjectionSummary *shard_proj,
-        unsigned region_idx, unsigned dep_type,
-        unsigned prev_region_idx, Domain index_domain)
-    //--------------------------------------------------------------------------
-    {
-      assert (index_domain != Domain::NO_DOMAIN);
-      if ((trace != NULL) && trace->is_recording())
-      {
-        trace->set_prev_point_wise_user(prev_op, prev_gen, prev_ctx_index,
-            shard_proj,
-            region_idx, dep_type, prev_region_idx,
-            index_domain,
-            this);
-      }
-      AutoLock o_lock(op_lock);
-      prev_index_tasks.insert({
-                              region_idx,
-                              PointWisePreviousIndexTaskInfo(
-                                  shard_proj->projection,
-                                  shard_proj->sharding,
-                                  shard_proj->sharding_domain,
-                                  index_domain,
-                                  prev_op, prev_gen, prev_ctx_index, dep_type,
-                                  prev_region_idx)
-                              });
-      set_connect_to_prev_point(region_idx);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::record_point_wise_dependence_completed_points_prev_task(
-        ProjectionSummary *shard_proj, uint64_t context_index)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<DomainPoint> prev_index_task_points;
-
-      Domain local_domain;
-      IndexSpace shard_space;
-
-      // Compute the local index space of points for this shard
-      if (shard_proj->sharding != NULL)
-      {
-        shard_space = shard_proj->sharding->find_shard_space(
-              parent_ctx->get_shard_id(),
-              shard_proj->domain,
-              shard_proj->sharding_domain->handle,
-              get_provenance());
-        if (shard_space.exists())
-        {
-          runtime->forest->find_domain(shard_space, local_domain);
-        }
-        else return;
-      }
-      else
-        shard_proj->domain->get_domain(local_domain);
-
-      for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
-      {
-        prev_index_task_points.push_back((*dpi));
-      }
-
-      assert(!prev_index_task_points.empty());
-
-      for(std::vector<DomainPoint>::iterator it =
-          prev_index_task_points.begin(); it !=
-          prev_index_task_points.end(); it++)
-      {
-        parent_ctx->record_point_wise_dependence(context_index,
-            (*it), RtEvent::NO_RT_EVENT);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::clear_context_maps(void)
     //--------------------------------------------------------------------------
     {
@@ -10465,59 +10355,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::set_next_point_wise_user(Operation *next_op,
-        GenerationID next_gen, GenerationID user_gen, unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      if ((trace != NULL) && trace->is_recording())
-      {
-        trace->set_next_point_wise_user(next_op, next_gen, user_gen, region_idx, this);
-      }
-
-      AutoLock o_lock(op_lock);
-
-      if (user_gen < gen)
-      {
-        return false;
-      }
-
-      if (!completed_point_list.empty())
-      {
-        for(std::vector<std::pair<DomainPoint,RtEvent>>::iterator it =
-            completed_point_list.begin(); it !=
-            completed_point_list.end(); it++)
-        {
-          parent_ctx->record_point_wise_dependence(context_index,
-              (*it).first, (*it).second);
-        }
-      }
-
-      set_connect_to_next_point(region_idx);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::get_points(RegionRequirement &req,
-        ProjectionFunction *projection,
-        LogicalRegion lr, Domain index_domain,
-        std::vector<DomainPoint> &points)
-    //--------------------------------------------------------------------------
-    {
-      if (req.handle_type == LEGION_PARTITION_PROJECTION)
-      {
-        projection->functor->invert(lr,
-            req.partition, index_domain,
-            points);
-      }
-      else
-      {
-        projection->functor->invert(lr,
-            req.region, index_domain,
-            points);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::record_point_wise_dependence(DomainPoint point,
                                                  unsigned region_idx,
                                                  RtEvent point_mapped)
@@ -10537,14 +10374,13 @@ namespace Legion {
       if (should_connect_to_prev_point(region_idx))
       {
         // Find prev index task our owner index task depend on
-        std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
+        std::map<unsigned, PointWisePrevOpInfo>::iterator finder =
           prev_index_tasks.find(region_idx);
         assert(finder != prev_index_tasks.end());
-        IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.previous_index_task);
-        GenerationID prev_task_gen = finder->second.previous_index_task_generation;
 
 #ifndef LEGION_SPY
-        if (prev_task_gen < prev_index_task->get_generation())
+        if (finder->second.previous_index_task_generation <
+            finder->second.previous_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
 #endif
 
@@ -10571,7 +10407,8 @@ namespace Legion {
             region_idx, 0,
             finder->second.dep_type);
 
-        if (prev_task_gen < prev_index_task->get_generation())
+        if (finder->second.previous_index_task_generation <
+            finder->second.previous_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
 #endif
 
@@ -10582,7 +10419,6 @@ namespace Legion {
       assert(false);
       return RtUserEvent::NO_RT_USER_EVENT;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void IndexTask::record_origin_mapped_slice(SliceTask *local_slice)
@@ -11155,62 +10991,6 @@ namespace Legion {
       derez.deserialize(mapped_event);
       task->record_intra_space_dependence(point, next, mapped_event);
     }
-
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexTask::process_slice_add_point_to_completed_list(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexTask *task;
-      derez.deserialize(task);
-      DomainPoint point;
-      derez.deserialize(point);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      RtEvent mapped_event;
-      derez.deserialize(mapped_event);
-      task->add_point_to_completed_list(point, region_idx, mapped_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexTask::process_slice_find_point_wise_dependence(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexTask *task;
-      derez.deserialize(task);
-      LogicalRegion lr;
-      derez.deserialize(lr);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DomainPoint point;
-      derez.deserialize(point);
-      const RtEvent result = task->find_point_wise_dependence(point, lr, region_idx);
-      Runtime::trigger_event(to_trigger, result);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexTask::process_slice_record_point_wise_dependence(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexTask *task;
-      derez.deserialize(task);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      RtEvent mapped_event;
-      derez.deserialize(mapped_event);
-      DomainPoint point;
-      derez.deserialize(point);
-      task->record_point_wise_dependence(point, region_idx, mapped_event);
-    }
-#endif
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
@@ -12554,7 +12334,6 @@ namespace Legion {
       Runtime::trigger_event(applied);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     bool SliceTask::need_forward_progress(void)
     //--------------------------------------------------------------------------
@@ -12562,7 +12341,6 @@ namespace Legion {
       return connect_to_prev_points.size() > 0 ||
         connect_to_next_points.size() > 0;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void SliceTask::rendezvous_concurrent_mapped(const DomainPoint &point,
@@ -13075,7 +12853,6 @@ namespace Legion {
         index_owner->record_intra_space_dependence(point, next, point_mapped);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void SliceTask::add_point_to_completed_list(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped)
@@ -13155,7 +12932,6 @@ namespace Legion {
                                     region_idx);
       return result;
     }
-#endif
 
     //--------------------------------------------------------------------------
     size_t SliceTask::get_collective_points(void) const

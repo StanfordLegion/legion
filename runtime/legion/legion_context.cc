@@ -10380,7 +10380,6 @@ namespace Legion {
                                     init_value, init_size)), redop);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void InnerContext::record_point_wise_dependence(uint64_t context_index,
         DomainPoint point, RtEvent point_mapped)
@@ -10502,7 +10501,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void InnerContext::destroy_dynamic_collective(DynamicCollective dc)

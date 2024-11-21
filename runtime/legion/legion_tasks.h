@@ -368,7 +368,7 @@ namespace Legion {
      * kinds of classes.  It also serves as the type that
      * represents a context for each application level task.
      */
-    class SingleTask : public TaskOp {
+    class SingleTask : public SinglePointWiseAnalysable<TaskOp> {
     public:
       struct MispredicationTaskArgs :
         public LgTaskArgs<MispredicationTaskArgs> {
@@ -564,9 +564,6 @@ namespace Legion {
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;
       std::vector<RtEvent>                  intra_space_mapping_dependences;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      std::vector<RtEvent>                  point_wise_mapping_dependences;
-#endif
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
       // The single task termination event encapsulates the exeuction of the
@@ -603,7 +600,7 @@ namespace Legion {
      * This is the parent type for each of the multi-task
      * kinds of classes.
      */
-      class MultiTask : public CollectiveViewCreator<TaskOp> {
+      class MultiTask : public PointWiseAnalysable<CollectiveViewCreator<TaskOp> > {
       public:
         typedef std::map<DomainPoint,DomainPoint> OutputExtentMap;
         class OutputOptions {
@@ -742,41 +739,6 @@ namespace Legion {
         size_t predicate_false_size;
       protected:
         std::map<DomainPoint,RtEvent> intra_space_dependences;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      protected:
-        // the key is the point of the next IndexSpaceTask
-        std::map<DomainPoint,RtEvent> point_wise_dependences;
-        // Flag to indicate if we have a previous task for which
-        // we can map point-task-wise instead of whole index-task-wise.
-        std::vector<bool> connect_to_prev_points;
-        // Flag to indicate if we have a next task for which
-        // we can map point-task-wise instead of whole index-task-wise.
-        std::vector<bool> connect_to_next_points;
-      public:
-        /*
-        void set_connect_to_prev_point (void) { connect_to_prev_point = true; }
-        void set_connect_to_next_point (void) { connect_to_next_point = true; }
-        bool should_connect_to_prev_point (void) { return connect_to_prev_point; }
-        bool should_connect_to_next_point (void) { return connect_to_next_point; }
-        */
-        void set_connect_to_prev_point (unsigned region_idx)
-        {
-          connect_to_prev_points[region_idx] = true;
-        }
-        void set_connect_to_next_point (unsigned region_idx)
-        {
-          connect_to_next_points[region_idx] = true;
-        }
-        bool should_connect_to_prev_point (unsigned region_idx)
-        {
-          return connect_to_prev_points[region_idx];
-        }
-        bool should_connect_to_next_point (unsigned region_idx)
-        {
-          return connect_to_next_points[region_idx];
-        }
-
-#endif
       protected:
         // This barrier is only here to help with a bug that currently
         // exists in the CUDA driver between collective kernel launches
@@ -988,11 +950,9 @@ namespace Legion {
         virtual void record_intra_space_dependences(unsigned index,
                const std::vector<DomainPoint> &dependences);
         virtual const Mappable* as_mappable(void) const { return this; }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
       public:
         void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
-#endif
       public:
         void initialize_point(SliceTask *owner, const DomainPoint &point,
                               const FutureMap &point_arguments, bool eager,
@@ -1159,9 +1119,7 @@ namespace Legion {
         void handle_output_equivalence_set(Deserializer &derez);
         void handle_refine_equivalence_sets(Deserializer &derez);
         void handle_intra_space_dependence(Deserializer &derez);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
         void handle_point_wise_dependence(Deserializer &derez);
-#endif
         void handle_resource_update(Deserializer &derez,
                                     std::set<RtEvent> &applied);
         void handle_created_region_contexts(Deserializer &derez,
@@ -1400,46 +1358,17 @@ namespace Legion {
 #endif
     protected:
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-      virtual void record_point_wise_dependence(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped);
-      virtual RtEvent find_point_wise_dependence(DomainPoint point,
-          LogicalRegion lr,
-          unsigned region_idx);
-      static void process_slice_find_point_wise_dependence(Deserializer &derez);
-      static void process_slice_record_point_wise_dependence(Deserializer &derez);
-      bool set_prev_point_wise_user(Operation *prev_op,
-          GenerationID prev_gen, uint64_t prev_ctx_index,
-          ProjectionSummary *shard_proj,
-          unsigned region_idx, unsigned dtype, unsigned prev_region_idx,
-          Domain index_domain);
-      bool set_next_point_wise_user(Operation *next_op,
-          GenerationID next_gen, GenerationID user_gen, unsigned region_idx);
+      bool region_has_collective(unsigned region_idx,
+          GenerationID gen) override;
       void add_point_to_completed_list(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped);
-      static void process_slice_add_point_to_completed_list(Deserializer &derez);
-      bool prev_point_wise_user_set(unsigned region_req_idx);
-      void record_point_wise_dependence_completed_points_prev_task(
-          ProjectionSummary *shard_proj, uint64_t context_index);
-      virtual void clear_context_maps(void);
-      bool region_has_collective(unsigned region_idx, GenerationID gen);
-    protected:
-      void get_points(RegionRequirement &req,
-          ProjectionFunction *projection,
-          LogicalRegion lr, Domain index_domain,
-          std::vector<DomainPoint> &points);
-    protected:
-      std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
-      std::vector<std::pair<DomainPoint,RtEvent>> completed_point_list;
-    public:
-      // Map of previous index task for a region id. This will
-      // be maintained in the next task to lookup the event
-      // this task needs to wait on. The event will be stored
-      // in the point_wise_dependnece data structure of the
-      // previous task.
-      std::map<unsigned,PointWisePreviousIndexTaskInfo> prev_index_tasks;
-#endif
+          unsigned region_idx, RtEvent point_mapped) override;
+      void clear_context_maps(void) override;
+      void record_point_wise_dependence(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped) override;
+      RtEvent find_point_wise_dependence(DomainPoint point,
+          LogicalRegion lr,
+          unsigned region_idx) override;
     };
 
     /**
@@ -1560,17 +1489,15 @@ namespace Legion {
       virtual void record_intra_space_dependence(const DomainPoint &point,
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
-      virtual void record_point_wise_dependence(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped);
-      virtual RtEvent find_point_wise_dependence(DomainPoint point,
+      void record_point_wise_dependence(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped) override;
+      RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx);
+          unsigned region_idx) override;
       void add_point_to_completed_list(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped);
-      bool need_forward_progress(void);
-#endif
+          unsigned region_idx, RtEvent point_mapped) override;
+      bool need_forward_progress(void) override;
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);

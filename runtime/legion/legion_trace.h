@@ -83,11 +83,9 @@ namespace Legion {
         RegionTreeNode *node;
 #endif
       };
-
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      struct TracePointWisePreviousIndexTaskInfo : public LegionHeapify<TracePointWisePreviousIndexTaskInfo> {
+      struct TracePointWisePrevOpInfo : public LegionHeapify<TracePointWisePrevOpInfo> {
       public:
-        TracePointWisePreviousIndexTaskInfo(ProjectionSummary *shard_proj,
+        TracePointWisePrevOpInfo(ProjectionSummary *shard_proj,
             Domain &index_domain,
             unsigned op_idx,
             GenerationID prev_op_gen, size_t ctx_index, unsigned dep_type,
@@ -107,17 +105,13 @@ namespace Legion {
         unsigned dep_type;
         unsigned region_idx;
       };
-#endif
-
       struct OperationInfo {
       public:
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
         std::map<unsigned,bool> connect_to_next_points;
         std::map<unsigned,bool> connect_to_prev_points;
-        std::map<unsigned,TracePointWisePreviousIndexTaskInfo> prev_ops;
-#endif
+        std::map<unsigned,TracePointWisePrevOpInfo> prev_ops;
       };
       struct VerificationInfo {
       public:
@@ -189,7 +183,6 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype,
                                     const FieldMask &dependent_mask);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
       void set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID source_gen,
           unsigned region_idx, Operation *source);
@@ -200,7 +193,6 @@ namespace Legion {
           Domain index_domain,
           Operation *source);
       void set_point_wise_dependences(size_t index, Operation *op);
-#endif
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }

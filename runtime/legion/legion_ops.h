@@ -687,6 +687,32 @@ namespace Legion {
         return (node != NULL) && node->remove_base_valid_ref(CONTEXT_REF);
       }
     public:
+      // Point-Wise analysis functions
+      virtual void
+        record_point_wise_dependence_completed_points_prev_task(
+          ProjectionSummary *shard_proj,
+          uint64_t context_index);
+      virtual void add_point_to_completed_list(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual void record_point_wise_dependence(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
+          LogicalRegion lr,
+          unsigned region_idx);
+      virtual bool set_prev_point_wise_user(Operation *prev_op,
+          GenerationID prev_gen, uint64_t prev_ctx_index,
+          ProjectionSummary *shard_proj,
+          unsigned region_idx, unsigned dep_type,
+          unsigned prev_region_idx,
+          Domain index_domain);
+      virtual bool set_next_point_wise_user(Operation *next_op,
+          GenerationID next_gen, GenerationID user_gen,
+          unsigned region_idx);
+      virtual bool region_has_collective(unsigned region_idx,
+          GenerationID gen);
+      virtual bool prev_point_wise_user_set(unsigned region_req_idx);
+      virtual bool need_forward_progress(void);
+    public:
       Runtime *const runtime;
     protected:
       mutable LocalLock op_lock;
@@ -816,6 +842,113 @@ namespace Legion {
     protected:
       mutable LocalLock                                 versioning_lock;
       std::map<unsigned,PendingVersioning>              pending_versioning;
+    };
+
+    /**
+     * \class SinglePointWiseAnalysable
+     */
+    template<typename OP>
+    class SinglePointWiseAnalysable : public OP {
+    public:
+      template<typename ... Args>
+      SinglePointWiseAnalysable(Runtime *rt, Args&& ... args)
+        : OP(rt, std::forward<Args>(args) ...) { }
+      SinglePointWiseAnalysable(
+          const SinglePointWiseAnalysable<OP> &rhs) = delete;
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    protected:
+      std::vector<RtEvent> point_wise_mapping_dependences;
+    };
+
+    /**
+     * \class PointWiseAnalysableBase
+     */
+    class PointWiseAnalysableBase {
+    public:
+      static void process_slice_find_point_wise_dependence(
+          Deserializer &derez);
+      static void process_slice_record_point_wise_dependence(
+          Deserializer &derez);
+      static void process_slice_add_point_to_completed_list(
+          Deserializer &derez);
+    protected:
+      std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
+      std::vector<std::pair<DomainPoint,RtEvent>> completed_point_list;
+    public:
+      // Map of previous index task for a region id. This will
+      // be maintained in the next task to lookup the event
+      // this task needs to wait on. The event will be stored
+      // in the point_wise_dependnece data structure of the
+      // previous task.
+      std::map<unsigned,PointWisePrevOpInfo> prev_index_tasks;
+    protected:
+      // the key is the point of the next IndexSpaceTask
+      std::map<DomainPoint,RtEvent> point_wise_dependences;
+      // Flag to indicate if we have a previous task for which
+      // we can map point-task-wise instead of whole index-task-wise.
+      std::vector<bool> connect_to_prev_points;
+      // Flag to indicate if we have a next task for which
+      // we can map point-task-wise instead of whole index-task-wise.
+      std::vector<bool> connect_to_next_points;
+    };
+
+    /**
+     * \class PointWiseAnalysable
+     */
+    template<typename OP>
+    class PointWiseAnalysable : public OP,
+                                public PointWiseAnalysableBase {
+    public:
+      template<typename ... Args>
+      PointWiseAnalysable(Runtime *rt, Args&& ... args)
+        : OP(rt, std::forward<Args>(args) ...) { }
+      PointWiseAnalysable(const PointWiseAnalysable<OP> &rhs) = delete;
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      virtual void clear_context_maps(void);
+    public:
+      bool prev_point_wise_user_set(unsigned region_req_idx) override;
+      bool region_has_collective(unsigned region_idx,
+          GenerationID gen) override;
+      bool set_next_point_wise_user(Operation *next_op,
+          GenerationID next_gen, GenerationID user_gen,
+          unsigned region_idx) override;
+      bool set_prev_point_wise_user(Operation *prev_op,
+          GenerationID prev_gen, uint64_t prev_ctx_index,
+          ProjectionSummary *shard_proj,
+          unsigned region_idx, unsigned dep_type,
+          unsigned prev_region_idx,
+          Domain index_domain) override;
+      void record_point_wise_dependence_completed_points_prev_task(
+          ProjectionSummary *shard_proj,
+          uint64_t context_index) override;
+      bool need_forward_progress(void) override;
+    protected:
+      void get_points(RegionRequirement &req,
+          ProjectionFunction *projection,
+          LogicalRegion lr, Domain index_domain,
+          std::vector<DomainPoint> &points);
+    public:
+      void set_connect_to_prev_point (unsigned region_idx)
+      {
+        connect_to_prev_points[region_idx] = true;
+      }
+      void set_connect_to_next_point (unsigned region_idx)
+      {
+        connect_to_next_points[region_idx] = true;
+      }
+      bool should_connect_to_prev_point (unsigned region_idx)
+      {
+        return connect_to_prev_points[region_idx];
+      }
+      bool should_connect_to_next_point (unsigned region_idx)
+      {
+        return connect_to_next_points[region_idx];
+      }
     };
 
     /**

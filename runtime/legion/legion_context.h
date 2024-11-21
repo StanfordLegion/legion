@@ -1650,7 +1650,6 @@ namespace Legion {
       void increment_frame(void);
       void decrement_frame(void);
       void finish_frame(FrameOp *frame);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
       void record_point_wise_dependence(uint64_t context_index,
           DomainPoint point, RtEvent point_mapped);
@@ -1658,7 +1657,6 @@ namespace Legion {
       RtEvent find_point_wise_dependence(uint64_t context_index,
           DomainPoint point);
       void clear_map(uint64_t context_index, std::vector<DomainPoint> points);
-#endif
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
       virtual MergeCloseOp* get_merge_close_op(Operation *op,
@@ -2045,12 +2043,10 @@ namespace Legion {
     protected:
       // Our cached set of index spaces for immediate domains
       std::map<Domain,IndexSpace> index_launch_spaces;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     protected:
       mutable LocalLock point_wise_lock;
       std::map<std::pair<uint64_t,DomainPoint>,RtEvent> ready_point_wise_deps;
       std::map<std::pair<uint64_t,DomainPoint>,std::pair<RtUserEvent,int>> pending_point_wise_deps;
-#endif
     protected:
       // Dependence tracking information for phase barriers
       mutable LocalLock                                   phase_barrier_lock;

@@ -1933,7 +1933,6 @@ namespace Legion {
         IndexTask::record_intra_space_dependence(point, next, point_mapped);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void ReplIndexTask::clear_context_maps(void)
     //--------------------------------------------------------------------------
@@ -1965,7 +1964,6 @@ namespace Legion {
       }
     }
 
-
     //--------------------------------------------------------------------------
     RtEvent ReplIndexTask::find_point_wise_dependence(DomainPoint point,
         LogicalRegion lr,
@@ -1985,11 +1983,9 @@ namespace Legion {
       if (should_connect_to_prev_point(region_idx))
       {
         // Find prev index task
-        std::map<unsigned, PointWisePreviousIndexTaskInfo>::iterator finder =
+        std::map<unsigned,PointWisePrevOpInfo>::iterator finder =
           prev_index_tasks.find(region_idx);
         assert(finder != prev_index_tasks.end());
-        IndexTask *prev_index_task = static_cast<IndexTask*>(finder->second.previous_index_task);
-        GenerationID prev_task_gen = finder->second.previous_index_task_generation;
 
         // find the point of the previous index_task
         RegionRequirement &req = logical_regions[region_idx];
@@ -2038,7 +2034,8 @@ namespace Legion {
           return pending_event;
         }
 
-        if (prev_task_gen < prev_index_task->get_generation())
+        if (finder->second.previous_index_task_generation <
+            finder->second.previous_index_task->get_generation())
           return RtEvent::NO_RT_EVENT;
 
         return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
@@ -2048,7 +2045,6 @@ namespace Legion {
       assert(false);
       return RtUserEvent::NO_RT_USER_EVENT;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplIndexTask::record_output_registered(RtEvent registered)
@@ -11199,7 +11195,6 @@ namespace Legion {
       assert(false);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void ShardManager::send_point_wise_dependence(ShardID target,
                                                    Serializer &rez)
@@ -11242,7 +11237,6 @@ namespace Legion {
       // Should never get here
       assert(false);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void ShardManager::broadcast_resource_update(ShardTask *source, 
@@ -12349,7 +12343,6 @@ namespace Legion {
       manager->handle_intra_space_dependence(derez);
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_point_wise_dependence(
                                           Deserializer &derez, Runtime *runtime)
@@ -12360,7 +12353,6 @@ namespace Legion {
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_point_wise_dependence(derez);
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_broadcast_update(Deserializer &derez,

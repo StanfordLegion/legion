@@ -1445,10 +1445,9 @@ namespace Legion {
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-    struct PointWisePreviousIndexTaskInfo : public LegionHeapify<PointWisePreviousIndexTaskInfo> {
+    struct PointWisePrevOpInfo : public LegionHeapify<PointWisePrevOpInfo> {
       public:
-        PointWisePreviousIndexTaskInfo(ProjectionFunction *projection,
+        PointWisePrevOpInfo(ProjectionFunction *projection,
             ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
             Operation *previous_index_task,
             GenerationID previous_index_task_generation, size_t ctx_index, unsigned dep_type,
@@ -1470,7 +1469,6 @@ namespace Legion {
         unsigned dep_type;
         unsigned region_idx;
     };
-#endif
 
     /**
      * \class LogicalAnalysis 
@@ -1485,10 +1483,8 @@ namespace Legion {
      * in an operation that touch the same fields of the same region tree.
      */
     class LogicalAnalysis {
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     public:
       bool bail_point_wise_analysis = true;
-#endif
     public:
       struct PendingClose : public LegionHeapify<PendingClose> {
       public:

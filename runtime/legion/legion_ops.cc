@@ -2682,6 +2682,86 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::record_point_wise_dependence_completed_points_prev_task(
+        ProjectionSummary *shard_proj, uint64_t context_index)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::add_point_to_completed_list(
+        DomainPoint point, unsigned region_idx, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_point_wise_dependence(
+        DomainPoint point, unsigned region_idx,
+        RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Operation::find_point_wise_dependence(
+        DomainPoint point, LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::set_prev_point_wise_user(
+        Operation *prev_op,
+        GenerationID prev_gen, uint64_t prev_ctx_index,
+        ProjectionSummary *shard_proj,
+        unsigned region_idx, unsigned dtype,
+        unsigned prev_region_idx,
+        Domain index_domain)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::set_next_point_wise_user(
+        Operation *next_op,
+        GenerationID next_gen, GenerationID user_gen,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::region_has_collective(
+        unsigned region_idx, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::prev_point_wise_user_set(unsigned region_req_idx)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::need_forward_progress(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+
+    //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
                               const FieldMaskSet<ReplicatedView> &collectives,
                               std::vector<MappingInstance> &input_valid,
@@ -4058,6 +4138,295 @@ namespace Legion {
           if (it->first->remove_reference())
             delete it->first;
       }
+    }
+
+    // Explicit instantiations
+    template class SinglePointWiseAnalysable<TaskOp>;
+
+    /////////////////////////////////////////////////////////////
+    // SinglePointWiseAnalysable
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void SinglePointWiseAnalysable<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void SinglePointWiseAnalysable<OP>::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      OP::deactivate(freeop);
+      point_wise_mapping_dependences.clear();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PointWiseAnalysablBasee
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PointWiseAnalysableBase::
+      process_slice_add_point_to_completed_list(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *task;
+      derez.deserialize(task);
+      DomainPoint point;
+      derez.deserialize(point);
+      unsigned region_idx;
+      derez.deserialize(region_idx);
+      RtEvent mapped_event;
+      derez.deserialize(mapped_event);
+      task->add_point_to_completed_list(point, region_idx,
+          mapped_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PointWiseAnalysableBase::
+      process_slice_find_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *task;
+      derez.deserialize(task);
+      LogicalRegion lr;
+      derez.deserialize(lr);
+      unsigned region_idx;
+      derez.deserialize(region_idx);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DomainPoint point;
+      derez.deserialize(point);
+      const RtEvent result = task->find_point_wise_dependence(point, lr, region_idx);
+      Runtime::trigger_event(to_trigger, result);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PointWiseAnalysableBase::
+      process_slice_record_point_wise_dependence(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *task;
+      derez.deserialize(task);
+      unsigned region_idx;
+      derez.deserialize(region_idx);
+      RtEvent mapped_event;
+      derez.deserialize(mapped_event);
+      DomainPoint point;
+      derez.deserialize(point);
+      task->record_point_wise_dependence(point, region_idx, mapped_event);
+    }
+
+    // Explicit instantiations
+    template class PointWiseAnalysable<CollectiveViewCreator<TaskOp> >;
+
+    /////////////////////////////////////////////////////////////
+    // PointWiseAnalysable
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      clear_context_maps();
+
+      OP::deactivate(freeop);
+
+      point_wise_dependences.clear();
+      connect_to_prev_points.clear();
+      connect_to_next_points.clear();
+
+      pending_point_wise_dependences.clear();
+      prev_index_tasks.clear();
+      completed_point_list.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::region_has_collective(
+        unsigned region_idx, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::prev_point_wise_user_set(
+        unsigned region_req_idx)
+    //--------------------------------------------------------------------------
+    {
+      return prev_index_tasks.find(region_req_idx)
+          != prev_index_tasks.end();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::set_prev_point_wise_user(
+        Operation *prev_op,
+        GenerationID prev_gen, uint64_t prev_ctx_index,
+        ProjectionSummary *shard_proj,
+        unsigned region_idx, unsigned dep_type,
+        unsigned prev_region_idx,
+        Domain index_domain)
+    //--------------------------------------------------------------------------
+    {
+      assert (index_domain != Domain::NO_DOMAIN);
+      if ((this->trace != NULL) && this->trace->is_recording())
+      {
+        this->trace->set_prev_point_wise_user(prev_op, prev_gen,
+            prev_ctx_index, shard_proj, region_idx, dep_type,
+            prev_region_idx, index_domain, this);
+      }
+      AutoLock o_lock(this->op_lock);
+      prev_index_tasks.insert({
+                              region_idx,
+                              PointWisePrevOpInfo(
+                                  shard_proj->projection,
+                                  shard_proj->sharding,
+                                  shard_proj->sharding_domain,
+                                  index_domain,
+                                  prev_op, prev_gen, prev_ctx_index,
+                                  dep_type,
+                                  prev_region_idx)
+                              });
+      set_connect_to_prev_point(region_idx);
+      return true;
+
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::record_point_wise_dependence_completed_points_prev_task(
+        ProjectionSummary *shard_proj, uint64_t context_index)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<DomainPoint> prev_index_task_points;
+
+      Domain local_domain;
+      IndexSpace shard_space;
+
+      // Compute the local index space of points for this shard
+      if (shard_proj->sharding != NULL)
+      {
+        shard_space = shard_proj->sharding->find_shard_space(
+              this->get_context()->get_shard_id(),
+              shard_proj->domain,
+              shard_proj->sharding_domain->handle,
+              this->get_provenance());
+        if (shard_space.exists())
+        {
+          this->runtime->forest->find_domain(shard_space, local_domain);
+        }
+        else return;
+      }
+      else
+        shard_proj->domain->get_domain(local_domain);
+
+      for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
+      {
+        prev_index_task_points.push_back((*dpi));
+      }
+
+      assert(!prev_index_task_points.empty());
+
+      for(std::vector<DomainPoint>::iterator it =
+          prev_index_task_points.begin(); it !=
+          prev_index_task_points.end(); it++)
+      {
+        this->get_context()->record_point_wise_dependence(context_index,
+            (*it), RtEvent::NO_RT_EVENT);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::set_next_point_wise_user(
+        Operation *next_op,
+        GenerationID next_gen, GenerationID user_gen,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      if ((this->get_trace() != NULL) && this->get_trace()->is_recording())
+      {
+        this->get_trace()->set_next_point_wise_user(next_op, next_gen,
+            user_gen, region_idx, this);
+      }
+
+      AutoLock o_lock(this->op_lock);
+
+      if (user_gen < this->gen)
+      {
+        return false;
+      }
+
+      if (!completed_point_list.empty())
+      {
+        for(std::vector<std::pair<DomainPoint,RtEvent>>::iterator it =
+            completed_point_list.begin(); it !=
+            completed_point_list.end(); it++)
+        {
+          this->get_context()->record_point_wise_dependence(
+              this->get_context_index(),
+              (*it).first, (*it).second);
+        }
+      }
+
+      set_connect_to_next_point(region_idx);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::get_points(RegionRequirement &req,
+        ProjectionFunction *projection,
+        LogicalRegion lr, Domain index_domain,
+        std::vector<DomainPoint> &points)
+    //--------------------------------------------------------------------------
+    {
+      if (req.handle_type == LEGION_PARTITION_PROJECTION)
+      {
+        projection->functor->invert(lr,
+            req.partition, index_domain,
+            points);
+      }
+      else
+      {
+        projection->functor->invert(lr,
+            req.region, index_domain,
+            points);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::need_forward_progress(void)
+    //--------------------------------------------------------------------------
+    {
+      return false;
     }
 
     // Explicit instantiations

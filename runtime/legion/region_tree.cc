@@ -16587,14 +16587,14 @@ namespace Legion {
                         static_cast<TaskOp*>(prev.op)->get_task_kind() ==
                         TaskOp::INDEX_TASK_KIND)
                     {
-                      if (static_cast<IndexTask*>(prev.op)->
+                      if (prev.op->
                           region_has_collective(prev.idx, prev.gen) ||
-                          static_cast<IndexTask*>(user.op)->
+                          user.op->
                           region_has_collective(user.idx, user.gen))
                       {
                         logical_analysis.bail_point_wise_analysis = true;
                       }
-                      if (static_cast<IndexTask*>(user.op)->
+                      if (user.op->
                           prev_point_wise_user_set(user.idx))
                       {
                         // We bail if we have more than one ancestor for now
@@ -16618,13 +16618,13 @@ namespace Legion {
                           if(parent_dominates)
                           {
                             skip_registering_region_dependence = true;
-                            if(!static_cast<IndexTask*>(prev.op)->set_next_point_wise_user(
+                            if(!prev.op->set_next_point_wise_user(
                                 user.op, user.gen, prev.gen, prev.idx))
                             {
-                              static_cast<IndexTask*>(user.op)->record_point_wise_dependence_completed_points_prev_task(
+                              user.op->record_point_wise_dependence_completed_points_prev_task(
                                   prev.shard_proj, prev.ctx_index);
                             }
-                            static_cast<IndexTask*>(user.op)->set_prev_point_wise_user(
+                            user.op->set_prev_point_wise_user(
                                 prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
                                 user.idx, dtype, prev.idx, prev.index_domain);
                           }

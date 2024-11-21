@@ -1501,7 +1501,6 @@ namespace Legion {
 		      next_id, next_idx, dep_type);
       }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
       static inline void log_mapping_point_wise_dependence(UniqueID context,
                 DistributedID repl_id,
                 unsigned prev_ctx_idx, DomainPoint prev_point,
@@ -1666,7 +1665,6 @@ namespace Legion {
 #error "Illegal LEGION_MAX_DIM"
 #endif
       }
-#endif
 
       // Logger calls for realm events
       static inline void log_event_dependence(LgEvent one, LgEvent two)

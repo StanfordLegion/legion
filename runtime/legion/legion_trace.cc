@@ -613,7 +613,6 @@ namespace Legion {
       return true;
     }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
     //--------------------------------------------------------------------------
     void LogicalTrace::set_next_point_wise_user(Operation *next_op,
         GenerationID next_gen, GenerationID source_gen,
@@ -662,7 +661,7 @@ namespace Legion {
       OperationInfo &info = replay_info[finder->second.second];
       info.prev_ops.insert({
                               region_idx,
-                              TracePointWisePreviousIndexTaskInfo(
+                              TracePointWisePrevOpInfo(
                                   shard_proj,
                                   index_domain,
                                   prev_finder->second.first,
@@ -685,7 +684,8 @@ namespace Legion {
           info.connect_to_next_points.find(i);
         if (next_finder != info.connect_to_next_points.end())
         {
-          bool rc = static_cast<IndexTask*>(op)->set_next_point_wise_user(NULL, 0, op->get_generation(), i);
+          bool rc = op->set_next_point_wise_user(NULL, 0,
+              op->get_generation(), i);
           assert(rc != false);
         }
         std::map<unsigned,bool>::iterator prev_finder =
@@ -693,13 +693,13 @@ namespace Legion {
         if (prev_finder != info.connect_to_prev_points.end())
         {
 
-          std::map<unsigned,TracePointWisePreviousIndexTaskInfo>::iterator prev_info_finder =
+          std::map<unsigned,TracePointWisePrevOpInfo>::iterator prev_info_finder =
             info.prev_ops.find(i);
           assert(prev_info_finder != info.prev_ops.end());
 
           OpInfo &op_info = operations[prev_info_finder->second.op_idx];
 
-          static_cast<IndexTask*>(op)->set_prev_point_wise_user(
+          op->set_prev_point_wise_user(
               op_info.op, op_info.gen, op_info.context_index,
               prev_info_finder->second.shard_proj,
               i, prev_info_finder->second.dep_type,
@@ -708,7 +708,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     bool LogicalTrace::record_region_dependence(Operation *target, 
