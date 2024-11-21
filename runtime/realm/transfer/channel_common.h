@@ -16,13 +16,10 @@
 #ifndef CHANNEL_COMMON
 #define CHANNEL_COMMON
 
-#include "realm/realm_config.h"
+#include <vector>
+#include <cstddef>
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-
-#include "realm/transfer/ib_memory.h"
+#include "realm/memory.h"
 
 namespace Realm {
 

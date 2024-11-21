@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-#include "realm/realm_config.h"
 #include "realm/transfer/channel_common.h"
+#include "realm/mem_impl.h"
+#include "realm/transfer/ib_memory.h"
 #include "realm/runtime_impl.h"
 #include <algorithm>
 

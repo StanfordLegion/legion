@@ -16,21 +16,8 @@
 #ifndef MEMCPY_CHANNEL
 #define MEMCPY_CHANNEL
 
-#include "realm/realm_config.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#ifndef REALM_ON_WINDOWS
-#include <unistd.h>
-#include <pthread.h>
-#endif
-#include <fcntl.h>
 #include <vector>
-#include <assert.h>
-#include <string.h>
 
-#include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
