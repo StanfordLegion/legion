@@ -25,7 +25,6 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
   std::vector<XferDesPortInfo> outputs_info;
   XferDesRedopInfo redop_info;
   XferDesID guid = 0;
-  int priority = 0;
   NodeID launch_node = 0;
   NodeID target_node = 0;
   Node node_data;
@@ -47,7 +46,6 @@ TEST_F(AddressSplitFactoryTest, DISABLED_CreateXferDesRemote)
   std::vector<XferDesPortInfo> outputs_info;
   XferDesRedopInfo redop_info;
   XferDesID guid = 0;
-  int priority = 0;
   NodeID launch_node = 1;
   NodeID target_node = 1;
   Node node_data;
@@ -142,13 +140,9 @@ TYPED_TEST_P(AddressSplitTest, ProgressXD)
   for(const auto &test_case : AddressSplitTest<TypeParam>::_test_cases_) {
     auto bgwork = std::make_unique<BackgroundWorkManager>();
     auto addrsplit_channel = std::make_unique<MockAddressSplitChannel>(bgwork.get());
-    auto factory = new AddressSplitXferDesFactory<N, T>(
-        test_case.bytes_per_element, test_case.spaces, addrsplit_channel.get());
 
     std::vector<XferDesPortInfo> inputs_info;
     std::vector<XferDesPortInfo> outputs_info;
-    // outputs_info[0].ib_size = 128;
-    // outputs_info[0].indirect_port_idx = -1;
 
     XferDesRedopInfo redop_info;
     XferDesID guid = 0;
@@ -223,7 +217,7 @@ TYPED_TEST_P(AddressSplitTest, ProgressXD)
   }
 }
 
-REGISTER_TYPED_TEST_CASE_P(AddressSplitTest, ProgressXD);
+REGISTER_TYPED_TEST_SUITE_P(AddressSplitTest, ProgressXD);
 
 typedef ::testing::Types<std::tuple<std::integral_constant<int, 1>, int>,
                          std::tuple<std::integral_constant<int, 2>, long long>>
