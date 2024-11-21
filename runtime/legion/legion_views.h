@@ -23,21 +23,6 @@
 #include "legion/legion_allocation.h"
 #include "legion/garbage_collection.h"
 
-// It's unclear what is causing view replication to be buggy, but my guess
-// is that it has something to do with the "out-of-order" updates applied
-// to remote views that gets us into trouble. It seems like view replication
-// is also in general slower than not replicating, so we're turning it off
-// for now as it is better to be both correct and faster. We're leaving
-// the implementation though here in case a program arises in the future
-// where view replication could lead to a performance win.
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// Note that this MAYBE was fixed by commit ddc4b70b86 but it has not
-// been tested. You can try this, but please verify that it is working
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#ifdef ENABLE_VIEW_REPLICATION
-#warning "ENABLE_VIEW_REPLICATION is buggy, see issue #653, please be careful!"
-#endif
-
 namespace Legion {
   namespace Internal {
 
@@ -378,22 +363,6 @@ namespace Legion {
                                                     Deserializer &derez);
       static void handle_atomic_reservation_response(Runtime *runtime,
                                                      Deserializer &derez);
-#ifdef ENABLE_VIEW_REPLICATION
-    public:
-      virtual void process_replication_request(AddressSpaceID source,
-                                 const FieldMask &request_mask,
-                                 RtUserEvent done_event) = 0;
-      virtual void process_replication_response(RtUserEvent done_event,
-                                 Deserializer &derez) = 0;
-      virtual void process_replication_removal(AddressSpaceID source,
-                                 const FieldMask &removal_mask) = 0;
-      static void handle_view_replication_request(Deserializer &derez,
-                        Runtime *runtime, AddressSpaceID source);
-      static void handle_view_replication_response(Deserializer &derez,
-                        Runtime *runtime);
-      static void handle_view_replication_removal(Deserializer &derez,
-                        Runtime *runtime, AddressSpaceID source);
-#endif
     public:
       PhysicalManager *const manager; 
       // This is the owner space for the purpose of logical analysis
@@ -1235,16 +1204,6 @@ namespace Legion {
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
                                    std::vector<RtEvent> &applied) const;
-#ifdef ENABLE_VIEW_REPLICATION
-    public:
-      virtual void process_replication_request(AddressSpaceID source,
-                                 const FieldMask &request_mask,
-                                 RtUserEvent done_event);
-      virtual void process_replication_response(RtUserEvent done_event,
-                                 Deserializer &derez);
-      virtual void process_replication_removal(AddressSpaceID source,
-                                 const FieldMask &removal_mask);
-#endif
     protected:
       friend class PendingTaskUser;
       friend class PendingCopyUser;
@@ -1262,10 +1221,6 @@ namespace Legion {
                                   const unsigned index);
       template<bool NEED_EXPR_LOCK>
       void clean_cache(void);
-#ifdef ENABLE_VIEW_REPLICATION
-      // Must be called while holding the replication lock
-      void update_remote_replication_state(std::set<RtEvent> &applied_events);
-#endif 
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                                                 Deserializer &derez);
@@ -1287,29 +1242,6 @@ namespace Legion {
       // added for when we go to invalidate the cache and clean the views
       std::atomic<unsigned> outstanding_additions;
       RtUserEvent clean_waiting; 
-#ifdef ENABLE_VIEW_REPLICATION
-    protected:
-      // Lock for protecting the following replication data structures
-      mutable LocalLock replicated_lock;
-      // Track which fields we have replicated clones of our current users
-      // On the owner node this tracks which fields have remote copies
-      // On remote nodes this tracks which fields we have replicated
-      FieldMask replicated_fields;
-      // On the owner node we also need to keep track of our set of 
-      // which nodes have replicated copies for which field
-      union {
-        LegionMap<AddressSpaceID,FieldMask> *replicated_copies;
-        LegionMap<RtUserEvent,FieldMask> *replicated_requests;
-      } repl_ptr;
-      // For remote copies we track which fields have seen requests
-      // in the past epoch of user adds so that we can reduce our 
-      // set of replicated fields if we're not actually being
-      // used for copy queries
-      FieldMask remote_copy_pre_fields;
-      unsigned remote_added_users; 
-      // Users that we need to apply once we receive an update from the owner
-      std::list<RemotePendingUser*> *remote_pending_users;
-#endif
     protected:
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no

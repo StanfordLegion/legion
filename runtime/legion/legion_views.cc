@@ -219,36 +219,6 @@ namespace Legion {
     { 
     } 
 
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void InstanceView::process_replication_request(AddressSpaceID source,
-                                                  const FieldMask &request_mask,
-                                                  RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called by derived classes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceView::process_replication_response(RtUserEvent done_event,
-                                                    Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called by derived classes
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceView::process_replication_removal(AddressSpaceID source,
-                                                  const FieldMask &removal_mask)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called by derived classes
-      assert(false);
-    }
-#endif // ENABLE_VIEW_REPLICATION
-
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_register_user(Deserializer &derez,
                                         Runtime *runtime, AddressSpaceID source)
@@ -322,84 +292,6 @@ namespace Legion {
       else
         Runtime::trigger_event(applied_event);
     } 
-
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_replication_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_replication_request(source, request_mask, done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_replication_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_replication_response(done_event, derez);
-      Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_view_replication_removal(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready = RtEvent::NO_RT_EVENT;
-      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-
-      FieldMask removal_mask;
-      derez.deserialize(removal_mask);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-#ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
-#endif
-      InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_replication_removal(source, removal_mask);
-      // Trigger the done event now that we are done
-      Runtime::trigger_event(done_event);
-    }
-#endif // ENABLE_VIEW_REPLICATION
 
     /////////////////////////////////////////////////////////////
     // ExprView
@@ -1387,10 +1279,8 @@ namespace Legion {
           derez.deserialize(user_event);
           FieldMaskSet<PhysicalUser> &current_users = 
             current_epoch_users[user_event];
-#ifndef ENABLE_VIEW_REPLICATION
           if (current_users.empty())
             to_collect.insert(user_event);
-#endif
           size_t num_users;
           derez.deserialize(num_users);
           for (unsigned idx2 = 0; idx2 < num_users; idx2++)
@@ -1421,10 +1311,8 @@ namespace Legion {
           derez.deserialize(user_event);
           FieldMaskSet<PhysicalUser> &previous_users = 
             previous_epoch_users[user_event];
-#ifndef ENABLE_VIEW_REPLICATION
           if (previous_users.empty())
             to_collect.insert(user_event);
-#endif
           size_t num_users;
           derez.deserialize(num_users);
           for (unsigned idx2 = 0; idx2 < num_users; idx2++)
@@ -3652,14 +3540,8 @@ namespace Legion {
       : IndividualView(rt, encode_materialized_did(did), man,
                        log_own, register_now, mapping), 
         expr_cache_uses(0), outstanding_additions(0)
-#ifdef ENABLE_VIEW_REPLICATION
-        , remote_added_users(0), remote_pending_users(NULL)
-#endif
     //--------------------------------------------------------------------------
     {
-#ifdef ENABLE_VIEW_REPLICATION
-      repl_ptr.replicated_copies = NULL;
-#endif
       if (is_logical_owner())
       {
         current_users = new ExprView(runtime->forest, manager, this,
@@ -3690,20 +3572,6 @@ namespace Legion {
       }
       if ((current_users != NULL) && current_users->remove_reference())
         delete current_users;
-#ifdef ENABLE_VIEW_REPLICATION
-      if (repl_ptr.replicated_copies != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(is_logical_owner());
-#endif
-        // We should only have replicated copies here
-        // If there are replicated requests that is very bad
-        delete repl_ptr.replicated_copies;
-      }
-#ifdef DEBUG_LEGION
-      assert(remote_pending_users == NULL);
-#endif
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3733,13 +3601,8 @@ namespace Legion {
       assert(is_logical_owner());
       assert(current_users != NULL);
 #endif
-#ifdef ENABLE_VIEW_REPLICATION
-      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
-                                term_event, false/*copy user*/, true/*covers*/);
-#else
       PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
                                             false/*copy user*/, true/*covers*/);
-#endif
       // No need to take the lock since we are just initializing
       // If it's the root this is easy
       if (user_expr == current_users->view_expr)
@@ -3850,130 +3713,10 @@ namespace Legion {
           registered.push_back(registered_event);
           applied_events.insert(applied_event);
         }
-#ifdef ENABLE_VIEW_REPLICATION
-        // If we have any local fields then we also need to update
-        // them here too since the owner isn't going to send us any
-        // updates itself, Do this after sending the message to make
-        // sure that we see a sound set of local fields
-        AutoLock r_lock(replicated_lock);
-        // Only need to add it if it's still replicated
-        const FieldMask local_mask = user_mask & replicated_fields;
-        if (!!local_mask)
-        {
-          // See if we need to make the current users data structure
-          if (current_users == NULL)
-          {
-            // Prevent races between multiple added users at the same time
-            AutoLock v_lock(view_lock);
-            // See if we lost the race
-            if (current_users == NULL)
-            {
-              current_users = new ExprView(runtime->forest, manager, this, 
-                                           manager->instance_domain);
-              current_users->add_reference();
-            }
-          }
-          // Add our local user
-          add_internal_task_user(usage, user_expr, local_mask, term_event,
-                                 op_id, index, trace_info.recording);
-          // Increment the number of remote added users
-          remote_added_users++;
-        }
-        // If we have outstanding requests to be made a replicated
-        // copy then we need to buffer this user so it can be applied
-        // later once we actually do get the update from the owner
-        // This only applies to updates from the local node though since
-        // any remote updates will be sent to us again by the owner
-        if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
-        {
-#ifdef DEBUG_LEGION
-          assert(!repl_ptr.replicated_requests->empty());
-#endif
-          FieldMask buffer_mask;
-          for (LegionMap<RtUserEvent,FieldMask>::const_iterator
-                it = repl_ptr.replicated_requests->begin();
-                it != repl_ptr.replicated_requests->end(); it++)
-          {
-            const FieldMask overlap = user_mask & it->second;
-            if (!overlap)
-              continue;
-#ifdef DEBUG_LEGION
-            assert(overlap * buffer_mask);
-#endif
-            buffer_mask |= overlap;
-            // This user isn't fully applied until the request comes
-            // back to make this view valid and the user gets applied
-            applied_events.insert(it->first);
-          }
-          if (!!buffer_mask)
-          {
-            // Protected by exclusive replicated lock
-            if (remote_pending_users == NULL)
-              remote_pending_users = new std::list<RemotePendingUser*>();
-            remote_pending_users->push_back(
-                new PendingTaskUser(usage, buffer_mask, user_expr, op_id,
-                                    index, term_event));
-          }
-        }
-        if (remote_added_users >= user_cache_timeout)
-          update_remote_replication_state(applied_events);
-#endif // ENABLE_VIEW_REPLICATION
         return ready_event;
       }
       else
       {
-#ifdef ENABLE_VIEW_REPLICATION
-        // We need to hold a read-only copy of the replicated lock when
-        // doing this in order to make sure it's atomic with any 
-        // replication requests that arrive
-        AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-        // Send updates to any remote copies to get them in flight
-        if (repl_ptr.replicated_copies != NULL)
-        {
-#ifdef DEBUG_LEGION
-          assert(!repl_ptr.replicated_copies->empty());
-#endif
-          const FieldMask repl_mask = replicated_fields & user_mask;
-          if (!!repl_mask)
-          {
-            for (LegionMap<AddressSpaceID,FieldMask>::const_iterator
-                  it = repl_ptr.replicated_copies->begin(); 
-                  it != repl_ptr.replicated_copies->end(); it++)
-            {
-              if (it->first == source)
-                continue;
-              const FieldMask overlap = it->second & repl_mask;
-              if (!overlap)
-                continue;
-              // Send the update to the remote node
-              RtUserEvent registered_event = Runtime::create_rt_user_event();
-              RtUserEvent applied_event = Runtime::create_rt_user_event();
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                rez.serialize(target->did);
-                rez.serialize(usage);
-                rez.serialize(overlap);
-                rez.serialize(user_expr->handle);
-                rez.serialize(op_id);
-                rez.serialize(op_ctx_index);
-                rez.serialize(index);
-                rez.serialize(match_space);
-                rez.serialize(term_event);
-                rez.serialize(local_collective_arrivals);
-                rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
-                rez.seriliaze(registered_event);
-                rez.serialize(applied_event);
-                trace_info.pack_trace_info(rez, applied_events);
-              }
-              runtime->send_view_register_user(it->first, rez);
-              registered_events.push_back(registered_event);
-              applied_events.insert(applied_event);
-            }
-          }
-        }
-#endif // ENABLE_VIEW_REPLICATION
         // Now we can do our local analysis
         std::set<ApEvent> wait_on_events;
         ApEvent start_use_event = manager->get_use_event(term_event);
@@ -4022,59 +3765,7 @@ namespace Legion {
         // Check to see if there are any replicated fields here which we
         // can handle locally so we don't have to send a message to the owner
         ApEvent result_event;
-#ifdef ENABLE_VIEW_REPLICATION
-        FieldMask new_remote_fields;
-#endif
         FieldMask request_mask(copy_mask);
-#ifdef ENABLE_VIEW_REPLICATION
-        // See if we can handle this now while all the fields are local
-        {
-          AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-          if (!!replicated_fields)
-          {
-            request_mask -= replicated_fields;
-            if (!request_mask)
-            {
-              // All of our fields are local here so we can do the
-              // analysis now without waiting for anything
-              // We do this while holding the read-only lock on
-              // replication to prevent invalidations of the
-              // replication state while we're doing this analysis
-#ifdef DEBUG_LEGION
-              assert(current_users != NULL);
-#endif
-              std::set<ApEvent> preconditions;
-              ApEvent start_use_event = manager->get_use_event();
-              if (start_use_event.exists())
-                preconditions.insert(start_use_event);
-              const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
-                  LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
-              const bool copy_dominates = 
-                (copy_expr->expr_id == current_users->view_expr->expr_id) ||
-                (copy_expr->get_volume() == current_users->get_view_volume());
-              {
-                // Need a read-only copy of the expr_view lock to 
-                // traverse the tree
-                AutoLock e_lock(expr_lock,1,false/*exclusive*/);
-                current_users->find_copy_preconditions(usage, copy_expr, 
-                                       copy_dominates, copy_mask, op_id, 
-                                       index, preconditions,
-                                       trace_info.recording);
-              }
-              if (!preconditions.empty())
-                result_event = Runtime::merge_events(&trace_info,preconditions);
-              // See if there are any new fields we need to record
-              // as having been used for copy precondition testing
-              // We'll have to update them later with the lock in
-              // exclusive mode, this is technically unsafe, but in
-              // the worst case it will just invalidate the cache
-              // and we'll have to make it valid again later
-              new_remote_fields = copy_mask - remote_copy_pre_fields;
-            }
-          }
-        }
-        if (!!request_mask)
-#endif // ENABLE_VIEW_REPLICATION
         {
           // All the fields are not local, first send the request to 
           // the owner to do the analysis since we're going to need 
@@ -4100,57 +3791,7 @@ namespace Legion {
           runtime->send_view_find_copy_preconditions_request(logical_owner,rez);
           applied_events.insert(applied);
           result_event = ready_event;
-#ifdef ENABLE_VIEW_REPLICATION
-#ifndef DISABLE_VIEW_REPLICATION
-          // Need the lock for this next part
-          AutoLock r_lock(replicated_lock);
-          // Record these fields as being sampled
-          remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
-          // Recompute this to make sure we didn't lose any races
-          request_mask = copy_mask - replicated_fields;
-          if (!!request_mask && (repl_ptr.replicated_requests != NULL))
-          {
-            for (LegionMap<RtUserEvent,FieldMask>::const_iterator it = 
-                  repl_ptr.replicated_requests->begin(); it !=
-                  repl_ptr.replicated_requests->end(); it++)
-            {
-              request_mask -= it->second;
-              if (!request_mask)
-                break;
-            }
-          }
-          if (!!request_mask)
-          {
-            // Send the request to the owner to make these replicated fields
-            const RtUserEvent request_event = Runtime::create_rt_user_event();
-            Serializer rez2;
-            {
-              RezCheck z2(rez2);
-              rez2.serialize(did);
-              rez2.serialize(request_mask);
-              rez2.serialize(request_event);
-            }
-            runtime->send_view_replication_request(logical_owner, rez2);
-            if (repl_ptr.replicated_requests == NULL)
-              repl_ptr.replicated_requests =
-                new LegionMap<RtUserEvent,FieldMask>();
-            (*repl_ptr.replicated_requests)[request_event] = request_mask;
-            // Make sure this is done before things are considered "applied"
-            // in order to prevent dangling requests
-            aggregator.record_reference_mutation_effect(request_event);
-          }
-#endif
-#endif
         }
-#ifdef ENABLE_VIEW_REPLICATION
-        else if (!!new_remote_fields)
-        {
-          AutoLock r_lock(replicated_lock);
-          // Record any new fields which are still replicated
-          remote_copy_pre_fields |= (new_remote_fields & replicated_fields);
-          // Then fall through like normal
-        }
-#endif 
         return result_event;
       }
       else
@@ -4213,119 +3854,9 @@ namespace Legion {
           runtime->send_view_add_copy_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
-#ifdef ENABLE_VIEW_REPLICATION
-        AutoLock r_lock(replicated_lock);
-        // Only need to add it if it's still replicated
-        const FieldMask local_mask = copy_mask & replicated_fields;
-        // If we have local fields to handle do that here
-        if (!!local_mask)
-        {
-          // See if we need to make the current users data structure
-          if (current_users == NULL)
-          {
-            // Prevent races between multiple added users at the same time
-            AutoLock v_lock(view_lock);
-            // See if we lost the race
-            if (current_users == NULL)
-            {
-              current_users = new ExprView(runtime->forest, manager, this,
-                                           manager->instance_domain);
-              current_users->add_reference();
-            }
-          }
-          const RegionUsage usage(reading ? LEGION_READ_ONLY : 
-            (redop > 0) ? LEGION_REDUCE : LEGION_READ_WRITE, 
-            (redop > 0) ? LEGION_ATOMIC : LEGION_EXCLUSIVE, redop);
-          add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
-                                 op_id, index);
-          // Increment the remote added users count
-          remote_added_users++;
-        }
-        // If we have pending replicated requests that overlap with this
-        // user then we need to record this as a pending user to be applied
-        // once we receive the update from the owner node
-        // This only applies to updates from the local node though since
-        // any remote updates will be sent to us again by the owner
-        if ((repl_ptr.replicated_requests != NULL) && (source == local_space))
-        {
-#ifdef DEBUG_LEGION
-          assert(!repl_ptr.replicated_requests->empty());
-#endif
-          FieldMask buffer_mask;
-          for (LegionMap<RtUserEvent,FieldMask>::const_iterator
-                it = repl_ptr.replicated_requests->begin();
-                it != repl_ptr.replicated_requests->end(); it++)
-          {
-            const FieldMask overlap = copy_mask & it->second;
-            if (!overlap)
-              continue;
-#ifdef DEBUG_LEGION
-            assert(overlap * buffer_mask);
-#endif
-            buffer_mask |= overlap;
-            // This user isn't fully applied until the request comes
-            // back to make this view valid and the user gets applied
-            applied_events.insert(it->first);
-          }
-          if (!!buffer_mask)
-          {
-            // Protected by exclusive replicated lock
-            if (remote_pending_users == NULL)
-              remote_pending_users = new std::list<RemotePendingUser*>();
-            remote_pending_users->push_back(
-                new PendingCopyUser(reading, buffer_mask, copy_expr, op_id,
-                                    index, term_event));
-          }
-        }
-        if (remote_added_users >= user_cache_timeout)
-          update_remote_replication_state(applied_events);
-#endif // ENABLE_VIEW_REPLICATION
       }
       else
       {
-#ifdef ENABLE_VIEW_REPLICATION
-        // We need to hold this lock in read-only mode to properly
-        // synchronize this with any replication requests that arrive
-        AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-        // Send updates to any remote copies to get them in flight
-        if (repl_ptr.replicated_copies != NULL)
-        {
-#ifdef DEBUG_LEGION
-          assert(!repl_ptr.replicated_copies->empty());
-#endif
-          const FieldMask repl_mask = replicated_fields & copy_mask;
-          if (!!repl_mask)
-          {
-            for (LegionMap<AddressSpaceID,FieldMask>::const_iterator
-                  it = repl_ptr.replicated_copies->begin(); 
-                  it != repl_ptr.replicated_copies->end(); it++)
-            {
-              if (it->first == source)
-                continue;
-              const FieldMask overlap = it->second & repl_mask;
-              if (!overlap)
-                continue;
-              RtUserEvent applied_event = Runtime::create_rt_user_event();
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                rez.serialize<bool>(reading);
-                rez.serialize(redop);
-                rez.serialize(term_event);
-                rez.serialize(copy_mask);
-                copy_expr->pack_expression(rez, it->first);
-                rez.serialize(op_id);
-                rez.serialize(index);
-                rez.serialize(applied_event);
-                rez.serialize<bool>(trace_recording);
-              }
-              runtime->send_view_add_copy_user(it->first, rez);
-              applied_events.insert(applied_event);
-            }
-          }
-        }
-#endif
         // Now we can do our local analysis
         const RegionUsage usage(reading ? LEGION_READ_ONLY : 
             (redop > 0) ? LEGION_REDUCE : LEGION_READ_WRITE, 
@@ -4380,160 +3911,6 @@ namespace Legion {
       }
     }
 
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_replication_request(AddressSpaceID source,
-                                                  const FieldMask &request_mask,
-                                                  RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      // Atomically we need to package up the response and send it back
-      AutoLock r_lock(replicated_lock); 
-      if (repl_ptr.replicated_copies == NULL)
-        repl_ptr.replicated_copies = 
-          new LegionMap<AddressSpaceID,FieldMask>();
-      LegionMap<AddressSpaceID,FieldMask>::iterator finder = 
-        repl_ptr.replicated_copies->find(source);
-      if (finder != repl_ptr.replicated_copies->end())
-      {
-#ifdef DEBUG_LEGION
-        assert(finder->second * request_mask);
-#endif
-        finder->second |= request_mask; 
-      }
-      else
-        (*repl_ptr.replicated_copies)[source] = request_mask;
-      // Update the summary as well
-      replicated_fields |= request_mask;
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(done_event);
-        std::map<PhysicalUser*,unsigned> indexes;
-        // Make sure no one else is mutating the state of the tree
-        // while we are doing the packing
-        AutoLock e_lock(expr_lock,1,false/*exclusive*/);
-        current_users->pack_replication(rez, indexes, request_mask, source);
-      }
-      runtime->send_view_replication_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_replication_response(RtUserEvent done,
-                                                        Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      AutoLock r_lock(replicated_lock);
-      {
-        // Take the view lock so we can modify the cache as well
-        // as part of our unpacking
-        AutoLock v_lock(view_lock);
-        if (current_users == NULL)
-        {
-          current_users = new ExprView(runtime->forest, manager, this,
-                                       manager->instance_domain);
-          current_users->add_reference();
-        }
-        // We need to hold the expr lock here since we might have to 
-        // make ExprViews and we need this to be atomic with other
-        // operations that might also try to mutate the tree 
-        AutoLock e_lock(expr_lock);
-        std::vector<PhysicalUser*> users;
-        // The source is always from the logical owner space
-        current_users->unpack_replication(derez, current_users, 
-                                          logical_owner, expr_cache, users);
-        // Remove references from all our users
-        for (unsigned idx = 0; idx < users.size(); idx++)
-          if (users[idx]->remove_reference())
-            delete users[idx]; 
-      }
-#ifdef DEBUG_LEGION
-      assert(repl_ptr.replicated_requests != NULL);
-#endif
-      LegionMap<RtUserEvent,FieldMask>::iterator finder = 
-        repl_ptr.replicated_requests->find(done);
-#ifdef DEBUG_LEGION
-      assert(finder != repl_ptr.replicated_requests->end());
-#endif
-      // Go through and apply any pending remote users we've recorded 
-      if (remote_pending_users != NULL)
-      {
-        for (std::list<RemotePendingUser*>::iterator it = 
-              remote_pending_users->begin(); it != 
-              remote_pending_users->end(); /*nothing*/)
-        {
-          if ((*it)->apply(this, finder->second))
-          {
-            delete (*it);
-            it = remote_pending_users->erase(it);
-          }
-          else
-            it++;
-        }
-        if (remote_pending_users->empty())
-        {
-          delete remote_pending_users;
-          remote_pending_users = NULL;
-        }
-      }
-      // Record that these fields are now replicated
-      replicated_fields |= finder->second;
-      repl_ptr.replicated_requests->erase(finder);
-      if (repl_ptr.replicated_requests->empty())
-      {
-        delete repl_ptr.replicated_requests;
-        repl_ptr.replicated_requests = NULL;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_replication_removal(AddressSpaceID source,
-                                                  const FieldMask &removal_mask)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock r_lock(replicated_lock);
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-      assert(repl_ptr.replicated_copies != NULL);
-#endif
-      LegionMap<AddressSpaceID,FieldMask>::iterator finder = 
-        repl_ptr.replicated_copies->find(source);
-#ifdef DEBUG_LEGION
-      assert(finder != repl_ptr.replicated_copies->end());
-      // We should know about all the fields being removed
-      assert(!(removal_mask - finder->second));
-#endif
-      finder->second -= removal_mask;
-      if (!finder->second)
-      {
-        repl_ptr.replicated_copies->erase(finder);
-        if (repl_ptr.replicated_copies->empty())
-        {
-          delete repl_ptr.replicated_copies;
-          repl_ptr.replicated_copies = NULL;
-          replicated_fields.clear();
-          return;
-        }
-        // Otherwise fall through and rebuild the replicated fields
-      }
-      // Rebuild the replicated fields so they are precise
-      if (repl_ptr.replicated_copies->size() > 1)
-      {
-        replicated_fields.clear();
-        for (LegionMap<AddressSpaceID,FieldMask>::const_iterator it =
-              repl_ptr.replicated_copies->begin(); it !=
-              repl_ptr.replicated_copies->end(); it++)
-          replicated_fields |= finder->second;
-      }
-      else
-        replicated_fields = repl_ptr.replicated_copies->begin()->second;
-    }
-#endif // ENABLE_VIEW_REPLICATION
- 
     //--------------------------------------------------------------------------
     void MaterializedView::add_internal_task_user(const RegionUsage &usage,
                                             IndexSpaceExpression *user_expr,
@@ -4835,77 +4212,6 @@ namespace Legion {
         }
       }
     }
-
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void MaterializedView::update_remote_replication_state(
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-      assert(!!replicated_fields);
-      assert(current_users != NULL);
-      assert(remote_added_users >= user_cache_timeout);
-#endif
-      // We can reset the counter now
-      remote_added_users = 0;
-      // See what fields haven't been sampled recently and therefore
-      // we should stop maintaining as remote duplicates
-      const FieldMask deactivate_mask = 
-        replicated_fields - remote_copy_pre_fields; 
-      // We can clear this now for the next epoch
-      remote_copy_pre_fields.clear();
-      // If we have any outstanding requests though keep those
-      if (repl_ptr.replicated_requests != NULL)
-      {
-        for (LegionMap<RtUserEvent,FieldMask>::const_iterator it = 
-              repl_ptr.replicated_requests->begin(); it !=
-              repl_ptr.replicated_requests->end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(it->second * deactivate_mask);
-#endif
-          remote_copy_pre_fields |= it->second;
-        }
-      }
-      // If we don't have any fields to deactivate then we're done
-      if (!deactivate_mask)
-        return;
-      // Send the message to do the deactivation on the owner node
-      RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(deactivate_mask);
-        rez.serialize(done_event);
-      }
-      runtime->send_view_replication_removal(logical_owner, rez);
-      applied_events.insert(done_event);
-      // Perform it locally
-      {
-        // Anytime we do a deactivate that can influence the valid
-        // set of ExprView objects so we need to clean the cache
-        AutoLock v_lock(view_lock);
-#ifdef DEBUG_LEGION
-        // There should be no outstanding_additions when we're here
-        // because we're already protected by the replication lock
-        assert(outstanding_additions.load() == 0);
-#endif
-        // Go through and remove any users for the deactivate mask
-        // Need an exclusive copy of the expr_lock to do this
-        AutoLock e_lock(expr_lock);
-        current_users->deactivate_replication(deactivate_mask);
-        // Then clean the cache since we likely invalidated some
-        // things. This will also go through and remove any views
-        // that no longer have any active users
-        clean_cache<false/*need expr lock*/>();
-      }
-      // Record that these fields are no longer replicated 
-      replicated_fields -= deactivate_mask;
-    }
-#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void MaterializedView::send_view(AddressSpaceID target)
