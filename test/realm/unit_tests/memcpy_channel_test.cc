@@ -171,7 +171,7 @@ protected:
                         const std::vector<size_t> &extents, size_t offset)
   {
     size_t bytes = strides[0] * extents[0];
-    for(int dim = 1; dim < strides.size(); dim++) {
+    for(size_t dim = 1; dim < strides.size(); dim++) {
       size_t count = extents[dim];
       bytes *= count;
     }
