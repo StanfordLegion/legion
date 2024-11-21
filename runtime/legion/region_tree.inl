@@ -262,10 +262,20 @@ namespace Legion {
         return NULL;
       DomainT<DIM,T> domain;
       get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
       Rect<DIM,T> bounds = domain.bounds;
+      if (!domain.dense())
+      {
+        rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
+        // If they don't overlap then the subtraction is easy
+        if (!bounds.overlaps(domain.bounds))
+          return this;
+        else
+          return NULL;
+      }
       rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
+      // If they don't overlap then the subtraction is easy
+      if (!bounds.overlaps(domain.bounds))
+        return this;
       if (!domain.dense())
         return NULL;
       // Handle the common case of equivalency
@@ -274,9 +284,6 @@ namespace Legion {
         const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
         return new IndexSpaceDifference<DIM,T>(empty, context);
       }
-      // If they don't overlap then the subtraction is easy
-      if (!bounds.overlaps(domain.bounds))
-        return this;
       // We can find up to one non-dominating dimension and still easily
       // compute the difference, as soon as we have more than one then 
       // this gets hard and we'll need to use Realm to compute all the
@@ -318,6 +325,42 @@ namespace Legion {
       }
       else
         return new IndexSpaceDifference<DIM,T>(bounds, context);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    uint64_t IndexSpaceExpression::get_canonical_hash_internal(
+                                  const DomainT<DIM,T> &realm_index_space) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Should never get this call for anything empty
+      assert(!realm_index_space.empty());
+#endif
+      // The promise of the canonical hash is that things that have the same
+      // set of points should have the same hash value. We therefore hash first
+      // on the type tag since things from different type tags don't need to 
+      // have the same hash value. Then we hash on the bounds of the tight
+      // realm index space since things with the same sets of points will have
+      // to have the same tight bounding box. Note that you cannot hash on the
+      // sparsity map ID because two realm index spaces can have different 
+      // sparsity maps but contain the same set of points.
+      Murmur3Hasher hasher;
+      hasher.hash(type_tag);
+      for (int d = 0; d < DIM; d++)
+      {
+        hasher.hash(realm_index_space.bounds.lo[d]);
+        hasher.hash(realm_index_space.bounds.hi[d]);
+      }
+      // If there is a sparsity map then hash the volume to differentiate
+      // things with sparsity maps from ones without sparsity maps. We know that
+      // even if two index spaces have different sparsity maps then in order for
+      // them to have the same points they should have the same volume.
+      if (!realm_index_space.dense())
+        hasher.hash(realm_index_space.volume());
+      uint64_t hash[2];
+      hasher.finalize(hash);
+      return hash[0] ^ hash[1];
     }
 
     //--------------------------------------------------------------------------
@@ -1168,15 +1211,15 @@ namespace Legion {
     template<int DIM, typename T>
     inline IndexSpaceExpression*
               IndexSpaceExpression::find_congruent_expression_internal(
-                                std::vector<IndexSpaceExpression*> &expressions)
+                     SmallPointerVector<IndexSpaceExpression,true> &expressions)
     //--------------------------------------------------------------------------
     {
       if (expressions.empty())
       {
-        expressions.push_back(this);
+        expressions.insert(this);
         return this;
       }
-      else if (std::binary_search(expressions.begin(), expressions.end(), this))
+      else if (expressions.contains(this))
         return this;
       Realm::IndexSpace<DIM,T> local_space;
       // No need to wait for the event, we know it is already triggered
@@ -1184,14 +1227,14 @@ namespace Legion {
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
       size_t local_rect_count = 0;
       KDNode<DIM,T,void> *local_tree = NULL;
-      for (std::vector<IndexSpaceExpression*>::const_iterator it =
-            expressions.begin(); it != expressions.end(); it++)
+      for (unsigned idx = 0; idx < expressions.size(); idx++)
       {
+        IndexSpaceExpression *expr = expressions[idx];
         Realm::IndexSpace<DIM,T> other_space;
         // No need to wait for the event here either, we know that if it is
         // in the 'expressions' data structure then wait has already been
         // called on it as well.
-        (*it)->get_expr_index_space(&other_space, type_tag, true/*need tight*/);
+        expr->get_expr_index_space(&other_space, type_tag, true/*need tight*/);
         // See if the rectangles are the same
         if (local_space.bounds != other_space.bounds)
           continue;
@@ -1201,11 +1244,11 @@ namespace Legion {
           // We know that things are the same here
           // Check to see if they have the expression is still alive and
           // can be used as a canonical expression
-          if ((*it)->try_add_live_reference())
+          if (expr->try_add_live_reference())
           {
             if (local_tree != NULL)
               delete local_tree;
-            return (*it);
+            return expr;
           }
           else
             continue;
@@ -1230,7 +1273,7 @@ namespace Legion {
           // these sparsity maps contain the same number of points
           // Build lists of both sets of rectangles
           KDNode<DIM,T> *other_tree = 
-            (*it)->get_sparsity_map_kd_tree()->as_kdnode<DIM,T>();
+            expr->get_sparsity_map_kd_tree()->as_kdnode<DIM,T>();
           size_t other_rect_count = other_tree->count_rectangles();
           if (local_rect_count == 0)
           {
@@ -1289,17 +1332,15 @@ namespace Legion {
         // If we get here that means we are congruent
         // Try to add the expression reference, we can race with deletions
         // here though so handle the case we're we can't add a reference
-        if ((*it)->try_add_live_reference())
+        if (expr->try_add_live_reference())
         {
           if (local_tree != NULL)
             delete local_tree;
-          return (*it);
+          return expr;
         }
       }
       // Did not find any congruences so add ourself
-      expressions.push_back(this);
-      // Keep the expressions sorted for searching
-      std::sort(expressions.begin(), expressions.end());
+      expressions.insert(this);
       // If we have a KD tree we can save it for later congruence tests
       if (local_tree != NULL)
       {
@@ -1626,6 +1667,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    uint64_t IndexSpaceOperationT<DIM,T>::get_canonical_hash(void)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> domain;
+      get_realm_index_space(domain, true/*tight*/);
+      return get_canonical_hash_internal(domain);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1785,7 +1836,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceExpression* 
       IndexSpaceOperationT<DIM,T>::find_congruent_expression(
-                                std::vector<IndexSpaceExpression*> &expressions)
+                     SmallPointerVector<IndexSpaceExpression,true> &expressions)
     //--------------------------------------------------------------------------
     {
       return find_congruent_expression_internal<DIM,T>(expressions); 
@@ -5354,6 +5405,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    uint64_t IndexSpaceNodeT<DIM,T>::get_canonical_hash(void)
+    //--------------------------------------------------------------------------
+    {
+      DomainT<DIM,T> domain;
+      get_realm_index_space(domain, true/*tight*/);
+      return get_canonical_hash_internal(domain);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(Operation *op,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -5514,7 +5575,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceExpression* 
             IndexSpaceNodeT<DIM,T>::find_congruent_expression(
-                                std::vector<IndexSpaceExpression*> &expressions)
+                     SmallPointerVector<IndexSpaceExpression,true> &expressions)
     //--------------------------------------------------------------------------
     {
       return find_congruent_expression_internal<DIM,T>(expressions); 

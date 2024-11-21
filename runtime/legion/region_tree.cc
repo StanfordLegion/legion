@@ -6008,34 +6008,37 @@ namespace Legion {
     {
       // we'll hash expressions based on the number of dimensions and points
       // to try to get an early separation for them for testing congruence
-      const size_t volume = expr->get_volume();
-      if (volume == 0)
+      if (expr->is_empty())
         return expr;
-      const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
+      const uint64_t hash_key = expr->get_canonical_hash();
       AutoLock c_lock(congruence_lock);
-      return expr->find_congruent_expression(canonical_expressions[key]);
+      return expr->find_congruent_expression(canonical_expressions[hash_key]);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::remove_canonical_expression(
-                                      IndexSpaceExpression *expr, size_t volume)
+                                                     IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
       // Nothing to do for empty expressions
-      if (volume == 0)
+      if (expr->is_empty())
         return;
-      const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
+      const uint64_t hash_key = expr->get_canonical_hash();
       AutoLock c_lock(congruence_lock);
-      std::vector<IndexSpaceExpression*> &exprs = canonical_expressions[key];
-      std::vector<IndexSpaceExpression*>::iterator finder =
-        std::lower_bound(exprs.begin(), exprs.end(), expr);
+      std::unordered_map<uint64_t,CanonicalSet>::iterator finder =
+        canonical_expressions.find(hash_key);
 #ifdef DEBUG_LEGION
-      assert(finder != exprs.end());
-      assert(*finder == expr);
+      assert(finder != canonical_expressions.end());
+#ifndef NDEBUG
+      const bool found = 
 #endif
-      exprs.erase(finder);
-      if (exprs.empty())
-        canonical_expressions.erase(key);
+#endif
+      finder->second.erase(expr);
+#ifdef DEBUG_LEGION
+      assert(found);
+#endif
+      if (finder->second.empty())
+        canonical_expressions.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -6915,12 +6918,7 @@ namespace Legion {
       if (canon != NULL)
       {
         if (canon == this)
-        {
-#ifdef DEBUG_LEGION
-          assert(has_volume);
-#endif
-          context->remove_canonical_expression(this, volume);
-        }
+          context->remove_canonical_expression(this);
         else if (canon->remove_canonical_reference(did))
           delete canon;
       }
@@ -7665,12 +7663,7 @@ namespace Legion {
       if (canon != NULL)
       {
         if (canon == this)
-        {
-#ifdef DEBUG_LEGION
-          assert(has_volume);
-#endif
-          context->remove_canonical_expression(this, volume);
-        }
+          context->remove_canonical_expression(this);
         else if (canon->remove_canonical_reference(did))
           delete canon;
       }

@@ -816,6 +816,33 @@ namespace Legion {
       unsigned alloc_range(RT first, RT last);
       void free_range(unsigned index);
     };
+
+    // A small pointer vector is a vector that stores 0 or 1 pointers 
+    // efficiently without any heap allocation but then expands to a
+    // full vector when there are multiple elements
+    template<typename T, bool SORTED>
+    class SmallPointerVector {
+    public:
+      inline SmallPointerVector(void);
+      SmallPointerVector(const SmallPointerVector &rhs) = delete;
+      SmallPointerVector(SmallPointerVector &&rhs) = default;
+      inline ~SmallPointerVector(void);
+    public:
+      SmallPointerVector& operator=(const SmallPointerVector &rhs) = delete;
+      SmallPointerVector& operator=(SmallPointerVector &&rhs) = default;
+    public:
+      inline bool empty(void) const;
+      inline size_t size(void) const;
+      inline bool contains(T *value) const;
+      inline void insert(T *value);
+      inline bool erase(T *value);
+      inline T* operator[](unsigned idx) const;
+    private:
+      inline std::vector<T*>& get_vector(void);
+      inline const std::vector<T*>& get_vector(void) const;
+    private:
+      uintptr_t ptr;
+    };
   }; // namspace Internal
 
     //--------------------------------------------------------------------------
@@ -2706,6 +2733,199 @@ namespace Legion {
                      idx, r.last - r.first, r.first, r.last);
         idx = r.next_free;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline SmallPointerVector<T,SORTED>::SmallPointerVector(void)
+      : ptr(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline SmallPointerVector<T,SORTED>::~SmallPointerVector(void)
+    //--------------------------------------------------------------------------
+    {
+      if (ptr & 0x1)
+        delete &get_vector();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline bool SmallPointerVector<T,SORTED>::empty(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (ptr == 0);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline size_t SmallPointerVector<T,SORTED>::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (ptr == 0)
+        return 0;
+      else if (ptr & 0x1)
+        return get_vector().size();
+      else
+        return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline bool SmallPointerVector<T,SORTED>::contains(T *value) const
+    //--------------------------------------------------------------------------
+    {
+      if (ptr == 0)
+        return false;
+      else if (ptr & 0x1)
+      {
+        const std::vector<T*> &vector = get_vector();
+        if (!SORTED)
+        {
+          for (typename std::vector<T*>::const_iterator it =
+                vector.begin(); it != vector.end(); it++)
+            if ((*it) == value)
+              return true;
+          return false;
+        }
+        else
+          return std::binary_search(vector.begin(), vector.end(), value);
+      }
+      else
+        return (ptr == reinterpret_cast<uintptr_t>(value));
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline void SmallPointerVector<T,SORTED>::insert(T *value)
+    //--------------------------------------------------------------------------
+    {
+      if (ptr == 0)
+      {
+        ptr = reinterpret_cast<uintptr_t>(value);
+#ifdef DEBUG_LEGION
+        assert(!(ptr & 0x1)); 
+#endif
+      }
+      else if (ptr & 0x1)
+      {
+        std::vector<T*> &vector = get_vector();
+        vector.push_back(value);
+        if (SORTED)
+          std::sort(vector.begin(), vector.end());
+      }
+      else
+      {
+        std::vector<T*> *new_vector = new std::vector<T*>(2);
+        new_vector->at(0) = reinterpret_cast<T*>(ptr);
+        new_vector->at(1) = value;
+        if (SORTED)
+          std::sort(new_vector->begin(), new_vector->end());
+        ptr = reinterpret_cast<uintptr_t>(new_vector);
+        ptr |= 0x1;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline bool SmallPointerVector<T,SORTED>::erase(T *value)
+    //--------------------------------------------------------------------------
+    {
+      if (ptr == 0)
+        return false;
+      else if (ptr & 0x1)
+      {
+        std::vector<T*> &vector = get_vector();
+        if (SORTED)
+        {
+          typename std::vector<T*>::iterator finder =
+            std::lower_bound(vector.begin(), vector.end(), value);
+          if ((finder != vector.end()) && (*finder == value))
+          {
+            vector.erase(finder);
+            if (vector.size() == 1)
+            {
+              ptr = reinterpret_cast<uintptr_t>(vector.back());
+#ifdef DEBUG_LEGION
+              assert(!(ptr & 0x1));
+#endif
+              delete &vector;
+            }
+            return true;
+          }
+          else
+            return false;
+        }
+        else
+        {
+          for (typename std::vector<T*>::iterator it =
+                vector.begin(); it != vector.end(); it++)
+          {
+            if ((*it) != value)
+              continue;
+            vector.erase(it);
+            if (vector.size() == 1)
+            {
+              ptr = reinterpret_cast<uintptr_t>(vector.back());
+#ifdef DEBUG_LEGION
+              assert(!(ptr & 0x1));
+#endif
+              delete &vector;
+            }
+            return true;
+          }
+          return false;
+        }
+      }
+      else
+      {
+        if (ptr == reinterpret_cast<uintptr_t>(value))
+        {
+          ptr = 0;
+          return true;
+        }
+        else
+          return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline T* SmallPointerVector<T,SORTED>::operator[](unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      if (ptr & 0x1)
+        return get_vector().at(idx);
+      else if ((idx == 0) && (ptr != 0))
+        return reinterpret_cast<T*>(ptr); 
+      else
+        std::abort();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline std::vector<T*>& SmallPointerVector<T,SORTED>::get_vector(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ptr & 0x1);
+#endif
+      return *reinterpret_cast<std::vector<T*>*>(ptr ^ 0x1);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline const std::vector<T*>& 
+                            SmallPointerVector<T,SORTED>::get_vector(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ptr & 0x1);
+#endif
+      return *reinterpret_cast<const std::vector<T*>*>(ptr ^ 0x1);
     }
 
     //--------------------------------------------------------------------------
