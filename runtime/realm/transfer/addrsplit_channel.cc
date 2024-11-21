@@ -26,14 +26,10 @@ namespace Realm {
     : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(
           bgwork, XFER_ADDR_SPLIT, "address split")
   {
-    assert(!local_addrsplit_channel);
-    local_addrsplit_channel = this;
   }
 
   AddressSplitChannel::~AddressSplitChannel()
   {
-    assert(local_addrsplit_channel == this);
-    local_addrsplit_channel = 0;
   }
 
   ////////////////////////////////////////////////////////////////////////

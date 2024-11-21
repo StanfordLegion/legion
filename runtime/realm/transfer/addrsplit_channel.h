@@ -52,6 +52,12 @@ namespace Realm {
     // do as many of these concurrently as we like
     static const bool is_ordered = false;
 
+    virtual void enqueue_ready_xd(XferDes *xd)
+    {
+      SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>::enqueue_ready_xd(
+          xd);
+    }
+
     // override this to make sure it's never called
     virtual XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node, XferDesID guid,
                                      const std::vector<XferDesPortInfo> &inputs_info,
@@ -86,7 +92,8 @@ namespace Realm {
   class AddressSplitXferDesFactory : public XferDesFactory {
   public:
     AddressSplitXferDesFactory(size_t _bytes_per_element,
-                               const std::vector<IndexSpace<N, T>> &_spaces);
+                               const std::vector<IndexSpace<N, T>> &_spaces,
+                               AddressSplitChannel *_addrsplit_channel);
 
   protected:
     virtual ~AddressSplitXferDesFactory();
@@ -105,23 +112,20 @@ namespace Realm {
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>> areg;
 
   protected:
+    AddressSplitChannel *addrsplit_channel;
     size_t bytes_per_element;
     std::vector<IndexSpace<N, T>> spaces;
   };
 
   template <int N, typename T>
   class AddressSplitXferDes : public AddressSplitXferDesBase {
-  protected:
-    friend class AddressSplitXferDesFactory<N, T>;
-    friend struct AddressSplitXferDesCreateMessage<N, T>;
-
+  public:
     AddressSplitXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
                         XferDesID _guid, const std::vector<XferDesPortInfo> &inputs_info,
                         const std::vector<XferDesPortInfo> &outputs_info, int _priority,
                         size_t _element_size,
                         const std::vector<IndexSpace<N, T>> &_spaces);
 
-  public:
     ~AddressSplitXferDes();
 
     virtual Event request_metadata();

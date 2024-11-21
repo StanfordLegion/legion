@@ -70,9 +70,11 @@ namespace Realm {
 
   template <int N, typename T>
   AddressSplitXferDesFactory<N, T>::AddressSplitXferDesFactory(
-      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces)
+      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces,
+      AddressSplitChannel *_addrsplit_channel)
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
+    , addrsplit_channel(_addrsplit_channel)
   {}
 
   template <int N, typename T>
@@ -98,13 +100,13 @@ namespace Realm {
     if(target_node == Network::my_node_id) {
       // local creation
       // assert(!inst.exists());
-      assert(local_addrsplit_channel != 0);
+      assert(addrsplit_channel != 0);
 
-      XferDes *xd = new AddressSplitXferDes<N, T>(
-          dma_op, local_addrsplit_channel, launch_node, guid, inputs_info, outputs_info,
-          priority, bytes_per_element, spaces);
+      XferDes *xd = new AddressSplitXferDes<N, T>(dma_op, addrsplit_channel, launch_node,
+                                                  guid, inputs_info, outputs_info,
+                                                  priority, bytes_per_element, spaces);
 
-      local_addrsplit_channel->enqueue_ready_xd(xd);
+      addrsplit_channel->enqueue_ready_xd(xd);
     } else {
       // remote creation
       Serialization::ByteCountSerializer bcs;
