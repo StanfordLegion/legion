@@ -112,9 +112,9 @@ namespace Realm {
     static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>> areg;
 
   protected:
-    AddressSplitChannel *addrsplit_channel;
     size_t bytes_per_element;
     std::vector<IndexSpace<N, T>> spaces;
+    AddressSplitChannel *addrsplit_channel;
   };
 
   template <int N, typename T>
