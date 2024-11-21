@@ -6111,9 +6111,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::find_or_request_remote_expression(
-                                IndexSpaceExprID remote_expr_id, 
-                                IndexSpaceExpression *origin, RtEvent *wait_for)
+    IndexSpaceExpression* RegionTreeForest::find_or_create_remote_expression(
+            IndexSpaceExprID remote_expr_id, Deserializer &derez, bool &created)
     //--------------------------------------------------------------------------
     {
       // See if we can find it with the read-only lock first
@@ -6122,63 +6121,33 @@ namespace Legion {
         std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
           finder = remote_expressions.find(remote_expr_id);
         if (finder != remote_expressions.end())
-          return finder->second;
-      }
-      const AddressSpaceID owner = 
-          IndexSpaceExpression::get_owner_space(remote_expr_id, runtime);
-#ifdef DEBUG_LEGION
-      assert(owner != runtime->address_space);
-#endif
-      // Retake the lock in exclusive mode and see if we lost the race
-      RtEvent wait_on;
-      RtUserEvent request_event;
-      {
-        AutoLock l_lock(lookup_is_op_lock);
-        std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-          finder = remote_expressions.find(remote_expr_id);
-        if (finder != remote_expressions.end())
-          return finder->second;
-        // It doesn't exist yet so see if we need to request it from the owner
-        std::map<IndexSpaceExprID,RtEvent>::const_iterator event_finder = 
-          pending_remote_expressions.find(remote_expr_id);
-        if (event_finder == pending_remote_expressions.end())
         {
-          request_event = Runtime::create_rt_user_event();
-          wait_on = request_event;
-          pending_remote_expressions[remote_expr_id] = wait_on; 
+          created = false;
+          finder->second->skip_unpack_expression(derez);
+          return finder->second;
         }
-        else
-          wait_on = event_finder->second;
       }
-      // Send the request for the remote expression
-      if (request_event.exists())
-      { 
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_expr_id);
-          rez.serialize(origin);
-          rez.serialize(request_event);
-        }
-        runtime->send_index_space_remote_expression_request(owner, rez);
-      }
-      if (wait_for == NULL)
+      // Take the lock in exclusive mode and see if we lost the race
+      AutoLock l_lock(lookup_is_op_lock);
+      std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
+        finder = remote_expressions.find(remote_expr_id);
+      if (finder != remote_expressions.end())
       {
-        wait_on.wait();
-        // When we get the lock again it should be there
-        AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-        std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-          finder = remote_expressions.find(remote_expr_id);
-#ifdef DEBUG_LEGION
-        assert(finder != remote_expressions.end());
-#endif
+        created = false;
+        finder->second->skip_unpack_expression(derez);
         return finder->second;
       }
-      else
-      {
-        *wait_for = wait_on;
-        return NULL;
-      }
+      // If we didn't lose the lock then we can make the instance
+      created = true;
+      TypeTag type_tag;
+      derez.deserialize(type_tag);
+      RemoteExpressionCreator creator(this, remote_expr_id, type_tag, derez);
+      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
+#ifdef DEBUG_LEGION
+      assert(creator.operation != NULL);
+#endif
+      remote_expressions[remote_expr_id] = creator.operation;
+      return creator.operation;
     }
 
     //--------------------------------------------------------------------------
@@ -6197,6 +6166,7 @@ namespace Legion {
       }
       else
       {
+        // Technically shouldn't happen anymore but if it does its still here
         IndexSpaceExpression *result = NULL;
         {
           AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
@@ -6231,77 +6201,6 @@ namespace Legion {
         finder = remote_expressions.find(remote_expr_id);
       if (finder != remote_expressions.end())
         remote_expressions.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::handle_remote_expression_request(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexSpaceExprID remote_expr_id;
-      derez.deserialize(remote_expr_id);
-      IndexSpaceExpression *origin;
-      derez.deserialize(origin);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(remote_expr_id);
-        origin->pack_expression_value(rez, source);
-        rez.serialize(done_event);
-      }
-      runtime->send_index_space_remote_expression_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::handle_remote_expression_response(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexSpaceExprID remote_expr_id;
-      derez.deserialize(remote_expr_id); 
-      IndexSpaceExpression *result = unpack_expression_value(derez, source);
-      {
-        AutoLock l_lock(lookup_is_op_lock);
-#ifdef DEBUG_LEGION
-        assert(remote_expressions.find(remote_expr_id) == 
-                remote_expressions.end());
-        assert(pending_remote_expressions.find(remote_expr_id) !=
-                pending_remote_expressions.end());
-#endif
-        remote_expressions[remote_expr_id] = result;
-        pending_remote_expressions.erase(remote_expr_id);
-      }
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::unpack_expression_value(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // First see if this is a base case of a known index space
-      bool is_index_space;
-      derez.deserialize<bool>(is_index_space);
-      if (is_index_space)
-      {
-        IndexSpace handle;
-        derez.deserialize(handle);
-        return get_node(handle);
-      }
-      TypeTag type_tag;
-      derez.deserialize(type_tag);
-      RemoteExpressionCreator creator(this, type_tag, derez);
-      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
-#ifdef DEBUG_LEGION
-      assert(creator.operation != NULL);
-#endif
-      return creator.operation;
     }
 
     /////////////////////////////////////////////////////////////
@@ -6773,10 +6672,9 @@ namespace Legion {
       {
         IndexSpaceExprID remote_expr_id;
         derez.deserialize(remote_expr_id);
-        IndexSpaceExpression *origin;
-        derez.deserialize(origin);
+        bool created = false;
         IndexSpaceExpression *result =
-          forest->find_or_request_remote_expression(remote_expr_id, origin);
+          forest->find_or_create_remote_expression(remote_expr_id, derez, created);
 #ifdef DEBUG_LEGION
         IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
         assert(op != NULL);
@@ -6784,9 +6682,14 @@ namespace Legion {
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
         result->add_base_expression_reference(LIVE_EXPR_REF);
+        if (created && (source != op->owner_space))
+          // Notify the owner of the new instance and pass the global
+          // ref with it so we don't delete prematurely
+          op->send_remote_registration(true/*passing global ref*/);
+        else
+          // Unpack the global reference that we had
+          op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
-        // Unpack the global reference that we had
-        op->unpack_global_ref();
         return result;
       }
     }
@@ -6838,28 +6741,30 @@ namespace Legion {
         ImplicitReferenceTracker::record_live_expression(node);
         return node;
       }
-      derez.deserialize(pending.remote_expr_id);
-      IndexSpaceExpression *origin;
-      derez.deserialize(origin);
-      IndexSpaceExpression *result =
-        forest->find_or_request_remote_expression(pending.remote_expr_id,
-                                                  origin, &wait_for);
-      if (result == NULL)
+      else
       {
-        pending.source = source;
+        derez.deserialize(pending.remote_expr_id);
+        bool created = false;
+        IndexSpaceExpression *result =
+          forest->find_or_create_remote_expression(
+              pending.remote_expr_id, derez, created);
+#ifdef DEBUG_LEGION
+        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
+        assert(op != NULL);
+#else
+        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
+#endif
+        result->add_base_expression_reference(LIVE_EXPR_REF);
+        if (created && (source != op->owner_space))
+          // Notify the owner of the new instance and pass the global
+          // ref with it so we don't delete prematurely
+          op->send_remote_registration(true/*passing global ref*/);
+        else
+          op->unpack_global_ref();
+        pending.done_ref_counting = true;
+        ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
-#ifdef DEBUG_LEGION
-      IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-      assert(op != NULL);
-#else
-      IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-      result->add_base_expression_reference(LIVE_EXPR_REF);
-      op->unpack_global_ref();
-      pending.done_ref_counting = true;
-      ImplicitReferenceTracker::record_live_expression(result);
-      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -8853,16 +8758,15 @@ namespace Legion {
         add_base_expression_reference(LIVE_EXPR_REF);
       }
     }
-    
+
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::pack_expression_value(Serializer &rez,
-                                               AddressSpaceID target)
+    void IndexSpaceNode::skip_unpack_expression(Deserializer &derez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<bool>(true/*index space*/);
-      rez.serialize(handle);
+      // should never be called
+      assert(false);
     }
-
+    
     //--------------------------------------------------------------------------
     void IndexSpaceNode::add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------

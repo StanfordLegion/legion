@@ -912,19 +912,11 @@ namespace Legion {
                        IndexSpaceExpression *lhs, IndexSpaceExpression *rhs);
     public:
       // Remote expression methods
-      IndexSpaceExpression* find_or_request_remote_expression(
-              IndexSpaceExprID remote_expr_id, 
-              IndexSpaceExpression *origin, RtEvent *wait_for = NULL);
+      IndexSpaceExpression* find_or_create_remote_expression(
+          IndexSpaceExprID remote_expr_id, Deserializer &derez, bool &created);
       IndexSpaceExpression* find_remote_expression(
               const PendingRemoteExpression &pending_expression);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
-      void handle_remote_expression_request(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_expression_response(Deserializer &derez,
-                                             AddressSpaceID source);
-    protected:
-      IndexSpaceExpression* unpack_expression_value(Deserializer &derez,
-                                                    AddressSpaceID source);
     public:
       Runtime *const runtime;
     protected:
@@ -958,7 +950,6 @@ namespace Legion {
       std::map<IndexSpaceExprID/*lhs*/,ExpressionTrieNode*> difference_ops;
       // Remote expressions
       std::map<IndexSpaceExprID,IndexSpaceExpression*> remote_expressions;
-      std::map<IndexSpaceExprID,RtEvent> pending_remote_expressions;
     private:
       // In order for the symbolic analysis to work, we need to know that
       // we don't have multiple symbols for congruent expressions. This data
@@ -1304,8 +1295,7 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const = 0; 
     public:
       virtual IndexSpaceExpression* inline_union(
           IndexSpaceExpression *rhs) = 0;
@@ -1632,8 +1622,7 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const = 0;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
@@ -1690,8 +1679,7 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const;
       virtual bool invalidate_operation(void) = 0;
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
@@ -1808,7 +1796,6 @@ namespace Legion {
     public:
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1850,7 +1837,6 @@ namespace Legion {
     public:
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1891,7 +1877,6 @@ namespace Legion {
     public:
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1941,7 +1926,6 @@ namespace Legion {
     public:
       InternalExpression& operator=(const InternalExpression &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     };
@@ -1992,34 +1976,33 @@ namespace Legion {
     public:
       RemoteExpression& operator=(const RemoteExpression &op);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     };
 
     class RemoteExpressionCreator {
     public:
-      RemoteExpressionCreator(RegionTreeForest *f, TypeTag t, Deserializer &d)
-        : forest(f), type_tag(t), derez(d), operation(NULL) { }
+      RemoteExpressionCreator(RegionTreeForest *f, IndexSpaceExprID e,
+                              TypeTag t, Deserializer &d)
+        : forest(f), expr_id(e), type_tag(t), derez(d), operation(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(RemoteExpressionCreator *creator)
       {
-        IndexSpaceExprID expr_id;
-        creator->derez.deserialize(expr_id);
-        DistributedID did;
-        creator->derez.deserialize(did);
         IndexSpaceOperation *origin;
         creator->derez.deserialize(origin);
+        DistributedID did;
+        creator->derez.deserialize(did);
 #ifdef DEBUG_LEGION
         assert(creator->operation == NULL);
 #endif
         creator->operation =
-            new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
-                            origin, creator->type_tag, creator->derez);
+            new RemoteExpression<N::N,T>(creator->forest, creator->expr_id,
+                did, origin, creator->type_tag, creator->derez);
       }
     public:
       RegionTreeForest *const forest;
+      const IndexSpaceExprID expr_id;
       const TypeTag type_tag;
       Deserializer &derez;
       IndexSpaceOperation *operation;
@@ -2257,7 +2240,7 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+      virtual void skip_unpack_expression(Deserializer &derez) const;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
