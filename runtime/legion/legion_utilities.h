@@ -825,11 +825,11 @@ namespace Legion {
     public:
       inline SmallPointerVector(void);
       SmallPointerVector(const SmallPointerVector &rhs) = delete;
-      SmallPointerVector(SmallPointerVector &&rhs) = default;
+      inline SmallPointerVector(SmallPointerVector &&rhs);
       inline ~SmallPointerVector(void);
     public:
       SmallPointerVector& operator=(const SmallPointerVector &rhs) = delete;
-      SmallPointerVector& operator=(SmallPointerVector &&rhs) = default;
+      inline SmallPointerVector& operator=(SmallPointerVector &&rhs);
     public:
       inline bool empty(void) const;
       inline size_t size(void) const;
@@ -2745,11 +2745,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T, bool SORTED>
+    inline SmallPointerVector<T,SORTED>::SmallPointerVector(
+                                                       SmallPointerVector &&rhs)
+      : ptr(rhs.ptr)
+    //--------------------------------------------------------------------------
+    {
+      rhs.ptr = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
     inline SmallPointerVector<T,SORTED>::~SmallPointerVector(void)
     //--------------------------------------------------------------------------
     {
       if (ptr & 0x1)
         delete &get_vector();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool SORTED>
+    inline SmallPointerVector<T,SORTED>& 
+               SmallPointerVector<T,SORTED>::operator=(SmallPointerVector &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (ptr & 0x1)
+        delete &get_vector();
+      ptr = rhs.ptr;
+      rhs.ptr = 0;
+      return *this;
     }
 
     //--------------------------------------------------------------------------
