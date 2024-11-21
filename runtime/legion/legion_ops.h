@@ -696,6 +696,8 @@ namespace Legion {
           unsigned region_idx, RtEvent point_mapped);
       virtual void record_point_wise_dependence(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx);
       virtual RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
           unsigned region_idx);
@@ -911,22 +913,22 @@ namespace Legion {
     public:
       virtual void clear_context_maps(void);
     public:
-      bool prev_point_wise_user_set(unsigned region_req_idx) override;
+      bool prev_point_wise_user_set(unsigned region_req_idx);
       bool region_has_collective(unsigned region_idx,
-          GenerationID gen) override;
+          GenerationID gen);
       bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen,
-          unsigned region_idx) override;
+          unsigned region_idx);
       bool set_prev_point_wise_user(Operation *prev_op,
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
           unsigned region_idx, unsigned dep_type,
           unsigned prev_region_idx,
-          Domain index_domain) override;
+          Domain index_domain);
       void record_point_wise_dependence_completed_points_prev_task(
           ProjectionSummary *shard_proj,
-          uint64_t context_index) override;
-      bool need_forward_progress(void) override;
+          uint64_t context_index);
+      bool need_forward_progress(void);
     protected:
       void get_points(RegionRequirement &req,
           ProjectionFunction *projection,

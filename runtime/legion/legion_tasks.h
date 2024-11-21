@@ -1360,15 +1360,15 @@ namespace Legion {
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
     public:
       bool region_has_collective(unsigned region_idx,
-          GenerationID gen) override;
+          GenerationID gen);
       void add_point_to_completed_list(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped) override;
-      void clear_context_maps(void) override;
+          unsigned region_idx, RtEvent point_mapped);
+      void clear_context_maps(void);
       void record_point_wise_dependence(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped) override;
+          unsigned region_idx, RtEvent point_mapped);
       RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx) override;
+          unsigned region_idx);
     };
 
     /**
@@ -1491,13 +1491,13 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       void record_point_wise_dependence(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped) override;
+          unsigned region_idx, RtEvent point_mapped);
       RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx) override;
+          unsigned region_idx);
       void add_point_to_completed_list(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped) override;
-      bool need_forward_progress(void) override;
+          unsigned region_idx, RtEvent point_mapped);
+      bool need_forward_progress(void);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);

@@ -2032,10 +2032,10 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
-      void clear_context_maps(void) override;
+      void clear_context_maps(void);
       RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
-          unsigned region_idx) override;
+          unsigned region_idx);
     public:
       // Output regions
       virtual void record_output_registered(RtEvent registered);

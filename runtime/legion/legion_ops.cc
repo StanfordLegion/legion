@@ -2707,6 +2707,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::record_point_wise_dependence(
+        LogicalRegion lr, unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent Operation::find_point_wise_dependence(
         DomainPoint point, LogicalRegion lr,
         unsigned region_idx)
