@@ -1,16 +1,12 @@
 #include <cstddef>
-#include "realm/id.h"
-#include "realm/mutex.h"
-
 #include "realm/ucx/mpool.h"
-
 #include <gtest/gtest.h>
 
 using namespace Realm;
 using namespace Realm::UCP;
 
 class UCXMPoolTest : public ::testing::Test {
-public:
+protected:
   void SetUp() override {}
   void TearDown() override {}
   size_t obj_size = 16;
@@ -123,86 +119,84 @@ TEST_P(UCXMPoolParamTest, GetObjectsBase)
   EXPECT_EQ(mpool.has(/*with_expand=*/false), test_case.not_empty);
 }
 
-// TODO(apryakhin@): There are many more combinations we can test
-INSTANTIATE_TEST_SUITE_P(MPool, UCXMPoolParamTest,
-                         // Case 1: init/get same number of objects
-                         testing::Values(
-                             UCXMPoolTestCase{
-                                 .obj_size = 16,
-                                 .alignment = 16,
-                                 .alignment_offset = 0,
-                                 .obj_per_chunks = 4,
-                                 .init_number_objects = 4,
-                                 .get_objects_count = 4,
-                                 .max_objects = 4,
-                                 .max_chunk_size = 16,
-                                 .expand_factor = 1.5,
-                                 .obj_init_args = 16,
-                                 .not_empty = false,
-                             },
+INSTANTIATE_TEST_SUITE_P(
+    MPool, UCXMPoolParamTest,
+    // Case 1: init/get same number of objects
+    testing::Values(UCXMPoolTestCase{
+                        /*obj_size=*/16,
+                        /*leak_check=*/true,
+                        /*alignment=*/16,
+                        /*alignment_offset=*/0,
+                        /*obj_per_chunks=*/4,
+                        /*init_number_objects=*/4,
+                        /*get_objects_count=*/4,
+                        /*max_objects=*/4,
+                        /*max_chunk_size=*/16,
+                        /*expand_factor=*/1.5,
+                        /*obj_init_args=*/16,
+                        /*not_empty=*/false,
+                    },
 
-                             // Case 2: init less objects
-                             UCXMPoolTestCase{
-                                 .obj_size = 16,
-                                 .leak_check = false,
-                                 .alignment = 16,
-                                 .alignment_offset = 0,
-                                 .obj_per_chunks = 4,
-                                 .init_number_objects = 4,
-                                 .get_objects_count = 5,
-                                 .max_objects = 5,
-                                 .max_chunk_size = 16,
-                                 .expand_factor = 1.5,
-                                 .obj_init_args = 16,
-                                 .not_empty = false,
-                             },
+                    // Case 2: init less objects
+                    UCXMPoolTestCase{
+                        /*obj_size=*/16,
+                        /*leak_check=*/false,
+                        /*alignment=*/16,
+                        /*alignment_offset=*/0,
+                        /*obj_per_chunks=*/4,
+                        /*init_number_objects=*/4,
+                        /*get_objects_count=*/5,
+                        /*max_objects=*/5,
+                        /*max_chunk_size=*/16,
+                        /*expand_factor=*/1.5,
+                        /*obj_init_args=*/16,
+                        /*not_empty=*/false,
+                    },
 
-                             // Case 2: get less objects
-                             UCXMPoolTestCase{
-                                 .obj_size = 16,
-                                 .leak_check = false,
-                                 .alignment = 16,
-                                 .alignment_offset = 0,
-                                 .obj_per_chunks = 4,
-                                 .init_number_objects = 4,
-                                 .get_objects_count = 3,
-                                 .max_objects = 4,
-                                 .max_chunk_size = 16,
-                                 .expand_factor = 1.5,
-                                 .obj_init_args = 16,
-                                 .not_empty = true,
-                             },
+                    // Case 2: get less objects
+                    UCXMPoolTestCase{
+                        /*obj_size=*/16,
+                        /*leak_check=*/false,
+                        /*alignment=*/16,
+                        /*alignment_offset=*/0,
+                        /*obj_per_chunks=*/4,
+                        /*init_number_objects=*/4,
+                        /*get_objects_count=*/3,
+                        /*max_objects=*/4,
+                        /*max_chunk_size=*/16,
+                        /*expand_factor=*/1.5,
+                        /*obj_init_args=*/16,
+                        /*not_empty=*/true,
+                    },
 
-                             // Case 3: zero init objects, dynamically
-                             // expand
-                             UCXMPoolTestCase{
-                                 .obj_size = 16,
-                                 .leak_check = false,
-                                 .alignment = 16,
-                                 .alignment_offset = 0,
-                                 .obj_per_chunks = 1,
-                                 .init_number_objects = 0,
-                                 .get_objects_count = 3,
-                                 .max_objects = 4,
-                                 .max_chunk_size = 16,
-                                 .expand_factor = 1.5,
-                                 .obj_init_args = 16,
-                                 .not_empty = false,
-                             },
+                    // Case 3: zero init objects, dynamically expand
+                    UCXMPoolTestCase{
+                        /*obj_size=*/16,
+                        /*leak_check=*/false,
+                        /*alignment=*/16,
+                        /*alignment_offset=*/0,
+                        /*obj_per_chunks=*/1,
+                        /*init_number_objects=*/0,
+                        /*get_objects_count=*/3,
+                        /*max_objects=*/4,
+                        /*max_chunk_size=*/16,
+                        /*expand_factor=*/1.5,
+                        /*obj_init_args=*/16,
+                        /*not_empty=*/false,
+                    },
 
-                             // Case 4: init/get same number of objects
-                             // with leak checker
-                             UCXMPoolTestCase{
-                                 .obj_size = 16,
-                                 .leak_check = true,
-                                 .alignment = 16,
-                                 .alignment_offset = 0,
-                                 .obj_per_chunks = 4,
-                                 .init_number_objects = 4,
-                                 .get_objects_count = 4,
-                                 .max_objects = 4,
-                                 .max_chunk_size = 16,
-                                 .expand_factor = 1.5,
-                                 .obj_init_args = 16,
-                                 .not_empty = false,
-                             }));
+                    // Case 4: init/get same number of objects with leak checker
+                    UCXMPoolTestCase{
+                        /*obj_size=*/16,
+                        /*leak_check=*/true,
+                        /*alignment=*/16,
+                        /*alignment_offset=*/0,
+                        /*obj_per_chunks=*/4,
+                        /*init_number_objects=*/4,
+                        /*get_objects_count=*/4,
+                        /*max_objects=*/4,
+                        /*max_chunk_size=*/16,
+                        /*expand_factor=*/1.5,
+                        /*obj_init_args=*/16,
+                        /*not_empty=*/false,
+                    }));
