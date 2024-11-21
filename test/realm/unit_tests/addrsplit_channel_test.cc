@@ -6,6 +6,63 @@
 
 using namespace Realm;
 
+class MockAddressSplitChannel : public AddressSplitChannel {
+public:
+  MockAddressSplitChannel(BackgroundWorkManager *bgwork)
+    : AddressSplitChannel(bgwork)
+  {}
+
+  virtual void enqueue_ready_xd(XferDes *xd) { num_xds++; }
+
+  int num_xds = 0;
+};
+
+struct AddressSplitFactoryTest : public ::testing::Test {};
+
+TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
+{
+  std::vector<XferDesPortInfo> inputs_info;
+  std::vector<XferDesPortInfo> outputs_info;
+  XferDesRedopInfo redop_info;
+  XferDesID guid = 0;
+  int priority = 0;
+  NodeID launch_node = 0;
+  NodeID target_node = 0;
+  Node node_data;
+  size_t bytes_per_element = 4;
+
+  auto bgwork = std::make_unique<BackgroundWorkManager>();
+  auto addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
+  std::vector<IndexSpace<1>> spaces(1);
+  auto factory = new AddressSplitXferDesFactory<1, int>(bytes_per_element, spaces,
+                                                        addrsplit_channel);
+  factory->create_xfer_des(0, launch_node, target_node, guid, inputs_info, outputs_info,
+                           0, redop_info, nullptr, 0, 0);
+  factory->release();
+}
+
+TEST_F(AddressSplitFactoryTest, DISABLED_CreateXferDesRemote)
+{
+  std::vector<XferDesPortInfo> inputs_info;
+  std::vector<XferDesPortInfo> outputs_info;
+  XferDesRedopInfo redop_info;
+  XferDesID guid = 0;
+  int priority = 0;
+  NodeID launch_node = 1;
+  NodeID target_node = 1;
+  Node node_data;
+  size_t bytes_per_element = 4;
+
+  auto bgwork = std::make_unique<BackgroundWorkManager>();
+  auto addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
+  std::vector<IndexSpace<1>> spaces(1);
+  auto factory = new AddressSplitXferDesFactory<1, int>(bytes_per_element, spaces,
+                                                        addrsplit_channel);
+  factory->create_xfer_des(0, launch_node, target_node, guid, inputs_info, outputs_info,
+                           0, redop_info, nullptr, 0, 0);
+  factory->release();
+}
+
 template <int N, typename T>
 struct AddressSplitXferDescTestCase {
   int expected_iterations = 1;
@@ -75,15 +132,6 @@ public:
   size_t iterations = 0;
   size_t offset = 0;
   size_t total_bytes = 0;
-};
-
-class MockAddressSplitChannel : public AddressSplitChannel {
-public:
-  MockAddressSplitChannel(BackgroundWorkManager *bgwork)
-    : AddressSplitChannel(bgwork)
-  {}
-
-  virtual void enqueue_ready_xd(XferDes *xd) { assert(0); }
 };
 
 TYPED_TEST_P(AddressSplitTest, ProgressXD)
