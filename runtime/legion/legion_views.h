@@ -927,16 +927,6 @@ namespace Legion {
       // this is that it will require stopping any precondition searches
       // which currently can still happen at the same time
       void clean_views(FieldMask &valid_mask,FieldMaskSet<ExprView> &clean_set);
-    public:
-      void pack_replication(Serializer &rez, 
-                            std::map<PhysicalUser*,unsigned> &indexes,
-                            const FieldMask &pack_mask,
-                            const AddressSpaceID target) const;
-      void unpack_replication(Deserializer &derez, ExprView *root,
-                              const AddressSpaceID source,
-                              std::map<IndexSpaceExprID,ExprView*> &expr_cache,
-                              std::vector<PhysicalUser*> &users);
-      void deactivate_replication(const FieldMask &deactivate_mask);
     protected:
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
