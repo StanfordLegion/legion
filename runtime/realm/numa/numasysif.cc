@@ -174,7 +174,7 @@ namespace Realm {
         }
         char line[256];
         while(fgets(line, 256, f)) {
-          const char *s = strstr(line, "MemFree");
+          const char *s = strstr(line, "MemTotal");
           if(!s)
             continue;
           const char *endptr;

@@ -1595,7 +1595,8 @@ namespace Legion {
 #endif
             // Get the interference kind and report it if it is bad
             RegionUsage usage2(logical_regions[indexes[j]]);
-            DependenceType dtype = check_dependence_type<false>(usage1, usage2);
+            DependenceType dtype = 
+              check_dependence_type<false,false>(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
             // There is a special case here for concurrent tasks with both
@@ -4564,10 +4565,11 @@ namespace Legion {
         Provenance *provenance = get_provenance();
         if (provenance != NULL)
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
-              "Task %s (UID %lld, provenance: %s) used a task "
+              "Task %s (UID %lld, provenance: %.*s) used a task "
               "variant with a maximum return size of %zd but "
               "returned a result of %zd bytes.",
-              get_task_name(), get_unique_id(), provenance->human_str(),
+              get_task_name(), get_unique_id(), int(provenance->human.length()),
+              provenance->human.data(),
               var_impl->return_type_size, instance->size)
         else
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,

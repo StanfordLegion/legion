@@ -77,10 +77,9 @@ void top_level_task(const Task *task,
   {
     Realm::ModuleConfig *numa_config = rt.get_module_config("numa");
     if (numa_config) {
-      bool numa_avail = false;
-      ret_value = numa_config->get_resource("numa", numa_avail);
-      assert(ret_value == true);
-      if (numa_avail) {
+      std::vector<size_t> numa_mems;
+      ret_value = numa_config->get_resource("numa_mems", numa_mems);
+      if (ret_value) {
         size_t numa_mem_size = 0;
         size_t numa_nocpu_mem_size = 0;
         int num_numa_cpus = 0;
@@ -275,10 +274,9 @@ int main(int argc, char **argv)
 
   Realm::ModuleConfig* numa_config = rt.get_module_config("numa");
   if (numa_config) {
-    bool numa_avail = false;
-    ret_value = numa_config->get_resource("numa", numa_avail);
-    assert(ret_value == true);
-    if (numa_avail) {
+    std::vector<size_t> numa_mems;
+    ret_value = numa_config->get_resource("numa_mems", numa_mems);
+    if (ret_value) {
       ret_value = numa_config->set_property<size_t>("numamem", TestConfig::numa_mem_size);
       assert(ret_value == true);
       ret_value = numa_config->set_property<size_t>("numa_nocpumem", TestConfig::numa_nocpu_mem_size);

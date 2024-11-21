@@ -3936,6 +3936,9 @@ namespace Realm {
       {
         Memory src_mem = channel_copy_info.src_mem;
         Memory dst_mem = channel_copy_info.dst_mem;
+        if(!supports_redop(redop_id)) {
+          return 0;
+        }
         // If we don't support the indirection memory, then no need to check the paths.
         if((channel_copy_info.ind_mem != Memory::NO_MEMORY) &&
            !supports_indirection_memory(channel_copy_info.ind_mem)) {
@@ -4438,6 +4441,21 @@ namespace Realm {
         return p;
       }
 
+      bool Channel::supports_redop(ReductionOpID redop_id) const
+      {
+        if(redop_id == 0) {
+          return true;
+        }
+
+        for(const SupportedPath &path : paths) {
+          if(path.redops_allowed) {
+            return true;
+          }
+        }
+
+        return false;
+      }
+
       long Channel::progress_xd(XferDes *xd, long max_nr)
       {
 	const long MAX_NR = 8;
@@ -4668,17 +4686,33 @@ namespace Realm {
   RemoteChannel::RemoteChannel(uintptr_t _remote_ptr,
                                const std::vector<Memory> &_indirect_memories)
     : Channel(XFER_NONE)
+    , remote_ptr(_remote_ptr)
     , factory_singleton(_remote_ptr)
     , indirect_memories(_indirect_memories.begin(), _indirect_memories.end())
   {}
   RemoteChannel::RemoteChannel(uintptr_t _remote_ptr)
     : Channel(XFER_NONE)
+    , remote_ptr(_remote_ptr)
     , factory_singleton(_remote_ptr)
   {}
 
   void RemoteChannel::shutdown() {}
 
+  uintptr_t RemoteChannel::get_remote_ptr() const { return remote_ptr; }
+
   XferDesFactory *RemoteChannel::get_factory() { return &factory_singleton; }
+
+  void RemoteChannel::register_redop(ReductionOpID redop_id)
+  {
+    RWLock::AutoWriterLock al(mutex);
+    (void)supported_redops.insert(redop_id);
+  }
+
+  bool RemoteChannel::supports_redop(ReductionOpID redop_id) const
+  {
+    RWLock::AutoReaderLock al(mutex);
+    return supported_redops.count(redop_id) != 0;
+  }
 
   long RemoteChannel::submit(Request **requests, long nr)
   {
@@ -4706,8 +4740,13 @@ namespace Realm {
       {
         // simultaneous serialization/deserialization not
         //  allowed anywhere right now
-        if((src_serdez_id != 0) && (dst_serdez_id != 0))
+        if((src_serdez_id != 0) && (dst_serdez_id != 0)) {
           return 0;
+        }
+
+        if(!supports_redop(redop_id)) {
+          return 0;
+        }
 
         // fall through to normal checks
         return Channel::supports_path(channel_copy_info, src_serdez_id, dst_serdez_id,
@@ -5405,26 +5444,9 @@ namespace Realm {
     xdq.add_to_manager(bgwork);
   }
 
-  uint64_t MemreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
-                                           CustomSerdezID src_serdez_id,
-                                           CustomSerdezID dst_serdez_id,
-                                           ReductionOpID redop_id,
-                                           size_t total_bytes,
-                                           const std::vector<size_t> *src_frags,
-                                           const std::vector<size_t> *dst_frags,
-                                           XferDesKind *kind_ret /*= 0*/,
-                                           unsigned *bw_ret /*= 0*/,
-                                           unsigned *lat_ret /*= 0*/)
+  bool MemreduceChannel::supports_redop(ReductionOpID redop_id) const
   {
-    // if it's not a reduction, we don't want it
-    if(redop_id == 0)
-      return 0;
-
-    // otherwise consult the normal supports_path logic
-    return Channel::supports_path(channel_copy_info,
-                                  src_serdez_id, dst_serdez_id, redop_id,
-                                  total_bytes, src_frags, dst_frags,
-                                  kind_ret, bw_ret, lat_ret);
+    return redop_id != 0;
   }
 
   XferDes *MemreduceChannel::create_xfer_des(uintptr_t dma_op,

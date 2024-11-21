@@ -24,34 +24,22 @@
 #include "realm/faults.h"
 
 #include "realm/network.h"
+#include <realm/activemsg.h>
 
 #include "realm/lists.h"
 #include "realm/threads.h"
 #include "realm/logging.h"
 #include "realm/redop.h"
 #include "realm/bgwork.h"
+#include "realm/dynamic_table.h"
 
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace Realm {
 
-#ifdef EVENT_TRACING
-  // For event tracing
-  struct EventTraceItem {
-  public:
-    enum Action
-    {
-      ACT_CREATE = 0,
-      ACT_QUERY = 1,
-      ACT_TRIGGER = 2,
-      ACT_WAIT = 3,
-    };
-
-  public:
-    unsigned time_units, event_id, event_gen, action;
-  };
-#endif
+  class GenEventImpl;
 
   extern Logger log_poison; // defined in event_impl.cc
   class ProcessorImpl;      // defined in proc_impl.h
@@ -179,17 +167,33 @@ namespace Realm {
     unsigned num_preconditions, max_preconditions;
   };
 
+  class EventCommunicator {
+  public:
+    virtual ~EventCommunicator() = default;
+
+    virtual void trigger(Event event, NodeID owner, bool poisoned);
+
+    virtual void update(Event event, NodeSet to_update,
+                        span<EventImpl::gen_t> poisoned_generations);
+
+    virtual void update(Event event, NodeID to_update,
+                        span<EventImpl::gen_t> poisoned_generations);
+
+    virtual void subscribe(Event event, NodeID owner,
+                           EventImpl::gen_t previous_subscribe_gen);
+  };
+
   class GenEventImpl : public EventImpl {
   public:
     static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
     GenEventImpl(void);
+    GenEventImpl(EventTriggerNotifier *_event_triggerer, EventCommunicator *_event_comm);
     ~GenEventImpl(void);
 
     void init(ID _me, unsigned _init_owner);
 
     static GenEventImpl *create_genevent(void);
-    static void free_genevent(GenEventImpl *);
 
     static ID make_id(const GenEventImpl &dummy, int owner, ID::IDType index)
     {
@@ -203,6 +207,8 @@ namespace Realm {
     virtual bool has_triggered(gen_t needed_gen, bool &poisoned);
 
     virtual void subscribe(gen_t subscribe_gen);
+    void handle_remote_subscription(NodeID sender, gen_t subscribe_gen,
+                                    gen_t previous_subscribe_gen);
 
     virtual void external_wait(gen_t needed_gen, bool &poisoned);
     virtual bool external_timedwait(gen_t needed_gen, bool &poisoned, long long max_ns);
@@ -221,7 +227,7 @@ namespace Realm {
     static Event ignorefaults(Event wait_for);
 
     // record that the event has triggered and notify anybody who cares
-    void trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
+    bool trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
                  TimeLimit work_until);
 
     // helper for triggering with an Event (which must be backed by a GenEventImpl)
@@ -242,24 +248,27 @@ namespace Realm {
   public: // protected:
     // these state variables are monotonic, so can be checked without a lock for
     //  early-out conditions
-    atomic<gen_t> generation;
-    atomic<gen_t> gen_subscribed;
-    atomic<int> num_poisoned_generations;
-    bool has_local_triggers;
+    atomic<gen_t> generation = atomic<gen_t>(0);
+    atomic<gen_t> gen_subscribed = atomic<gen_t>(0);
+    atomic<int> num_poisoned_generations = atomic<int>(0);
+    bool has_local_triggers = false;
 
     bool is_generation_poisoned(gen_t gen) const; // helper function - linear search
 
     // this is only manipulated when the event is "idle"
-    GenEventImpl *next_free;
+    GenEventImpl *next_free = 0;
 
     // used for merge_events and delayed UserEvent triggers
     EventMerger merger;
+
+    EventTriggerNotifier *event_triggerer;
+    std::unique_ptr<EventCommunicator> event_comm;
 
     // everything below here protected by this mutex
     Mutex mutex;
 
     // The operation that will trigger this generation
-    Operation *current_trigger_op;
+    Operation *current_trigger_op = nullptr;
 
     // local waiters are tracked by generation - an easily-accessed list is used
     //  for the "current" generation, whereas a map-by-generation-id is used for
@@ -269,7 +278,7 @@ namespace Realm {
     std::map<gen_t, EventWaiter::EventWaiterList> future_local_waiters;
 
     // external waiters on this node are notifies via a condition variable
-    bool has_external_waiters;
+    bool has_external_waiters = false;
     // use kernel mutex for timedwait functionality
     KernelMutex external_waiter_mutex;
     KernelMutex::CondVar external_waiter_condvar;
@@ -288,7 +297,7 @@ namespace Realm {
     // we also can't use an STL vector because reallocation prevents us from reading the
     //  list without the lock - instead we'll allocate the max size if/when we need
     //  any space
-    gen_t *poisoned_generations;
+    gen_t *poisoned_generations = 0;
 
     // local triggerings - if we're not the owner, but we've triggered/poisoned events,
     //  we need to give consistent answers for those generations, so remember what we've
@@ -298,34 +307,8 @@ namespace Realm {
 
     // these resolve a race condition between the early trigger of a
     //  poisoned merge and the last precondition
-    bool free_list_insertion_delayed;
+    bool free_list_insertion_delayed = false;
     friend class EventMerger;
-    void perform_delayed_free_list_insertion(void);
-  };
-
-  // active messages
-
-  struct EventSubscribeMessage {
-    Event event;
-    EventImpl::gen_t previous_subscribe_gen;
-
-    static void handle_message(NodeID sender, const EventSubscribeMessage &msg,
-                               const void *data, size_t datalen);
-  };
-
-  struct EventTriggerMessage {
-    Event event;
-    bool poisoned;
-
-    static void handle_message(NodeID sender, const EventTriggerMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-  };
-
-  struct EventUpdateMessage {
-    Event event;
-
-    static void handle_message(NodeID sender, const EventUpdateMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
   };
 }; // namespace Realm
 

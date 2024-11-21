@@ -26,9 +26,10 @@ enum {
   COPYPROF_TASK,
 };
 
-enum {
-  FID_INT = 44,
-  FID_DOUBLE = 88,
+enum
+{
+  FID_RHS = 44,
+  FID_LHS = 88,
 };
 
 enum {
@@ -36,11 +37,9 @@ enum {
 };
 
 namespace TestConfig {
-  bool all_memories = false;
+  bool all_memories = true;
   unsigned dim_mask = 7; // i.e. 1-D, 2-D, 3-D
 };
-
-const ReductionOpMixedAdd::RHS ReductionOpMixedAdd::identity = 0;
 
 template <int N, typename T>
 bool test_reduction(IndexSpace<N,T> domain, IndexSpace<N,T> bloat,
@@ -49,8 +48,8 @@ bool test_reduction(IndexSpace<N,T> domain, IndexSpace<N,T> bloat,
                     Memory chk_mem)
 {
   std::map<FieldID, size_t> fields;
-  fields[FID_INT] = sizeof(int);
-  fields[FID_DOUBLE] = sizeof(double);
+  fields[FID_RHS] = sizeof(ReductionOpMixedAdd::RHS);
+  fields[FID_LHS] = sizeof(ReductionOpMixedAdd::LHS);
 
   RegionInstance dst_inst, chk_inst;
   std::vector<RegionInstance> src_insts;
@@ -73,19 +72,19 @@ bool test_reduction(IndexSpace<N,T> domain, IndexSpace<N,T> bloat,
   {
     {
       std::vector<CopySrcDstField> srcs(2), dsts(2);
-      srcs[0].set_fill<int>(1);
-      srcs[1].set_fill<double>(2);
-      dsts[0].set_field(dst_inst, FID_INT, sizeof(int));
-      dsts[1].set_field(dst_inst, FID_DOUBLE, sizeof(double));
+      srcs[0].set_fill<ReductionOpMixedAdd::RHS>(1);
+      srcs[1].set_fill<ReductionOpMixedAdd::LHS>(2);
+      dsts[0].set_field(dst_inst, FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
+      dsts[1].set_field(dst_inst, FID_LHS, sizeof(ReductionOpMixedAdd::LHS));
       events.push_back(bloat.copy(srcs, dsts, ProfilingRequestSet()));
     }
 
     for(size_t i = 0; i < src_mems.size(); i++) {
       std::vector<CopySrcDstField> srcs(2), dsts(2);
-      srcs[0].set_fill<int>(2*i + 3);
-      srcs[1].set_fill<double>(2*i + 4);
-      dsts[0].set_field(src_insts[i], FID_INT, sizeof(int));
-      dsts[1].set_field(src_insts[i], FID_DOUBLE, sizeof(double));
+      srcs[0].set_fill<ReductionOpMixedAdd::RHS>(2 * i + 3);
+      srcs[1].set_fill<ReductionOpMixedAdd::LHS>(2 * i + 4);
+      dsts[0].set_field(src_insts[i], FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
+      dsts[1].set_field(src_insts[i], FID_LHS, sizeof(ReductionOpMixedAdd::LHS));
       events.push_back(bloat.copy(srcs, dsts, ProfilingRequestSet()));
     }
   }
@@ -98,8 +97,8 @@ bool test_reduction(IndexSpace<N,T> domain, IndexSpace<N,T> bloat,
     Event e = Event::NO_EVENT;
     for(size_t i = 0; i < src_mems.size(); i++) {
       std::vector<CopySrcDstField> srcs(1), dsts(1);
-      srcs[0].set_field(src_insts[i], FID_INT, sizeof(int));
-      dsts[0].set_field(dst_inst, FID_DOUBLE, sizeof(double));
+      srcs[0].set_field(src_insts[i], FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
+      dsts[0].set_field(dst_inst, FID_LHS, sizeof(ReductionOpMixedAdd::LHS));
       dsts[0].set_redop(REDOP_MIXED_ADD, false /*!is_fold*/);
       e = domain.copy(srcs, dsts, ProfilingRequestSet(), e);
     }
@@ -107,22 +106,21 @@ bool test_reduction(IndexSpace<N,T> domain, IndexSpace<N,T> bloat,
     // copy to memory we can access directly
     {
       std::vector<CopySrcDstField> srcs(1), dsts(1);
-      srcs[0].set_field(dst_inst, FID_DOUBLE, sizeof(double));
-      dsts[0].set_field(chk_inst, FID_DOUBLE, sizeof(double));
+      srcs[0].set_field(dst_inst, FID_LHS, sizeof(ReductionOpMixedAdd::LHS));
+      dsts[0].set_field(chk_inst, FID_LHS, sizeof(ReductionOpMixedAdd::LHS));
       e = domain.copy(srcs, dsts, ProfilingRequestSet(), e);
     }
     e.wait();
 
-    AffineAccessor<double,N,T> acc(chk_inst, FID_DOUBLE);
+    AffineAccessor<ReductionOpMixedAdd::LHS, N, T> acc(chk_inst, FID_LHS);
     for(IndexSpaceIterator<N,T> it(domain); it.valid; it.step())
       for(PointInRectIterator<N,T> it2(it.rect); it2.valid; it2.step()) {
-        double exp = 1 + (src_mems.size() + 1) * (src_mems.size() + 1);
-        double act = acc[it2.p];
-        if(act == exp) {
-          // good
-        } else {
-          if(++errors < 10)
+        ReductionOpMixedAdd::LHS exp = 1 + (src_mems.size() + 1) * (src_mems.size() + 1);
+        ReductionOpMixedAdd::LHS act = acc[it2.p];
+        if(act != exp) {
+          if(++errors < 10) {
             log_app.error() << "apply mismatch: [" << it2.p << "] = " << act << " (expected " << exp << ")";
+          }
         }
       }
   }
@@ -132,38 +130,39 @@ bool test_reduction(IndexSpace<N,T> domain, IndexSpace<N,T> bloat,
     Event e = Event::NO_EVENT;
     for(size_t i = 0; i < src_mems.size(); i++) {
       std::vector<CopySrcDstField> srcs(1), dsts(1);
-      srcs[0].set_field(src_insts[i], FID_INT, sizeof(int));
-      dsts[0].set_field(dst_inst, FID_INT, sizeof(int));
+      srcs[0].set_field(src_insts[i], FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
+      dsts[0].set_field(dst_inst, FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
       dsts[0].set_redop(REDOP_MIXED_ADD, true /*is_fold*/);
       e = domain.copy(srcs, dsts, ProfilingRequestSet(), e);
     }
-    e.wait();
 
     // copy to memory we can access directly
     {
       std::vector<CopySrcDstField> srcs(1), dsts(1);
-      srcs[0].set_field(dst_inst, FID_INT, sizeof(int));
-      dsts[0].set_field(chk_inst, FID_INT, sizeof(int));
+      srcs[0].set_field(dst_inst, FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
+      dsts[0].set_field(chk_inst, FID_RHS, sizeof(ReductionOpMixedAdd::RHS));
       e = domain.copy(srcs, dsts, ProfilingRequestSet(), e);
     }
     e.wait();
 
-    AffineAccessor<int,N,T> acc(chk_inst, FID_INT);
+    AffineAccessor<int, N, T> acc(chk_inst, FID_RHS);
     for(IndexSpaceIterator<N,T> it(domain); it.valid; it.step())
       for(PointInRectIterator<N,T> it2(it.rect); it2.valid; it2.step()) {
         int exp = (src_mems.size() + 1) * (src_mems.size() + 1);
         int act = acc[it2.p];
         if(act != exp) {
-          if(++errors < 10)
+          if(++errors < 10) {
             log_app.error() << "fold mismatch: [" << it2.p << "] = " << act << " (expected " << exp << ")";
+          }
         }
       }
   }
 
   chk_inst.destroy();
   dst_inst.destroy();
-  for(size_t i = 0; i < src_insts.size(); i++)
+  for(size_t i = 0; i < src_insts.size(); i++) {
     src_insts[i].destroy();
+  }
 
   return (errors == 0);
 }
@@ -172,10 +171,12 @@ void top_level_task(const void *data, size_t datalen,
                     const void *userdata, size_t userlen, Processor p)
 {
   std::vector<Memory> mems;
-  Machine::MemoryQuery mq(Machine::get_machine());
-  for(Machine::MemoryQuery::iterator it = mq.begin(); it != mq.end(); ++it)
-    if((*it).capacity() > 0)
-      mems.push_back(*it);
+  Machine::MemoryQuery mq = Machine::MemoryQuery(Machine::get_machine()).has_capacity(1);
+  mems.assign(mq.begin(), mq.end());
+
+  for(Memory mem : mems) {
+    log_app.info() << mem << " kind=" << mem.kind() << ' ' << mem.capacity();
+  }
 
   // pick a memory we have affinity to that we'll do verification in
   Memory chk_mem = Machine::MemoryQuery(Machine::get_machine()).has_affinity_to(p).first();
@@ -183,7 +184,7 @@ void top_level_task(const void *data, size_t datalen,
 
   bool ok = true;
 
-  for(size_t i = 0; i < mems.size(); i++) {
+  for(size_t i = 0; i < (TestConfig::all_memories ? mems.size() : 1); i++) {
     if(TestConfig::dim_mask & 1) {
       // 1-D
       Rect<1> r(0,7);
@@ -214,9 +215,6 @@ void top_level_task(const void *data, size_t datalen,
       if(ok) ok = test_reduction(IndexSpace<3>(r), IndexSpace<3>(r), mems[i], mems, chk_mem);
       if(ok) ok = test_reduction(IndexSpace<3>(smaller), IndexSpace<3>(r), mems[i], mems, chk_mem);
     }
-
-    if(!TestConfig::all_memories)
-      break;
   }
 
   Runtime::get_runtime().shutdown(Event::NO_EVENT,

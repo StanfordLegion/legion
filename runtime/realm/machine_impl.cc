@@ -604,8 +604,16 @@ namespace Realm {
         {
           RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
           if(rci) {
+            size_t num_redops = 0;
             RemoteChannel *rc = rci->create_remote_channel();
             delete rci;
+
+            fbd >> num_redops;
+            for(size_t i = 0; i < num_redops; i++) {
+              ReductionOpID redop_id = 0;
+              fbd >> redop_id;
+              rc->register_redop(redop_id);
+            }
 
             log_annc.debug() << "adding channel: " << *rc;
             assert(rc->node == node_id);
