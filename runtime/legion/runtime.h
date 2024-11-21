@@ -3126,10 +3126,6 @@ namespace Legion {
                                            Serializer &rez);
       void send_index_space_colors_response(AddressSpaceID target,
                                             Serializer &rez);
-      void send_index_space_remote_expression_request(AddressSpaceID target,
-                                                      Serializer &rez);
-      void send_index_space_remote_expression_response(AddressSpaceID target,
-                                                       Serializer &rez);
       void send_index_space_generate_color_request(AddressSpaceID target,
                                                    Serializer &rez);
       void send_index_space_generate_color_response(AddressSpaceID target,
@@ -3579,10 +3575,6 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
-      void handle_index_space_remote_expression_request(Deserializer &derez,
-                                                        AddressSpaceID source);
-      void handle_index_space_remote_expression_response(Deserializer &derez,
-                                                         AddressSpaceID source);
       void handle_index_space_generate_color_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_index_space_generate_color_response(Deserializer &derez);
@@ -6059,10 +6051,6 @@ namespace Legion {
           break;
         case SEND_INDEX_SPACE_COLORS_RESPONSE:
           break;
-        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
-          break;
-        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
-          return EXPRESSION_VIRTUAL_CHANNEL;
         case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
           break;
         case SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE:

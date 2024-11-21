@@ -777,8 +777,6 @@ namespace Legion {
       SEND_INDEX_SPACE_CHILD_RESPONSE,
       SEND_INDEX_SPACE_COLORS_REQUEST,
       SEND_INDEX_SPACE_COLORS_RESPONSE,
-      SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
-      SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
       SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST,
       SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE,
       SEND_INDEX_SPACE_RELEASE_COLOR,
@@ -1109,8 +1107,6 @@ namespace Legion {
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \
         "Send Index Space Colors Response",                           \
-        "Send Index Space Remote Expression Request",                 \
-        "Send Index Space Remote Expression Response",                \
         "Send Index Space Generate Color Request",                    \
         "Send Index Space Generate Color Response",                   \
         "Send Index Space Release Color",                             \
