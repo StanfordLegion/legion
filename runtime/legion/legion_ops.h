@@ -855,8 +855,6 @@ namespace Legion {
       template<typename ... Args>
       SinglePointWiseAnalysable(Runtime *rt, Args&& ... args)
         : OP(rt, std::forward<Args>(args) ...) { }
-      SinglePointWiseAnalysable(
-          const SinglePointWiseAnalysable<OP> &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -899,31 +897,37 @@ namespace Legion {
       template<typename ... Args>
       PointWiseAnalysable(Runtime *rt, Args&& ... args)
         : OP(rt, std::forward<Args>(args) ...) { }
-      PointWiseAnalysable(const PointWiseAnalysable<OP> &rhs) = delete;
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
       virtual void clear_context_maps(void);
     public:
-      bool prev_point_wise_user_set(unsigned region_req_idx);
-      bool region_has_collective(unsigned region_idx,
+      virtual bool prev_point_wise_user_set(unsigned region_req_idx);
+      virtual bool region_has_collective(unsigned region_idx,
           GenerationID gen);
-      bool set_next_point_wise_user(Operation *next_op,
+      virtual bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen,
           unsigned region_idx);
-      bool set_prev_point_wise_user(Operation *prev_op,
+      virtual bool set_prev_point_wise_user(Operation *prev_op,
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
           unsigned region_idx, unsigned dep_type,
           unsigned prev_region_idx,
           Domain index_domain);
-      void record_point_wise_dependence_completed_points_prev_task(
+      virtual void record_point_wise_dependence_completed_points_prev_task(
           ProjectionSummary *shard_proj,
           uint64_t context_index);
-      bool need_forward_progress(void);
+      virtual bool need_forward_progress(void);
+      virtual void add_point_to_completed_list(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual void record_point_wise_dependence(DomainPoint point,
+          unsigned region_idx, RtEvent point_mapped);
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
+          LogicalRegion lr,
+          unsigned region_idx);
     public:
-      void get_points(RegionRequirement &req,
+      void get_points(const RegionRequirement &req,
           ProjectionFunction *projection,
           LogicalRegion lr, Domain index_domain,
           std::vector<DomainPoint> &points)
@@ -1746,7 +1750,7 @@ namespace Legion {
      * except it is an index space operation for performing
      * multiple copies with projection functions
      */
-    class IndexCopyOp : public CopyOp {
+    class IndexCopyOp : public PointWiseAnalysable<CopyOp> {
     public:
       IndexCopyOp(Runtime *rt);
       IndexCopyOp(const IndexCopyOp &rhs);
@@ -1828,7 +1832,8 @@ namespace Legion {
      * physical part of the analysis for an index copy
      * operation.
      */
-    class PointCopyOp : public CopyOp, public ProjectionPoint {
+    class PointCopyOp : public SinglePointWiseAnalysable<CopyOp>,
+                        public ProjectionPoint {
     public:
       friend class IndexCopyOp;
       PointCopyOp(Runtime *rt);
@@ -1867,6 +1872,10 @@ namespace Legion {
       virtual void record_intra_space_dependences(unsigned idx,
                                const std::vector<DomainPoint> &region_deps);
       virtual const Mappable* as_mappable(void) const { return this; }
+    public:
+      using Operation::record_point_wise_dependence;
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx);
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;

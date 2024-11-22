@@ -952,7 +952,7 @@ namespace Legion {
         virtual const Mappable* as_mappable(void) const { return this; }
       public:
         using Operation::record_point_wise_dependence;
-        void record_point_wise_dependence(LogicalRegion lr,
+        virtual void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
       public:
         void initialize_point(SliceTask *owner, const DomainPoint &point,
@@ -1201,10 +1201,6 @@ namespace Legion {
       void initialize_predicate(const Future &pred_future,
                                 const UntypedBuffer &pred_arg);
       void perform_base_dependence_analysis(void);
-      void analyze_region_requirements(
-        IndexSpaceNode *launch_space = nullptr,
-        ShardingFunction *func = nullptr,
-        IndexSpace shard_space = IndexSpace::NO_SPACE);
     protected:
       void create_output_regions(std::vector<OutputRequirement> &outputs,
                                  IndexSpace launch_space);
@@ -1361,16 +1357,9 @@ namespace Legion {
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
     public:
       using Operation::record_point_wise_dependence;
-      bool region_has_collective(unsigned region_idx,
+      virtual bool region_has_collective(unsigned region_idx,
           GenerationID gen);
-      void add_point_to_completed_list(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped);
-      void clear_context_maps(void);
-      void record_point_wise_dependence(DomainPoint point,
-          unsigned region_idx, RtEvent point_mapped);
-      RtEvent find_point_wise_dependence(DomainPoint point,
-          LogicalRegion lr,
-          unsigned region_idx);
+      virtual void clear_context_maps(void);
     public:
       static void process_slice_find_point_wise_dependence(
           Deserializer &derez);
@@ -1378,7 +1367,6 @@ namespace Legion {
           Deserializer &derez);
       static void process_slice_add_point_to_completed_list(
           Deserializer &derez);
-
     };
 
     /**
@@ -1501,14 +1489,14 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       using Operation::record_point_wise_dependence;
-      void record_point_wise_dependence(DomainPoint point,
+      virtual void record_point_wise_dependence(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
-      RtEvent find_point_wise_dependence(DomainPoint point,
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
           unsigned region_idx);
-      void add_point_to_completed_list(DomainPoint point,
+      virtual void add_point_to_completed_list(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
-      bool need_forward_progress(void);
+      virtual bool need_forward_progress(void);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);

@@ -1328,6 +1328,10 @@ namespace Legion {
 
       LogicalAnalysis logical_analysis(this, get_output_offset());
 
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      logical_analysis.bail_point_wise_analysis = false;
+#endif
+
       unsigned req_count = get_region_count();
       for (unsigned i = 0; i < req_count; i++)
       {
@@ -4150,6 +4154,7 @@ namespace Legion {
 
     // Explicit instantiations
     template class SinglePointWiseAnalysable<TaskOp>;
+    template class SinglePointWiseAnalysable<CopyOp>;
 
     /////////////////////////////////////////////////////////////
     // SinglePointWiseAnalysable
@@ -4174,6 +4179,7 @@ namespace Legion {
 
     // Explicit instantiations
     template class PointWiseAnalysable<CollectiveViewCreator<TaskOp> >;
+    template class PointWiseAnalysable<CopyOp>;
 
     /////////////////////////////////////////////////////////////
     // PointWiseAnalysable
@@ -4346,6 +4352,96 @@ namespace Legion {
 
       set_connect_to_next_point(region_idx);
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::add_point_to_completed_list(
+        DomainPoint point, unsigned region_idx, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(this->op_lock);
+      if (!should_connect_to_next_point(region_idx))
+      {
+        completed_point_list.push_back(std::make_pair(point, point_mapped));
+      }
+      else
+      {
+        record_point_wise_dependence(point, region_idx, point_mapped);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointWiseAnalysable<OP>::record_point_wise_dependence(
+        DomainPoint point, unsigned region_idx, RtEvent point_mapped)
+    //--------------------------------------------------------------------------
+    {
+      this->parent_ctx->record_point_wise_dependence(
+          this->context_index,
+          point,
+          point_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent PointWiseAnalysable<OP>::find_point_wise_dependence(
+        DomainPoint point,
+        LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(this->op_lock);
+
+      if (should_connect_to_prev_point(region_idx))
+      {
+        // Find prev index task our owner index task depend on
+        std::map<unsigned, PointWisePrevOpInfo>::iterator finder =
+          prev_index_tasks.find(region_idx);
+        assert(finder != prev_index_tasks.end());
+
+#ifndef LEGION_SPY
+        if (finder->second.previous_index_task_generation <
+            finder->second.previous_index_task->get_generation())
+          return RtEvent::NO_RT_EVENT;
+#endif
+
+        const RegionRequirement &req =
+          this->get_requirement(region_idx);
+        std::vector<DomainPoint> previous_index_task_points;
+
+        get_points(req, finder->second.projection,
+            lr, finder->second.index_domain,
+            previous_index_task_points);
+
+        if (previous_index_task_points.size() > 1)
+        {
+          assert(false);
+        }
+        assert(!previous_index_task_points.empty());
+
+#ifdef LEGION_SPY
+        LegionSpy::log_mapping_point_wise_dependence(
+            this->get_context()->get_unique_id(),
+            LEGION_DISTRIBUTED_ID_FILTER(0),
+            finder->second.ctx_index, previous_index_task_points[0],
+            finder->second.region_idx, 0,
+            this->context_index, point,
+            region_idx, 0,
+            finder->second.dep_type);
+
+        if (finder->second.previous_index_task_generation <
+            finder->second.previous_index_task->get_generation())
+          return RtEvent::NO_RT_EVENT;
+#endif
+
+        return this->parent_ctx->find_point_wise_dependence(
+            finder->second.ctx_index,
+            previous_index_task_points[0]);
+      }
+
+      assert(false);
+      return RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8405,7 +8501,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(Runtime *rt)
-      : CopyOp(rt)
+      : PointWiseAnalysable<CopyOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -8413,7 +8509,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-      : CopyOp(rhs)
+      : PointWiseAnalysable<CopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8455,6 +8551,17 @@ namespace Legion {
       sharding_space = launcher.sharding_space;
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      size_t region_count = src_requirements.size();
+      connect_to_prev_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+        connect_to_prev_points[idx] = false;
+      connect_to_next_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+        connect_to_next_points[idx] = false;
+#endif
+
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -9513,12 +9620,12 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Point Copy Operation 
+    // Point Copy Operation
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     PointCopyOp::PointCopyOp(Runtime *rt)
-      : CopyOp(rt)
+      : SinglePointWiseAnalysable<CopyOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -9526,7 +9633,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointCopyOp::PointCopyOp(const PointCopyOp &rhs)
-      : CopyOp(rhs)
+      : SinglePointWiseAnalysable<CopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9865,6 +9972,36 @@ namespace Legion {
       }
       // We should never get here
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::record_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->should_connect_to_prev_point(region_idx))
+      {
+        RtEvent pre = owner->find_point_wise_dependence(get_domain_point(),
+            lr, region_idx);
+        if (!std::binary_search(point_wise_mapping_dependences.begin(),
+                  point_wise_mapping_dependences.end(), pre))
+        {
+          point_wise_mapping_dependences.push_back(pre);
+          std::sort(point_wise_mapping_dependences.begin(),
+                    point_wise_mapping_dependences.end());
+        }
+      }
+
+      if (owner->should_connect_to_next_point(region_idx))
+      {
+        owner->record_point_wise_dependence(get_domain_point(), region_idx,
+                                                  get_mapped_event());
+      }
+      else
+      {
+        owner->add_point_to_completed_list(get_domain_point(), region_idx,
+            get_mapped_event());
+      }
     }
 
     //--------------------------------------------------------------------------

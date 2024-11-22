@@ -1988,7 +1988,7 @@ namespace Legion {
         assert(finder != prev_index_tasks.end());
 
         // find the point of the previous index_task
-        RegionRequirement &req = logical_regions[region_idx];
+        const RegionRequirement &req = get_requirement(region_idx);
         std::vector<DomainPoint> previous_index_task_points;
 
         get_points(req, finder->second.projection,

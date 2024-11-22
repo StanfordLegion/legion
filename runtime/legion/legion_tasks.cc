@@ -4170,7 +4170,6 @@ namespace Legion {
         const RtEvent ready =
           Runtime::merge_events(point_wise_mapping_dependences);
         point_wise_mapping_dependences.clear();
-        ready.wait();
         if (ready.exists() && !ready.has_triggered())
           return defer_perform_mapping(ready, must_epoch_op,
                                        defer_args, 1/*invocation count*/);
@@ -5209,11 +5208,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MultiTask::MultiTask(Runtime *rt)
-      : PointWiseAnalysable<CollectiveViewCreator<TaskOp>>(rt)
+      : PointWiseAnalysable<CollectiveViewCreator<TaskOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
-    
+
     //--------------------------------------------------------------------------
     MultiTask::~MultiTask(void)
     //--------------------------------------------------------------------------
@@ -8492,6 +8491,7 @@ namespace Legion {
                    std::map<RtEvent,std::vector<PointTask*> > &event_deps) const
     //--------------------------------------------------------------------------
     {
+      //TODO: Account for point_wise_mapping_dependences
       if (intra_space_mapping_dependences.empty())
         return false;
       unsigned count = 0;
@@ -9449,40 +9449,6 @@ namespace Legion {
       version_infos.resize(logical_regions.size());
     }
 
-    void IndexTask::analyze_region_requirements(
-      IndexSpaceNode *launch_space,
-      ShardingFunction *func,
-      IndexSpace shard_space)
-    {
-      // We can skip doing the analysis for logical regions if we
-      // are replaying a logical trace
-      if ((trace != NULL) && !trace->is_recording())
-        return;
-
-      LogicalAnalysis logical_analysis(this, get_output_offset());
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      logical_analysis.bail_point_wise_analysis = false;
-#endif
-
-      unsigned req_count = get_region_count();
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        const RegionRequirement &req = get_requirement(i);
-
-        ProjectionInfo projection_info(runtime,
-                                       &req,
-                                       launch_space,
-                                       func,
-                                       shard_space);
-
-        runtime->forest->perform_dependence_analysis(this,
-                                                     i,
-                                                     req,
-                                                     projection_info,
-                                                     logical_analysis);
-      }
-    }
-
     //--------------------------------------------------------------------------
     void IndexTask::report_interfering_requirements(unsigned idx1,unsigned idx2)
     //--------------------------------------------------------------------------
@@ -10314,22 +10280,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_point_to_completed_list(DomainPoint point,
-        unsigned region_idx, RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!should_connect_to_next_point(region_idx))
-      {
-        completed_point_list.push_back(std::make_pair(point, point_mapped));
-      }
-      else
-      {
-        record_point_wise_dependence(point, region_idx, point_mapped);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::clear_context_maps(void)
     //--------------------------------------------------------------------------
     {
@@ -10352,72 +10302,6 @@ namespace Legion {
         }
         parent_ctx->clear_map(context_index, points);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::record_point_wise_dependence(DomainPoint point,
-                                                 unsigned region_idx,
-                                                 RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx->record_point_wise_dependence(context_index, point, point_mapped);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent IndexTask::find_point_wise_dependence(DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-
-      if (should_connect_to_prev_point(region_idx))
-      {
-        // Find prev index task our owner index task depend on
-        std::map<unsigned, PointWisePrevOpInfo>::iterator finder =
-          prev_index_tasks.find(region_idx);
-        assert(finder != prev_index_tasks.end());
-
-#ifndef LEGION_SPY
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-#endif
-
-        RegionRequirement &req = logical_regions[region_idx];
-        std::vector<DomainPoint> previous_index_task_points;
-
-        get_points(req, finder->second.projection,
-            lr, finder->second.index_domain,
-            previous_index_task_points);
-
-        if (previous_index_task_points.size() > 1)
-        {
-          assert(false);
-        }
-        assert(!previous_index_task_points.empty());
-
-#ifdef LEGION_SPY
-        LegionSpy::log_mapping_point_wise_dependence(
-            get_context()->get_unique_id(),
-            LEGION_DISTRIBUTED_ID_FILTER(0),
-            finder->second.ctx_index, previous_index_task_points[0],
-            finder->second.region_idx, 0,
-            context_index, point,
-            region_idx, 0,
-            finder->second.dep_type);
-
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-#endif
-
-        return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
-            previous_index_task_points[0]);
-      }
-
-      assert(false);
-      return RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
