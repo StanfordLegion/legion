@@ -992,29 +992,6 @@ namespace Legion {
                                       const bool trace_recording);
       void find_previous_filter_users(const FieldMask &dominated_mask,
                                       EventFieldUsers &filter_users);
-      // More overload versions for even more precise information including
-      // the index space expressions for individual events and fields
-      void find_current_preconditions(const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      const bool user_covers,
-                                      std::set<ApEvent> &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      EventFieldUsers &filter_events,
-                                      FieldMask &observed, 
-                                      FieldMask &non_dominated,
-                                      const bool trace_recording);
-      void find_previous_preconditions(const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      const bool user_covers,
-                                      std::set<ApEvent> &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      const bool trace_recording);
       // Overloads for find_last_users
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
@@ -1028,22 +1005,14 @@ namespace Legion {
                                       IndexSpaceExpression *expr,
                                       const bool expr_covers,
                                       std::set<ApEvent> &last_events) const;
-
-      template<bool COPY_USER>
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                       const RegionUsage &next_user,
                                       IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
                                       const bool user_covers,
-                                      bool &dominates) const;
-      template<bool COPY_USER>
-      inline bool has_local_precondition(PhysicalUser *prev_user,
-                                      const RegionUsage &next_user,
-                                      IndexSpaceExpression *user_expr,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      const bool user_covers) const;
+                                      const bool copy_user,
+                                      bool *dominates = NULL) const;
     public:
       size_t get_view_volume(void);
       void find_all_done_events(std::set<ApEvent> &all_done) const;
@@ -1982,14 +1951,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<bool COPY_USER>
     inline bool ExprView::has_local_precondition(PhysicalUser *user,
                                                  const RegionUsage &next_user,
                                                  IndexSpaceExpression *expr,
                                                  const UniqueID op_id,
                                                  const unsigned index,
                                                  const bool next_covers,
-                                                 bool &dominates) const
+                                                 const bool copy_user,
+                                                 bool *dominates) const
     //--------------------------------------------------------------------------
     {
       // We order these tests in a entirely based on cost
@@ -1998,7 +1967,7 @@ namespace Legion {
       // Copies from different region requirements though still 
       // need to wait on each other correctly
       if ((op_id == user->op_id) && (index != user->index) && 
-          (!COPY_USER || !user->copy_user))
+          (!copy_user || !user->copy_user))
         return false;
       // Now do a dependence test for privilege non-interference
       // Only reductions here are copy reductions which we know do not interfere
@@ -2031,54 +2000,8 @@ namespace Legion {
         // expression to dominate anything. It's hard to guarantee
         // correctness without this. Think very carefully if you
         // plan to change this!
-        dominates = false;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<bool COPY_USER>
-    inline bool ExprView::has_local_precondition(PhysicalUser *user,
-                                                 const RegionUsage &next_user,
-                                                 IndexSpaceExpression *expr,
-                                                 const UniqueID op_id,
-                                                 const unsigned index,
-                                                 const bool next_covers) const
-    //--------------------------------------------------------------------------
-    {
-      // We order these tests in a entirely based on cost
-
-      // Different region requirements of the same operation 
-      // Copies from different region requirements though still 
-      // need to wait on each other correctly
-      if ((op_id == user->op_id) && (index != user->index) && 
-          (!COPY_USER || !user->copy_user))
-        return false;
-      // Now do a dependence test for privilege non-interference
-      // Only reductions here are copy reductions which we know do not interfere
-      DependenceType dt =
-        check_dependence_type<false,false>(user->usage, next_user);
-      switch (dt)
-      {
-        case LEGION_NO_DEPENDENCE:
-        case LEGION_ATOMIC_DEPENDENCE:
-        case LEGION_SIMULTANEOUS_DEPENDENCE:
-          return false;
-        case LEGION_TRUE_DEPENDENCE:
-        case LEGION_ANTI_DEPENDENCE:
-          break;
-        default:
-          assert(false); // should never get here
-      }
-      // If the user doesn't cover the expression for this view then
-      // we need to do an extra intersection test, this should only
-      // happen with copy users at the moment
-      if (!user->covers && !next_covers)
-      {
-        IndexSpaceExpression *overlap = 
-          forest->intersect_index_spaces(expr, user->expr);
-        if (overlap->is_empty())
-          return false;
+        if (dominates != NULL)
+          *dominates = false;
       }
       return true;
     }

@@ -610,6 +610,7 @@ namespace Legion {
           {
             FieldMask observed, non_dominated;
             find_current_preconditions(usage, copy_mask, copy_expr, 
+                                       ApEvent::NO_AP_EVENT,
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
@@ -623,8 +624,8 @@ namespace Legion {
               find_previous_filter_users(dominated, previous_to_filter);
             const FieldMask previous_mask = copy_mask - dominated;
             if (!!previous_mask)
-              find_previous_preconditions(usage, previous_mask,
-                                          copy_expr, op_id, index,
+              find_previous_preconditions(usage, previous_mask, copy_expr,
+                                          ApEvent::NO_AP_EVENT, op_id, index,
                                           copy_dominates, preconditions,
                                           dead_events, trace_recording);
           }
@@ -635,6 +636,7 @@ namespace Legion {
           {
             FieldMask observed, non_dominated;
             find_current_preconditions(usage, copy_mask, copy_expr,
+                                       ApEvent::NO_AP_EVENT,
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
@@ -646,6 +648,7 @@ namespace Legion {
           }
           if (!previous_epoch_users.empty())
             find_previous_preconditions(usage, copy_mask, copy_expr,
+                                        ApEvent::NO_AP_EVENT,
                                         op_id, index, copy_dominates,
                                         preconditions, dead_events,
                                         trace_recording);
@@ -1277,8 +1280,8 @@ namespace Legion {
           if (!user_overlap)
             continue;
           bool dominates = true;
-          if (has_local_precondition<false>(it->first, usage, user_expr,
-                                      op_id, index, user_covers, dominates))
+          if (has_local_precondition(it->first, usage, user_expr,
+                op_id, index, user_covers, false/*copy user*/, &dominates))
           {
             preconditions.insert(cit->first);
             if (dominates)
@@ -1352,142 +1355,8 @@ namespace Legion {
         {
           if (user_mask * it->second)
             continue;
-          if (has_local_precondition<false>(it->first, usage, user_expr,
-                                                op_id, index, user_covers))
-          {
-            preconditions.insert(pit->first);
-            break;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ExprView::find_current_preconditions(const RegionUsage &usage,
-                                              const FieldMask &user_mask,
-                                              IndexSpaceExpression *user_expr,
-                                              const UniqueID op_id,
-                                              const unsigned index,
-                                              const bool user_covers,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<ApEvent> &dead_events,
-                                              EventFieldUsers &filter_events,
-                                              FieldMask &observed,
-                                              FieldMask &non_dominated,
-                                              const bool trace_recording)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
-            cit != current_epoch_users.end(); cit++)
-      {
-#ifndef LEGION_DISABLE_EVENT_PRUNING
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_recording && cit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(cit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = cit->second;
-        FieldMask overlap = event_users.get_valid_mask() & user_mask;
-        if (!overlap)
-          continue;
-#if 0
-        // You might think you can optimize things like this, but you can't
-        // because we still need the correct epoch users for every ExprView
-        // when we go to add our user later
-        if (!trace_recording && finder != preconditions.end())
-        {
-          overlap -= finder->second.get_valid_mask();
-          if (!overlap)
-            continue;
-        }
-#endif
-        EventFieldUsers::iterator to_filter = filter_events.find(cit->first);
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          const FieldMask user_overlap = user_mask & it->second;
-          if (!user_overlap)
-            continue;
-          bool dominated = true;
-          if (has_local_precondition<true>(it->first, usage, user_expr,
-                                 op_id, index, user_covers, dominated)) 
-          {
-            preconditions.insert(cit->first);
-            if (dominated)
-            {
-              observed |= user_overlap;
-              if (to_filter == filter_events.end())
-              {
-                filter_events[cit->first].insert(it->first, user_overlap);
-                to_filter = filter_events.find(cit->first);
-              }
-              else
-                to_filter->second.insert(it->first, user_overlap);
-            }
-            else
-              non_dominated |= user_overlap;
-          }
-          else
-            non_dominated |= user_overlap;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ExprView::find_previous_preconditions(const RegionUsage &usage,
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                                               const bool user_covers,
-                                               std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                               const bool trace_recording)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
-      {
-#ifndef LEGION_DISABLE_EVENT_PRUNING
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_recording && pit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(pit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = pit->second;
-        FieldMask overlap = user_mask & event_users.get_valid_mask();
-        if (!overlap)
-          continue;
-#if 0
-        // You might think you can optimize things like this, but you can't
-        // because we still need the correct epoch users for every ExprView
-        // when we go to add our user later
-        if (!trace_recording && finder != preconditions.end())
-        {
-          overlap -= finder->second.get_valid_mask();
-          if (!overlap)
-            continue;
-        }
-#endif
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          const FieldMask user_overlap = overlap & it->second;
-          if (!user_overlap)
-            continue;
-          if (has_local_precondition<true>(it->first, usage, user_expr, 
-                                           op_id, index, user_covers))
+          if (has_local_precondition(it->first, usage, user_expr,
+                op_id, index, user_covers, false/*copy user*/))
           {
             preconditions.insert(pit->first);
             break;
@@ -1523,8 +1392,8 @@ namespace Legion {
           bool dominated = true;
           // We're just reading these and we want to see all prior
           // dependences so just give dummy opid and index
-          if (has_local_precondition<true>(it->first, usage, expr,
-                   0/*opid*/, 0/*index*/, expr_covers, dominated)) 
+          if (has_local_precondition(it->first, usage, expr, 0/*opid*/,
+                0/*index*/, expr_covers, true/*copy user*/, &dominated)) 
           {
             last_events.insert(cit->first);
             if (dominated)
@@ -1563,8 +1432,8 @@ namespace Legion {
             continue;
           // We're just reading these and we want to see all prior
           // dependences so just give dummy opid and index
-          if (has_local_precondition<true>(it->first, usage, expr, 
-                               0/*opid*/, 0/*index*/, expr_covers))
+          if (has_local_precondition(it->first, usage, expr, 
+                0/*opid*/, 0/*index*/, expr_covers, true/*copy user*/))
           {
             last_users.insert(pit->first);
             break;
