@@ -135,7 +135,7 @@ namespace Realm {
     std::map<gen_t, gen_t> held_triggers;
 
     bool needs_ordering;
-    std::vector<RemoteNotification> buffered_notifications;
+    std::vector<std::pair<int, std::vector<RemoteNotification>>> ordered_buffer;
 
     unsigned base_arrival_count;
     ReductionOpID redop_id;
@@ -186,6 +186,7 @@ namespace Realm {
     unsigned base_arrival_count;
     int broadcast_index;
     bool is_complete_list;
+    int sequence_number;
   };
 
   struct BarrierTriggerMessageArgs {

@@ -15,12 +15,8 @@
 
 #include "realm/event_impl.h"
 #include "realm/barrier_impl.h"
-
-#include "realm/proc_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
-#include "realm/threads.h"
-#include "realm/profiling.h"
 
 #define DISABLE_BARRIER_MIGRATION
 
@@ -212,7 +208,7 @@ namespace Realm {
     next_free = 0;
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    needs_ordering = false;
+    needs_ordering = true;
     base_arrival_count = 0;
     redop = 0;
     initial_value = 0;
@@ -239,7 +235,7 @@ namespace Realm {
     next_free = 0;
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    needs_ordering = false;
+    needs_ordering = true;
     base_arrival_count = 0;
     redop = 0;
     initial_value = 0;
@@ -432,24 +428,14 @@ namespace Realm {
     }
   }
 
-  static void
-  broadcast_trigger(Barrier barrier, const std::vector<RemoteNotification> &notifications,
-                    const std::vector<NodeID> &broadcast_targets,
-                    EventImpl::gen_t oldest_previous, EventImpl::gen_t broadcast_previous,
-                    EventImpl::gen_t first_generation, NodeID migration_target,
-                    unsigned base_arrival_count, ReductionOpID redop_id, const void *data,
-                    size_t datalen, bool sort = false, bool include_notifications = true)
+  static void broadcast_trigger(
+      Barrier barrier, const std::vector<RemoteNotification> &ordered_notifications,
+      const std::vector<NodeID> &broadcast_targets, EventImpl::gen_t oldest_previous,
+      EventImpl::gen_t broadcast_previous, EventImpl::gen_t first_generation,
+      NodeID migration_target, unsigned base_arrival_count, ReductionOpID redop_id,
+      const void *data, size_t datalen, bool include_notifications = true)
   {
     BarrierImpl *impl = get_barrier_impl(barrier);
-
-    std::vector<RemoteNotification> ordered_notifications = notifications;
-
-    if(sort) {
-      std::sort(ordered_notifications.begin(), ordered_notifications.end(),
-                [](const RemoteNotification &a, const RemoteNotification &b) {
-                  return a.node < b.node;
-                });
-    }
 
     for(const NodeID target : broadcast_targets) {
       EventImpl::gen_t trigger_gen = ordered_notifications[target].trigger_gen;
@@ -486,6 +472,8 @@ namespace Realm {
                     sizeof(BarrierTriggerMessageArgsInternal) - sizeof(size_t)) /
                        sizeof(RemoteNotification));
 
+      int sequence_number = 0;
+      std::vector<std::vector<RemoteNotification>> pubs;
       for(size_t start = 0; start < ordered_notifications.size();
           start += max_notifications) {
         size_t end = std::min(start + max_notifications, ordered_notifications.size());
@@ -493,20 +481,10 @@ namespace Realm {
         if(include_notifications) {
           std::vector<RemoteNotification> chunk_remote_notifications(
               ordered_notifications.begin() + start, ordered_notifications.begin() + end);
+          trigger_args.internal.sequence_number = sequence_number++;
+          trigger_args.internal.is_complete_list = (end == ordered_notifications.size());
           trigger_args.remote_notifications = chunk_remote_notifications;
         }
-
-        trigger_args.internal.is_complete_list = (end == notifications.size());
-
-        log_barrier.info() << "trigger broadcast N:" << Network::my_node_id
-                           << " index:" << target
-                           << " target:" << ordered_notifications[target].node
-                           << " trigger_gen:" << ordered_notifications[target].trigger_gen
-                           << " datalen:" << datalen
-                           << " prev_gen:" << ordered_notifications[target].previous_gen
-                           << " bcast_prev_gen:" << broadcast_previous
-                           << " max_node:" << Network::max_node_id;
-
         BarrierTriggerMessage::send_request(ordered_notifications[target].node,
                                             barrier.id, trigger_args, reduce_data,
                                             reduce_data_size);
@@ -1158,28 +1136,36 @@ namespace Realm {
     if(!trigger_args.remote_notifications.empty()) {
       AutoLock<> a(impl->mutex);
 
-      impl->buffered_notifications.insert(impl->buffered_notifications.end(),
-                                          trigger_args.remote_notifications.begin(),
-                                          trigger_args.remote_notifications.end());
-
+      impl->ordered_buffer.emplace_back(trigger_args.internal.sequence_number,
+                                        trigger_args.remote_notifications);
       if(trigger_args.internal.is_complete_list == false) {
         return;
       }
 
+      std::vector<RemoteNotification> ordered_notifications;
+      if(impl->needs_ordering) {
+        std::sort(impl->ordered_buffer.begin(), impl->ordered_buffer.end(),
+                  [](const auto &a, const auto &b) { return a.first < b.first; });
+      }
+
+      for(const auto &[_, chunk] : impl->ordered_buffer) {
+        ordered_notifications.insert(ordered_notifications.end(), chunk.begin(),
+                                     chunk.end());
+      }
+
       std::vector<NodeID> broadcast_targets;
       get_broadcast_targets(trigger_args.internal.broadcast_index,
-                            impl->buffered_notifications.size(), impl->broadcast_radix,
+                            ordered_notifications.size(), impl->broadcast_radix,
                             broadcast_targets);
 
-      broadcast_trigger(
-          b, impl->buffered_notifications, broadcast_targets,
-          /*oldest_previous=*/0, /*broadcast_previous=*/0,
-          trigger_args.internal.first_generation, trigger_args.internal.migration_target,
-          trigger_args.internal.base_arrival_count, trigger_args.internal.redop_id, data,
-          datalen, impl->needs_ordering);
+      broadcast_trigger(b, ordered_notifications, broadcast_targets,
+                        /*oldest_previous=*/0, /*broadcast_previous=*/0,
+                        trigger_args.internal.first_generation,
+                        trigger_args.internal.migration_target,
+                        trigger_args.internal.base_arrival_count,
+                        trigger_args.internal.redop_id, data, datalen);
 
-      impl->needs_ordering = false;
-      impl->buffered_notifications.clear();
+      impl->ordered_buffer.clear();
     }
 
     // we'll probably end up with a list of local waiters to notify

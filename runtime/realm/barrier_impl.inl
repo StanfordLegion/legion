@@ -71,6 +71,7 @@ namespace Realm {
               (ser & args.internal.base_arrival_count) &&
               (ser & args.internal.broadcast_index) &&
               (ser & args.internal.is_complete_list) &&
+              (ser & args.internal.sequence_number) &&
               (ser & args.remote_notifications);
 
     return success;
