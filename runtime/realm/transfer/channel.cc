@@ -2132,39 +2132,38 @@ namespace Realm {
           }
 
 #ifdef DEBUG_REALM
-	      assert(bytes <= bytes_left);
+          assert(bytes <= bytes_left);
 #endif
-	      total_bytes += bytes;
+          total_bytes += bytes;
 
-	      // stop if it's been too long, but make sure we do at least the
-	      //  minimum number of bytes
-	      if((total_bytes >= min_xfer_size) && work_until.is_expired()) break;
-	    }
-	  } else {
-	    // fill with no output, so just count the bytes
-	    total_bytes = max_bytes;
-	  }
-
-	  // mem fill is always immediate, so handle both skip and copy with
-	  //  the same code
-	  wseqcache.add_span(output_control.current_io_port,
-			     out_span_start, total_bytes);
-	  out_span_start += total_bytes;
-
-	  bool done = record_address_consumption(total_bytes, total_bytes);
-
-	  did_work = true;
-
-	  if(done || work_until.is_expired())
-	    break;
-	}
-
-	rseqcache.flush();
-	wseqcache.flush();
-
-	return did_work;
+          // stop if it's been too long, but make sure we do at least the
+          //  minimum number of bytes
+          if((total_bytes >= min_xfer_size) && work_until.is_expired())
+            break;
+        }
+      } else {
+        // fill with no output, so just count the bytes
+        total_bytes = max_bytes;
       }
 
+      // mem fill is always immediate, so handle both skip and copy with
+      //  the same code
+      wseqcache.add_span(output_control.current_io_port, out_span_start, total_bytes);
+      out_span_start += total_bytes;
+
+      bool done = record_address_consumption(total_bytes, total_bytes);
+
+      did_work = true;
+
+      if(done || work_until.is_expired())
+        break;
+    }
+
+    rseqcache.flush();
+    wseqcache.flush();
+
+    return did_work;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //

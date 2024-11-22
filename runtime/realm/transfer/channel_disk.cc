@@ -247,25 +247,23 @@ namespace Realm {
     }
 
     FileChannel::FileChannel(BackgroundWorkManager *bgwork)
-      : SingleXDQChannel<FileChannel, FileXferDes>(bgwork,
-						   XFER_NONE /*FIXME*/,
-						   "file channel")
+      : SingleXDQChannel<FileChannel, FileXferDes>(bgwork, XFER_NONE /*FIXME*/,
+                                                   "file channel")
     {
-      unsigned bw = 10; // HACK - estimate 10 MB/s
-      unsigned latency = 10000; // HACK - estimate 10 us
+      unsigned bw = 10;               // HACK - estimate 10 MB/s
+      unsigned latency = 10000;       // HACK - estimate 10 us
       unsigned frag_overhead = 10000; // HACK - estimate 10 us
 
       // all local cpu memories are valid sources/dests
       std::vector<Memory> local_cpu_mems;
-      enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id], local_cpu_mems);
+      enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id],
+                                   local_cpu_mems);
 
-      add_path(Memory::FILE_MEM, false,
-               local_cpu_mems,
-               bw, latency, frag_overhead, XFER_FILE_READ);
+      add_path(Memory::FILE_MEM, false, local_cpu_mems, bw, latency, frag_overhead,
+               XFER_FILE_READ);
 
-      add_path(local_cpu_mems,
-               Memory::FILE_MEM, false,
-               bw, latency, frag_overhead, XFER_FILE_WRITE);
+      add_path(local_cpu_mems, Memory::FILE_MEM, false, bw, latency, frag_overhead,
+               XFER_FILE_WRITE);
     }
 
     FileChannel::~FileChannel()
@@ -315,25 +313,23 @@ namespace Realm {
     }
 
     DiskChannel::DiskChannel(BackgroundWorkManager *bgwork)
-      : SingleXDQChannel<DiskChannel, DiskXferDes>(bgwork,
-						   XFER_NONE /*FIXME*/,
-						   "disk channel")
+      : SingleXDQChannel<DiskChannel, DiskXferDes>(bgwork, XFER_NONE /*FIXME*/,
+                                                   "disk channel")
     {
-      unsigned bw = 10; // HACK - estimate 10 MB/s
-      unsigned latency = 10000; // HACK - estimate 10 us
+      unsigned bw = 10;               // HACK - estimate 10 MB/s
+      unsigned latency = 10000;       // HACK - estimate 10 us
       unsigned frag_overhead = 10000; // HACK - estimate 10 us
 
       // all local cpu memories are valid sources/dests
       std::vector<Memory> local_cpu_mems;
-      enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id], local_cpu_mems);
+      enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id],
+                                   local_cpu_mems);
 
-      add_path(Memory::DISK_MEM, false,
-               local_cpu_mems,
-               bw, latency, frag_overhead, XFER_DISK_READ);
+      add_path(Memory::DISK_MEM, false, local_cpu_mems, bw, latency, frag_overhead,
+               XFER_DISK_READ);
 
-      add_path(local_cpu_mems,
-               Memory::DISK_MEM, false,
-               bw, latency, frag_overhead, XFER_DISK_WRITE);
+      add_path(local_cpu_mems, Memory::DISK_MEM, false, bw, latency, frag_overhead,
+               XFER_DISK_WRITE);
     }
 
     DiskChannel::~DiskChannel()

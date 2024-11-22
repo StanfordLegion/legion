@@ -609,7 +609,7 @@ namespace Realm {
 
         // all local cpu memories are valid sources/dests
         std::vector<Memory> local_cpu_mems;
-        enumerate_local_cpu_memories(local_cpu_mems);
+        enumerate_local_cpu_memories(&get_runtime()->nodes[Network::my_node_id], local_cpu_mems);
 
         add_path(Memory::HDF_MEM, false,
                  local_cpu_mems,
