@@ -396,10 +396,12 @@ namespace Realm {
   class REALM_PUBLIC_API ExternalInstanceResource {
   protected:
     // only subclasses can be constructed
-    ExternalInstanceResource();
-    
+    ExternalInstanceResource(uint64_t _type_id)
+      : type_id(_type_id)
+    {}
+
   public:
-    virtual ~ExternalInstanceResource();
+    virtual ~ExternalInstanceResource() {}
 
     // returns the suggested memory in which this resource should be created
     virtual Memory suggested_memory() const = 0;
@@ -412,8 +414,11 @@ namespace Realm {
     // pretty-printing
     friend std::ostream& operator<<(std::ostream& os, const ExternalInstanceResource& res);
 
+    uint64_t get_type_id() const { return type_id; }
+
   protected:
     virtual void print(std::ostream& os) const = 0;
+    uint64_t type_id = 0;
   };
 
   template <typename S>

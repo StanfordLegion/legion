@@ -1513,27 +1513,28 @@ namespace Realm {
     bool GPUFBMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
                                                          size_t& inst_offset)
     {
+      switch(inst->metadata.ext_resource->get_type_id()) {
+      case REALM_HASH_TOKEN(ExternalCudaMemoryResource):
       {
-        ExternalCudaMemoryResource *res = dynamic_cast<ExternalCudaMemoryResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = res->base - base; // offset relative to our base
-          return true;
-        }
+        ExternalCudaMemoryResource *res =
+            static_cast<ExternalCudaMemoryResource *>(inst->metadata.ext_resource);
+        // automatic success
+        inst_offset = res->base - base; // offset relative to our base
+        return true;
+      }
+      case REALM_HASH_TOKEN(ExternalCudaArrayResource):
+      {
+        ExternalCudaArrayResource *res =
+            static_cast<ExternalCudaArrayResource *>(inst->metadata.ext_resource);
+        // automatic success
+        inst_offset = 0;
+        inst->metadata.add_mem_specific(new MemSpecificCudaArray(res->array));
+        return true;
+      }
+      default:
+        break;
       }
 
-      {
-        ExternalCudaArrayResource *res = dynamic_cast<ExternalCudaArrayResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = 0;
-          CUarray array = reinterpret_cast<CUarray>(res->array);
-          inst->metadata.add_mem_specific(new MemSpecificCudaArray(array));
-          return true;
-        }
-      }
-
-      // not a kind we recognize
       return false;
     }
 

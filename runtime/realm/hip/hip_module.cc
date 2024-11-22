@@ -1307,20 +1307,23 @@ namespace Realm {
     // GPUFBMemory supports ExternalHipMemoryResource and
     //  ExternalHipArrayResource (not implemented)
     bool GPUFBMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
-                                                         size_t& inst_offset)
+                                                         size_t &inst_offset)
     {
+      switch(inst->metadata.ext_resource->get_type_id()) {
+      case REALM_HASH_TOKEN(ExternalHipMemoryResource):
       {
-        ExternalHipMemoryResource *res = dynamic_cast<ExternalHipMemoryResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = res->base - reinterpret_cast<uintptr_t>(base); // offset relative to our base
-          return true;
-        }
+        ExternalHipMemoryResource *res =
+            static_cast<ExternalHipMemoryResource *>(inst->metadata.ext_resource);
+        // automatic success
+        inst_offset =
+            res->base - reinterpret_cast<uintptr_t>(base); // offset relative to our base
+        return true;
+      }
+      // TODO: add hip array
+      default:
+        break;
       }
 
-      // TODO: add hip array
-
-      // not a kind we recognize
       return false;
     }
 
