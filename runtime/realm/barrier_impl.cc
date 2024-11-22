@@ -785,7 +785,7 @@ namespace Realm {
 
       // now do remote notifications
 
-      {
+      if(!remote_notifications.empty()) {
         AutoLock<> al(mutex);
         broadcast_trigger(b, remote_notifications, remote_broadcast_targets,
                           oldest_previous, broadcast_previous, first_generation,
