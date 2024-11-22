@@ -26,7 +26,6 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
-#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -526,7 +525,6 @@ namespace Legion {
       if (!subviews.empty() && 
           !(subviews.get_valid_mask() * user_mask))
       {
-        IndexSpaceValue user_expr_val(user_expr);
         FieldMaskSet<ExprView> to_traverse;
         std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
         for (FieldMaskSet<ExprView>::const_iterator it = 
@@ -548,11 +546,12 @@ namespace Legion {
             traverse_exprs[it->first] = user_expr;
             continue;
           }
-          IndexSpaceValue expr_overlap = user_expr_val & it->first->view_expr;
-          if (!expr_overlap.is_empty())
+          IndexSpaceExpression *expr_overlap = 
+            forest->intersect_index_spaces(user_expr, it->first->view_expr);
+          if (!expr_overlap->is_empty())
           {
             to_traverse.insert(it->first, overlap);
-            traverse_exprs[it->first] = *expr_overlap;
+            traverse_exprs[it->first] = expr_overlap;
           }
         }
         if (!to_traverse.empty())
@@ -791,7 +790,6 @@ namespace Legion {
         bool need_tighten = true;
         std::vector<ExprView*> to_delete;
         FieldMaskSet<ExprView> dominating_subviews;
-        IndexSpaceValue subview_val(subview->view_expr);
 
         for (FieldMaskSet<ExprView>::iterator it = 
               subviews.begin(); it != subviews.end(); it++)
@@ -800,8 +798,9 @@ namespace Legion {
           FieldMask overlap_mask = it->second & subview_mask;
           if (!overlap_mask)
             continue;
-          IndexSpaceValue overlap = subview_val & it->first->view_expr;
-          const size_t overlap_volume = overlap.get_volume();
+          IndexSpaceExpression *overlap = forest->intersect_index_spaces(
+              subview->view_expr, it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == 0)
             continue;
           // See if we dominate or just intersect

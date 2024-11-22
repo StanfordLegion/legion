@@ -26,7 +26,6 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_trace.h"
 #include "legion/legion_replication.h"
-#include "legion/index_space_value.h"
 
 // templates in legion/region_tree.inl are instantiated by region_tree_tmpl.cc
 
