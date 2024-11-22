@@ -134,6 +134,7 @@ namespace Realm {
 
     // operator-> gives access to the header structure
     T *operator->(void);
+    T &operator*(void);
 
     // variable payload can be written to in three ways:
     //  (a) Realm-style serialization (currently eager)
