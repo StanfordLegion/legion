@@ -3838,7 +3838,7 @@ namespace Legion {
      * applying a number of fill operations over an 
      * index space of points with projection functions.
      */
-    class IndexFillOp : public FillOp {
+    class IndexFillOp : public PointWiseAnalysable<FillOp> {
     public:
       IndexFillOp(Runtime *rt);
       IndexFillOp(const IndexFillOp &rhs);
@@ -3888,7 +3888,8 @@ namespace Legion {
      * physical part of the analysis for an index
      * fill operation.
      */
-    class PointFillOp : public FillOp, public ProjectionPoint {
+    class PointFillOp : public SinglePointWiseAnalysable<FillOp>,
+                        public ProjectionPoint {
     public:
       PointFillOp(Runtime *rt);
       PointFillOp(const PointFillOp &rhs);
@@ -3921,6 +3922,10 @@ namespace Legion {
       virtual void record_intra_space_dependences(unsigned idx,
                                const std::vector<DomainPoint> &region_deps);
       virtual const Mappable* as_mappable(void) const { return this; }
+    public:
+      using Operation::record_point_wise_dependence;
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx);
     public:
       // From Memoizable
       virtual TraceLocalID get_trace_local_id(void) const;
@@ -4045,7 +4050,7 @@ namespace Legion {
      * operations where we are attaching external resources
      * to many subregions of a region tree with a single operation
      */
-    class IndexAttachOp : public CollectiveViewCreator<Operation> {
+    class IndexAttachOp : public PointWiseAnalysable<CollectiveViewCreator<Operation> > {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
     public:
@@ -4105,7 +4110,7 @@ namespace Legion {
      * \class PointAttachOp
      * An individual attach operation inside of an index attach operation
      */
-    class PointAttachOp : public AttachOp {
+    class PointAttachOp : public SinglePointWiseAnalysable<AttachOp> {
     public:
       PointAttachOp(Runtime *rt);
       PointAttachOp(const PointAttachOp &rhs);
@@ -4138,6 +4143,10 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_attach(void) const { return true; }
+    public:
+      using Operation::record_point_wise_dependence;
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx);
     protected:
       IndexAttachOp *owner;
       DomainPoint index_point;

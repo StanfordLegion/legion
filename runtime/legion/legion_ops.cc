@@ -2725,6 +2725,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2738,6 +2739,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2748,6 +2750,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2756,6 +2759,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2763,6 +2767,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2770,8 +2775,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return false;
     }
-
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
@@ -8552,16 +8557,6 @@ namespace Legion {
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t region_count = src_requirements.size();
-      connect_to_prev_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-        connect_to_prev_points[idx] = false;
-      connect_to_next_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-        connect_to_next_points[idx] = false;
-#endif
-
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -8734,6 +8729,17 @@ namespace Legion {
 #else
       arrive_barriers = launcher.arrive_barriers;
 #endif
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      size_t region_count = get_region_count();
+      connect_to_prev_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+        connect_to_prev_points[idx] = false;
+      connect_to_next_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+        connect_to_next_points[idx] = false;
+#endif
+
       map_id = launcher.map_id;
       tag = launcher.tag; 
       mapper_data_size = launcher.map_arg.get_size();
@@ -9766,6 +9772,13 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       if (!intra_space_mapping_dependences.empty())
         preconditions.swap(intra_space_mapping_dependences);
+      if (!point_wise_mapping_dependences.empty())
+      {
+        const RtEvent ready =
+          Runtime::merge_events(point_wise_mapping_dependences);
+        point_wise_mapping_dependences.clear();
+        preconditions.insert(ready);
+      }
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
             src_requirements[idx], copies[idx].src->version, preconditions);
@@ -9981,7 +9994,8 @@ namespace Legion {
     {
       if (owner->should_connect_to_prev_point(region_idx))
       {
-        RtEvent pre = owner->find_point_wise_dependence(get_domain_point(),
+        RtEvent pre = owner->find_point_wise_dependence(
+            get_domain_point(),
             lr, region_idx);
         if (!std::binary_search(point_wise_mapping_dependences.begin(),
                   point_wise_mapping_dependences.end(), pre))
@@ -9994,12 +10008,13 @@ namespace Legion {
 
       if (owner->should_connect_to_next_point(region_idx))
       {
-        owner->record_point_wise_dependence(get_domain_point(), region_idx,
-                                                  get_mapped_event());
+        owner->record_point_wise_dependence(get_domain_point(),
+            region_idx, get_mapped_event());
       }
       else
       {
-        owner->add_point_to_completed_list(get_domain_point(), region_idx,
+        owner->add_point_to_completed_list(get_domain_point(),
+            region_idx,
             get_mapped_event());
       }
     }
@@ -18884,7 +18899,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(Runtime *rt)
-      : FillOp(rt)
+      : PointWiseAnalysable<FillOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -18892,7 +18907,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
-      : FillOp(rhs)
+      : PointWiseAnalysable<FillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -18989,6 +19004,16 @@ namespace Legion {
           LegionSpy::log_future_use(unique_op_id, future.impl->did); 
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      size_t region_count = get_region_count();
+      connect_to_prev_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+        connect_to_prev_points[idx] = false;
+      connect_to_next_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+        connect_to_next_points[idx] = false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -19416,7 +19441,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointFillOp::PointFillOp(Runtime *rt)
-      : FillOp(rt)
+      : SinglePointWiseAnalysable<FillOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -19424,7 +19449,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointFillOp::PointFillOp(const PointFillOp &rhs)
-      : FillOp(rhs)
+      : SinglePointWiseAnalysable<FillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -19544,6 +19569,13 @@ namespace Legion {
     {
       // Perform the version info
       std::set<RtEvent> preconditions;
+      if (!point_wise_mapping_dependences.empty())
+      {
+        preconditions.insert(
+            Runtime::merge_events(
+              point_wise_mapping_dependences));
+        point_wise_mapping_dependences.clear();
+      }
       if (view_ready.exists())
         preconditions.insert(view_ready);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
@@ -19619,6 +19651,38 @@ namespace Legion {
     {
       // Ignore any intra-space requirements on fills, we know that they
       // are all filling the same value so they can be done in any order
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::record_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->should_connect_to_prev_point(region_idx))
+      {
+        RtEvent pre = owner->find_point_wise_dependence(
+            get_domain_point(),
+            lr, region_idx);
+        if (!std::binary_search(point_wise_mapping_dependences.begin(),
+                  point_wise_mapping_dependences.end(), pre))
+        {
+          point_wise_mapping_dependences.push_back(pre);
+          std::sort(point_wise_mapping_dependences.begin(),
+                    point_wise_mapping_dependences.end());
+        }
+      }
+
+      if (owner->should_connect_to_next_point(region_idx))
+      {
+        owner->record_point_wise_dependence(get_domain_point(),
+            region_idx, get_mapped_event());
+      }
+      else
+      {
+        owner->add_point_to_completed_list(get_domain_point(),
+            region_idx,
+            get_mapped_event());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20553,7 +20617,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexAttachOp::IndexAttachOp(Runtime *rt)
-      : CollectiveViewCreator<Operation>(rt)
+      : PointWiseAnalysable<CollectiveViewCreator<Operation> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -20663,6 +20727,16 @@ namespace Legion {
           runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       resources = ExternalResources(result);
+
+#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      size_t region_count = get_region_count();
+      connect_to_prev_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+        connect_to_prev_points[idx] = false;
+      connect_to_next_points.resize(region_count);
+      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+        connect_to_next_points[idx] = false;
+#endif
       return resources;
     }
 
@@ -21058,14 +21132,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointAttachOp::PointAttachOp(Runtime *rt)
-      : AttachOp(rt)
+      : SinglePointWiseAnalysable<AttachOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PointAttachOp::PointAttachOp(const PointAttachOp &rhs)
-      : AttachOp(rhs)
+      : SinglePointWiseAnalysable<AttachOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -21329,6 +21403,38 @@ namespace Legion {
     {
       return owner->rendezvous_collective_versioning_analysis(index, handle,
           tracker, runtime->address_space, mask, parent_req_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::record_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->should_connect_to_prev_point(region_idx))
+      {
+        RtEvent pre = owner->find_point_wise_dependence(
+            index_point,
+            lr, region_idx);
+        if (!std::binary_search(point_wise_mapping_dependences.begin(),
+                  point_wise_mapping_dependences.end(), pre))
+        {
+          point_wise_mapping_dependences.push_back(pre);
+          std::sort(point_wise_mapping_dependences.begin(),
+                    point_wise_mapping_dependences.end());
+        }
+      }
+
+      if (owner->should_connect_to_next_point(region_idx))
+      {
+        owner->record_point_wise_dependence(index_point,
+            region_idx, get_mapped_event());
+      }
+      else
+      {
+        owner->add_point_to_completed_list(index_point,
+            region_idx,
+            get_mapped_event());
+      }
     }
 
     ///////////////////////////////////////////////////////////// 
