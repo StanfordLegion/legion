@@ -299,8 +299,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExprView::ExprView(DistributedID did, RegionTreeForest *ctx,
-                       IndexSpaceExpression *exp) 
-      : forest(ctx), view_expr(exp->get_canonical_expression(ctx)), 
+                       IndexSpaceExpression *exp, bool unbound) 
+      : forest(ctx),
+        view_expr(unbound ? exp : exp->get_canonical_expression(ctx)),
         view_volume(std::numeric_limits<size_t>::max()), view_did(did),
         invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES))
     //--------------------------------------------------------------------------
@@ -1614,7 +1615,7 @@ namespace Legion {
       : InstanceView(rt, did, register_now, mapping),
         manager(man), logical_owner(log_owner), current_users(
         (log_owner == local_space) ? new ExprView(this->did, rt->forest, 
-          manager->instance_domain) : NULL), 
+          manager->instance_domain, manager->is_unbound()) : NULL),
         expr_cache_uses(0), outstanding_additions(0)
     //--------------------------------------------------------------------------
     {
@@ -2452,8 +2453,23 @@ namespace Legion {
                                             const unsigned index)
     //--------------------------------------------------------------------------
     {
-      // Convert to the canonical expression
-      user_expr = user_expr->get_canonical_expression(runtime->forest);
+      // Convert to the canonical expression if it is not the root expr
+      if (user_expr != current_users->view_expr)
+      {
+        // Handle the dumb case of output region expr views
+        // Since we cannot make the root expr view have a canonical
+        // expression then we need to check to make sure we're just not
+        // finding it because it is congruent to the output region
+        const size_t user_volume = user_expr->get_volume();
+        const size_t root_volume = current_users->view_expr->get_volume();
+#ifdef DEBUG_LEGION
+        assert(user_volume <= root_volume);
+#endif
+        if (user_volume < root_volume)
+          user_expr = user_expr->get_canonical_expression(runtime->forest);
+        else
+          user_expr = current_users->view_expr;
+      }
       PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
                                             false/*copy user*/, true/*covers*/);
       // Hold a reference to this in case it finishes before we're done
@@ -2571,8 +2587,23 @@ namespace Legion {
                                             const unsigned index)
     //--------------------------------------------------------------------------
     {
-      // Convert to the canonical expression
-      user_expr = user_expr->get_canonical_expression(runtime->forest);
+      // Convert to the canonical expression if it is not the root
+      if (user_expr != current_users->view_expr)
+      {
+        // Handle the dumb case of output region expr views
+        // Since we cannot make the root expr view have a canonical
+        // expression then we need to check to make sure we're just not
+        // finding it because it is congruent to the output region
+        const size_t user_volume = user_expr->get_volume();
+        const size_t root_volume = current_users->view_expr->get_volume();
+#ifdef DEBUG_LEGION
+        assert(user_volume <= root_volume);
+#endif
+        if (user_volume < root_volume)
+          user_expr = user_expr->get_canonical_expression(runtime->forest);
+        else
+          user_expr = current_users->view_expr;
+      }
       // First we're going to check to see if we can add this directly to 
       // an existing ExprView with the same expresssion in which case
       // we'll be able to mark this user as being precise

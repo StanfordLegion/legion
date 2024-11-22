@@ -919,7 +919,7 @@ namespace Legion {
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(DistributedID view_did, RegionTreeForest *forest,
-               IndexSpaceExpression *expr);
+               IndexSpaceExpression *expr, bool unbound = false);
       ExprView(const ExprView &rhs) = delete;
       virtual ~ExprView(void);
     public:
