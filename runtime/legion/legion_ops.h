@@ -868,13 +868,6 @@ namespace Legion {
      * \class PointWiseAnalysableBase
      */
     class PointWiseAnalysableBase {
-    public:
-      static void process_slice_find_point_wise_dependence(
-          Deserializer &derez);
-      static void process_slice_record_point_wise_dependence(
-          Deserializer &derez);
-      static void process_slice_add_point_to_completed_list(
-          Deserializer &derez);
     protected:
       std::map<LogicalRegion,RtUserEvent> pending_point_wise_dependences;
       std::vector<std::pair<DomainPoint,RtEvent>> completed_point_list;
@@ -929,7 +922,6 @@ namespace Legion {
           ProjectionSummary *shard_proj,
           uint64_t context_index);
       bool need_forward_progress(void);
-    protected:
       void get_points(RegionRequirement &req,
           ProjectionFunction *projection,
           LogicalRegion lr, Domain index_domain,

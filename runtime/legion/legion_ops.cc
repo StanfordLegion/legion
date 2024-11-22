@@ -4172,65 +4172,6 @@ namespace Legion {
       point_wise_mapping_dependences.clear();
     }
 
-    /////////////////////////////////////////////////////////////
-    // PointWiseAnalysablBasee
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PointWiseAnalysableBase::
-      process_slice_add_point_to_completed_list(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Operation *task;
-      derez.deserialize(task);
-      DomainPoint point;
-      derez.deserialize(point);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      RtEvent mapped_event;
-      derez.deserialize(mapped_event);
-      task->add_point_to_completed_list(point, region_idx,
-          mapped_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PointWiseAnalysableBase::
-      process_slice_find_point_wise_dependence(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Operation *task;
-      derez.deserialize(task);
-      LogicalRegion lr;
-      derez.deserialize(lr);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DomainPoint point;
-      derez.deserialize(point);
-      const RtEvent result = task->find_point_wise_dependence(point, lr, region_idx);
-      Runtime::trigger_event(to_trigger, result);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PointWiseAnalysableBase::
-      process_slice_record_point_wise_dependence(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Operation *task;
-      derez.deserialize(task);
-      unsigned region_idx;
-      derez.deserialize(region_idx);
-      RtEvent mapped_event;
-      derez.deserialize(mapped_event);
-      DomainPoint point;
-      derez.deserialize(point);
-      task->record_point_wise_dependence(point, region_idx, mapped_event);
-    }
-
     // Explicit instantiations
     template class PointWiseAnalysable<CollectiveViewCreator<TaskOp> >;
 

@@ -24946,21 +24946,21 @@ namespace Legion {
     void Runtime::handle_slice_find_point_wise_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysableBase::process_slice_find_point_wise_dependence(derez);
+      IndexTask::process_slice_find_point_wise_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_slice_record_point_wise_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysableBase::process_slice_record_point_wise_dependence(derez);
+      IndexTask::process_slice_record_point_wise_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_slice_add_point_to_completed_list(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysableBase::process_slice_add_point_to_completed_list(derez);
+      IndexTask::process_slice_add_point_to_completed_list(derez);
     }
 
     //--------------------------------------------------------------------------

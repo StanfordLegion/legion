@@ -1369,6 +1369,14 @@ namespace Legion {
       RtEvent find_point_wise_dependence(DomainPoint point,
           LogicalRegion lr,
           unsigned region_idx);
+    public:
+      static void process_slice_find_point_wise_dependence(
+          Deserializer &derez);
+      static void process_slice_record_point_wise_dependence(
+          Deserializer &derez);
+      static void process_slice_add_point_to_completed_list(
+          Deserializer &derez);
+
     };
 
     /**
