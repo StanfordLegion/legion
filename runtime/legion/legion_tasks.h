@@ -951,6 +951,7 @@ namespace Legion {
                const std::vector<DomainPoint> &dependences);
         virtual const Mappable* as_mappable(void) const { return this; }
       public:
+        using Operation::record_point_wise_dependence;
         void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
       public:
@@ -1359,6 +1360,7 @@ namespace Legion {
     protected:
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
     public:
+      using Operation::record_point_wise_dependence;
       bool region_has_collective(unsigned region_idx,
           GenerationID gen);
       void add_point_to_completed_list(DomainPoint point,
@@ -1498,6 +1500,7 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
+      using Operation::record_point_wise_dependence;
       void record_point_wise_dependence(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
       RtEvent find_point_wise_dependence(DomainPoint point,
