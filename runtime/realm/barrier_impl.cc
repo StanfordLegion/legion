@@ -25,7 +25,6 @@
 #define DISABLE_BARRIER_MIGRATION
 
 namespace BarrierConfig {
-  int broadcast_radix = 4;
   int max_notifies_payload = 256;
 }; // namespace BarrierConfig
 
@@ -219,6 +218,8 @@ namespace Realm {
     initial_value = 0;
     value_capacity = 0;
     final_values = 0;
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "barrier_broadcast_radix", broadcast_radix));
   }
 
   BarrierImpl::~BarrierImpl(void)
@@ -756,8 +757,8 @@ namespace Realm {
 
       NodeID node = (Network::my_node_id - owner + Network::max_node_id + 1) %
                     (Network::max_node_id + 1);
-      get_broadcast_targets(node, remote_notifications.size(),
-                            BarrierConfig::broadcast_radix, remote_broadcast_targets);
+      get_broadcast_targets(node, remote_notifications.size(), broadcast_radix,
+                            remote_broadcast_targets);
     } while(0);
 
     if(forward_to_node != (NodeID)-1) {
@@ -1167,8 +1168,8 @@ namespace Realm {
 
       std::vector<NodeID> broadcast_targets;
       get_broadcast_targets(trigger_args.internal.broadcast_index,
-                            impl->buffered_notifications.size(),
-                            BarrierConfig::broadcast_radix, broadcast_targets);
+                            impl->buffered_notifications.size(), impl->broadcast_radix,
+                            broadcast_targets);
 
       broadcast_trigger(
           b, impl->buffered_notifications, broadcast_targets,

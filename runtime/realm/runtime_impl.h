@@ -168,6 +168,9 @@ namespace Realm {
 
       // sparstiy maps
       bool enable_sparsity_refcount = false;
+
+      // barriers
+      int barrier_broadcast_radix = 4;
     };
 
     class CoreModule : public Module {

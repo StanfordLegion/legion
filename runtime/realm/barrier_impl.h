@@ -144,6 +144,7 @@ namespace Realm {
 
     unsigned value_capacity; // how many values the two allocations below can hold
     char *final_values;      // results of completed reductions
+    int broadcast_radix = 4;
   };
 
   // active messages
