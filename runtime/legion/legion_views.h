@@ -959,7 +959,9 @@ namespace Legion {
                             FieldMask user_mask,
                             const ApEvent term_event,
                             IndexSpaceExpression *user_expr,
-                            const size_t user_volume);
+                            const size_t user_volume,
+                            PhysicalUser *&covered_user,
+                            PhysicalUser *&uncovered_user);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
                             const FieldMask &user_mask);
       // TODO: Optimize this so that we prune out intermediate nodes in 

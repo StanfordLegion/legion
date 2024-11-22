@@ -949,7 +949,9 @@ namespace Legion {
                                     FieldMask user_mask,
                                     const ApEvent term_event,
                                     IndexSpaceExpression *user_expr,
-                                    const size_t user_volume)
+                                    const size_t user_volume,
+                                    PhysicalUser *&covered_user,
+                                    PhysicalUser *&uncovered_user)
     //--------------------------------------------------------------------------
     {
       // We're going to try to put this user as far down the ExprView tree
@@ -975,16 +977,21 @@ namespace Legion {
             // Check for the cases where we dominated perfectly
             if (overlap_volume == it->first->get_view_volume())
             {
-              PhysicalUser *dominate_user = new PhysicalUser(usage,
-                  it->first->view_expr,op_id,index,true/*copy*/,true/*covers*/);
-              it->first->add_current_user(dominate_user, term_event, 
+              if (covered_user == NULL)
+              {
+                covered_user = new PhysicalUser(usage, user_expr,
+                    op_id, index, true/*copy*/, true/*covers*/);
+                covered_user->add_reference();
+              }
+              it->first->add_current_user(covered_user, term_event, 
                                           overlap_mask);
             }
             else
             {
               // Continue the traversal on this node
               it->first->add_partial_user(usage, op_id, index, overlap_mask,
-                                          term_event, user_expr, user_volume);
+                  term_event, user_expr, user_volume, 
+                  covered_user, uncovered_user);
             }
             // We only need to record the partial user in one sub-tree
             // where it is dominated in order to be sound
@@ -999,9 +1006,13 @@ namespace Legion {
       // If we still have local fields, make a user and record it here
       if (!!user_mask)
       {
-        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index,
-                                              true/*copy*/, false/*covers*/);
-        add_current_user(user, term_event, user_mask);
+        if (uncovered_user == NULL)
+        {
+          uncovered_user = new PhysicalUser(usage, user_expr, op_id, index,
+                                            true/*copy*/, false/*covers*/);
+          uncovered_user->add_reference();
+        }
+        add_current_user(uncovered_user, term_event, user_mask);
       }
     }
 
@@ -2629,10 +2640,18 @@ namespace Legion {
         // We're traversing the view tree but not modifying it so 
         // we need a read-only copy of the expr_lock
         AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+        PhysicalUser *covered_user = NULL;
+        PhysicalUser *uncovered_user = NULL;
         current_users->add_partial_user(usage, op_id, index,
                                         user_mask, term_event, 
                                         user_expr, 
-                                        user_expr->get_volume());
+                                        user_expr->get_volume(),
+                                        covered_user, uncovered_user);
+        // Remove the reference that was added when this was made
+        if ((covered_user != NULL) && covered_user->remove_reference())
+          delete covered_user;
+        if ((uncovered_user != NULL) && uncovered_user->remove_reference())
+          delete uncovered_user;
       }
       if (update_count && (outstanding_additions.fetch_sub(1) == 1) &&
             (USER_CACHE_TIMEOUT <= expr_cache_uses.load()))
