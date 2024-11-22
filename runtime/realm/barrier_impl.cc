@@ -25,7 +25,7 @@
 #define DISABLE_BARRIER_MIGRATION
 
 namespace BarrierConfig {
-  int broadcast_radix = 2;
+  int broadcast_radix = 4;
   int max_notifies_payload = 256;
 }; // namespace BarrierConfig
 
