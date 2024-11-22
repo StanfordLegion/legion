@@ -2217,6 +2217,7 @@ namespace Legion {
     class LogicalView; // base class for instance and reduction
     class InstanceKey;
     class InstanceView;
+    class ExprView;
     class CollectableView; // pure virtual class
     class IndividualView;
     class CollectiveView;
