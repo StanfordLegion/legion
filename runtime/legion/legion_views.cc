@@ -2487,7 +2487,7 @@ namespace Legion {
         update_count = false;
         has_target_view = true;
       }
-      else
+      else if (expr_cache_uses.fetch_add(1) < USER_CACHE_TIMEOUT)
       {
         // Hard case where we will have subviews
         AutoLock e_lock(expr_lock,1,false/*exclusive*/);
@@ -2501,6 +2501,55 @@ namespace Legion {
           if (finder->second->invalid_fields * user_mask)
             has_target_view = true;
         }
+        // increment the number of outstanding additions
+        outstanding_additions.fetch_add(1);
+      }
+      else
+      {
+        // This is the path where we clean the cache, multiple threads
+        // can race to get here
+        AutoLock e_lock(expr_lock);
+        // Block waiting for the prior additions to drain
+        while (USER_CACHE_TIMEOUT <= expr_cache_uses.load())
+        {
+          // Wait for the prior outstanding additions to drain
+          if (outstanding_additions.load() > 0)
+          {
+            if (!clean_waiting.exists())
+              clean_waiting = Runtime::create_rt_user_event();
+            const RtEvent wait_on = clean_waiting;
+            e_lock.release();
+            wait_on.wait();
+            e_lock.reacquire();
+          }
+          else // We won the race to wake up and clean the cache
+            clean_cache();
+        }
+        // Now we can do the normal lookup
+        // Have the lock in exclusive mode so can make nodes if needed
+        LegionMap<IndexSpaceExprID,ExprView*>::const_iterator
+          finder = expr_cache.find(user_expr->expr_id);
+        if (finder == expr_cache.end())
+        {
+          target_view = new ExprView(this->did, runtime->forest, user_expr);
+          expr_cache[user_expr->expr_id] = target_view;
+        }
+        else
+          target_view = finder->second;
+        if (target_view != current_users)
+        {
+          // Now see if we need to insert it
+          FieldMask insert_mask = user_mask & target_view->invalid_fields;
+          if (!!insert_mask)
+          {
+            // Remove these fields from being invalid before we
+            // destroy the insert mask
+            target_view->invalid_fields -= insert_mask;
+            // Do the insertion into the tree
+            current_users->insert_subview(target_view, insert_mask);
+          }
+        }
+        has_target_view = true;
         // increment the number of outstanding additions
         outstanding_additions.fetch_add(1);
       }
@@ -2544,36 +2593,15 @@ namespace Legion {
       target_view->add_current_user(user, term_event, user_mask);
       if (user->remove_reference())
         delete user;
-      if (update_count)
+      if (update_count && (outstanding_additions.fetch_sub(1) == 1) &&
+            (USER_CACHE_TIMEOUT <= expr_cache_uses.load()))
       {
-        if ((outstanding_additions.fetch_sub(1) == 1) &&
-            (USER_CACHE_TIMEOUT < expr_cache_uses.load()))
+        AutoLock e_lock(expr_lock);
+        if (clean_waiting.exists())
         {
-          AutoLock e_lock(expr_lock);
-          if ((outstanding_additions.load() == 0) && clean_waiting.exists())
-          {
-            // Wake up the clean waiter
-            Runtime::trigger_event(clean_waiting);
-            clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
-          }
-        }
-        // See if we need to reset the cache
-        const unsigned cache_uses = expr_cache_uses.fetch_add(1);
-        if (cache_uses == USER_CACHE_TIMEOUT)
-        {
-          AutoLock e_lock(expr_lock);
-          while (outstanding_additions.load() > 0)
-          {
-#ifdef DEBUG_LEGION
-            assert(!clean_waiting.exists());
-#endif
-            clean_waiting = Runtime::create_rt_user_event();
-            const RtEvent wait_on = clean_waiting;
-            e_lock.release();
-            wait_on.wait();
-            e_lock.reacquire();
-          }
-          clean_cache();
+          // Wake up the clean waiter
+          Runtime::trigger_event(clean_waiting);
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
     }
@@ -2609,16 +2637,18 @@ namespace Legion {
       // we'll be able to mark this user as being precise
       ExprView *target_view = NULL;
       bool has_target_view = false;
+      bool skip_check = false;
       // Handle an easy case first, if the user_expr is the same as the 
       // view_expr for the root then this is easy
-      bool update_count = false;
+      bool update_count = true;
       if (user_expr == current_users->view_expr)
       {
         // This is just going to add at the top so never needs to wait
         target_view = current_users;
+        update_count = false;
         has_target_view = true;
       }
-      else
+      else if (expr_cache_uses.fetch_add(1) < USER_CACHE_TIMEOUT)
       {
         // Hard case where we will have subviews
         AutoLock e_lock(expr_lock,1,false/*exclusive*/);
@@ -2634,9 +2664,52 @@ namespace Legion {
         }
         // increment the number of outstanding additions
         outstanding_additions.fetch_add(1);
-        update_count = true;
       }
-      if (!has_target_view)
+      else
+      {
+        // This is the path where we clean the cache, multiple threads
+        // can race to get here
+        AutoLock e_lock(expr_lock);
+        // Block waiting for the prior additions to drain
+        while (USER_CACHE_TIMEOUT <= expr_cache_uses.load())
+        {
+          // Wait for the prior outstanding additions to drain
+          if (outstanding_additions.load() > 0)
+          {
+            if (!clean_waiting.exists())
+              clean_waiting = Runtime::create_rt_user_event();
+            const RtEvent wait_on = clean_waiting;
+            e_lock.release();
+            wait_on.wait();
+            e_lock.reacquire();
+          }
+          else // We won the race to wake up and clean the cache
+            clean_cache();
+        }
+        // Now we can do the normal lookup
+        LegionMap<IndexSpaceExprID,ExprView*>::const_iterator
+          finder = expr_cache.find(user_expr->expr_id);
+        if (finder != expr_cache.end())
+        {
+          target_view = finder->second;
+          // No need to insert this if it's the root
+          if (target_view != current_users)
+          {
+            FieldMask insert_mask = target_view->invalid_fields & user_mask;
+            if (!!insert_mask)
+            {
+              target_view->invalid_fields -= insert_mask;
+              current_users->insert_subview(target_view, insert_mask);
+            }
+          }
+          has_target_view = true;
+        }
+        else
+          skip_check = true; // No point in checking again
+        // increment the number of outstanding additions
+        outstanding_additions.fetch_add(1);
+      }
+      if (!has_target_view && !skip_check)
       {
         // This could change the shape of the view tree so we need
         // exclusive privileges on the expr lock to serialize it
@@ -2693,36 +2766,15 @@ namespace Legion {
                                         user_expr, 
                                         user_expr->get_volume());
       }
-      if (update_count)
+      if (update_count && (outstanding_additions.fetch_sub(1) == 1) &&
+            (USER_CACHE_TIMEOUT <= expr_cache_uses.load()))
       {
-        if ((outstanding_additions.fetch_sub(1) == 1) &&
-            (USER_CACHE_TIMEOUT < expr_cache_uses.load()))
+        AutoLock e_lock(expr_lock);
+        if (clean_waiting.exists())
         {
-          AutoLock e_lock(expr_lock);
-          if ((outstanding_additions.load() == 0) && clean_waiting.exists())
-          {
-            // Wake up the clean waiter
-            Runtime::trigger_event(clean_waiting);
-            clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
-          }
-        }
-        // See if we need to reset the cache
-        const unsigned cache_uses = expr_cache_uses.fetch_add(1);
-        if (cache_uses == USER_CACHE_TIMEOUT)
-        {
-          AutoLock e_lock(expr_lock);
-          while (outstanding_additions.load() > 0)
-          {
-#ifdef DEBUG_LEGION
-            assert(!clean_waiting.exists());
-#endif
-            clean_waiting = Runtime::create_rt_user_event();
-            const RtEvent wait_on = clean_waiting;
-            e_lock.release();
-            wait_on.wait();
-            e_lock.reacquire();
-          }
-          clean_cache();
+          // Wake up the clean waiter
+          Runtime::trigger_event(clean_waiting);
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
     }
