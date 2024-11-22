@@ -20,7 +20,7 @@ protected:
 
   void SetUp() override
   {
-    for (int i = 0; i < N; i++) {
+    for(int i = 0; i < N; i++) {
       values1[i] = i + 1;
       values2[i] = i * 2;
     }
@@ -37,7 +37,7 @@ TYPED_TEST_P(PointTest, Zeroes)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   TypeParam point = TypeParam::ZEROES();
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(point[i], static_cast<T>(0));
   }
 }
@@ -47,7 +47,7 @@ TYPED_TEST_P(PointTest, Ones)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   TypeParam point = TypeParam::ONES();
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(point[i], static_cast<T>(1));
   }
 }
@@ -57,7 +57,7 @@ TYPED_TEST_P(PointTest, BaseAccess)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   TypeParam point(this->values1);
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(point[i], this->values1[i]);
   }
 }
@@ -82,7 +82,7 @@ TYPED_TEST_P(PointTest, Add)
   TypeParam point2(this->values2);
   TypeParam result = point1 + point2;
 
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values1[i] + this->values2[i]);
   }
 }
@@ -95,7 +95,7 @@ TYPED_TEST_P(PointTest, Subtract)
   TypeParam point2(this->values1);
   TypeParam result = point1 - point2;
 
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] - this->values1[i]);
   }
 }
@@ -108,7 +108,7 @@ TYPED_TEST_P(PointTest, Multiply)
   TypeParam point2(this->values1);
   TypeParam result = point1 * point2;
 
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] * this->values1[i]);
   }
 }
@@ -121,7 +121,7 @@ TYPED_TEST_P(PointTest, Divide)
   TypeParam point2(this->values1);
   TypeParam result = point1 / point2;
 
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] / this->values1[i]);
   }
 }
@@ -134,7 +134,7 @@ TYPED_TEST_P(PointTest, Modulo)
   TypeParam point2(this->values1);
   TypeParam result = point1 % point2;
 
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     EXPECT_EQ(result[i], this->values2[i] % this->values1[i]);
   }
 }
@@ -144,7 +144,7 @@ TYPED_TEST_P(PointTest, Dot)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   T product = 0;
-  for (int i = 0; i < N; i++) {
+  for(int i = 0; i < N; i++) {
     product += this->values1[i] * this->values2[i];
   }
 
@@ -155,9 +155,28 @@ TYPED_TEST_P(PointTest, Dot)
   EXPECT_EQ(dot, product);
 }
 
+TYPED_TEST_P(PointTest, Conversion)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  using PointUnsigned = Point<N, unsigned>;
+  PointUnsigned point_unsigned;
+  for(int i = 0; i < N; i++) {
+    point_unsigned[i] = 2u;
+  }
+
+  using PointInt = Point<N, int>;
+  PointInt point_int = point_unsigned;
+
+  for(int i = 0; i < N; i++) {
+    EXPECT_EQ(point_int[i], static_cast<int>(point_unsigned[i]));
+  }
+}
+
 // Register the Dot test
 REGISTER_TYPED_TEST_SUITE_P(PointTest, BaseAccess, Equality, Dot, Zeroes, Ones, Add,
-                            Subtract, Multiply, Divide, Modulo);
+                            Subtract, Multiply, Divide, Modulo, Conversion);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
@@ -165,8 +184,8 @@ auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
   return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
 }
 
-using TestTypesInt = decltype(GeneratePointTypes<int>(
-    std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+using TestTypesInt =
+    decltype(GeneratePointTypes<int>(std::make_integer_sequence<int, REALM_MAX_DIM>{}));
 using TestTypesLongLong = decltype(GeneratePointTypes<long long>(
     std::make_integer_sequence<int, REALM_MAX_DIM>{}));
 
