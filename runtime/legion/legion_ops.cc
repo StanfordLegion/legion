@@ -4350,28 +4350,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void PointWiseAnalysable<OP>::get_points(RegionRequirement &req,
-        ProjectionFunction *projection,
-        LogicalRegion lr, Domain index_domain,
-        std::vector<DomainPoint> &points)
-    //--------------------------------------------------------------------------
-    {
-      if (req.handle_type == LEGION_PARTITION_PROJECTION)
-      {
-        projection->functor->invert(lr,
-            req.partition, index_domain,
-            points);
-      }
-      else
-      {
-        projection->functor->invert(lr,
-            req.region, index_domain,
-            points);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
     bool PointWiseAnalysable<OP>::need_forward_progress(void)
     //--------------------------------------------------------------------------
     {

@@ -922,11 +922,25 @@ namespace Legion {
           ProjectionSummary *shard_proj,
           uint64_t context_index);
       bool need_forward_progress(void);
+    public:
       void get_points(RegionRequirement &req,
           ProjectionFunction *projection,
           LogicalRegion lr, Domain index_domain,
-          std::vector<DomainPoint> &points);
-    public:
+          std::vector<DomainPoint> &points)
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+          {
+            projection->functor->invert(lr,
+                req.partition, index_domain,
+                points);
+          }
+          else
+          {
+            projection->functor->invert(lr,
+                req.region, index_domain,
+                points);
+          }
+      }
       void set_connect_to_prev_point (unsigned region_idx)
       {
         connect_to_prev_points[region_idx] = true;
