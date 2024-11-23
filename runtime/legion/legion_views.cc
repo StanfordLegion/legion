@@ -324,26 +324,20 @@ namespace Legion {
       // If we have any current or previous users filter them out now
       if (!current_epoch_users.empty())
       {
-        for (EventFieldUsers::const_iterator eit = current_epoch_users.begin();
-              eit != current_epoch_users.end(); eit++)
-        {
-          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
-                eit->second.begin(); it != eit->second.end(); it++)
-            if (it->first->remove_reference())
-              delete it->first;
-        }
+        for (FieldMaskSet<PhysicalUser>::const_iterator it =
+              current_epoch_users.begin(); it !=
+              current_epoch_users.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
         current_epoch_users.clear();
       }
       if (!previous_epoch_users.empty())
       {
-        for (EventFieldUsers::const_iterator eit = previous_epoch_users.begin();
-              eit != previous_epoch_users.end(); eit++)
-        {
-          for (FieldMaskSet<PhysicalUser>::const_iterator it = 
-                eit->second.begin(); it != eit->second.end(); it++)
-            if (it->first->remove_reference())
-              delete it->first;
-        }
+        for (FieldMaskSet<PhysicalUser>::const_iterator it =
+              previous_epoch_users.begin(); it !=
+              previous_epoch_users.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
         previous_epoch_users.clear();
       }
     }
@@ -369,12 +363,14 @@ namespace Legion {
     {
       // No need for any locks here since we're in the view destructor
       // and there should be no more races between anything
-      for (EventFieldUsers::const_iterator it = current_epoch_users.begin();
-            it != current_epoch_users.end(); it++)
-        all_done.insert(it->first);
-      for (EventFieldUsers::const_iterator it = previous_epoch_users.begin();
-            it != previous_epoch_users.end(); it++)
-        all_done.insert(it->first);
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            current_epoch_users.begin(); it !=
+            current_epoch_users.end(); it++)
+        all_done.insert(it->first->term_event);
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            previous_epoch_users.begin(); it !=
+            previous_epoch_users.end(); it++)
+        all_done.insert(it->first->term_event);
       for (FieldMaskSet<ExprView>::const_iterator it =
             subviews.begin(); it != subviews.end(); it++)
         it->first->find_all_done_events(all_done);
@@ -382,54 +378,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void ExprView::verify_current_to_filter(
-                 const FieldMask &dominated, EventFieldUsers &current_to_filter)
+      const FieldMask &dominated, FieldMaskSet<PhysicalUser> &current_to_filter)
     //--------------------------------------------------------------------------
     {
       if (!!dominated)
       {
-        for (EventFieldUsers::iterator eit = current_to_filter.begin();
-              eit != current_to_filter.end(); /*nothing*/)
+        const FieldMask non_dominated =
+          current_to_filter.get_valid_mask() - dominated;
+        if (!non_dominated)
+          return;
+        if (non_dominated != current_to_filter.get_valid_mask())
         {
-          const FieldMask non_dominated = 
-            eit->second.get_valid_mask() - dominated;
-          // If everything was actually dominated we can keep going
-          if (!non_dominated)
-          {
-            eit++;
-            continue;
-          }
-          // If no fields were dominated we can just remove this
-          if (non_dominated == eit->second.get_valid_mask())
-          {
-            EventFieldUsers::iterator to_delete = eit++;
-            current_to_filter.erase(to_delete);
-            continue;
-          }
-          // Otherwise do the actuall overlapping test
-          std::vector<PhysicalUser*> to_delete; 
+          // Selectively filter
+          std::vector<PhysicalUser*> to_delete;
           for (FieldMaskSet<PhysicalUser>::iterator it =
-                eit->second.begin(); it != eit->second.end(); it++)
+                current_to_filter.begin(); it != current_to_filter.end(); it++)
           {
             it.filter(non_dominated);
             if (!it->second)
               to_delete.push_back(it->first);
           }
-          if (!eit->second.tighten_valid_mask())
+          for (std::vector<PhysicalUser*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
           {
-            EventFieldUsers::iterator to_delete = eit++;
-            current_to_filter.erase(to_delete);
+            current_to_filter.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
           }
-          else
-          {
-            for (std::vector<PhysicalUser*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              eit->second.erase(*it);
-            eit++;
-          }
+          current_to_filter.tighten_valid_mask();
+          return;
         }
       }
-      else
-        current_to_filter.clear();
+      // Otherwise we fall through here and clean out all the users
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            current_to_filter.begin(); it !=
+            current_to_filter.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      current_to_filter.clear();
     } 
 
     //--------------------------------------------------------------------------
@@ -446,8 +432,8 @@ namespace Legion {
       DETAILED_PROFILER(Internal::implicit_runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
       FieldMask dominated;
-      std::set<ApEvent> dead_events; 
-      EventFieldUsers current_to_filter, previous_to_filter;
+      std::set<PhysicalUser*> dead_users; 
+      FieldMaskSet<PhysicalUser> current_to_filter, previous_to_filter;
       // Perform the analysis with a read-only lock
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
@@ -463,7 +449,7 @@ namespace Legion {
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
-                                       dead_events, current_to_filter, 
+                                       dead_users, current_to_filter, 
                                        observed, non_dominated,
                                        trace_recording, false/*copy*/);
             if (!!observed)
@@ -478,7 +464,7 @@ namespace Legion {
               find_previous_preconditions(usage, previous_mask, user_expr,
                                           term_event, op_id, index,
                                           user_dominates, preconditions,
-                                          dead_events, trace_recording,
+                                          dead_users, trace_recording,
                                           false/*copy*/);
           }
         }
@@ -490,7 +476,7 @@ namespace Legion {
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
-                                       dead_events, current_to_filter, 
+                                       dead_users, current_to_filter, 
                                        observed, non_dominated,
                                        trace_recording, false/*copy*/);
 #ifdef DEBUG_LEGION
@@ -502,7 +488,7 @@ namespace Legion {
             find_previous_preconditions(usage, user_mask, user_expr,
                                         term_event, op_id, index,
                                         user_dominates, preconditions,
-                                        dead_events, trace_recording,
+                                        dead_users, trace_recording,
                                         false/*copy*/);
         }
       } 
@@ -511,15 +497,13 @@ namespace Legion {
       // otherwise we can get into issues of soundness
       if (!current_to_filter.empty())
         verify_current_to_filter(dominated, current_to_filter);
-      if (!trace_recording && (!dead_events.empty() || 
+      if (!trace_recording && (!dead_users.empty() || 
            !previous_to_filter.empty() || !current_to_filter.empty()))
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
+        if (!dead_users.empty())
+          filter_dead_users(dead_users);
         if (!previous_to_filter.empty())
           filter_previous_users(previous_to_filter);
         if (!current_to_filter.empty())
@@ -599,8 +583,8 @@ namespace Legion {
       DETAILED_PROFILER(Internal::implicit_runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
       FieldMask dominated;
-      std::set<ApEvent> dead_events; 
-      EventFieldUsers current_to_filter, previous_to_filter;
+      std::set<PhysicalUser*> dead_users; 
+      FieldMaskSet<PhysicalUser> current_to_filter, previous_to_filter;
       // Do the first pass with a read-only lock on the events
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
@@ -616,7 +600,7 @@ namespace Legion {
             find_current_preconditions(usage, copy_mask, copy_expr, 
                                        ApEvent::NO_AP_EVENT,
                                        op_id, index, copy_dominates,
-                                       preconditions, dead_events, 
+                                       preconditions, dead_users, 
                                        current_to_filter, observed, 
                                        non_dominated, trace_recording,
                                        true/*copy user*/);
@@ -632,7 +616,7 @@ namespace Legion {
               find_previous_preconditions(usage, previous_mask, copy_expr,
                                           ApEvent::NO_AP_EVENT, op_id, index,
                                           copy_dominates, preconditions,
-                                          dead_events, trace_recording,
+                                          dead_users, trace_recording,
                                           true/*copy user*/);
           }
         }
@@ -644,7 +628,7 @@ namespace Legion {
             find_current_preconditions(usage, copy_mask, copy_expr,
                                        ApEvent::NO_AP_EVENT,
                                        op_id, index, copy_dominates,
-                                       preconditions, dead_events, 
+                                       preconditions, dead_users,
                                        current_to_filter, observed, 
                                        non_dominated, trace_recording,
                                        true/*copy user*/);
@@ -657,7 +641,7 @@ namespace Legion {
             find_previous_preconditions(usage, copy_mask, copy_expr,
                                         ApEvent::NO_AP_EVENT,
                                         op_id, index, copy_dominates,
-                                        preconditions, dead_events,
+                                        preconditions, dead_users,
                                         trace_recording, true/*copy user*/);
         }
       }
@@ -666,15 +650,13 @@ namespace Legion {
       // otherwise we can get into issues of soundness
       if (!current_to_filter.empty())
         verify_current_to_filter(dominated, current_to_filter);
-      if (!trace_recording && (!dead_events.empty() || 
+      if (!trace_recording && (!dead_users.empty() || 
            !previous_to_filter.empty() || !current_to_filter.empty()))
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
+        if (!dead_users.empty())
+          filter_dead_users(dead_users);
         if (!previous_to_filter.empty())
           filter_previous_users(previous_to_filter);
         if (!current_to_filter.empty())
@@ -986,12 +968,11 @@ namespace Legion {
             {
               if (covered_user == NULL)
               {
-                covered_user = new PhysicalUser(usage, user_expr,
+                covered_user = new PhysicalUser(usage, user_expr, term_event,
                     op_id, index, true/*copy*/, true/*covers*/);
                 covered_user->add_reference();
               }
-              it->first->add_current_user(covered_user, term_event, 
-                                          overlap_mask);
+              it->first->add_current_user(covered_user, overlap_mask);
             }
             else
             {
@@ -1015,22 +996,20 @@ namespace Legion {
       {
         if (uncovered_user == NULL)
         {
-          uncovered_user = new PhysicalUser(usage, user_expr, op_id, index,
-                                            true/*copy*/, false/*covers*/);
+          uncovered_user = new PhysicalUser(usage, user_expr, term_event,
+              op_id, index, true/*copy*/, false/*covers*/);
           uncovered_user->add_reference();
         }
-        add_current_user(uncovered_user, term_event, user_mask);
+        add_current_user(uncovered_user, user_mask);
       }
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::add_current_user(PhysicalUser *user,const ApEvent term_event,
-                                    const FieldMask &user_mask)
+    void ExprView::add_current_user(PhysicalUser *user, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
-      EventUsers &event_users = current_epoch_users[term_event];
-      if (event_users.insert(user, user_mask))
+      if (current_epoch_users.insert(user, mask))
         user->add_reference();
     }
 
@@ -1097,185 +1076,142 @@ namespace Legion {
       }
       AutoLock v_lock(view_lock);
       if (!current_epoch_users.empty())
-      {
-        for (EventFieldUsers::const_iterator it = 
-              current_epoch_users.begin(); it != 
-              current_epoch_users.end(); it++)
-          valid_mask |= it->second.get_valid_mask();
-      }
+        valid_mask |= current_epoch_users.get_valid_mask();
       if (!previous_epoch_users.empty())
-      {
-        for (EventFieldUsers::const_iterator it = 
-              previous_epoch_users.begin(); it != 
-              previous_epoch_users.end(); it++)
-          valid_mask |= it->second.get_valid_mask();
-      }
+        valid_mask |= previous_epoch_users.get_valid_mask();
       // Save this for the future so we don't need to compute it again
       if (clean_set.insert(this, valid_mask))
         add_reference();
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::filter_local_users(ApEvent term_event) 
+    void ExprView::filter_dead_users(const std::set<PhysicalUser*> &dead_users)
     //--------------------------------------------------------------------------
     {
-      // Caller must be holding the lock
-      DETAILED_PROFILER(forest->runtime, 
-                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
+      for (std::set<PhysicalUser*>::const_iterator it =
+            dead_users.begin(); it != dead_users.end(); it++)
+      {
+        unsigned refs_to_remove = 1;
 #ifndef LEGION_DISABLE_EVENT_PRUNING
-      EventFieldUsers::iterator current_finder = 
-        current_epoch_users.find(term_event);
-      if (current_finder != current_epoch_users.end())
-      {
-        for (EventUsers::const_iterator it = current_finder->second.begin();
-              it != current_finder->second.end(); it++)
-          if (it->first->remove_reference())
-            delete it->first;
-        current_epoch_users.erase(current_finder);
-      }
-      LegionMap<ApEvent,EventUsers>::iterator previous_finder = 
-        previous_epoch_users.find(term_event);
-      if (previous_finder != previous_epoch_users.end())
-      {
-        for (EventUsers::const_iterator it = previous_finder->second.begin();
-              it != previous_finder->second.end(); it++)
-          if (it->first->remove_reference())
-            delete it->first;
-        previous_epoch_users.erase(previous_finder);
-      }
+        FieldMaskSet<PhysicalUser>::iterator finder =
+          current_epoch_users.find(*it);
+        if (finder != current_epoch_users.end())
+        {
+          current_epoch_users.erase(finder);
+          refs_to_remove++;
+        }
+        finder = previous_epoch_users.find(*it);
+        if (finder != previous_epoch_users.end())
+        {
+          previous_epoch_users.erase(finder);
+          refs_to_remove++;
+        }
 #endif
+        if ((*it)->remove_reference(refs_to_remove))
+          delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::filter_current_users(const EventFieldUsers &to_filter)
+    void ExprView::filter_current_users(
+                                    const FieldMaskSet<PhysicalUser> &to_filter)
     //--------------------------------------------------------------------------
     {
       // Lock needs to be held by caller 
-      for (EventFieldUsers::const_iterator fit = to_filter.begin();
-            fit != to_filter.end(); fit++)
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            to_filter.begin(); it != to_filter.end(); it++)
       {
-        EventFieldUsers::iterator event_finder = 
-          current_epoch_users.find(fit->first);
-        // If it's already been pruned out then either it was filtered
-        // because it finished or someone else moved it already, either
-        // way we don't need to do anything about it
-        if (event_finder == current_epoch_users.end())
-          continue;
-        EventFieldUsers::iterator target_finder = 
-          previous_epoch_users.find(fit->first);
-        for (EventUsers::const_iterator it = fit->second.begin();
-              it != fit->second.end(); it++)
+        unsigned refs_to_remove = 1;
+        FieldMaskSet<PhysicalUser>::iterator finder =
+          current_epoch_users.find(it->first);
+        if (finder != current_epoch_users.end())
         {
-          EventUsers::iterator finder = event_finder->second.find(it->first);
-          // Might already have been pruned out again, either way there is
-          // nothing for us to do here if it was already moved
-          if (finder == event_finder->second.end())
-            continue;
-          const FieldMask overlap = finder->second & it->second;
+          const FieldMask overlap = it->second & finder->second;
           if (!overlap)
-            continue;
-          finder.filter(overlap);
-          bool needs_reference = true;
-          if (!finder->second)
           {
-            // Have the reference flow back with the user
-            needs_reference = false;
-            event_finder->second.erase(finder);
-          }
-          // Now add the user to the previous set
-          if (target_finder == previous_epoch_users.end())
-          {
-            if (needs_reference)
-              it->first->add_reference();
-            previous_epoch_users[fit->first].insert(it->first, overlap);
-            target_finder = previous_epoch_users.find(fit->first);
-          }
-          else
-          {
-            if (target_finder->second.insert(it->first, overlap))
+            finder.filter(overlap);
+            if (!finder->second)
             {
-              // Added a new user to the previous users
-              if (needs_reference)
-                it->first->add_reference();
+              current_epoch_users.erase(finder);
+              refs_to_remove++;
             }
-            else
-            {
-              // Remove any extra references we might be trying to send back
-              if (!needs_reference && it->first->remove_reference())
-                delete it->first;
-            }
+            // Add this into the previous epoch users
+            // and pass along a reference if necessary
+            if (previous_epoch_users.insert(it->first, overlap))
+              refs_to_remove--;
           }
         }
-        if (event_finder->second.empty())
-          current_epoch_users.erase(event_finder);
+        if ((refs_to_remove > 0) &&
+            it->first->remove_reference(refs_to_remove))
+          delete it->first;
       }
+      current_epoch_users.tighten_valid_mask();
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::filter_previous_users(const EventFieldUsers &to_filter)
+    void ExprView::filter_previous_users(
+                                    const FieldMaskSet<PhysicalUser> &to_filter)
     //--------------------------------------------------------------------------
     {
       // Lock needs to be held by caller
-      for (EventFieldUsers::const_iterator fit = to_filter.begin();
-            fit != to_filter.end(); fit++)
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            to_filter.begin(); it != to_filter.end(); it++)
       {
-        EventFieldUsers::iterator event_finder = 
-          previous_epoch_users.find(fit->first);
-        // Might already have been pruned out
-        if (event_finder == previous_epoch_users.end())
-          continue;
-        for (EventUsers::const_iterator it = fit->second.begin();
-              it != fit->second.end(); it++)
+        unsigned refs_to_remove = 1;
+        FieldMaskSet<PhysicalUser>::iterator finder =
+          previous_epoch_users.find(it->first);
+        if (finder != previous_epoch_users.end())
         {
-          EventUsers::iterator finder = event_finder->second.find(it->first);
-          // Might already have been pruned out again
-          if (finder == event_finder->second.end())
-            continue;
           finder.filter(it->second);
           if (!finder->second)
           {
-            if (finder->first->remove_reference())
-              delete finder->first;
-            event_finder->second.erase(finder);
+            previous_epoch_users.erase(finder);
+            refs_to_remove++;
           }
         }
-        if (event_finder->second.empty())
-          previous_epoch_users.erase(event_finder);
+        // Remove the reference we were holding
+        if (it->first->remove_reference(refs_to_remove))
+          delete it->first;
       }
+      previous_epoch_users.tighten_valid_mask();
     } 
 
     //--------------------------------------------------------------------------
     void ExprView::find_current_preconditions(const RegionUsage &usage,
-                                              const FieldMask &user_mask,
-                                              IndexSpaceExpression *user_expr,
-                                              ApEvent term_event,
-                                              const UniqueID op_id,
-                                              const unsigned index,
-                                              const bool user_covers,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<ApEvent> &dead_events,
-                                              EventFieldUsers &filter_users,
-                                              FieldMask &observed,
-                                              FieldMask &non_dominated,
-                                              const bool trace_recording,
-                                              const bool copy_user)
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      ApEvent term_event,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      const bool user_covers,
+                                      std::set<ApEvent> &preconditions,
+                                      std::set<PhysicalUser*> &dead_users,
+                                      FieldMaskSet<PhysicalUser> &filter_users,
+                                      FieldMask &observed,
+                                      FieldMask &non_dominated,
+                                      const bool trace_recording,
+                                      const bool copy_user)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
-            cit != current_epoch_users.end(); cit++)
+      if (user_mask * current_epoch_users.get_valid_mask())
+        return;
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            current_epoch_users.begin(); it != current_epoch_users.end(); it++)
       {
-        if (cit->first == term_event)
+        if (it->first->term_event == term_event)
           continue;
 #ifndef LEGION_DISABLE_EVENT_PRUNING
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (!trace_recording && cit->first.has_triggered_faultignorant())
+        if (!trace_recording &&
+            it->first->term_event.has_triggered_faultignorant())
         {
-          dead_events.insert(cit->first);
+          if (dead_users.insert(it->first).second)
+            it->first->add_reference();
           continue;
         }
 #if 0
@@ -1283,79 +1219,64 @@ namespace Legion {
         // because we still need the correct epoch users for every ExprView
         // when we go to add our user later
         if (!trace_recording &&
-            preconditions.find(cit->first) != preconditions.end())
+            preconditions.find(it->first->term_event) != preconditions.end())
           continue;
 #endif
 #endif
-        const EventUsers &event_users = cit->second;
-        const FieldMask overlap = event_users.get_valid_mask() & user_mask;
+        const FieldMask overlap = user_mask & it->second;
         if (!overlap)
           continue;
-        EventFieldUsers::iterator to_filter = filter_users.find(cit->first);
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
+        bool dominates;
+        if (has_local_precondition(it->first, usage, user_expr,
+              op_id, index, user_covers, copy_user, &dominates))
         {
-          const FieldMask user_overlap = user_mask & it->second;
-          if (!user_overlap)
-            continue;
-          bool dominates = true;
-          if (has_local_precondition(it->first, usage, user_expr,
-                op_id, index, user_covers, copy_user, &dominates))
+          preconditions.insert(it->first->term_event);
+          if (dominates)
           {
-            preconditions.insert(cit->first);
-            if (dominates)
-            {
-              observed |= user_overlap;
-              if (to_filter == filter_users.end())
-              {
-                filter_users[cit->first].insert(it->first, user_overlap);
-                to_filter = filter_users.find(cit->first);
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-                assert(to_filter->second.find(it->first) == 
-                        to_filter->second.end());
-#endif
-                to_filter->second.insert(it->first, user_overlap);
-              }
-            }
-            else
-              non_dominated |= user_overlap;
+            observed |= overlap;
+            if (filter_users.insert(it->first, overlap))
+              it->first->add_reference();
           }
           else
-            non_dominated |= user_overlap;
+            non_dominated |= overlap;
         }
+        else
+          non_dominated |= overlap;
       }
     }
 
     //--------------------------------------------------------------------------
     void ExprView::find_previous_preconditions(const RegionUsage &usage,
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               ApEvent term_event,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                                               const bool user_covers,
-                                               std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                               const bool trace_recording,
-                                               const bool copy_user)
+                                           const FieldMask &user_mask,
+                                           IndexSpaceExpression *user_expr,
+                                           ApEvent term_event,
+                                           const UniqueID op_id,
+                                           const unsigned index,
+                                           const bool user_covers,
+                                           std::set<ApEvent> &preconditions,
+                                           std::set<PhysicalUser*> &dead_users,
+                                           const bool trace_recording,
+                                           const bool copy_user)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
-            pit != previous_epoch_users.end(); pit++)
+      if (user_mask * previous_epoch_users.get_valid_mask())
+        return;
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            previous_epoch_users.begin(); it !=
+            previous_epoch_users.end(); it++)
       {
-        if (pit->first == term_event)
+        if (it->first->term_event == term_event)
           continue;
 #ifndef LEGION_DISABLE_EVENT_PRUNING
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (!trace_recording && pit->first.has_triggered_faultignorant())
+        if (!trace_recording &&
+            it->first->term_event.has_triggered_faultignorant())
         {
-          dead_events.insert(pit->first);
+          if (dead_users.insert(it->first).second)
+            it->first->add_reference();
           continue;
         }
 #if 0
@@ -1363,25 +1284,16 @@ namespace Legion {
         // because we still need the correct epoch users for every ExprView
         // when we go to add our user later
         if (!trace_recording &&
-            preconditions.find(pit->first) != preconditions.end())
+            preconditions.find(it->first->term_event) != preconditions.end())
           continue;
 #endif
 #endif
-        const EventUsers &event_users = pit->second;
-        if (user_mask * event_users.get_valid_mask())
+        const FieldMask overlap = user_mask & it->second;
+        if (!overlap)
           continue;
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          if (user_mask * it->second)
-            continue;
-          if (has_local_precondition(it->first, usage, user_expr,
-                op_id, index, user_covers, copy_user))
-          {
-            preconditions.insert(pit->first);
-            break;
-          }
-        }
+        if (has_local_precondition(it->first, usage, user_expr,
+              op_id, index, user_covers, copy_user))
+          preconditions.insert(it->first->term_event);
       }
     }
 
@@ -1396,34 +1308,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
-            cit != current_epoch_users.end(); cit++)
+      if (mask * current_epoch_users.get_valid_mask())
+        return;
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            current_epoch_users.begin(); it != current_epoch_users.end(); it++)
       {
-        const EventUsers &event_users = cit->second;
-        FieldMask overlap = event_users.get_valid_mask() & mask;
+        const FieldMask overlap = mask & it->second;
         if (!overlap)
           continue;
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
+        bool dominated = true;
+        // We're just reading these and we want to see all prior
+        // dependences so just give dummy opid and index
+        if (has_local_precondition(it->first, usage, expr, 0/*opid*/,
+              0/*index*/, expr_covers, true/*copy user*/, &dominated)) 
         {
-          const FieldMask user_overlap = mask & it->second;
-          if (!user_overlap)
-            continue;
-          bool dominated = true;
-          // We're just reading these and we want to see all prior
-          // dependences so just give dummy opid and index
-          if (has_local_precondition(it->first, usage, expr, 0/*opid*/,
-                0/*index*/, expr_covers, true/*copy user*/, &dominated)) 
-          {
-            last_events.insert(cit->first);
-            if (dominated)
-              observed |= user_overlap;
-            else
-              non_dominated |= user_overlap;
-          }
+          last_events.insert(it->first->term_event);
+          if (dominated)
+            observed |= overlap;
           else
-            non_dominated |= user_overlap;
+            non_dominated |= overlap;
         }
+        else
+          non_dominated |= overlap;
       }
     }
 
@@ -1436,59 +1342,40 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
+      if (mask * previous_epoch_users.get_valid_mask())
+        return;
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            previous_epoch_users.begin(); it !=
+            previous_epoch_users.end(); it++)
       {
-        const EventUsers &event_users = pit->second;
-        FieldMask overlap = mask & event_users.get_valid_mask();
+        const FieldMask overlap = mask & it->second;
         if (!overlap)
           continue;
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          const FieldMask user_overlap = overlap & it->second;
-          if (!user_overlap)
-            continue;
-          // We're just reading these and we want to see all prior
-          // dependences so just give dummy opid and index
-          if (has_local_precondition(it->first, usage, expr, 
-                0/*opid*/, 0/*index*/, expr_covers, true/*copy user*/))
-          {
-            last_users.insert(pit->first);
-            break;
-          }
-        }
+        // We're just reading these and we want to see all prior
+        // dependences so just give dummy opid and index
+        if (has_local_precondition(it->first, usage, expr, 
+              0/*opid*/, 0/*index*/, expr_covers, true/*copy user*/))
+          last_users.insert(it->first->term_event);
       }
     }
 
     //--------------------------------------------------------------------------
     void ExprView::find_previous_filter_users(const FieldMask &dom_mask,
-                                            EventFieldUsers &filter_users)
+                                       FieldMaskSet<PhysicalUser> &filter_users)
     //--------------------------------------------------------------------------
     {
       // Lock better be held by caller
-      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
-            pit != previous_epoch_users.end(); pit++)
+      if (dom_mask * previous_epoch_users.get_valid_mask())
+        return;
+      for (FieldMaskSet<PhysicalUser>::const_iterator it =
+            previous_epoch_users.begin(); it !=
+            previous_epoch_users.end(); it++)
       {
-        FieldMask event_overlap = pit->second.get_valid_mask() & dom_mask;
-        if (!event_overlap)
+        const FieldMask overlap = dom_mask & it->second;
+        if (!overlap)
           continue;
-        EventFieldUsers::iterator to_filter = filter_users.find(pit->first);
-        for (EventUsers::const_iterator it = pit->second.begin();
-              it != pit->second.end(); it++)
-        {
-          const FieldMask user_overlap = it->second & event_overlap;
-          if (!user_overlap)
-            continue;
-          if (to_filter == filter_users.end())
-          {
-            filter_users[pit->first].insert(it->first, user_overlap);
-            to_filter = filter_users.find(pit->first);
-          }
-          else
-            to_filter->second.insert(it->first, user_overlap);
-        }
+        if (filter_users.insert(it->first, overlap))
+          it->first->add_reference();
       }
     }
 
@@ -2358,8 +2245,8 @@ namespace Legion {
         else
           user_expr = current_users->view_expr;
       }
-      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
-                                            false/*copy user*/, true/*covers*/);
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, term_event,
+          op_id, index, false/*copy user*/, true/*covers*/);
       // Hold a reference to this in case it finishes before we're done
       // with the analysis and its get pruned/deleted
       user->add_reference();
@@ -2478,7 +2365,7 @@ namespace Legion {
       }
       // Now we know the target view and it's valid for all fields
       // so we can add it to the expr view
-      target_view->add_current_user(user, term_event, user_mask);
+      target_view->add_current_user(user, user_mask);
       if (user->remove_reference())
         delete user;
       if (update_count && (outstanding_additions.fetch_sub(1) == 1) &&
@@ -2633,14 +2520,14 @@ namespace Legion {
       {
         // If we have a target view, then we know we cover it because
         // the expressions match directly
-        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
-                                              true/*copy user*/,true/*covers*/);
+        PhysicalUser *user = new PhysicalUser(usage, user_expr, term_event,
+            op_id, index, true/*copy user*/,true/*covers*/);
         // Hold a reference to this in case it finishes before we're done
         // with the analysis and its get pruned/deleted
         user->add_reference();
         // We already know the view so we can just add the user directly
         // there and then do any updates that we need to
-        target_view->add_current_user(user, term_event, user_mask);
+        target_view->add_current_user(user, user_mask);
         if (user->remove_reference())
           delete user;
       }

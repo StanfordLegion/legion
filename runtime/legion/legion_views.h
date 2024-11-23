@@ -914,9 +914,7 @@ namespace Legion {
      */
     class ExprView : public LegionHeapify<ExprView>, public Collectable {
     public:
-      typedef LegionMap<ApEvent,FieldMask> EventFieldMap;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
-      typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(DistributedID view_did, RegionTreeForest *forest,
                IndexSpaceExpression *expr, bool unbound = false);
@@ -962,8 +960,7 @@ namespace Legion {
                             const size_t user_volume,
                             PhysicalUser *&covered_user,
                             PhysicalUser *&uncovered_user);
-      void add_current_user(PhysicalUser *user, const ApEvent term_event,
-                            const FieldMask &user_mask);
+      void add_current_user(PhysicalUser *user, const FieldMask &user_mask);
       // TODO: Optimize this so that we prune out intermediate nodes in 
       // the tree while still allowing precondition searches to proceed
       // in parallel. Right now we stop the world to prune out such nodes
@@ -977,8 +974,8 @@ namespace Legion {
                                       const unsigned index,
                                       const bool user_covers,
                                       std::set<ApEvent> &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      EventFieldUsers &filter_users,
+                                      std::set<PhysicalUser*> &dead_users,
+                                      FieldMaskSet<PhysicalUser> &filter_users,
                                       FieldMask &observed, 
                                       FieldMask &non_dominated,
                                       const bool trace_recording,
@@ -991,11 +988,11 @@ namespace Legion {
                                       const unsigned index,
                                       const bool user_covers,
                                       std::set<ApEvent> &preconditions,
-                                      std::set<ApEvent> &dead_events,
+                                      std::set<PhysicalUser*> &dead_users,
                                       const bool trace_recording,
                                       const bool copy_user);
       void find_previous_filter_users(const FieldMask &dominated_mask,
-                                      EventFieldUsers &filter_users);
+                                      FieldMaskSet<PhysicalUser> &filter_users);
       // Overloads for find_last_users
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
@@ -1021,12 +1018,11 @@ namespace Legion {
       size_t get_view_volume(void);
       void find_all_done_events(std::set<ApEvent> &all_done) const;
     protected:
-      void filter_local_users(ApEvent term_event);
-      void filter_current_users(const EventFieldUsers &to_filter);
-      void filter_previous_users(const EventFieldUsers &to_filter);
-      bool refine_users(void);
+      void filter_dead_users(const std::set<PhysicalUser*> &dead_users);
+      void filter_current_users(const FieldMaskSet<PhysicalUser> &to_filter);
+      void filter_previous_users(const FieldMaskSet<PhysicalUser> &to_filter);
       static void verify_current_to_filter(const FieldMask &dominated,
-                                  EventFieldUsers &current_to_filter);
+                        FieldMaskSet<PhysicalUser> &current_to_filter);
     public:
       RegionTreeForest *const forest;
       IndexSpaceExpression *const view_expr;
@@ -1055,8 +1051,8 @@ namespace Legion {
       // hold locks in read-only mode prevent user fragmentation. It also
       // deals better with the common case which are higher views in
       // the view tree that less frequently filter their sub-users.
-      EventFieldUsers current_epoch_users;
-      EventFieldUsers previous_epoch_users;
+      FieldMaskSet<PhysicalUser> current_epoch_users;
+      FieldMaskSet<PhysicalUser> previous_epoch_users;
     protected:
       // Subviews for fields that have users in subexpressions
       FieldMaskSet<ExprView> subviews;
