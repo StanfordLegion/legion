@@ -981,7 +981,8 @@ namespace Legion {
                                       EventFieldUsers &filter_users,
                                       FieldMask &observed, 
                                       FieldMask &non_dominated,
-                                      const bool trace_recording);
+                                      const bool trace_recording,
+                                      const bool copy_user);
       void find_previous_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
@@ -991,7 +992,8 @@ namespace Legion {
                                       const bool user_covers,
                                       std::set<ApEvent> &preconditions,
                                       std::set<ApEvent> &dead_events,
-                                      const bool trace_recording);
+                                      const bool trace_recording,
+                                      const bool copy_user);
       void find_previous_filter_users(const FieldMask &dominated_mask,
                                       EventFieldUsers &filter_users);
       // Overloads for find_last_users

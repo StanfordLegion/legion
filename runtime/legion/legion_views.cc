@@ -464,7 +464,8 @@ namespace Legion {
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
                                        dead_events, current_to_filter, 
-                                       observed, non_dominated,trace_recording);
+                                       observed, non_dominated,
+                                       trace_recording, false/*copy*/);
             if (!!observed)
               dominated = observed - non_dominated;
           }
@@ -477,7 +478,8 @@ namespace Legion {
               find_previous_preconditions(usage, previous_mask, user_expr,
                                           term_event, op_id, index,
                                           user_dominates, preconditions,
-                                          dead_events, trace_recording);
+                                          dead_events, trace_recording,
+                                          false/*copy*/);
           }
         }
         else
@@ -489,7 +491,8 @@ namespace Legion {
                                        term_event, op_id, index, 
                                        user_dominates, preconditions, 
                                        dead_events, current_to_filter, 
-                                       observed, non_dominated,trace_recording);
+                                       observed, non_dominated,
+                                       trace_recording, false/*copy*/);
 #ifdef DEBUG_LEGION
             assert(!observed);
             assert(current_to_filter.empty());
@@ -499,7 +502,8 @@ namespace Legion {
             find_previous_preconditions(usage, user_mask, user_expr,
                                         term_event, op_id, index,
                                         user_dominates, preconditions,
-                                        dead_events, trace_recording);
+                                        dead_events, trace_recording,
+                                        false/*copy*/);
         }
       } 
       // It's possible that we recorded some users for fields which
@@ -614,7 +618,8 @@ namespace Legion {
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
-                                       non_dominated, trace_recording);
+                                       non_dominated, trace_recording,
+                                       true/*copy user*/);
             if (!!observed)
               dominated = observed - non_dominated;
           }
@@ -627,7 +632,8 @@ namespace Legion {
               find_previous_preconditions(usage, previous_mask, copy_expr,
                                           ApEvent::NO_AP_EVENT, op_id, index,
                                           copy_dominates, preconditions,
-                                          dead_events, trace_recording);
+                                          dead_events, trace_recording,
+                                          true/*copy user*/);
           }
         }
         else
@@ -640,7 +646,8 @@ namespace Legion {
                                        op_id, index, copy_dominates,
                                        preconditions, dead_events, 
                                        current_to_filter, observed, 
-                                       non_dominated, trace_recording);
+                                       non_dominated, trace_recording,
+                                       true/*copy user*/);
 #ifdef DEBUG_LEGION
             assert(!observed);
             assert(current_to_filter.empty());
@@ -651,7 +658,7 @@ namespace Legion {
                                         ApEvent::NO_AP_EVENT,
                                         op_id, index, copy_dominates,
                                         preconditions, dead_events,
-                                        trace_recording);
+                                        trace_recording, true/*copy user*/);
         }
       }
       // It's possible that we recorded some users for fields which
@@ -1252,7 +1259,8 @@ namespace Legion {
                                               EventFieldUsers &filter_users,
                                               FieldMask &observed,
                                               FieldMask &non_dominated,
-                                              const bool trace_recording)
+                                              const bool trace_recording,
+                                              const bool copy_user)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -1292,7 +1300,7 @@ namespace Legion {
             continue;
           bool dominates = true;
           if (has_local_precondition(it->first, usage, user_expr,
-                op_id, index, user_covers, false/*copy user*/, &dominates))
+                op_id, index, user_covers, copy_user, &dominates))
           {
             preconditions.insert(cit->first);
             if (dominates)
@@ -1331,7 +1339,8 @@ namespace Legion {
                                                const bool user_covers,
                                                std::set<ApEvent> &preconditions,
                                                std::set<ApEvent> &dead_events,
-                                               const bool trace_recording)
+                                               const bool trace_recording,
+                                               const bool copy_user)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -1367,7 +1376,7 @@ namespace Legion {
           if (user_mask * it->second)
             continue;
           if (has_local_precondition(it->first, usage, user_expr,
-                op_id, index, user_covers, false/*copy user*/))
+                op_id, index, user_covers, copy_user))
           {
             preconditions.insert(pit->first);
             break;
