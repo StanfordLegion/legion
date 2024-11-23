@@ -196,21 +196,56 @@ namespace Legion {
       // index space expressions for it to deal with
       if (implicit_runtime->legion_spy_enabled)
         return NULL;
-      DomainT<DIM,T> domain;
-      get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
-      const Rect<DIM,T> bounds = domain.bounds;
-      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
-      const Rect<DIM,T> result = bounds.intersection(domain.bounds);
-      if (result == bounds)
+      DomainT<DIM,T> left, right;
+      get_expr_index_space(&left, type_tag, true/*tight*/);
+      rhs->get_expr_index_space(&right, type_tag, true/*tight*/);
+      if (!left.bounds.overlaps(right.bounds))
+      {
+        // Empty case
+        Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
+        return new IndexSpaceIntersection<DIM,T>(empty, context);
+      }
+      // A note on sparsity maps here: technically if we had just one sparsity
+      // map then we could just tighten the bound on that sparsity map and
+      // that would be good enough, but then we would create the illusion
+      // of having created a new index space and the index space operation
+      // would think it owned the sparsity map and would try to destroy it 
+      // when being cleaned up which would be wrong. We'll leave it up to 
+      // Realm to do that by falling back to the normal intersection path
+      const Rect<DIM,T> intersection = left.bounds.intersection(right.bounds);
+      if (!left.dense())
+      {
+        if (!right.dense())
+        {
+          // Only the same if they have the same sparsity map
+          if (left.sparsity == right.sparsity)
+            return this;
+          else
+            return NULL;
+        }
+        else
+        {
+          // See if tightening with right bounds changes bounding box
+          if (left.bounds == intersection)
+            return this;
+          else
+            return NULL;
+        }
+      }
+      else if (!right.dense())
+      {
+        // See if tightening with the left bounds changes bounding box
+        if (right.bounds == intersection)
+          return rhs;
+        else
+          return NULL;
+      }
+      if (intersection == left.bounds)
         return this;
-      if (result == domain.bounds)
+      if (intersection == right.bounds)
         return rhs;
       // Make a new Intersection space that is a value of this space
-      return new IndexSpaceIntersection<DIM,T>(result, context); 
+      return new IndexSpaceIntersection<DIM,T>(intersection, context);
     }
 
     //--------------------------------------------------------------------------
@@ -225,26 +260,38 @@ namespace Legion {
         return NULL;
       DomainT<DIM,T> domain;
       get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
+      if (domain.empty())
+        return this;
       Rect<DIM,T> result = domain.bounds;
+      bool has_sparsity = !domain.dense();
       IndexSpaceExpression *smallest = NULL;
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             exprs.begin(); it != exprs.end(); it++)
       {
         (*it)->get_expr_index_space(&domain, type_tag, true/*tight*/);
+        // Keep going anyway to see if the intersection proves empty
         if (!domain.dense())
-          return NULL;
+          has_sparsity = true;
         const Rect<DIM,T> next = result.intersection(domain.bounds);
         if (next != result)
         {
+          result = next;
+          // If it becomes empty than we are done
+          if (next.empty())
+          {
+            if (domain.empty())
+              return *it;
+            else
+              return new IndexSpaceIntersection<DIM,T>(result, context);
+          }
           if (next == domain.bounds)
             smallest = (*it);
           else
             smallest = NULL;
-          result = next;
         }
       }
+      if (has_sparsity)
+        return NULL;
       if (smallest != NULL)
         return smallest;
       return new IndexSpaceIntersection<DIM,T>(result, context);
@@ -260,29 +307,25 @@ namespace Legion {
       // index space expressions for it to deal with
       if (implicit_runtime->legion_spy_enabled)
         return NULL;
-      DomainT<DIM,T> domain;
-      get_expr_index_space(&domain, type_tag, true/*tight*/);
-      Rect<DIM,T> bounds = domain.bounds;
-      if (!domain.dense())
+      DomainT<DIM,T> left, right;
+      get_expr_index_space(&left, type_tag, true/*tight*/);
+      rhs->get_expr_index_space(&right, type_tag, true/*tight*/);
+      // If they don't overlap then this is easy
+      if (!left.bounds.overlaps(right.bounds))
+        return this;
+      // If right is not dense we toss up our hands
+      if (!right.dense())
+        return NULL;
+      if (!left.dense())
       {
-        rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
-        // If they don't overlap then the subtraction is easy
-        if (!bounds.overlaps(domain.bounds))
-          return this;
+        // Can still do a test for containment here to see if we're empty
+        if (right.bounds.contains(left.bounds))
+        {
+          const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
+          return new IndexSpaceDifference<DIM,T>(empty, context);
+        }
         else
           return NULL;
-      }
-      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
-      // If they don't overlap then the subtraction is easy
-      if (!bounds.overlaps(domain.bounds))
-        return this;
-      if (!domain.dense())
-        return NULL;
-      // Handle the common case of equivalency
-      if (bounds == domain.bounds)
-      {
-        const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
-        return new IndexSpaceDifference<DIM,T>(empty, context);
       }
       // We can find up to one non-dominating dimension and still easily
       // compute the difference, as soon as we have more than one then 
@@ -293,25 +336,22 @@ namespace Legion {
       int non_dominating_dim = -1;
       for (int i = 0; i < DIM; i++)
       {
-        if ((domain.bounds.lo[i] <= bounds.lo[i]) &&
-            (bounds.hi[i] <= domain.bounds.hi[i]))
-          continue;
-        if (domain.bounds.lo[i] <= bounds.lo[i])
+        if (right.bounds.lo[i] <= left.bounds.lo[i])
         {
           // Check if dominated on both sides
-          if (bounds.hi[i] <= domain.bounds.hi[i])
+          if (left.bounds.hi[i] <= right.bounds.hi[i])
             continue;
           // Just dominated on the low-side
           if (non_dominating_dim > -1)
             return NULL;
-          bounds.lo[i] = domain.bounds.hi[i]+1;
+          left.bounds.lo[i] = right.bounds.hi[i]+1;
         }
-        else if (bounds.hi[i] <= domain.bounds.hi[i])
+        else if (left.bounds.hi[i] <= right.bounds.hi[i])
         {
           // Just dominated on the high side
           if (non_dominating_dim > -1)
             return NULL;
-          bounds.hi[i] = domain.bounds.lo[i]-1;
+          left.bounds.hi[i] = right.bounds.lo[i]-1;
         }
         else // Not dominated on either side
           return NULL;
@@ -324,7 +364,7 @@ namespace Legion {
         return new IndexSpaceDifference<DIM,T>(empty, context);
       }
       else
-        return new IndexSpaceDifference<DIM,T>(bounds, context);
+        return new IndexSpaceDifference<DIM,T>(left.bounds, context);
     }
 
     //--------------------------------------------------------------------------
@@ -1434,10 +1474,14 @@ namespace Legion {
       return get_realm_index_space(*space, need_tight_result);
     }
 
+    //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceOperationT<DIM,T>::is_sparse()
+    bool IndexSpaceOperationT<DIM,T>::is_sparse(void)
+    //--------------------------------------------------------------------------
     {
-      return !realm_index_space.dense();
+      DomainT<DIM,T> result;
+      get_realm_index_space(result, true/*tight*/);
+      return !result.dense();
     }
 
     //--------------------------------------------------------------------------
@@ -2619,10 +2663,14 @@ namespace Legion {
         delete linear;
     }
 
+    //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::is_sparse()
+    bool IndexSpaceNodeT<DIM,T>::is_sparse(void)
+    //--------------------------------------------------------------------------
     {
-      return !realm_index_space.dense();
+      DomainT<DIM,T> result;
+      get_realm_index_space(result, true/*tight*/);
+      return !result.dense();
     }
 
     //--------------------------------------------------------------------------

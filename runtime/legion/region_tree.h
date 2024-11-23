@@ -1285,7 +1285,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual bool is_sparse() = 0;
+      virtual bool is_sparse(void) = 0;
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1670,7 +1670,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual bool is_sparse();
+      virtual bool is_sparse(void);
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -2480,7 +2480,7 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual bool is_sparse();
+      virtual bool is_sparse(void);
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
