@@ -9012,10 +9012,8 @@ namespace Legion {
                 const FieldMask overlap = it->second & right_mask;
                 if (!overlap)
                   continue;
-                const Rect<DIM,T> intersection =
-                  rect.intersection(it->first->bounds);
 #ifdef DEBUG_LEGION
-                assert(!intersection.empty());
+                assert(rect.overlaps(it->first->bounds));
 #endif
                 to_traverse.insert(it->first, overlap);
                 right_mask -= overlap;
