@@ -7774,6 +7774,10 @@ namespace Legion {
       FieldMaskSet<EqKDNode<DIM,T> > to_get_previous;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert((current_sets == NULL) ||
+            (current_sets->get_valid_mask() * mask));
+#endif
         if (previous_sets != NULL)
         {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -8899,7 +8903,7 @@ namespace Legion {
                 }
                 // No need to delete previous sets or tighten its valid
                 // mask since we know that there will be current sets
-                // getting store into the previous sets for all those fields
+                // getting stored into the previous sets for all those fields
               }
             }
             // Now we can invalidate the current sets and flush them
@@ -8920,6 +8924,10 @@ namespace Legion {
               if (!current_mask)
                 break;
             }
+#ifdef DEBUG_LEGION
+            // Should have moved something over for all fields
+            assert(!current_mask);
+#endif
             for (std::vector<EquivalenceSet*>::const_iterator it =
                   to_delete.begin(); it != to_delete.end(); it++)
             {
@@ -9040,6 +9048,11 @@ namespace Legion {
       // Record the any all-previous fields at this child
       if (parent_all_previous != NULL)
       {
+        // Need to retake the lock here because record_equivalence_set
+        // could be calling back in here and mutating the previous sets
+        // while we're try to read it which can lead to the wrong set
+        // of fields being recorded
+        AutoLock n_lock(node_lock);
         *parent_all_previous = all_previous_below;
         if (previous_sets != NULL)
           *parent_all_previous |= previous_sets->get_valid_mask();
@@ -9056,7 +9069,7 @@ namespace Legion {
     {
       if (!!all_previous_below)
       {
-        // If the fields are already all-previous below than we're done
+        // If the fields are already all-previous below then we're done
         mask -= all_previous_below;
         if (!mask)
           return;
