@@ -217,9 +217,16 @@ namespace Legion {
       {
         if (!right.dense())
         {
-          // Only the same if they have the same sparsity map
+          // Only the same if they have the same sparsity map and bounds
           if (left.sparsity == right.sparsity)
-            return this;
+          {
+            if (left.bounds == intersection)
+              return this;
+            else if (right.bounds == intersection)
+              return rhs;
+            else
+              return NULL;
+          }
           else
             return NULL;
         }
