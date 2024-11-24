@@ -1753,8 +1753,7 @@ namespace Legion {
     {
       log_auto_trace.debug() << "Encountered untraceable operation: "
         << get_string_rep(get_operation_kind());
-      recognizer.record_operation_untraceable(opidx);
-      return false;
+      return recognizer.record_operation_untraceable(opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -7365,8 +7364,7 @@ namespace Legion {
       hasher.hash<bool>(is_index_space);
       if (is_index_space)
         hasher.hash(index_domain);
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -9814,8 +9812,7 @@ namespace Legion {
       Murmur3Hasher hasher;
       hasher.hash(get_operation_kind());
       hasher.hash(fence_kind);
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -12270,8 +12267,7 @@ namespace Legion {
       for (std::set<FieldID>::const_iterator it = fields.begin();
             it != fields.end(); it++)
         hasher.hash(*it);
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -13076,8 +13072,7 @@ namespace Legion {
       for (std::set<FieldID>::const_iterator it = fields.begin();
             it != fields.end(); it++)
         hasher.hash(*it);
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -18363,8 +18358,7 @@ namespace Legion {
         hasher.hash(future.impl->did);
       else
         hasher.hash(value, value_size);
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
     
     //--------------------------------------------------------------------------
@@ -19646,8 +19640,7 @@ namespace Legion {
                                       uint64_t opidx)
     //--------------------------------------------------------------------------
     {
-      recognizer.record_operation_noop(this);
-      return true;
+      return recognizer.record_operation_noop(this);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -22350,8 +22343,7 @@ namespace Legion {
     {
       Murmur3Hasher hasher;
       hasher.hash(get_operation_kind());
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------

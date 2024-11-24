@@ -6307,10 +6307,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (output_regions.size() > 0)
-      {
-        recognizer.record_operation_untraceable(opidx);
-        return false;
-      }
+        return recognizer.record_operation_untraceable(opidx);
       Murmur3Hasher hasher;
       hasher.hash(get_operation_kind());
       hasher.hash(task_id);
@@ -6324,8 +6321,7 @@ namespace Legion {
         hasher.hash<bool>(must_epoch_task);
         hasher.hash(index_domain);
       }
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -9503,10 +9499,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (output_regions.size() > 0)
-      {
-        recognizer.record_operation_untraceable(opidx);
-        return false;
-      }
+        return recognizer.record_operation_untraceable(opidx);
       Murmur3Hasher hasher;
       hasher.hash(get_operation_kind());
       hasher.hash(task_id);
@@ -9516,8 +9509,7 @@ namespace Legion {
       hasher.hash<bool>(concurrent_task);
       hasher.hash<bool>(must_epoch_task);
       hasher.hash(index_domain);
-      recognizer.record_operation_hash(this, hasher, opidx);
-      return true;
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------

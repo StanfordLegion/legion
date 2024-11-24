@@ -66,9 +66,9 @@ namespace Legion {
     public:
       TraceCache(InnerContext *context);
     public:
-      void record_operation(Operation *op,
+      bool record_operation(Operation *op,
           Murmur3Hasher::Hash hash, uint64_t opidx);
-      void record_noop(Operation *op);
+      bool record_noop(Operation *op);
       bool has_prefix(const std::vector<Murmur3Hasher::Hash> &hashes) const;
       void insert(std::vector<Murmur3Hasher::Hash> &hashes, uint64_t opidx);
       void flush(uint64_t opidx);
@@ -206,9 +206,9 @@ namespace Legion {
       OccurrenceWatcher(InnerContext *context,
           const Mapper::ContextConfigOutput &config);
     public:
-      void record_operation(Operation *op,
+      bool record_operation(Operation *op,
           Murmur3Hasher::Hash hash, uint64_t opidx); 
-      void record_noop(Operation *op);
+      bool record_noop(Operation *op);
       void flush(uint64_t opidx);
       void insert(const Murmur3Hasher::Hash *hashes, 
                   size_t size, uint64_t opidx);
@@ -260,7 +260,7 @@ namespace Legion {
     /**
      * \class TraceRecognizer
      * The trace recognizer class lazily buffers up a sequence of hashes 
-     * corresponding  to the sequence of operations and their arguments 
+     * corresponding to the sequence of operations and their arguments 
      * and looks for repeats within the sequence for which we can replay. 
      */
     class TraceRecognizer {
@@ -295,10 +295,10 @@ namespace Legion {
       TraceRecognizer(InnerContext *context,
           const Mapper::ContextConfigOutput &config);
     public:
-      void record_operation_hash(Operation *op, 
+      bool record_operation_hash(Operation *op, 
           Murmur3Hasher &hasher, uint64_t opidx);
-      void record_operation_noop(Operation *op);
-      void record_operation_untraceable(uint64_t opidx);
+      bool record_operation_noop(Operation *op);
+      bool record_operation_untraceable(uint64_t opidx);
       static void find_repeats(const void *args);
     private:
       bool check_for_repeats(uint64_t opidx);

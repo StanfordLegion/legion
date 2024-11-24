@@ -34,10 +34,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCache::record_operation(Operation *op, Murmur3Hasher::Hash hash,
+    bool TraceCache::record_operation(Operation *op, Murmur3Hasher::Hash hash,
                                       uint64_t opidx)
     //--------------------------------------------------------------------------
     {
+      // Short circuit if we don't have any traces recorded yet
+      // Technically this is superfluous because we'll end up flushing the
+      // buffer later in this function if we don't have any active pointers
+      // in the trie, but this saves us some work for a simple test and
+      // also makes the it clearer that there is no lazy evaluation until
+      // we actually start observing traces.
+      if (trie.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(operation_start_idx == opidx);
+#endif
+        operation_start_idx++;
+        return false;
+      }
+      // We only start lazily 
       operations.emplace(op);
       // Update all watching pointers. This is very similar to the advancing
       // of pointers in the TraceOccurrenceWatcher.
@@ -246,6 +261,7 @@ namespace Legion {
           // pointers.
         }
       }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -262,12 +278,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCache::record_noop(Operation *op)
+    bool TraceCache::record_noop(Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_operation_ignorable_in_traces(op));
 #endif
+      if (trie.empty())
+      {
+        operation_start_idx++;
+        return false;
+      }
       // If the operation is a noop during traces, then the replayer
       // takes a much simpler process. In particular, none of the pointers
       // advance or are cancelled, but their depth increases to account
@@ -291,6 +312,7 @@ namespace Legion {
       if (active_commit_pointers.empty() && 
           completed_commit_pointers.empty())
         flush_buffer();
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -321,35 +343,39 @@ namespace Legion {
       active_commit_pointers.clear();
       // If we have no completed pointers, flush all pending operations and
       // early exit.
-      if (completed_commit_pointers.empty())
+      if (!completed_commit_pointers.empty())
       {
-        flush_buffer();
-        return;
-      }
-
 #ifdef DEBUG_LEGION
-      assert(std::is_sorted(completed_commit_pointers.begin(), 
-            completed_commit_pointers.end()));
+        assert(std::is_sorted(completed_commit_pointers.begin(), 
+              completed_commit_pointers.end()));
 #endif
-      // Now that we have some (sorted) completed pointers,  issue them.
-      for (std::vector<FrozenCommitPointer>::iterator it =
-            completed_commit_pointers.begin(); it !=
-            completed_commit_pointers.end(); it++)
-      {
-        // If we're considering a pointer that starts earlier than the
-        // pending set of operations, then that trace is behind us. So
-        // we just continue onto the next trace.
-        if (it->get_opidx() < operation_start_idx)
-          continue;
-        // Now, flush the buffer up until the start of this trace.
-        flush_buffer(it->get_opidx());
-        // Finally, we can issue the trace.
-        TraceID tid = it->replay(context);
-        replay_trace(it->get_opidx() + it->get_length(), tid);
+        // Now that we have some (sorted) completed pointers, issue them.
+        for (std::vector<FrozenCommitPointer>::iterator it =
+              completed_commit_pointers.begin(); it !=
+              completed_commit_pointers.end(); it++)
+        {
+          // If we're considering a pointer that starts earlier than the
+          // pending set of operations, then that trace is behind us. So
+          // we just continue onto the next trace.
+          if (it->get_opidx() < operation_start_idx)
+            continue;
+          // Now, flush the buffer up until the start of this trace.
+          flush_buffer(it->get_opidx());
+          // Finally, we can issue the trace.
+          TraceID tid = it->replay(context);
+          replay_trace(it->get_opidx() + it->get_length(), tid);
+        }
+        completed_commit_pointers.clear();
       }
-      completed_commit_pointers.clear();
       // Flush all remaining operations.
       flush_buffer();
+      // Make sure we're counting correctly, this was an untraceable operation
+      // that was never added to the operation buffer so still need to bump
+      // starting index
+#ifdef DEBUG_LEGION
+      assert(operation_start_idx == opidx);
+#endif
+      operation_start_idx++;
     }
 
     //--------------------------------------------------------------------------
@@ -546,7 +572,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OccurrenceWatcher::record_operation(Operation *op,
+    bool OccurrenceWatcher::record_operation(Operation *op,
                                        Murmur3Hasher::Hash hash, uint64_t opidx)
     //--------------------------------------------------------------------------
     {
@@ -604,7 +630,7 @@ namespace Legion {
       active_pointers.erase(
           active_pointers.begin()+current_index, active_pointers.end());
       // Now tell the trace cache to reocrd the operation too
-      cache.record_operation(op, hash, opidx);
+      return cache.record_operation(op, hash, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -630,10 +656,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OccurrenceWatcher::record_noop(Operation *op)
+    bool OccurrenceWatcher::record_noop(Operation *op)
     //--------------------------------------------------------------------------
     {
-      cache.record_noop(op);
+      return cache.record_noop(op);
     }
 
     //--------------------------------------------------------------------------
@@ -678,7 +704,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceRecognizer::record_operation_hash(Operation *op,
+    bool TraceRecognizer::record_operation_hash(Operation *op,
                                           Murmur3Hasher &hasher, uint64_t opidx)
     //--------------------------------------------------------------------------
     {
@@ -687,18 +713,18 @@ namespace Legion {
       hashes.push_back(hash);
       if (check_for_repeats(opidx))
         update_watcher(opidx);
-      watcher.record_operation(op, hash, opidx);
+      return watcher.record_operation(op, hash, opidx);
     }
 
     //--------------------------------------------------------------------------
-    void TraceRecognizer::record_operation_noop(Operation *op)
+    bool TraceRecognizer::record_operation_noop(Operation *op)
     //--------------------------------------------------------------------------
     {
-      watcher.record_noop(op);
+      return watcher.record_noop(op);
     }
 
     //--------------------------------------------------------------------------
-    void TraceRecognizer::record_operation_untraceable(uint64_t opidx)
+    bool TraceRecognizer::record_operation_untraceable(uint64_t opidx)
     //--------------------------------------------------------------------------
     {
       // When encountering a non-traceable operation, insert a
@@ -709,6 +735,7 @@ namespace Legion {
       if (check_for_repeats(opidx))
         update_watcher(opidx);
       watcher.flush(opidx);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1158,11 +1185,8 @@ namespace Legion {
       if (unordered || (this->current_trace != NULL) || !outermost)
         return T::add_to_dependence_queue(
             op, dependences, unordered, true/*outermost*/);
-      else if (op->record_trace_hash(this->recognizer, this->opidx))
-      {
-        this->opidx++;
+      else if (op->record_trace_hash(this->recognizer, this->opidx++))
         return true;
-      }
       else
       {
         // Increment the current trace blocking index so we know

@@ -79,6 +79,10 @@ namespace Legion {
       // Initialize the root with an arbitrary token.
       Trie() : root(T{}, nullptr) {}
 
+      inline bool empty(void) const {
+        return this->root.children.empty();
+      }
+
       template<typename ITER>
       void insert(ITER start, ITER end, V value) {
         TrieNode<T, V>* node = &this->root;
