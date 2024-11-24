@@ -45,13 +45,7 @@ namespace Legion {
       // also makes the it clearer that there is no lazy evaluation until
       // we actually start observing traces.
       if (trie.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(operation_start_idx == opidx);
-#endif
-        operation_start_idx++;
         return false;
-      }
       // We only start lazily 
       operations.emplace(op);
       // Update all watching pointers. This is very similar to the advancing
@@ -285,10 +279,7 @@ namespace Legion {
       assert(is_operation_ignorable_in_traces(op));
 #endif
       if (trie.empty())
-      {
-        operation_start_idx++;
         return false;
-      }
       // If the operation is a noop during traces, then the replayer
       // takes a much simpler process. In particular, none of the pointers
       // advance or are cancelled, but their depth increases to account
@@ -369,13 +360,6 @@ namespace Legion {
       }
       // Flush all remaining operations.
       flush_buffer();
-      // Make sure we're counting correctly, this was an untraceable operation
-      // that was never added to the operation buffer so still need to bump
-      // starting index
-#ifdef DEBUG_LEGION
-      assert(operation_start_idx == opidx);
-#endif
-      operation_start_idx++;
     }
 
     //--------------------------------------------------------------------------
@@ -1185,8 +1169,11 @@ namespace Legion {
       if (unordered || (this->current_trace != NULL) || !outermost)
         return T::add_to_dependence_queue(
             op, dependences, unordered, true/*outermost*/);
-      else if (op->record_trace_hash(this->recognizer, this->opidx++))
+      else if (op->record_trace_hash(this->recognizer, this->opidx))
+      {
+        this->opidx++;
         return true;
+      }
       else
       {
         // Increment the current trace blocking index so we know
