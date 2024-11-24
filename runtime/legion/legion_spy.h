@@ -85,11 +85,11 @@ namespace Legion {
 
       // Logger calls for the shape of region trees
       static inline void log_top_index_space(IDType unique_id,
-                                             AddressSpaceID owner,
-                                             const char *provenance)
+          AddressSpaceID owner, const std::string_view &provenance)
       {
-        log_spy.print("Index Space " IDFMT " %u %s", unique_id,
-            owner, (provenance == NULL) ? "" : provenance);
+        log_spy.print("Index Space " IDFMT " %u %.*s", unique_id,
+            owner, int(provenance.length()), 
+            (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_index_space_name(IDType unique_id,
@@ -101,12 +101,14 @@ namespace Legion {
 
       static inline void log_index_partition(IDType parent_id, 
                 IDType unique_id, int disjoint, int complete,
-                LegionColor point, AddressSpaceID owner, const char *provenance)
+                LegionColor point, AddressSpaceID owner, 
+                const std::string_view &provenance)
       {
         // Convert ints from -1,0,1 to 0,1,2
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %u %s",
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %u %.*s",
 		      parent_id, unique_id, disjoint+1, complete+1, point,
-                      owner, (provenance == NULL) ? "" : provenance); 
+                      owner, int(provenance.length()),
+                      (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -200,10 +202,11 @@ namespace Legion {
 
       static inline void log_field_space(unsigned unique_id,
                                          AddressSpaceID owner,
-                                         const char *provenance)
+                                         const std::string_view &provenance)
       {
-        log_spy.print("Field Space %u %u %s", unique_id, 
-            owner, (provenance == NULL) ? "" : provenance);
+        log_spy.print("Field Space %u %u %.*s", unique_id, 
+            owner, int(provenance.length()),
+            (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_field_space_name(unsigned unique_id,
@@ -215,11 +218,12 @@ namespace Legion {
 
       static inline void log_field_creation(unsigned unique_id, 
                                 unsigned field_id, size_t size,
-                                const char *provenance)
+                                const std::string_view &provenance)
       {
-        log_spy.print("Field Creation %u %u %ld %s", 
+        log_spy.print("Field Creation %u %u %ld %.*s", 
 		      unique_id, field_id, long(size),
-                      (provenance == NULL) ? "" : provenance);
+                      int(provenance.length()),
+                      (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_field_name(unsigned unique_id,
@@ -232,11 +236,12 @@ namespace Legion {
 
       static inline void log_top_region(IDType index_space, 
                       unsigned field_space, unsigned tree_id,
-                      AddressSpaceID owner, const char *provenance)
+                      AddressSpaceID owner, const std::string_view &provenance)
       {
-        log_spy.print("Region " IDFMT " %u %u %u %s", 
+        log_spy.print("Region " IDFMT " %u %u %u %.*s", 
 		      index_space, field_space, tree_id, owner,
-                      (provenance == NULL) ? "" : provenance);
+                      int(provenance.length()), 
+                      (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_logical_region_name(IDType index_space, 
@@ -1011,9 +1016,11 @@ namespace Legion {
       }
 
       static inline void log_operation_provenance(UniqueID unique_id,
-                                                  const char *provenance)
+                                    const std::string_view &provenance)
       {
-        log_spy.print("Operation Provenance %llu %s", unique_id, provenance);
+        log_spy.print("Operation Provenance %llu %.*s", unique_id,
+            int(provenance.length()), 
+            (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_child_operation_index(UniqueID parent_id, 

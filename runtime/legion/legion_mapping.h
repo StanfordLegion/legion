@@ -67,6 +67,7 @@ namespace Legion {
       FieldSpace get_field_space(void) const;
       RegionTreeID get_tree_id(void) const;
       LayoutConstraintID get_layout_id(void) const;
+      PointerConstraint get_pointer_constraint(void) const;
     public:
       // See if our instance still exists or if it has been
       // garbage collected, this is just a sample, using the

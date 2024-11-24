@@ -88,10 +88,6 @@ namespace Realm {
     uintptr_t pc_hash; // used for fast comparisons
     std::vector<uintptr_t> pcs;
     std::vector<std::string> symbols;
-#ifdef REALM_USE_LIBDW
-    std::vector<std::string> filenames;
-    std::vector<int> line_numbers;
-#endif
 
     template <typename S>
       friend bool serdez(S& serdez, const Backtrace& b);

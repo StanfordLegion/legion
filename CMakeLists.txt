@@ -133,7 +133,7 @@ if (CMAKE_BUILD_TYPE AND ( CMAKE_BUILD_TYPE STREQUAL "Debug"))
   set(DEBUG_LEGION ON)
 endif()
 
-set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
+set(BUILD_SHARED_LIBS OFF  CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
 #------------------------------------------------------------------------------#
 # Architecture
@@ -413,7 +413,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(GASNet_GITREPO ${Legion_EMBED_GASNet_GITREPO})
 
     set(Legion_EMBED_GASNet_GITREF
-      "d7cc06907cc66e2a3f968e19ea17a80650b16a3b" # master as of 2024-07-19
+      "f356a41a43a67c63eb230a74931196434ba1212e" # master as of 2024-11-11
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(GASNet_GITREF ${Legion_EMBED_GASNet_GITREF})
 
@@ -728,12 +728,6 @@ endif()
 option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
 if(Legion_BACKTRACE_USE_UNWIND)
   set(REALM_USE_UNWIND ON)
-endif()
-
-option(Legion_BACKTRACE_USE_LIBDW "Use libdw to analyze backtrace" OFF)
-if(Legion_BACKTRACE_USE_LIBDW)
-  find_package(LIBDW)
-  set(REALM_USE_LIBDW ON)
 endif()
 
 #------------------------------------------------------------------------------#
