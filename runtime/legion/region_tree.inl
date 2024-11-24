@@ -8743,6 +8743,7 @@ namespace Legion {
       // calls like record_equivalence_set or cancel_subscription can still
       // be coming back asynchronously to touch data structures in these nodes
       FieldMask remaining = mask;
+      FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
       FieldMaskSet<EqKDNode<DIM,T> > to_invalidate_previous;
       LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > to_invalidate;
       {
@@ -8970,6 +8971,63 @@ namespace Legion {
               refine_node(rect, current_mask, true/*refine current*/);
           }
         }
+        // Now see if we need to continue the traversal for any remaining fields
+        if (!!remaining)
+        {
+          // We can skip performing invalidations if we know that everything
+          // below is already previous-only
+          if (!!all_previous_below)
+            remaining -= all_previous_below;
+          // Find the nodes to traverse below
+          if (!!remaining && (lefts != NULL) &&
+              !(remaining * lefts->get_valid_mask()))
+          {
+            FieldMask right_mask;
+            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                  lefts->begin(); it != lefts->end(); it++)
+            {
+              const FieldMask overlap = it->second & remaining;
+              if (!overlap)
+                continue;
+              // Compute the overlap
+              const Rect<DIM,T> intersection = 
+                rect.intersection(it->first->bounds); 
+              if (!intersection.empty())
+              {
+                to_traverse.insert(it->first, overlap);
+                if (intersection != rect)
+                  right_mask |= overlap;
+              }
+              else
+                right_mask |= overlap;
+              remaining -= overlap;
+              if (!remaining)
+                break;
+            }
+            if (!!right_mask)
+            {
+              for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                    rights->begin(); it != rights->end(); it++)
+              {
+                const FieldMask overlap = it->second & right_mask;
+                if (!overlap)
+                  continue;
+                const Rect<DIM,T> intersection =
+                  rect.intersection(it->first->bounds);
+#ifdef DEBUG_LEGION
+                assert(!intersection.empty());
+#endif
+                to_traverse.insert(it->first, overlap);
+                right_mask -= overlap;
+                if (!right_mask)
+                  break;
+              }
+#ifdef DEBUG_LEGION
+              assert(!right_mask);
+#endif
+            }
+          }
+        }
       }
       if (!to_invalidate.empty())
         EqSetTracker::invalidate_subscriptions(runtime, this,
@@ -8982,96 +9040,57 @@ namespace Legion {
         if (it->first->remove_reference())
           delete it->first;
       }
-      // Now see if we need to continue the traversal for any remaining fields
-      // Note that we know we don't need the lock here since we know that
-      // the shape of the equivalence set KD tree can't be changing since 
-      // we hold the tree lock at the root
-      if (!!remaining)
+      // Now do the traversal for the invalidation below
+      bool has_child_previous = false;
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        // We can skip performing invalidations if we know that everything
-        // below is already previous-only
-        if (!!all_previous_below)
-          remaining -= all_previous_below;
-        // Find the nodes to traverse below
-        if (!!remaining && (lefts != NULL) &&
-            !(remaining * lefts->get_valid_mask()))
+        const Rect<DIM,T> intersection = rect.intersection(it->first->bounds);
+#ifdef DEBUG_LEGION
+        assert(!intersection.empty());
+#endif
+        FieldMask child_previous;
+        it->first->invalidate_tree(intersection, it->second, runtime,
+            invalidated, move_to_previous, &child_previous);
+        // Clear the fields
+        it.clear();
+        // Save any below
+        if (!!child_previous)
         {
-          FieldMask right_mask;
-          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                lefts->begin(); it != lefts->end(); it++)
-          {
-            const FieldMask overlap = it->second & remaining;
-            if (!overlap)
-              continue;
-            // Compute the overlap
-            const Rect<DIM,T> intersection = 
-              rect.intersection(it->first->bounds); 
-            if (!intersection.empty())
-            {
-              // Invalidate the child and then record which fields it is
-              // all previous below
-              FieldMask child_previous;
-              it->first->invalidate_tree(intersection, overlap, runtime,
-                  invalidated, move_to_previous, &child_previous);
-              if (!!child_previous)
-                record_child_all_previous(it->first, child_previous);
-              if (intersection != rect)
-                right_mask |= overlap;
-            }
-            else
-              right_mask |= overlap;
-            remaining -= overlap;
-            if (!remaining)
-              break;
-          }
-          if (!!right_mask)
-          {
-            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                  rights->begin(); it != rights->end(); it++)
-            {
-              const FieldMask overlap = it->second & right_mask;
-              if (!overlap)
-                continue;
-              const Rect<DIM,T> intersection =
-                rect.intersection(it->first->bounds);
-#ifdef DEBUG_LEGION
-              assert(!intersection.empty());
-#endif
-              FieldMask child_previous;
-              it->first->invalidate_tree(intersection, overlap, runtime,
-                  invalidated, move_to_previous, &child_previous);
-              if (!!child_previous)
-                record_child_all_previous(it->first, child_previous);
-              right_mask -= overlap;
-              if (!right_mask)
-                break;
-            }
-#ifdef DEBUG_LEGION
-            assert(!right_mask);
-#endif
-          }
+          it.merge(child_previous);
+          has_child_previous = true;
         }
       }
       // Record the any all-previous fields at this child
-      if (parent_all_previous != NULL)
+      if (has_child_previous || (parent_all_previous != NULL))
       {
         // Need to retake the lock here because record_equivalence_set
         // could be calling back in here and mutating the previous sets
         // while we're try to read it which can lead to the wrong set
         // of fields being recorded
         AutoLock n_lock(node_lock);
-        *parent_all_previous = all_previous_below;
-        if (previous_sets != NULL)
-          *parent_all_previous |= previous_sets->get_valid_mask();
-        // Only return fields that were invalidated
-        *parent_all_previous &= mask;
+        if (has_child_previous)
+        {
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator it =
+                to_traverse.begin(); it != to_traverse.end(); it++)
+            if (!!it->second)
+              record_child_all_previous(it->first, it->second);
+        }
+        if (parent_all_previous != NULL)
+        {
+          *parent_all_previous = all_previous_below;
+          if (previous_sets != NULL)
+            *parent_all_previous |= previous_sets->get_valid_mask();
+          // Only return fields that were invalidated
+          *parent_all_previous &= mask;
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDNode<DIM,T>::record_child_all_previous(EqKDNode<DIM,T> *child,
-                                                    FieldMask &mask)
+                                                    FieldMask mask)
     //--------------------------------------------------------------------------
     {
       if (!!all_previous_below)

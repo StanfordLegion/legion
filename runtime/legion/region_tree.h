@@ -3398,7 +3398,7 @@ namespace Legion {
       void invalidate_previous_sets(const FieldMask &mask,
               FieldMaskSet<EqKDNode<DIM,T> > &to_invalidate_previous);
       void record_child_all_previous(EqKDNode<DIM,T> *child, 
-                                     FieldMask &mask);
+                                     FieldMask mask);
     protected:
       mutable LocalLock node_lock;
       // Left and right sub-trees for different fields
