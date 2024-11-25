@@ -650,13 +650,13 @@ before_script:
 
 .realm_clang_format: &realm_clang_format
   script:
-    - apt update -qq -yy && apt install -qq -yy clang-format-15
-    - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-15 -p1 2>&1 > /tmp/not-formatted.diff
+    - apt update -qq -yy && apt install -qq -yy clang-format-14
+    - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
     - |
       if grep -q '[^[:space:]]' /tmp/not-formatted.diff; then
         echo 'Code is not formatted'
         echo 'Run clang-format-diff on your changes to fix these:'
-        echo "    git diff -U0 --no-color origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-15 -p1 -i"
+        echo "    git diff -U0 --no-color origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 -i"
         echo "Diff formatting result:"
         cat /tmp/not-formatted.diff
         exit 1

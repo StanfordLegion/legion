@@ -87,6 +87,13 @@ namespace Legion {
       public:
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
+        // Only need this during trace capture
+        // It records dependences for internal operations (that are not merge
+        // close ops, mainly refinement ops) based on the region
+        // requirement the internal operations were made for so we can forward
+        // them on when later things depende on them. This data structure is
+        // cleared after we're done with the trace recording
+        std::map<unsigned,LegionVector<DependenceRecord> > internal_dependences;
       };
       struct VerificationInfo {
       public:

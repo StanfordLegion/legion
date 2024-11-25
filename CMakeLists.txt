@@ -413,7 +413,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(GASNet_GITREPO ${Legion_EMBED_GASNet_GITREPO})
 
     set(Legion_EMBED_GASNet_GITREF
-      "872ff31858c4ed97fd92a4855fc53f8037c097a8" # master as of 2024-11-08
+      "f356a41a43a67c63eb230a74931196434ba1212e" # master as of 2024-11-11
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(GASNet_GITREF ${Legion_EMBED_GASNet_GITREF})
 

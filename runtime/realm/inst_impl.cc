@@ -1506,55 +1506,45 @@ namespace Realm {
       mem_specific = info;
     }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class ExternalInstanceResource
-
-  ExternalInstanceResource::ExternalInstanceResource()
-  {}
-
-  ExternalInstanceResource::~ExternalInstanceResource()
-  {}
-
-  
   ////////////////////////////////////////////////////////////////////////
   //
   // class ExternalMemoryResource
 
-  ExternalMemoryResource::ExternalMemoryResource()
-  {}
-  
-  ExternalMemoryResource::ExternalMemoryResource(uintptr_t _base,
-						 size_t _size_in_bytes,
-						 bool _read_only)
-    : base(_base)
-    , size_in_bytes(_size_in_bytes)
-    , read_only(_read_only)
-  {}
+    ExternalMemoryResource::ExternalMemoryResource()
+      : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalMemoryResource))
+    {}
 
-  ExternalMemoryResource::ExternalMemoryResource(void *_base,
-						 size_t _size_in_bytes)
-    : base(reinterpret_cast<uintptr_t>(_base))
-    , size_in_bytes(_size_in_bytes)
-    , read_only(false)
-  {}
+    ExternalMemoryResource::ExternalMemoryResource(uintptr_t _base, size_t _size_in_bytes,
+                                                   bool _read_only)
+      : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalMemoryResource))
+      , base(_base)
+      , size_in_bytes(_size_in_bytes)
+      , read_only(_read_only)
+    {}
 
-  ExternalMemoryResource::ExternalMemoryResource(const void *_base,
-						 size_t _size_in_bytes)
-    : base(reinterpret_cast<uintptr_t>(_base))
-    , size_in_bytes(_size_in_bytes)
-    , read_only(true)
-  {}
+    ExternalMemoryResource::ExternalMemoryResource(void *_base, size_t _size_in_bytes)
+      : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalMemoryResource))
+      , base(reinterpret_cast<uintptr_t>(_base))
+      , size_in_bytes(_size_in_bytes)
+      , read_only(false)
+    {}
 
-  // returns the suggested memory in which this resource should be created
-  Memory ExternalMemoryResource::suggested_memory() const
-  {
-    // TODO: some way to ask for external memory resources on other ranks?
-    CoreModule *mod = get_runtime()->get_module<CoreModule>("core");
-    assert(mod);
-    return mod->ext_sysmem->me;
-  }
+    ExternalMemoryResource::ExternalMemoryResource(const void *_base,
+                                                   size_t _size_in_bytes)
+      : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalMemoryResource))
+      , base(reinterpret_cast<uintptr_t>(_base))
+      , size_in_bytes(_size_in_bytes)
+      , read_only(true)
+    {}
+
+    // returns the suggested memory in which this resource should be created
+    Memory ExternalMemoryResource::suggested_memory() const
+    {
+      // TODO: some way to ask for external memory resources on other ranks?
+      CoreModule *mod = get_runtime()->get_module<CoreModule>("core");
+      assert(mod);
+      return mod->ext_sysmem->me;
+    }
 
   ExternalInstanceResource *ExternalMemoryResource::clone(void) const
   {
@@ -1578,12 +1568,14 @@ namespace Realm {
   // class ExternalFileResource
 
   ExternalFileResource::ExternalFileResource()
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalFileResource))
   {}
-  
-  ExternalFileResource::ExternalFileResource(const std::string& _filename,
-					     realm_file_mode_t _mode,
-					     size_t _offset /*= 0*/)
-    : filename(_filename)
+
+  ExternalFileResource::ExternalFileResource(const std::string &_filename,
+                                             realm_file_mode_t _mode,
+                                             size_t _offset /*= 0*/)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalFileResource))
+    , filename(_filename)
     , offset(_offset)
     , mode(_mode)
   {}

@@ -7462,7 +7462,7 @@ class Operation(object):
             # This is a single operation
             assert self.launch_shape is None
             assert len(self.reqs) >= len(logical_op.reqs)
-            for idx in xrange(0,len(logical_op.reqs)):
+            for idx in iterkeys(logical_op.reqs):
                 if not self.verify_logical_requirement(idx, logical_op, previous_deps):
                     return False
         return True

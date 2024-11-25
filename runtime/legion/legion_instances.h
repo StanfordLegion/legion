@@ -353,6 +353,8 @@ namespace Legion {
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
     public:
+      inline bool is_unbound(void) const 
+        { return (kind.load() == UNBOUND_INSTANCE_KIND); }
       inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
       inline bool acquire_instance(ReferenceSource source);

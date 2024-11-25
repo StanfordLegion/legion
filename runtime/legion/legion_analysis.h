@@ -853,18 +853,15 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, bool copy, bool covers);
-      PhysicalUser(const PhysicalUser &rhs);
+          ApEvent term, UniqueID op_id, unsigned index, bool copy, bool covers);
+      PhysicalUser(const PhysicalUser &rhs) = delete;
       ~PhysicalUser(void);
     public:
-      PhysicalUser& operator=(const PhysicalUser &rhs);
-    public:
-      void pack_user(Serializer &rez, const AddressSpaceID target) const;
-      static PhysicalUser* unpack_user(Deserializer &derez, 
-              RegionTreeForest *forest, const AddressSpaceID source);
+      PhysicalUser& operator=(const PhysicalUser &rhs) = delete;
     public:
       const RegionUsage usage;
       IndexSpaceExpression *const expr;
+      const ApEvent term_event;
       const UniqueID op_id;
       const unsigned index; // region requirement index
       const bool copy_user; // is this from a copy or an operation
