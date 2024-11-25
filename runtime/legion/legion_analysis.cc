@@ -20518,6 +20518,7 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
       FieldMaskSet<IndexSpaceExpression> *dirty_updates = NULL;
+      std::vector<IndexSpaceExpression*> temp_refs;
       {
         // Lock in exclusive mode since we're doing an invalidate
         AutoLock eq(eq_lock);
@@ -20540,6 +20541,7 @@ namespace Legion {
           applied_events.push_back(done_event);
           return;
         }
+        bool overlap_covers = true;;
         // If we get here, we're performing the clone locally for these fields
         if (!set_expr->is_empty())
         {
@@ -20547,39 +20549,149 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(overlap_volume > 0);
 #endif
-          const bool overlap_covers = 
-            (overlap_volume == set_expr->get_volume());
-          find_overlap_updates(overlap, overlap_covers, mask, false/*invalids*/,
+          overlap_covers = (overlap_volume == set_expr->get_volume());
+          find_overlap_updates(overlap_covers ? set_expr : overlap,
+                               overlap_covers, mask, false/*invalids*/,
                                valid_updates, initialized_updates,
-                               invalid_updates, reduction_updates, 
+                               invalid_updates, reduction_updates,
                                restricted_updates, released_updates,
                                NULL/*guards*/,NULL/*guards*/,
                                precondition_updates, anticondition_updates,
                                postcondition_updates, dirty_updates,
                                dst->did, dst->set_expr);
-          invalidate_state(overlap, overlap_covers, mask, record_invalidate);
         }
-        else 
+        // Don't need to get updates if this equivalence set is empty
+        // and the destination equivalence set is not empty
+        else if (dst->set_expr->is_empty())
+          find_overlap_updates(set_expr, true/*covers*/, mask,
+                               false/*invalids*/,
+                               valid_updates, initialized_updates,
+                               invalid_updates, reduction_updates,
+                               restricted_updates, released_updates,
+                               NULL/*guards*/,NULL/*guards*/,
+                               precondition_updates, anticondition_updates,
+                               postcondition_updates, dirty_updates,
+                               dst->did, dst->set_expr);
+        // Save references on everything to keep it alive since we're about
+        // to do an invalidation of the state, pack references to views in
+        // case they ultimately need to be forwarded to a remote node when
+        // we end up calling apply_state
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<LogicalView> >::const_iterator vit =
+              valid_updates.begin(); vit != valid_updates.end(); vit++)
         {
-          if (dst->set_expr->is_empty())
-            find_overlap_updates(set_expr, true/*covers*/, mask,
-                                 false/*invalids*/,
-                                 valid_updates, initialized_updates,
-                                 invalid_updates, reduction_updates, 
-                                 restricted_updates, released_updates,
-                                 NULL/*guards*/,NULL/*guards*/,
-                                 precondition_updates, anticondition_updates,
-                                 postcondition_updates, dirty_updates,
-                                 dst->did, dst->set_expr);
-          invalidate_state(set_expr, true/*covers*/, mask, record_invalidate);
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),vit->first))
+          {
+            vit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(vit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<LogicalView>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+            it->first->pack_valid_ref();
         }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              initialized_updates.begin(); it !=
+              initialized_updates.end(); it++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(), it->first))
+          {
+            it->first->add_nested_expression_reference(did);
+            temp_refs.push_back(it->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              invalid_updates.begin(); it != invalid_updates.end(); it++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(), it->first))
+          {
+            it->first->add_nested_expression_reference(did);
+            temp_refs.push_back(it->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+        }
+        for (std::map<unsigned,std::list<std::pair<InstanceView*,
+              IndexSpaceExpression*> > >::const_iterator rit =
+              reduction_updates.begin(); rit != reduction_updates.end(); rit++)
+        {
+          for (std::list<std::pair<InstanceView*,
+                IndexSpaceExpression*> >::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            it->first->pack_valid_ref();
+            if (!std::binary_search(temp_refs.begin(),
+                  temp_refs.end(), it->second))
+            {
+              it->second->add_nested_expression_reference(did);
+              temp_refs.push_back(it->second);
+              std::sort(temp_refs.begin(), temp_refs.end());
+            }
+          }
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::const_iterator rit =
+              restricted_updates.begin(); rit != 
+              restricted_updates.end(); rit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),rit->first))
+          {
+            rit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(rit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::const_iterator rit =
+              released_updates.begin(); rit != released_updates.end(); rit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),rit->first))
+          {
+            rit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(rit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        // No need to do anything for the tracing data structures as they
+        // are already keeping their own references to everything
+        if (dirty_updates != NULL)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                dirty_updates->begin(); it != dirty_updates->end(); it++)
+          {
+            if (!std::binary_search(temp_refs.begin(),
+                  temp_refs.end(), it->first))
+            {
+              it->first->add_nested_expression_reference(did);
+              temp_refs.push_back(it->first);
+              std::sort(temp_refs.begin(), temp_refs.end());
+            }
+          }
+        }
+        // Now we can do the invalidation
+        if (overlap_covers)
+          invalidate_state(set_expr, true/*covers*/, mask, record_invalidate);
+        else
+          invalidate_state(overlap, false/*covers*/, mask, record_invalidate);
+
       }
       // Call back to the destination to apply the state
       dst->apply_state(valid_updates, initialized_updates, invalid_updates,
             reduction_updates, restricted_updates, released_updates, 
             precondition_updates, anticondition_updates, postcondition_updates,
             dirty_updates, NULL/*guards*/, NULL/*guards*/, applied_events, 
-            need_dst_lock, true/*forward to owner*/,false/*unpack references*/);
+            need_dst_lock, true/*forward to owner*/, true/*unpack references*/);
+      // Remove the temporary references that we added to keep everything alive
+      for (std::vector<IndexSpaceExpression*>::const_iterator it =
+            temp_refs.begin(); it != temp_refs.end(); it++)
+        if ((*it)->remove_nested_expression_reference(did))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
