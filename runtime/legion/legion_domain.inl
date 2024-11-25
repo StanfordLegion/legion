@@ -1088,6 +1088,8 @@ namespace Legion {
     {
       switch (dim)
       {
+        case 0:
+          return 0;
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
@@ -1202,6 +1204,11 @@ namespace Legion {
     {
       // We've just got a rect so we can do the dumb thing
       switch (p.get_dim()) {
+      case 0:
+        {
+          is_valid = false;
+          break;
+        }
 #define DIMFUNC(DIM) \
       case DIM: \
         { \

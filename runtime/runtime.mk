@@ -566,7 +566,7 @@ endif
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
-INC_FLAGS	+= -I$(CUDA)/include
+INC_FLAGS	+= -I$(CUDA)/include -I$(CUDA)/extras/CUPTI/include
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -g -O0
 #NVCC_FLAGS	+= -G
@@ -1124,7 +1124,6 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
-                    $(LG_RT_DIR)/legion/index_space_value.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 LEGION_HIP_SRC   += $(LG_RT_DIR)/legion/legion_redop.cu

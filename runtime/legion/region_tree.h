@@ -892,7 +892,7 @@ namespace Legion {
       friend class IndexSpaceExpression;
       IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
     public:
-      void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
+      void remove_canonical_expression(IndexSpaceExpression *expr);
     private:
       static inline bool compare_expressions(IndexSpaceExpression *one,
                                              IndexSpaceExpression *two);
@@ -912,19 +912,11 @@ namespace Legion {
                        IndexSpaceExpression *lhs, IndexSpaceExpression *rhs);
     public:
       // Remote expression methods
-      IndexSpaceExpression* find_or_request_remote_expression(
-              IndexSpaceExprID remote_expr_id, 
-              IndexSpaceExpression *origin, RtEvent *wait_for = NULL);
+      IndexSpaceExpression* find_or_create_remote_expression(
+          IndexSpaceExprID remote_expr_id, Deserializer &derez, bool &created);
       IndexSpaceExpression* find_remote_expression(
               const PendingRemoteExpression &pending_expression);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
-      void handle_remote_expression_request(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_expression_response(Deserializer &derez,
-                                             AddressSpaceID source);
-    protected:
-      IndexSpaceExpression* unpack_expression_value(Deserializer &derez,
-                                                    AddressSpaceID source);
     public:
       Runtime *const runtime;
     protected:
@@ -958,13 +950,12 @@ namespace Legion {
       std::map<IndexSpaceExprID/*lhs*/,ExpressionTrieNode*> difference_ops;
       // Remote expressions
       std::map<IndexSpaceExprID,IndexSpaceExpression*> remote_expressions;
-      std::map<IndexSpaceExprID,RtEvent> pending_remote_expressions;
     private:
       // In order for the symbolic analysis to work, we need to know that
       // we don't have multiple symbols for congruent expressions. This data
       // structure is used to find congruent expressions where they exist
-      std::map<std::pair<size_t,TypeTag>,
-               std::vector<IndexSpaceExpression*> > canonical_expressions;
+      typedef SmallPointerVector<IndexSpaceExpression,true> CanonicalSet;
+      std::unordered_map<uint64_t/*hash*/,CanonicalSet> canonical_expressions;
     public:
       static const unsigned MAX_EXPRESSION_FANOUT = 32;
     };
@@ -1294,7 +1285,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
-      virtual bool is_sparse() = 0;
+      virtual bool is_sparse(void) = 0;
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1304,8 +1295,18 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const = 0; 
+    public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs) = 0;
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs) = 0;
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs) = 0;
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs) = 0;
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs) = 0;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) = 0;
@@ -1383,7 +1384,7 @@ namespace Legion {
          const Domain *padding_delta) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::vector<IndexSpaceExpression*> &expressions) = 0;
+          SmallPointerVector<IndexSpaceExpression,true> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
@@ -1434,6 +1435,27 @@ namespace Legion {
       // Convert this index space expression to the canonical one that
       // represents all expressions that are all congruent
       IndexSpaceExpression* get_canonical_expression(RegionTreeForest *forest);
+      virtual uint64_t get_canonical_hash(void) = 0;
+    protected:
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_union_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_union_internal(
+          const std::set<IndexSpaceExpression*> &exprs,
+          RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_intersection_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_intersection_internal(
+          const std::set<IndexSpaceExpression*> &exprs,
+          RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_subtraction_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      uint64_t get_canonical_hash_internal(const DomainT<DIM,T> &domain) const;
     protected:
       template<int DIM, typename T>
       inline ApEvent issue_fill_internal(RegionTreeForest *forest,Operation *op,
@@ -1489,7 +1511,7 @@ namespace Legion {
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
-                        std::vector<IndexSpaceExpression*> &expressions);
+          SmallPointerVector<IndexSpaceExpression,true> &expressions);
       template<int DIM, typename T>
       inline KDTree* get_sparsity_map_kd_tree_internal(void);
     public:
@@ -1600,8 +1622,7 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const = 0;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
@@ -1649,7 +1670,7 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual bool is_sparse();
+      virtual bool is_sparse(void);
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -1658,8 +1679,7 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const;
       virtual bool invalidate_operation(void) = 0;
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
@@ -1669,6 +1689,18 @@ namespace Legion {
                                 const std::set<Domain> &rectangles);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
+    public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs);
+      virtual uint64_t get_canonical_hash(void);
     public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -1713,7 +1745,7 @@ namespace Legion {
          const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::vector<IndexSpaceExpression*> &expressions);
+          SmallPointerVector<IndexSpaceExpression,true> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
@@ -1758,12 +1790,12 @@ namespace Legion {
     public:
       IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
                       RegionTreeForest *context);
+      IndexSpaceUnion(const Rect<DIM,T> &bounds, RegionTreeForest *context);
       IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
       virtual ~IndexSpaceUnion(void);
     public:
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1798,12 +1830,13 @@ namespace Legion {
     public:
       IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
                              RegionTreeForest *context);
+      IndexSpaceIntersection(const Rect<DIM,T> &bounds, 
+                             RegionTreeForest *context);
       IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
       virtual ~IndexSpaceIntersection(void);
     public:
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1838,12 +1871,12 @@ namespace Legion {
     public:
       IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
                            RegionTreeForest *context);
+      IndexSpaceDifference(const Rect<DIM,T> &bounds, RegionTreeForest *ctx);
       IndexSpaceDifference(const IndexSpaceDifference &rhs);
       virtual ~IndexSpaceDifference(void);
     public:
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1893,7 +1926,6 @@ namespace Legion {
     public:
       InternalExpression& operator=(const InternalExpression &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     };
@@ -1944,34 +1976,33 @@ namespace Legion {
     public:
       RemoteExpression& operator=(const RemoteExpression &op);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     };
 
     class RemoteExpressionCreator {
     public:
-      RemoteExpressionCreator(RegionTreeForest *f, TypeTag t, Deserializer &d)
-        : forest(f), type_tag(t), derez(d), operation(NULL) { }
+      RemoteExpressionCreator(RegionTreeForest *f, IndexSpaceExprID e,
+                              TypeTag t, Deserializer &d)
+        : forest(f), expr_id(e), type_tag(t), derez(d), operation(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(RemoteExpressionCreator *creator)
       {
-        IndexSpaceExprID expr_id;
-        creator->derez.deserialize(expr_id);
-        DistributedID did;
-        creator->derez.deserialize(did);
         IndexSpaceOperation *origin;
         creator->derez.deserialize(origin);
+        DistributedID did;
+        creator->derez.deserialize(did);
 #ifdef DEBUG_LEGION
         assert(creator->operation == NULL);
 #endif
         creator->operation =
-            new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
-                            origin, creator->type_tag, creator->derez);
+            new RemoteExpression<N::N,T>(creator->forest, creator->expr_id,
+                did, origin, creator->type_tag, creator->derez);
       }
     public:
       RegionTreeForest *const forest;
+      const IndexSpaceExprID expr_id;
       const TypeTag type_tag;
       Deserializer &derez;
       IndexSpaceOperation *operation;
@@ -2209,7 +2240,7 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+      virtual void skip_unpack_expression(Deserializer &derez) const;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
@@ -2449,7 +2480,7 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
-      virtual bool is_sparse();
+      virtual bool is_sparse(void);
       // If you ask for a tight index space you don't need to pay 
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
@@ -2634,6 +2665,18 @@ namespace Legion {
                                    const std::vector<std::string> &field_files,
                                    const OrderingConstraint &dimension_order);
     public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs);
+      virtual uint64_t get_canonical_hash(void);
+    public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -2677,7 +2720,7 @@ namespace Legion {
          const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::vector<IndexSpaceExpression*> &expressions);
+          SmallPointerVector<IndexSpaceExpression,true> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -3355,7 +3398,7 @@ namespace Legion {
       void invalidate_previous_sets(const FieldMask &mask,
               FieldMaskSet<EqKDNode<DIM,T> > &to_invalidate_previous);
       void record_child_all_previous(EqKDNode<DIM,T> *child, 
-                                     FieldMask &mask);
+                                     FieldMask mask);
     protected:
       mutable LocalLock node_lock;
       // Left and right sub-trees for different fields
