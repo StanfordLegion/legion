@@ -785,7 +785,6 @@ list(APPEND LEGION_SRC
   legion.h
   legion/bitmask.h
   legion/garbage_collection.h             legion/garbage_collection.cc
-  legion/index_space_value.h              legion/index_space_value.cc
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc
