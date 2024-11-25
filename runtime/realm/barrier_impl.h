@@ -36,6 +36,11 @@
 
 namespace Realm {
 
+  struct RemoteNotification {
+    NodeID node;
+    EventImpl::gen_t trigger_gen, previous_gen;
+  };
+
   class BarrierImpl : public EventImpl {
   public:
     static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
@@ -129,6 +134,9 @@ namespace Realm {
     std::map<unsigned, gen_t> remote_subscribe_gens, remote_trigger_gens;
     std::map<gen_t, gen_t> held_triggers;
 
+    bool needs_ordering;
+    std::vector<std::pair<int, std::vector<RemoteNotification>>> ordered_buffer;
+
     unsigned base_arrival_count;
     ReductionOpID redop_id;
     const ReductionOpUntyped *redop;
@@ -136,6 +144,7 @@ namespace Realm {
 
     unsigned value_capacity; // how many values the two allocations below can hold
     char *final_values;      // results of completed reductions
+    int broadcast_radix = 4;
   };
 
   // active messages
@@ -168,23 +177,32 @@ namespace Realm {
                              bool forwarded);
   };
 
-  struct BarrierTriggerMessage {
-    ID::IDType barrier_id;
+  struct BarrierTriggerMessageArgsInternal {
     EventImpl::gen_t trigger_gen;
     EventImpl::gen_t previous_gen;
     EventImpl::gen_t first_generation;
     ReductionOpID redop_id;
     NodeID migration_target;
     unsigned base_arrival_count;
+    int broadcast_index;
+    bool is_complete_list;
+    int sequence_number;
+  };
+
+  struct BarrierTriggerMessageArgs {
+    BarrierTriggerMessageArgsInternal internal;
+    std::vector<RemoteNotification> remote_notifications;
+  };
+
+  struct BarrierTriggerMessage {
+    ID::IDType barrier_id;
 
     static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
                                const void *data, size_t datalen, TimeLimit work_until);
 
     static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
-                             NodeID migration_target, unsigned base_arrival_count,
-                             const void *data, size_t datalen);
+                             BarrierTriggerMessageArgs &trigger_args, const void *data,
+                             size_t datalen);
   };
 
   struct BarrierMigrationMessage {
