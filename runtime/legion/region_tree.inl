@@ -196,21 +196,63 @@ namespace Legion {
       // index space expressions for it to deal with
       if (implicit_runtime->legion_spy_enabled)
         return NULL;
-      DomainT<DIM,T> domain;
-      get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
-      const Rect<DIM,T> bounds = domain.bounds;
-      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
-      const Rect<DIM,T> result = bounds.intersection(domain.bounds);
-      if (result == bounds)
+      DomainT<DIM,T> left, right;
+      get_expr_index_space(&left, type_tag, true/*tight*/);
+      rhs->get_expr_index_space(&right, type_tag, true/*tight*/);
+      if (!left.bounds.overlaps(right.bounds))
+      {
+        // Empty case
+        Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
+        return new IndexSpaceIntersection<DIM,T>(empty, context);
+      }
+      // A note on sparsity maps here: technically if we had just one sparsity
+      // map then we could just tighten the bound on that sparsity map and
+      // that would be good enough, but then we would create the illusion
+      // of having created a new index space and the index space operation
+      // would think it owned the sparsity map and would try to destroy it 
+      // when being cleaned up which would be wrong. We'll leave it up to 
+      // Realm to do that by falling back to the normal intersection path
+      const Rect<DIM,T> intersection = left.bounds.intersection(right.bounds);
+      if (!left.dense())
+      {
+        if (!right.dense())
+        {
+          // Only the same if they have the same sparsity map and bounds
+          if (left.sparsity == right.sparsity)
+          {
+            if (left.bounds == intersection)
+              return this;
+            else if (right.bounds == intersection)
+              return rhs;
+            else
+              return NULL;
+          }
+          else
+            return NULL;
+        }
+        else
+        {
+          // See if tightening with right bounds changes bounding box
+          if (left.bounds == intersection)
+            return this;
+          else
+            return NULL;
+        }
+      }
+      else if (!right.dense())
+      {
+        // See if tightening with the left bounds changes bounding box
+        if (right.bounds == intersection)
+          return rhs;
+        else
+          return NULL;
+      }
+      if (intersection == left.bounds)
         return this;
-      if (result == domain.bounds)
+      if (intersection == right.bounds)
         return rhs;
       // Make a new Intersection space that is a value of this space
-      return new IndexSpaceIntersection<DIM,T>(result, context); 
+      return new IndexSpaceIntersection<DIM,T>(intersection, context);
     }
 
     //--------------------------------------------------------------------------
@@ -225,26 +267,38 @@ namespace Legion {
         return NULL;
       DomainT<DIM,T> domain;
       get_expr_index_space(&domain, type_tag, true/*tight*/);
-      if (!domain.dense())
-        return NULL;
+      if (domain.empty())
+        return this;
       Rect<DIM,T> result = domain.bounds;
+      bool has_sparsity = !domain.dense();
       IndexSpaceExpression *smallest = NULL;
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             exprs.begin(); it != exprs.end(); it++)
       {
         (*it)->get_expr_index_space(&domain, type_tag, true/*tight*/);
+        // Keep going anyway to see if the intersection proves empty
         if (!domain.dense())
-          return NULL;
+          has_sparsity = true;
         const Rect<DIM,T> next = result.intersection(domain.bounds);
         if (next != result)
         {
+          result = next;
+          // If it becomes empty than we are done
+          if (next.empty())
+          {
+            if (domain.empty())
+              return *it;
+            else
+              return new IndexSpaceIntersection<DIM,T>(result, context);
+          }
           if (next == domain.bounds)
             smallest = (*it);
           else
             smallest = NULL;
-          result = next;
         }
       }
+      if (has_sparsity)
+        return NULL;
       if (smallest != NULL)
         return smallest;
       return new IndexSpaceIntersection<DIM,T>(result, context);
@@ -260,29 +314,25 @@ namespace Legion {
       // index space expressions for it to deal with
       if (implicit_runtime->legion_spy_enabled)
         return NULL;
-      DomainT<DIM,T> domain;
-      get_expr_index_space(&domain, type_tag, true/*tight*/);
-      Rect<DIM,T> bounds = domain.bounds;
-      if (!domain.dense())
+      DomainT<DIM,T> left, right;
+      get_expr_index_space(&left, type_tag, true/*tight*/);
+      rhs->get_expr_index_space(&right, type_tag, true/*tight*/);
+      // If they don't overlap then this is easy
+      if (!left.bounds.overlaps(right.bounds))
+        return this;
+      // If right is not dense we toss up our hands
+      if (!right.dense())
+        return NULL;
+      if (!left.dense())
       {
-        rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
-        // If they don't overlap then the subtraction is easy
-        if (!bounds.overlaps(domain.bounds))
-          return this;
+        // Can still do a test for containment here to see if we're empty
+        if (right.bounds.contains(left.bounds))
+        {
+          const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
+          return new IndexSpaceDifference<DIM,T>(empty, context);
+        }
         else
           return NULL;
-      }
-      rhs->get_expr_index_space(&domain, type_tag, true/*tight*/);
-      // If they don't overlap then the subtraction is easy
-      if (!bounds.overlaps(domain.bounds))
-        return this;
-      if (!domain.dense())
-        return NULL;
-      // Handle the common case of equivalency
-      if (bounds == domain.bounds)
-      {
-        const Rect<DIM,T> empty = Rect<DIM,T>::make_empty();
-        return new IndexSpaceDifference<DIM,T>(empty, context);
       }
       // We can find up to one non-dominating dimension and still easily
       // compute the difference, as soon as we have more than one then 
@@ -293,25 +343,22 @@ namespace Legion {
       int non_dominating_dim = -1;
       for (int i = 0; i < DIM; i++)
       {
-        if ((domain.bounds.lo[i] <= bounds.lo[i]) &&
-            (bounds.hi[i] <= domain.bounds.hi[i]))
-          continue;
-        if (domain.bounds.lo[i] <= bounds.lo[i])
+        if (right.bounds.lo[i] <= left.bounds.lo[i])
         {
           // Check if dominated on both sides
-          if (bounds.hi[i] <= domain.bounds.hi[i])
+          if (left.bounds.hi[i] <= right.bounds.hi[i])
             continue;
           // Just dominated on the low-side
           if (non_dominating_dim > -1)
             return NULL;
-          bounds.lo[i] = domain.bounds.hi[i]+1;
+          left.bounds.lo[i] = right.bounds.hi[i]+1;
         }
-        else if (bounds.hi[i] <= domain.bounds.hi[i])
+        else if (left.bounds.hi[i] <= right.bounds.hi[i])
         {
           // Just dominated on the high side
           if (non_dominating_dim > -1)
             return NULL;
-          bounds.hi[i] = domain.bounds.lo[i]-1;
+          left.bounds.hi[i] = right.bounds.lo[i]-1;
         }
         else // Not dominated on either side
           return NULL;
@@ -324,7 +371,7 @@ namespace Legion {
         return new IndexSpaceDifference<DIM,T>(empty, context);
       }
       else
-        return new IndexSpaceDifference<DIM,T>(bounds, context);
+        return new IndexSpaceDifference<DIM,T>(left.bounds, context);
     }
 
     //--------------------------------------------------------------------------
@@ -1434,10 +1481,14 @@ namespace Legion {
       return get_realm_index_space(*space, need_tight_result);
     }
 
+    //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceOperationT<DIM,T>::is_sparse()
+    bool IndexSpaceOperationT<DIM,T>::is_sparse(void)
+    //--------------------------------------------------------------------------
     {
-      return !realm_index_space.dense();
+      DomainT<DIM,T> result;
+      get_realm_index_space(result, true/*tight*/);
+      return !result.dense();
     }
 
     //--------------------------------------------------------------------------
@@ -2619,10 +2670,14 @@ namespace Legion {
         delete linear;
     }
 
+    //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::is_sparse()
+    bool IndexSpaceNodeT<DIM,T>::is_sparse(void)
+    //--------------------------------------------------------------------------
     {
-      return !realm_index_space.dense();
+      DomainT<DIM,T> result;
+      get_realm_index_space(result, true/*tight*/);
+      return !result.dense();
     }
 
     //--------------------------------------------------------------------------
@@ -7726,6 +7781,10 @@ namespace Legion {
       FieldMaskSet<EqKDNode<DIM,T> > to_get_previous;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert((current_sets == NULL) ||
+            (current_sets->get_valid_mask() * mask));
+#endif
         if (previous_sets != NULL)
         {
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
@@ -8684,6 +8743,7 @@ namespace Legion {
       // calls like record_equivalence_set or cancel_subscription can still
       // be coming back asynchronously to touch data structures in these nodes
       FieldMask remaining = mask;
+      FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
       FieldMaskSet<EqKDNode<DIM,T> > to_invalidate_previous;
       LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > to_invalidate;
       {
@@ -8851,7 +8911,7 @@ namespace Legion {
                 }
                 // No need to delete previous sets or tighten its valid
                 // mask since we know that there will be current sets
-                // getting store into the previous sets for all those fields
+                // getting stored into the previous sets for all those fields
               }
             }
             // Now we can invalidate the current sets and flush them
@@ -8872,6 +8932,10 @@ namespace Legion {
               if (!current_mask)
                 break;
             }
+#ifdef DEBUG_LEGION
+            // Should have moved something over for all fields
+            assert(!current_mask);
+#endif
             for (std::vector<EquivalenceSet*>::const_iterator it =
                   to_delete.begin(); it != to_delete.end(); it++)
             {
@@ -8907,6 +8971,61 @@ namespace Legion {
               refine_node(rect, current_mask, true/*refine current*/);
           }
         }
+        // Now see if we need to continue the traversal for any remaining fields
+        if (!!remaining)
+        {
+          // We can skip performing invalidations if we know that everything
+          // below is already previous-only
+          if (!!all_previous_below)
+            remaining -= all_previous_below;
+          // Find the nodes to traverse below
+          if (!!remaining && (lefts != NULL) &&
+              !(remaining * lefts->get_valid_mask()))
+          {
+            FieldMask right_mask;
+            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                  lefts->begin(); it != lefts->end(); it++)
+            {
+              const FieldMask overlap = it->second & remaining;
+              if (!overlap)
+                continue;
+              // Compute the overlap
+              const Rect<DIM,T> intersection = 
+                rect.intersection(it->first->bounds); 
+              if (!intersection.empty())
+              {
+                to_traverse.insert(it->first, overlap);
+                if (intersection != rect)
+                  right_mask |= overlap;
+              }
+              else
+                right_mask |= overlap;
+              remaining -= overlap;
+              if (!remaining)
+                break;
+            }
+            if (!!right_mask)
+            {
+              for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                    rights->begin(); it != rights->end(); it++)
+              {
+                const FieldMask overlap = it->second & right_mask;
+                if (!overlap)
+                  continue;
+#ifdef DEBUG_LEGION
+                assert(rect.overlaps(it->first->bounds));
+#endif
+                to_traverse.insert(it->first, overlap);
+                right_mask -= overlap;
+                if (!right_mask)
+                  break;
+              }
+#ifdef DEBUG_LEGION
+              assert(!right_mask);
+#endif
+            }
+          }
+        }
       }
       if (!to_invalidate.empty())
         EqSetTracker::invalidate_subscriptions(runtime, this,
@@ -8919,96 +9038,62 @@ namespace Legion {
         if (it->first->remove_reference())
           delete it->first;
       }
-      // Now see if we need to continue the traversal for any remaining fields
-      // Note that we know we don't need the lock here since we know that
-      // the shape of the equivalence set KD tree can't be changing since 
-      // we hold the tree lock at the root
-      if (!!remaining)
+      // Now do the traversal for the invalidation below
+      bool has_child_previous = false;
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
       {
-        // We can skip performing invalidations if we know that everything
-        // below is already previous-only
-        if (!!all_previous_below)
-          remaining -= all_previous_below;
-        // Find the nodes to traverse below
-        if (!!remaining && (lefts != NULL) &&
-            !(remaining * lefts->get_valid_mask()))
+        const Rect<DIM,T> intersection = rect.intersection(it->first->bounds);
+#ifdef DEBUG_LEGION
+        assert(!intersection.empty());
+#endif
+        FieldMask child_previous;
+        it->first->invalidate_tree(intersection, it->second, runtime,
+            invalidated, move_to_previous, &child_previous);
+        // Clear the fields
+        it.clear();
+        // Save any below
+        if (!!child_previous)
         {
-          FieldMask right_mask;
-          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                lefts->begin(); it != lefts->end(); it++)
-          {
-            const FieldMask overlap = it->second & remaining;
-            if (!overlap)
-              continue;
-            // Compute the overlap
-            const Rect<DIM,T> intersection = 
-              rect.intersection(it->first->bounds); 
-            if (!intersection.empty())
-            {
-              // Invalidate the child and then record which fields it is
-              // all previous below
-              FieldMask child_previous;
-              it->first->invalidate_tree(intersection, overlap, runtime,
-                  invalidated, move_to_previous, &child_previous);
-              if (!!child_previous)
-                record_child_all_previous(it->first, child_previous);
-              if (intersection != rect)
-                right_mask |= overlap;
-            }
-            else
-              right_mask |= overlap;
-            remaining -= overlap;
-            if (!remaining)
-              break;
-          }
-          if (!!right_mask)
-          {
-            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
-                  rights->begin(); it != rights->end(); it++)
-            {
-              const FieldMask overlap = it->second & right_mask;
-              if (!overlap)
-                continue;
-              const Rect<DIM,T> intersection =
-                rect.intersection(it->first->bounds);
-#ifdef DEBUG_LEGION
-              assert(!intersection.empty());
-#endif
-              FieldMask child_previous;
-              it->first->invalidate_tree(intersection, overlap, runtime,
-                  invalidated, move_to_previous, &child_previous);
-              if (!!child_previous)
-                record_child_all_previous(it->first, child_previous);
-              right_mask -= overlap;
-              if (!right_mask)
-                break;
-            }
-#ifdef DEBUG_LEGION
-            assert(!right_mask);
-#endif
-          }
+          it.merge(child_previous);
+          has_child_previous = true;
         }
       }
       // Record the any all-previous fields at this child
-      if (parent_all_previous != NULL)
+      if (has_child_previous || (parent_all_previous != NULL))
       {
-        *parent_all_previous = all_previous_below;
-        if (previous_sets != NULL)
-          *parent_all_previous |= previous_sets->get_valid_mask();
-        // Only return fields that were invalidated
-        *parent_all_previous &= mask;
+        // Need to retake the lock here because record_equivalence_set
+        // could be calling back in here and mutating the previous sets
+        // while we're try to read it which can lead to the wrong set
+        // of fields being recorded
+        AutoLock n_lock(node_lock);
+        if (has_child_previous)
+        {
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator it =
+                to_traverse.begin(); it != to_traverse.end(); it++)
+            if (!!it->second)
+              record_child_all_previous(it->first, it->second);
+        }
+        if (parent_all_previous != NULL)
+        {
+          *parent_all_previous = all_previous_below;
+          if (previous_sets != NULL)
+            *parent_all_previous |= previous_sets->get_valid_mask();
+          // Only return fields that were invalidated
+          *parent_all_previous &= mask;
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void EqKDNode<DIM,T>::record_child_all_previous(EqKDNode<DIM,T> *child,
-                                                    FieldMask &mask)
+                                                    FieldMask mask)
     //--------------------------------------------------------------------------
     {
       if (!!all_previous_below)
       {
-        // If the fields are already all-previous below than we're done
+        // If the fields are already all-previous below then we're done
         mask -= all_previous_below;
         if (!mask)
           return;

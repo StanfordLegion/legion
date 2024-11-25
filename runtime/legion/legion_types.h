@@ -895,9 +895,6 @@ namespace Legion {
       SEND_VIEW_ADD_COPY_USER,
       SEND_VIEW_FIND_LAST_USERS_REQUEST,
       SEND_VIEW_FIND_LAST_USERS_RESPONSE,
-      SEND_VIEW_REPLICATION_REQUEST,
-      SEND_VIEW_REPLICATION_RESPONSE,
-      SEND_VIEW_REPLICATION_REMOVAL,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_RESULT_SIZE,
@@ -1225,9 +1222,6 @@ namespace Legion {
         "Send View Add Copy User",                                    \
         "Send View Find Last Users Request",                          \
         "Send View Find Last Users Response",                         \
-        "Send View Replication Request",                              \
-        "Send View Replication Response",                             \
-        "Send View Replication Removal",                              \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Result Size",                                    \
@@ -2223,6 +2217,7 @@ namespace Legion {
     class LogicalView; // base class for instance and reduction
     class InstanceKey;
     class InstanceView;
+    class ExprView;
     class CollectableView; // pure virtual class
     class IndividualView;
     class CollectiveView;

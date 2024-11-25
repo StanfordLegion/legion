@@ -27,7 +27,6 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
-#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
@@ -67,24 +66,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
-                               UniqueID id, unsigned x, bool cpy, bool cov)
-      : usage(u), expr(e), op_id(id), index(x), copy_user(cpy), covers(cov)
+        ApEvent term, UniqueID id, unsigned x, bool cpy, bool cov)
+      : usage(u), expr(e), term_event(term), op_id(id), index(x),
+        copy_user(cpy), covers(cov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
       expr->add_base_expression_reference(PHYSICAL_USER_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
-      : usage(rhs.usage), expr(rhs.expr), op_id(rhs.op_id), index(rhs.index),
-        copy_user(rhs.copy_user), covers(rhs.covers)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -96,49 +86,6 @@ namespace Legion {
 #endif
       if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalUser& PhysicalUser::operator=(const PhysicalUser &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalUser::pack_user(Serializer &rez, 
-                                 const AddressSpaceID target) const
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(usage);
-      expr->pack_expression(rez, target);
-      rez.serialize(op_id);
-      rez.serialize(index);
-      rez.serialize<bool>(copy_user);
-      rez.serialize<bool>(covers);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
-                          RegionTreeForest *forest, const AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      bool copy_user, covers;
-      derez.deserialize<bool>(copy_user);
-      derez.deserialize<bool>(covers);
-      return new PhysicalUser(usage, expr, op_id, index, copy_user, covers);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7568,16 +7515,17 @@ namespace Legion {
                        deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
-          IndexSpaceValue expr = IndexSpaceValue(set->set_expr) & analysis_expr;
-          if (expr.is_empty())
+          IndexSpaceExpression *expr = runtime->forest->intersect_index_spaces(
+              set->set_expr, analysis_expr);
+          if (expr->is_empty())
             return;
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
-          if (expr.get_volume() == set->set_expr->get_volume())
+          if (expr->get_volume() == set->set_expr->get_volume())
             set->analyze(*this, set->set_expr, true/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
           else
-            set->analyze(*this, *expr, false/*covers*/, mask,
+            set->analyze(*this, expr, false/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
         }
         else

@@ -12970,25 +12970,6 @@ namespace Legion {
               runtime->handle_view_find_last_users_response(derez);
               break;
             }
-#ifdef ENABLE_VIEW_REPLICATION
-          case SEND_VIEW_REPLICATION_REQUEST:
-            {
-              runtime->handle_view_replication_request(derez, 
-                                                       remote_address_space);
-              break;
-            }
-          case SEND_VIEW_REPLICATION_RESPONSE:
-            {
-              runtime->handle_view_replication_response(derez);
-              break;
-            }
-          case SEND_VIEW_REPLICATION_REMOVAL:
-            {
-              runtime->handle_view_replication_removal(derez, 
-                                                       remote_address_space);
-              break;
-            }
-#endif
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez);
@@ -22829,35 +22810,6 @@ namespace Legion {
                                           rez, true/*flush*/, true/*response*/);
     }
 
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_request(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_REQUEST, rez,
-                                                                true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_response(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_RESPONSE, rez,
-                                              true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_removal(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_REMOVAL, rez,
-                                                                true/*flush*/);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25298,31 +25250,6 @@ namespace Legion {
     {
       PhysicalManager::handle_manager_request(derez, this);
     }
-
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_request(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_request(derez, this, source);
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_removal(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_removal(derez, this, source);
-    }
-#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void Runtime::handle_future_result(Deserializer &derez)
