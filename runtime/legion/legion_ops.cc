@@ -21781,7 +21781,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexDetachOp::IndexDetachOp(Runtime *rt)
-      : CollectiveViewCreator<Operation>(rt)
+      : PointWiseAnalysable<CollectiveViewCreator<Operation> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -22062,14 +22062,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointDetachOp::PointDetachOp(Runtime *rt)
-      : DetachOp(rt)
+      : SinglePointWiseAnalysable<DetachOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PointDetachOp::PointDetachOp(const PointDetachOp &rhs)
-      : DetachOp(rhs)
+      : SinglePointWiseAnalysable<DetachOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -22198,6 +22198,38 @@ namespace Legion {
     {
       return owner->rendezvous_collective_versioning_analysis(index, handle,
           tracker, runtime->address_space, mask, parent_req_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::record_point_wise_dependence(LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->should_connect_to_prev_point(region_idx))
+      {
+        RtEvent pre = owner->find_point_wise_dependence(
+            index_point,
+            lr, region_idx);
+        if (!std::binary_search(point_wise_mapping_dependences.begin(),
+                  point_wise_mapping_dependences.end(), pre))
+        {
+          point_wise_mapping_dependences.push_back(pre);
+          std::sort(point_wise_mapping_dependences.begin(),
+                    point_wise_mapping_dependences.end());
+        }
+      }
+
+      if (owner->should_connect_to_next_point(region_idx))
+      {
+        owner->record_point_wise_dependence(index_point,
+            region_idx, get_mapped_event());
+      }
+      else
+      {
+        owner->add_point_to_completed_list(index_point,
+            region_idx,
+            get_mapped_event());
+      }
     }
 
     ///////////////////////////////////////////////////////////// 

@@ -921,6 +921,7 @@ namespace Legion {
       virtual bool need_forward_progress(void);
       virtual void add_point_to_completed_list(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
+      using Operation::record_point_wise_dependence;
       virtual void record_point_wise_dependence(DomainPoint point,
           unsigned region_idx, RtEvent point_mapped);
       virtual RtEvent find_point_wise_dependence(DomainPoint point,
@@ -4147,9 +4148,10 @@ namespace Legion {
       using Operation::record_point_wise_dependence;
       virtual void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
+    public:
+      DomainPoint index_point;
     protected:
       IndexAttachOp *owner;
-      DomainPoint index_point;
     };
 
     /**
@@ -4216,7 +4218,7 @@ namespace Legion {
      * \class IndexDetachOp
      * This is an index space detach operation for performing many detaches
      */
-    class IndexDetachOp : public CollectiveViewCreator<Operation> {
+    class IndexDetachOp : public PointWiseAnalysable<CollectiveViewCreator<Operation> > {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
@@ -4276,7 +4278,7 @@ namespace Legion {
      * \class PointDetachOp
      * Indvidiual detach operations for an index space detach
      */
-    class PointDetachOp : public DetachOp {
+    class PointDetachOp : public SinglePointWiseAnalysable<DetachOp> {
     public:
       PointDetachOp(Runtime *rt);
       PointDetachOp(const PointDetachOp &rhs);
@@ -4308,9 +4310,14 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_detach(void) const { return true; }
+    public:
+      using Operation::record_point_wise_dependence;
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx);
+    public:
+      DomainPoint index_point;
     protected:
       IndexDetachOp *owner;
-      DomainPoint index_point;
     };
 
     /**

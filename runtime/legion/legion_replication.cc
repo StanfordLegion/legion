@@ -955,13 +955,104 @@ namespace Legion {
             LG_LATENCY_DEFERRED_PRIORITY, output_bar);
     }
 
+
+    // Explicit instantiations
+    template class ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> >;
+
     /////////////////////////////////////////////////////////////
-    // Repl Index Task 
+    // ReplPointWiseAnalysable
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent ReplPointWiseAnalysable<OP>::find_point_wise_dependence(DomainPoint point,
+        LogicalRegion lr,
+        unsigned region_idx)
+    //--------------------------------------------------------------------------
+      {
+      AutoLock o_lock(this->op_lock);
+
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(this->parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(this->parent_ctx);
+#endif
+
+      if (this->should_connect_to_prev_point(region_idx))
+      {
+        // Find prev index task
+        std::map<unsigned,PointWisePrevOpInfo>::iterator finder =
+          this->prev_index_tasks.find(region_idx);
+        assert(finder != this->prev_index_tasks.end());
+
+        // find the point of the previous index_task
+        const RegionRequirement &req = this->get_requirement(region_idx);
+        std::vector<DomainPoint> previous_index_task_points;
+
+        this->get_points(req, finder->second.projection,
+            lr, finder->second.index_domain,
+            previous_index_task_points);
+
+        if (previous_index_task_points.size() > 1)
+        {
+          assert(false);
+        }
+        assert(!previous_index_task_points.empty());
+
+        // find shard of the point
+        const ShardID prev_shard =
+           finder->second.sharding->find_owner(previous_index_task_points[0],
+              finder->second.index_domain);
+
+#ifdef LEGION_SPY
+        LegionSpy::log_mapping_point_wise_dependence(
+            this->get_context()->get_unique_id(),
+            LEGION_DISTRIBUTED_ID_FILTER(repl_ctx->shard_manager->did),
+            finder->second.ctx_index, previous_index_task_points[0],
+            finder->second.region_idx, prev_shard,
+            this->context_index, point,
+            region_idx, this->parent_ctx->get_shard_id(),
+            finder->second.dep_type);
+#endif
+
+        if (prev_shard != this->parent_ctx->get_shard_id())
+        {
+          // send to the shard where the point is
+          const RtUserEvent pending_event = Runtime::create_rt_user_event();
+
+          // A different shard owns it so send a message to that shard
+          // requesting it to fill in the dependence
+          Serializer rez;
+          rez.serialize(repl_ctx->shard_manager->did);
+          rez.serialize(prev_shard);
+          rez.serialize(finder->second.ctx_index);
+          rez.serialize(pending_event);
+          rez.serialize(previous_index_task_points[0]);
+          repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
+          return pending_event;
+        }
+
+        if (finder->second.previous_index_task_generation <
+            finder->second.previous_index_task->get_generation())
+          return RtEvent::NO_RT_EVENT;
+
+        return this->parent_ctx->find_point_wise_dependence(
+            finder->second.ctx_index,
+            previous_index_task_points[0]);
+      }
+
+      assert(false);
+      return RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Index Task
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(Runtime *rt)
-      : ReplCollectiveViewCreator<IndexTask>(rt)
+      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -1965,88 +2056,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::find_point_wise_dependence(DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-
-      if (should_connect_to_prev_point(region_idx))
-      {
-        // Find prev index task
-        std::map<unsigned,PointWisePrevOpInfo>::iterator finder =
-          prev_index_tasks.find(region_idx);
-        assert(finder != prev_index_tasks.end());
-
-        // find the point of the previous index_task
-        const RegionRequirement &req = get_requirement(region_idx);
-        std::vector<DomainPoint> previous_index_task_points;
-
-        get_points(req, finder->second.projection,
-            lr, finder->second.index_domain,
-            previous_index_task_points);
-
-        if (previous_index_task_points.size() > 1)
-        {
-          assert(false);
-        }
-        assert(!previous_index_task_points.empty());
-
-        // find shard of the point
-        const ShardID prev_shard =
-           finder->second.sharding->find_owner(previous_index_task_points[0],
-              finder->second.index_domain);
-
-#ifdef LEGION_SPY
-        LegionSpy::log_mapping_point_wise_dependence(
-            get_context()->get_unique_id(),
-            LEGION_DISTRIBUTED_ID_FILTER(repl_ctx->shard_manager->did),
-            finder->second.ctx_index, previous_index_task_points[0],
-            finder->second.region_idx, prev_shard,
-            context_index, point,
-            region_idx, parent_ctx->get_shard_id(),
-            finder->second.dep_type);
-#endif
-
-        if (prev_shard != parent_ctx->get_shard_id())
-        {
-          // send to the shard where the point is
-          const RtUserEvent pending_event = Runtime::create_rt_user_event();
-
-          // A different shard owns it so send a message to that shard
-          // requesting it to fill in the dependence
-          Serializer rez;
-          rez.serialize(repl_ctx->shard_manager->did);
-          rez.serialize(prev_shard);
-          rez.serialize(finder->second.ctx_index);
-          rez.serialize(pending_event);
-          rez.serialize(previous_index_task_points[0]);
-          repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
-          return pending_event;
-        }
-
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-
-        return parent_ctx->find_point_wise_dependence(finder->second.ctx_index,
-            previous_index_task_points[0]);
-      }
-
-      assert(false);
-      return RtUserEvent::NO_RT_USER_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndexTask::record_output_registered(RtEvent registered)
     //--------------------------------------------------------------------------
     {
@@ -2693,14 +2702,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(Runtime *rt)
-      : IndexFillOp(rt)
+      : ReplPointWiseAnalysable<IndexFillOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(const ReplIndexFillOp &rhs)
-      : IndexFillOp(rhs)
+      : ReplPointWiseAnalysable<IndexFillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2954,6 +2963,33 @@ namespace Legion {
     {
       collective_id = ctx->get_next_collective_index(COLLECTIVE_LOC_93);
       fresh_did = fresh;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        IndexSpaceNode *local_points = this->get_shard_points();
+        Domain local_domain;
+        local_points->get_domain(local_domain);
+
+        std::vector<DomainPoint> points;
+
+        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
+        {
+          points.push_back((*dpi));
+        }
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3310,14 +3346,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(Runtime *rt)
-      : IndexCopyOp(rt)
+      : ReplPointWiseAnalysable<IndexCopyOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(const ReplIndexCopyOp &rhs)
-      : IndexCopyOp(rhs)
+      : ReplPointWiseAnalysable<IndexCopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3927,6 +3963,33 @@ namespace Legion {
       else
         return sharding_function->find_shard_participants(launch_space,
                                           launch_space->handle, shards);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        IndexSpaceNode *local_points = this->get_shard_points();
+        Domain local_domain;
+        local_points->get_domain(local_domain);
+
+        std::vector<DomainPoint> points;
+
+        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
+        {
+          points.push_back((*dpi));
+        }
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -7208,7 +7271,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexAttachOp::ReplIndexAttachOp(Runtime *rt)
-      : ReplCollectiveViewCreator<IndexAttachOp>(rt)
+      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -7397,13 +7460,38 @@ namespace Legion {
       return participants->find_shard_participants(shards);  
     }
 
+    //--------------------------------------------------------------------------
+    void ReplIndexAttachOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        std::vector<DomainPoint> points;
+
+        for (std::vector<PointAttachOp*>::const_iterator pit =
+              this->points.begin(); pit != this->points.end(); pit++)
+        {
+          points.push_back((*pit)->index_point);
+        }
+
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Detach Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     ReplIndexDetachOp::ReplIndexDetachOp(Runtime *rt)
-      : ReplCollectiveViewCreator<IndexDetachOp>(rt)
+      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -7548,6 +7636,31 @@ namespace Legion {
       assert(participants != NULL);
 #endif
       return participants->find_shard_participants(shards);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexDetachOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        std::vector<DomainPoint> points;
+
+        for (std::vector<PointDetachOp*>::const_iterator pit =
+              this->points.begin(); pit != this->points.end(); pit++)
+        {
+          points.push_back((*pit)->index_point);
+        }
+
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
     }
 
     /////////////////////////////////////////////////////////////

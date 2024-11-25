@@ -1983,11 +1983,26 @@ namespace Legion {
     };
 
     /**
+     * \class ReplPointWiseAnalysable
+     */
+    template<typename OP>
+    class ReplPointWiseAnalysable : public OP {
+    public:
+      template<typename ... Args>
+      ReplPointWiseAnalysable(Runtime *rt, Args&& ... args)
+        : OP(rt, std::forward<Args>(args) ...) { }
+    public:
+      virtual RtEvent find_point_wise_dependence(DomainPoint point,
+          LogicalRegion lr,
+          unsigned region_idx);
+    };
+
+    /**
      * \class ReplIndexTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexTask : public ReplCollectiveViewCreator<IndexTask> {
+    class ReplIndexTask : public ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> > {
     public:
       ReplIndexTask(Runtime *rt);
       ReplIndexTask(const ReplIndexTask &rhs) = delete;
@@ -2032,10 +2047,7 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
-      void clear_context_maps(void);
-      RtEvent find_point_wise_dependence(DomainPoint point,
-          LogicalRegion lr,
-          unsigned region_idx);
+      virtual void clear_context_maps(void);
     public:
       // Output regions
       virtual void record_output_registered(RtEvent registered);
@@ -2191,7 +2203,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexFillOp : public IndexFillOp {
+    class ReplIndexFillOp : public ReplPointWiseAnalysable<IndexFillOp> {
     public:
       ReplIndexFillOp(Runtime *rt);
       ReplIndexFillOp(const ReplIndexFillOp &rhs);
@@ -2221,6 +2233,8 @@ namespace Legion {
       CreateCollectiveFillView *collective;
       CollectiveID collective_id;
       DistributedID fresh_did;
+    public:
+      virtual void clear_context_maps(void);
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2301,7 +2315,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexCopyOp : public IndexCopyOp {
+    class ReplIndexCopyOp : public ReplPointWiseAnalysable<IndexCopyOp> {
     public:
       ReplIndexCopyOp(Runtime *rt);
       ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
@@ -2343,6 +2357,8 @@ namespace Legion {
       std::vector<IndirectRecordExchange*> src_collectives;
       std::vector<IndirectRecordExchange*> dst_collectives;
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
+    public:
+      virtual void clear_context_maps(void);
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2786,7 +2802,7 @@ namespace Legion {
      * An index space attach operation that is aware
      * that it is executing in a control replicated context
      */
-    class ReplIndexAttachOp : public ReplCollectiveViewCreator<IndexAttachOp> {
+    class ReplIndexAttachOp : public ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> > {
     public:
       ReplIndexAttachOp(Runtime *rt);
       ReplIndexAttachOp(const ReplIndexAttachOp &rhs) = delete;
@@ -2809,6 +2825,8 @@ namespace Legion {
       IndexAttachExchange *collective;
       ShardParticipantsExchange *participants;
       ShardingFunction *sharding_function;
+    public:
+      virtual void clear_context_maps(void);
     };
 
     /**
@@ -2858,7 +2876,7 @@ namespace Legion {
      * An index space detach operation that is aware
      * that it is executing in a control replicated context
      */
-    class ReplIndexDetachOp : public ReplCollectiveViewCreator<IndexDetachOp> {
+    class ReplIndexDetachOp : public ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> > {
     public:
       ReplIndexDetachOp(Runtime *rt);
       ReplIndexDetachOp(const ReplIndexDetachOp &rhs) = delete;
@@ -2882,6 +2900,8 @@ namespace Legion {
       ShardingFunction *sharding_function;
       ShardParticipantsExchange *participants;
       ApBarrier effects_barrier;
+    public:
+      virtual void clear_context_maps(void);
     };
 
     /**
