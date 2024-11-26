@@ -3447,8 +3447,7 @@ namespace Legion {
                       const FieldMask &clone_mask,
                       IndexSpaceExpression *clone_expr,
                       const bool record_invalidate,
-                      std::vector<RtEvent> &applied_events, 
-                      const bool invalidate_overlap);
+                      std::vector<RtEvent> &applied_events); 
       bool filter_partial_invalidations(const FieldMask &mask, 
                                         RtUserEvent &filtered);
       void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
@@ -3699,14 +3698,12 @@ namespace Legion {
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           IndexSpaceExpression *clone_expr,
                           std::vector<RtEvent> &applied_events,
-                          const bool invalidate_overlap,
                           const bool record_invalidate,
                           const bool need_dst_lock = true);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
-                    const bool invalidate_overlap,
                     const bool record_invalidate);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask,
