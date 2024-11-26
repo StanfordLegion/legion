@@ -1226,7 +1226,7 @@ namespace Legion {
         const FieldMask overlap = user_mask & it->second;
         if (!overlap)
           continue;
-        bool dominates;
+        bool dominates = true;
         if (has_local_precondition(it->first, usage, user_expr,
               op_id, index, user_covers, copy_user, &dominates))
         {
