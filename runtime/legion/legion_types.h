@@ -121,9 +121,6 @@ template<typename DT, unsigned BLOAT, bool BIDIR> class CompoundBitMask;
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
-
-#define POINT_WISE_LOGICAL_ANALYSIS 1
-
 namespace Legion { 
 
   typedef ::legion_error_t LegionErrorType;

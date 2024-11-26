@@ -1600,27 +1600,35 @@ namespace Legion {
       ProjectionSummary *shard_proj = NULL;
       if (proj_info.is_projecting())
       {
-#ifndef POINT_WISE_LOGICAL_ANALYSIS
-        if(proj_info.is_sharding()) {
-#endif
-          // If we're doing a projection in a control replicated context then
-          // we need to compute the shard projection up front since it might
-          // involve a collective if we don't hit in the cache and we want
-          // that to appear nice and deterministic
+        if (runtime->disable_point_wise_analysis)
+        {
+          if(proj_info.is_sharding())
+          {
+            // If we're doing a projection in a control replicated context then
+            // we need to compute the shard projection up front since it might
+            // involve a collective if we don't hit in the cache and we want
+            // that to appear nice and deterministic
+            RegionTreeNode *destination = 
+              (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+              static_cast<RegionTreeNode*>(get_node(req.partition)) :
+              static_cast<RegionTreeNode*>(get_node(req.region));
+            shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                  logical_analysis, proj_info);
+          }
+        }
+        else
+        {
           RegionTreeNode *destination = 
             (req.handle_type == LEGION_PARTITION_PROJECTION) ?
             static_cast<RegionTreeNode*>(get_node(req.partition)) :
             static_cast<RegionTreeNode*>(get_node(req.region));
           shard_proj = destination->compute_projection_summary(op, idx, req,
                                                 logical_analysis, proj_info);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-          if(!shard_proj->is_disjoint() || !shard_proj->can_perform_name_based_self_analysis()) {
+          if(!shard_proj->is_disjoint() ||
+              !shard_proj->can_perform_name_based_self_analysis()) {
             logical_analysis.bail_point_wise_analysis = true;
           }
-#endif
-#ifndef POINT_WISE_LOGICAL_ANALYSIS
         }
-#endif
       }
 
       LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
@@ -16290,9 +16298,7 @@ namespace Legion {
             FieldMask still_open;
             it->first->close_logical_node(user, close_mask, privilege_root,
                                           path_node, analysis, still_open);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
             analysis.bail_point_wise_analysis = true;
-#endif
             if (!!still_open)
             {
               if (still_open != close_mask)
@@ -16337,9 +16343,7 @@ namespace Legion {
               FieldMask child_fields;
               next_child->close_logical_node(user, overlap, privilege_root,
                                              path_node, analysis, child_fields);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
               analysis.bail_point_wise_analysis = true;
-#endif
               if (!!child_fields)
               {
                 open_below |= child_fields;
@@ -16373,9 +16377,7 @@ namespace Legion {
           FieldMask still_open;
           it->first->close_logical_node(user, close_mask, privilege_root,
                                         path_node, analysis, still_open);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
           analysis.bail_point_wise_analysis = true;
-#endif
           if (!!still_open)
           {
             open_below |= still_open;
@@ -16555,9 +16557,7 @@ namespace Legion {
             continue;
           }
           const FieldMask overlap = check_mask & it->second;
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
           bool skip_registering_region_dependence = false;
-#endif
           if (!!overlap)
           {
             if (TRACK_DOM)
@@ -16577,56 +16577,59 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-                  if (prev.shard_proj != NULL && user.shard_proj != NULL &&
-                      prev.op->get_operation_kind() == Operation::TASK_OP_KIND &&
-                      user.op->get_operation_kind() == Operation::TASK_OP_KIND)
+                  if (!runtime->disable_point_wise_analysis)
                   {
-                    if (static_cast<TaskOp*>(user.op)->get_task_kind() ==
-                        TaskOp::INDEX_TASK_KIND &&
-                        static_cast<TaskOp*>(prev.op)->get_task_kind() ==
-                        TaskOp::INDEX_TASK_KIND)
+
+                    if (prev.shard_proj != NULL && user.shard_proj != NULL &&
+                        prev.op->get_operation_kind() == Operation::TASK_OP_KIND &&
+                        user.op->get_operation_kind() == Operation::TASK_OP_KIND)
                     {
-                      if (prev.op->
-                          region_has_collective(prev.idx, prev.gen) ||
-                          user.op->
-                          region_has_collective(user.idx, user.gen))
+                      if (static_cast<TaskOp*>(user.op)->get_task_kind() ==
+                          TaskOp::INDEX_TASK_KIND &&
+                          static_cast<TaskOp*>(prev.op)->get_task_kind() ==
+                          TaskOp::INDEX_TASK_KIND)
                       {
-                        logical_analysis.bail_point_wise_analysis = true;
-                      }
-                      if (user.op->
-                          prev_point_wise_user_set(user.idx))
-                      {
-                        // We bail if we have more than one ancestor for now
-                        logical_analysis.bail_point_wise_analysis = true;
-                      }
-                      if (!logical_analysis.bail_point_wise_analysis) {
-                        if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
-                          logical_analysis.bail_point_wise_analysis = true;
-                        }
-                        else if ((user.shard_proj->projection->projection_id !=
-                              prev.shard_proj->projection->projection_id) ||
-                            !user.shard_proj->projection->is_functional ||
-                            (!user.shard_proj->projection->is_invertible &&
-                             user.shard_proj->projection->projection_id != 0))
+                        if (prev.op->
+                            region_has_collective(prev.idx, prev.gen) ||
+                            user.op->
+                            region_has_collective(user.idx, user.gen))
                         {
                           logical_analysis.bail_point_wise_analysis = true;
                         }
-                        else
+                        if (user.op->
+                            prev_point_wise_user_set(user.idx))
                         {
-                          bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
-                          if(parent_dominates)
+                          // We bail if we have more than one ancestor for now
+                          logical_analysis.bail_point_wise_analysis = true;
+                        }
+                        if (!logical_analysis.bail_point_wise_analysis) {
+                          if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
+                            logical_analysis.bail_point_wise_analysis = true;
+                          }
+                          else if ((user.shard_proj->projection->projection_id !=
+                                prev.shard_proj->projection->projection_id) ||
+                              !user.shard_proj->projection->is_functional ||
+                              (!user.shard_proj->projection->is_invertible &&
+                               user.shard_proj->projection->projection_id != 0))
                           {
-                            skip_registering_region_dependence = true;
-                            if(!prev.op->set_next_point_wise_user(
-                                user.op, user.gen, prev.gen, prev.idx))
+                            logical_analysis.bail_point_wise_analysis = true;
+                          }
+                          else
+                          {
+                            bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
+                            if(parent_dominates)
                             {
-                              user.op->record_point_wise_dependence_completed_points_prev_task(
-                                  prev.shard_proj, prev.ctx_index);
+                              skip_registering_region_dependence = true;
+                              if(!prev.op->set_next_point_wise_user(
+                                  user.op, user.gen, prev.gen, prev.idx))
+                              {
+                                user.op->record_point_wise_dependence_completed_points_prev_task(
+                                    prev.shard_proj, prev.ctx_index);
+                              }
+                              user.op->set_prev_point_wise_user(
+                                  prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
+                                  user.idx, dtype, prev.idx, prev.index_domain);
                             }
-                            user.op->set_prev_point_wise_user(
-                                prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
-                                user.idx, dtype, prev.idx, prev.index_domain);
                           }
                         }
                       }
@@ -16634,74 +16637,69 @@ namespace Legion {
                   }
                   if(!skip_registering_region_dependence)
                   {
-#endif
-                  // If we can validate a region record which of our
-                  // predecessors regions we are validating, otherwise
-                  // just register a normal dependence
-                  user.op->register_region_dependence(user.idx, prev.op,
-                                                      prev.gen, prev.idx,
-                                                      dtype, overlap);
+                    // If we can validate a region record which of our
+                    // predecessors regions we are validating, otherwise
+                    // just register a normal dependence
+                    user.op->register_region_dependence(user.idx, prev.op,
+                                                        prev.gen, prev.idx,
+                                                        dtype, overlap);
 #ifdef LEGION_SPY
-                  LegionSpy::log_mapping_dependence(
-                      user.op->get_context()->get_unique_id(),
-                      prev.uid, prev.idx, user.uid, user.idx, dtype);
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype);
 #endif
 
-                  if (prev.shard_proj != NULL)
-                  {
-                   // Two operations from the same must epoch shouldn't
-                    // be recording close dependences on each other so
-                    // we can skip that part
-                    if ((prev.ctx_index == user.ctx_index) &&
-                        (user.op->get_must_epoch_op() != NULL))
-                      break;
-                    // If this is a sharding projection operation then check 
-                    // to see if we need to record a fence dependence here to
-                    // ensure that we get dependences between interfering 
-                    // points in different shards correct
-                    // There are three sceanrios here:
-                    // 1. We haven't arrived in which case we don't have any 
-                    //    good way to symbolically prove it is safe to elide
-                    //    the fence so just record the close
-                    // 2. We've arrived but we're not projection in which case
-                    //    we'll interfere with any projections anyway so we need
-                    //    a full fence for dependences anyway
-                    // 3. We've arrived and are projecting in which case we can
-                    //    try to elide things symbolically, if that doesn't work
-                    //    we may still need to do an expensive analysis to prove
-                    //    it is safe to elide the close which we'll only do it
-                    //    we are tracing
-                    if (arrived && proj_info.is_projecting())
+                    if (prev.shard_proj != NULL)
                     {
-                      // If we arrived and are projecting then we can test
-                      // these two projection trees for intereference with
-                      // each other and see if we can prove that they are
-                      // disjoint in which case we don't need a close
-#ifdef DEBUG_LEGION
-#ifndef POINT_WISE_LOGICAL_ANALYSIS
-                      assert(proj_info.is_sharding());
-#endif
-                      assert(user.shard_proj != NULL);
-#endif
-                      if (!state.has_interfering_shards(logical_analysis,
-                                          prev.shard_proj, user.shard_proj))
+                     // Two operations from the same must epoch shouldn't
+                      // be recording close dependences on each other so
+                      // we can skip that part
+                      if ((prev.ctx_index == user.ctx_index) &&
+                          (user.op->get_must_epoch_op() != NULL))
                         break;
-                    }
-                    // We weren't able to prove that the projections were
-                    // non-interfering with each other so we need a close
-                    // Not able to do the symbolic elision so we need a fence
-                    // across the shards to be safe
-                    logical_analysis.record_close_dependence(root,
-                                  user.idx, this, &prev, overlap);
-                    it.filter(overlap);
-                    tighten = true;
-                    if (!it->second)
-                      to_delete.push_back(it->first);
-                  }
-
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-                  }
+                      // If this is a sharding projection operation then check 
+                      // to see if we need to record a fence dependence here to
+                      // ensure that we get dependences between interfering 
+                      // points in different shards correct
+                      // There are three sceanrios here:
+                      // 1. We haven't arrived in which case we don't have any 
+                      //    good way to symbolically prove it is safe to elide
+                      //    the fence so just record the close
+                      // 2. We've arrived but we're not projection in which case
+                      //    we'll interfere with any projections anyway so we need
+                      //    a full fence for dependences anyway
+                      // 3. We've arrived and are projecting in which case we can
+                      //    try to elide things symbolically, if that doesn't work
+                      //    we may still need to do an expensive analysis to prove
+                      //    it is safe to elide the close which we'll only do it
+                      //    we are tracing
+                      if (arrived && proj_info.is_projecting())
+                      {
+                        // If we arrived and are projecting then we can test
+                        // these two projection trees for intereference with
+                        // each other and see if we can prove that they are
+                        // disjoint in which case we don't need a close
+#ifdef DEBUG_LEGION
+                        if (runtime->disable_point_wise_analysis)
+                          assert(proj_info.is_sharding());
+                        assert(user.shard_proj != NULL);
 #endif
+                        if (!state.has_interfering_shards(logical_analysis,
+                                            prev.shard_proj, user.shard_proj))
+                          break;
+                      }
+                      // We weren't able to prove that the projections were
+                      // non-interfering with each other so we need a close
+                      // Not able to do the symbolic elision so we need a fence
+                      // across the shards to be safe
+                      logical_analysis.record_close_dependence(root,
+                                    user.idx, this, &prev, overlap);
+                      it.filter(overlap);
+                      tighten = true;
+                      if (!it->second)
+                        to_delete.push_back(it->first);
+                    }
+                  }
                   break;
                 }
               default:

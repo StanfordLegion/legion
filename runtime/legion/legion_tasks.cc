@@ -2438,12 +2438,13 @@ namespace Legion {
         for (unsigned idx = 0;
               idx < intra_space_mapping_dependences.size(); idx++)
           rez.serialize(intra_space_mapping_dependences[idx]);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-        rez.serialize<size_t>(point_wise_mapping_dependences.size());
-        for (unsigned idx = 0;
-              idx < point_wise_mapping_dependences.size(); idx++)
-          rez.serialize(point_wise_mapping_dependences[idx]);
-#endif
+        if (!runtime->disable_point_wise_analysis)
+        {
+          rez.serialize<size_t>(point_wise_mapping_dependences.size());
+          for (unsigned idx = 0;
+                idx < point_wise_mapping_dependences.size(); idx++)
+            rez.serialize(point_wise_mapping_dependences[idx]);
+        }
       }
     }
 
@@ -2532,16 +2533,17 @@ namespace Legion {
         intra_space_mapping_dependences.resize(num_intra_space_dependences);
         for (unsigned idx = 0; idx < num_intra_space_dependences; idx++)
           derez.deserialize(intra_space_mapping_dependences[idx]);
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
+      if (!runtime->disable_point_wise_analysis)
+      {
         size_t num_point_wise_mapping_dependences;
         derez.deserialize(num_point_wise_mapping_dependences);
         point_wise_mapping_dependences.resize(num_point_wise_mapping_dependences);
         for (unsigned idx = 0; idx < num_point_wise_mapping_dependences; idx++)
           derez.deserialize(point_wise_mapping_dependences[idx]);
-#endif
+      }
       }
       update_no_access_regions();
-    } 
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::shard_off(RtEvent mapped_precondition)
@@ -5690,17 +5692,18 @@ namespace Legion {
         else
           rez.serialize(concurrent_precondition.interpreted);
       }
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      rez.serialize<size_t>(connect_to_prev_points.size());
-      for (unsigned idx = 0;
-            idx < connect_to_prev_points.size(); idx++)
-        rez.serialize<bool>(connect_to_prev_points[idx]);
+      if (!runtime->disable_point_wise_analysis)
+      {
+        rez.serialize<size_t>(connect_to_prev_points.size());
+        for (unsigned idx = 0;
+              idx < connect_to_prev_points.size(); idx++)
+          rez.serialize<bool>(connect_to_prev_points[idx]);
 
-      rez.serialize<size_t>(connect_to_next_points.size());
-      for (unsigned idx = 0;
-            idx < connect_to_next_points.size(); idx++)
-        rez.serialize<bool>(connect_to_next_points[idx]);
-#endif
+        rez.serialize<size_t>(connect_to_next_points.size());
+        for (unsigned idx = 0;
+              idx < connect_to_next_points.size(); idx++)
+          rez.serialize<bool>(connect_to_next_points[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5770,27 +5773,28 @@ namespace Legion {
           derez.deserialize(concurrent_precondition.interpreted);
       }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t num_connect_to_prev_points;
-      derez.deserialize(num_connect_to_prev_points);
-      connect_to_prev_points.resize(num_connect_to_prev_points);
-      for (unsigned idx = 0; idx < num_connect_to_prev_points; idx++)
+      if (!runtime->disable_point_wise_analysis)
       {
-        bool result;
-        derez.deserialize(result);
-        connect_to_prev_points[idx] = result;
-      }
+        size_t num_connect_to_prev_points;
+        derez.deserialize(num_connect_to_prev_points);
+        connect_to_prev_points.resize(num_connect_to_prev_points);
+        for (unsigned idx = 0; idx < num_connect_to_prev_points; idx++)
+        {
+          bool result;
+          derez.deserialize(result);
+          connect_to_prev_points[idx] = result;
+        }
 
-      size_t num_connect_to_next_points;
-      derez.deserialize(num_connect_to_next_points);
-      connect_to_next_points.resize(num_connect_to_next_points);
-      for (unsigned idx = 0; idx < num_connect_to_next_points; idx++)
-      {
-        bool result;
-        derez.deserialize(result);
-        connect_to_next_points[idx];
+        size_t num_connect_to_next_points;
+        derez.deserialize(num_connect_to_next_points);
+        connect_to_next_points.resize(num_connect_to_next_points);
+        for (unsigned idx = 0; idx < num_connect_to_next_points; idx++)
+        {
+          bool result;
+          derez.deserialize(result);
+          connect_to_next_points[idx];
+        }
       }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8900,15 +8904,16 @@ namespace Legion {
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t region_count = get_region_count();
-      connect_to_prev_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-        connect_to_prev_points[idx] = false;
-      connect_to_next_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-        connect_to_next_points[idx] = false;
-#endif
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
 
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
@@ -9041,15 +9046,16 @@ namespace Legion {
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t region_count = get_region_count();
-      connect_to_prev_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-        connect_to_prev_points[idx] = false;
-      connect_to_next_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-        connect_to_next_points[idx] = false;
-#endif
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
 
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)

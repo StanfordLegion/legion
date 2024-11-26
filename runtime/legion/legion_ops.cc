@@ -1327,10 +1327,7 @@ namespace Legion {
         return;
 
       LogicalAnalysis logical_analysis(this, get_output_offset());
-
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
       logical_analysis.bail_point_wise_analysis = false;
-#endif
 
       unsigned req_count = get_region_count();
       for (unsigned i = 0; i < req_count; i++)
@@ -8730,15 +8727,16 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
 #endif
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t region_count = get_region_count();
-      connect_to_prev_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-        connect_to_prev_points[idx] = false;
-      connect_to_next_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-        connect_to_next_points[idx] = false;
-#endif
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
 
       map_id = launcher.map_id;
       tag = launcher.tag; 
@@ -19005,15 +19003,16 @@ namespace Legion {
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t region_count = get_region_count();
-      connect_to_prev_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-        connect_to_prev_points[idx] = false;
-      connect_to_next_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-        connect_to_next_points[idx] = false;
-#endif
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20728,15 +20727,16 @@ namespace Legion {
       }
       resources = ExternalResources(result);
 
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-      size_t region_count = get_region_count();
-      connect_to_prev_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-        connect_to_prev_points[idx] = false;
-      connect_to_next_points.resize(region_count);
-      for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-        connect_to_next_points[idx] = false;
-#endif
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
       return resources;
     }
 

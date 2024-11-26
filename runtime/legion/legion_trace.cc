@@ -399,9 +399,8 @@ namespace Legion {
 
         // Check to see if the meta-data alignes
         OperationInfo &info = replay_info[index];
-#ifdef POINT_WISE_LOGICAL_ANALYSIS
-        set_point_wise_dependences(index, op);
-#endif
+        if (!context->runtime->disable_point_wise_analysis)
+          set_point_wise_dependences(index, op);
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
         operations.push_back(op_info);
