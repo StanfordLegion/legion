@@ -13848,18 +13848,17 @@ namespace Legion {
       // At this point we've decided to do the migration
       log_migration.info("Migrating Equivalence Set %llx from %d to %d",
           did, local_space, new_logical_owner);
-      logical_owner_space = new_logical_owner;
       const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       // Do the migration
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        pack_state(rez, logical_owner_space, did, set_expr, set_expr,
+        pack_state(rez, new_logical_owner, did, set_expr, set_expr,
           true/*covers*/, all_ones, true/*pack guards*/, true/*pack invalids*/);
         pack_global_ref();
       }
-      runtime->send_equivalence_set_migration(logical_owner_space, rez);
+      runtime->send_equivalence_set_migration(new_logical_owner, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, false/*record*/);
       // Also invalidate the partial invalidations since we know we migrated
       // them all to the new owner node
@@ -13869,6 +13868,8 @@ namespace Legion {
         if (it->first->remove_nested_expression_reference(did))
           delete it->first;
       partial_invalidations.clear();
+      // Now we can change the logical owner space 
+      logical_owner_space = new_logical_owner;
 #endif // LEGION_DISABLE_EQUIVALENCE_SET MIGRATION
     }
 
@@ -19677,8 +19678,7 @@ namespace Legion {
     void EquivalenceSet::clone_from(EquivalenceSet *src, const FieldMask &mask,
                                     IndexSpaceExpression *clone_expr,
                                     const bool record_invalidate,
-                                    std::vector<RtEvent> &applied_events,
-                                    const bool invalidate_overlap)
+                                    std::vector<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19692,7 +19692,7 @@ namespace Legion {
         // other fiedls and expressions
         eq.release();
         src->clone_to_local(this, mask, clone_expr, applied_events,
-            invalidate_overlap, record_invalidate);
+            record_invalidate);
       }
       else
       {
@@ -19700,7 +19700,7 @@ namespace Legion {
         const AddressSpaceID logical_owner = logical_owner_space;
         eq.release();
         src->clone_to_remote(did, logical_owner, set_expr, clone_expr,
-             mask, applied_events, invalidate_overlap, record_invalidate);
+             mask, applied_events, record_invalidate);
       }
     }
 
@@ -20366,6 +20366,9 @@ namespace Legion {
        const bool expr_covers, const FieldMask &mask, bool record_invalidations)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
       filter_valid_instances(expr, expr_covers, mask); 
       filter_reduction_instances(expr, expr_covers, mask); 
       filter_initialized_data(expr, expr_covers, mask);
@@ -20498,7 +20501,6 @@ namespace Legion {
     void EquivalenceSet::clone_to_local(EquivalenceSet *dst, FieldMask mask,
                      IndexSpaceExpression *overlap,
                      std::vector<RtEvent> &applied_events, 
-                     const bool invalidate_overlap,
                      const bool record_invalidate,
                      const bool need_dst_lock)
     //--------------------------------------------------------------------------
@@ -20516,9 +20518,10 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
       FieldMaskSet<IndexSpaceExpression> *dirty_updates = NULL;
+      std::vector<IndexSpaceExpression*> temp_refs;
       {
-        // Lock in exclusive mode if we're doing an invalidate
-        AutoLock eq(eq_lock, 1, false/*exclusive*/);
+        // Lock in exclusive mode since we're doing an invalidate
+        AutoLock eq(eq_lock);
         if (!is_logical_owner())
         {
           const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -20532,13 +20535,13 @@ namespace Legion {
             overlap->pack_expression(rez, logical_owner_space);
             rez.serialize(mask);
             rez.serialize(done_event);
-            rez.serialize<bool>(invalidate_overlap);
             rez.serialize<bool>(record_invalidate);
           }
           runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
           applied_events.push_back(done_event);
           return;
         }
+        bool overlap_covers = true;;
         // If we get here, we're performing the clone locally for these fields
         if (!set_expr->is_empty())
         {
@@ -20546,45 +20549,149 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(overlap_volume > 0);
 #endif
-          const bool overlap_covers = 
-            (overlap_volume == set_expr->get_volume());
-          find_overlap_updates(overlap, overlap_covers, mask, false/*invalids*/,
+          overlap_covers = (overlap_volume == set_expr->get_volume());
+          find_overlap_updates(overlap_covers ? set_expr : overlap,
+                               overlap_covers, mask, false/*invalids*/,
                                valid_updates, initialized_updates,
-                               invalid_updates, reduction_updates, 
+                               invalid_updates, reduction_updates,
                                restricted_updates, released_updates,
                                NULL/*guards*/,NULL/*guards*/,
                                precondition_updates, anticondition_updates,
                                postcondition_updates, dirty_updates,
                                dst->did, dst->set_expr);
         }
+        // Don't need to get updates if this equivalence set is empty
+        // and the destination equivalence set is not empty
         else if (dst->set_expr->is_empty())
-          find_overlap_updates(set_expr, true/*covers*/, mask,false/*invalids*/,
+          find_overlap_updates(set_expr, true/*covers*/, mask,
+                               false/*invalids*/,
                                valid_updates, initialized_updates,
-                               invalid_updates, reduction_updates, 
+                               invalid_updates, reduction_updates,
                                restricted_updates, released_updates,
                                NULL/*guards*/,NULL/*guards*/,
                                precondition_updates, anticondition_updates,
                                postcondition_updates, dirty_updates,
                                dst->did, dst->set_expr);
+        // Save references on everything to keep it alive since we're about
+        // to do an invalidation of the state, pack references to views in
+        // case they ultimately need to be forwarded to a remote node when
+        // we end up calling apply_state
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<LogicalView> >::const_iterator vit =
+              valid_updates.begin(); vit != valid_updates.end(); vit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),vit->first))
+          {
+            vit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(vit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<LogicalView>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              initialized_updates.begin(); it !=
+              initialized_updates.end(); it++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(), it->first))
+          {
+            it->first->add_nested_expression_reference(did);
+            temp_refs.push_back(it->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              invalid_updates.begin(); it != invalid_updates.end(); it++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(), it->first))
+          {
+            it->first->add_nested_expression_reference(did);
+            temp_refs.push_back(it->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+        }
+        for (std::map<unsigned,std::list<std::pair<InstanceView*,
+              IndexSpaceExpression*> > >::const_iterator rit =
+              reduction_updates.begin(); rit != reduction_updates.end(); rit++)
+        {
+          for (std::list<std::pair<InstanceView*,
+                IndexSpaceExpression*> >::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            it->first->pack_valid_ref();
+            if (!std::binary_search(temp_refs.begin(),
+                  temp_refs.end(), it->second))
+            {
+              it->second->add_nested_expression_reference(did);
+              temp_refs.push_back(it->second);
+              std::sort(temp_refs.begin(), temp_refs.end());
+            }
+          }
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::const_iterator rit =
+              restricted_updates.begin(); rit != 
+              restricted_updates.end(); rit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),rit->first))
+          {
+            rit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(rit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::const_iterator rit =
+              released_updates.begin(); rit != released_updates.end(); rit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),rit->first))
+          {
+            rit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(rit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        // No need to do anything for the tracing data structures as they
+        // are already keeping their own references to everything
+        if (dirty_updates != NULL)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                dirty_updates->begin(); it != dirty_updates->end(); it++)
+          {
+            if (!std::binary_search(temp_refs.begin(),
+                  temp_refs.end(), it->first))
+            {
+              it->first->add_nested_expression_reference(did);
+              temp_refs.push_back(it->first);
+              std::sort(temp_refs.begin(), temp_refs.end());
+            }
+          }
+        }
+        // Now we can do the invalidation
+        if (overlap_covers)
+          invalidate_state(set_expr, true/*covers*/, mask, record_invalidate);
+        else
+          invalidate_state(overlap, false/*covers*/, mask, record_invalidate);
+
       }
-      // We hold the lock so calling back into the destination is safe
+      // Call back to the destination to apply the state
       dst->apply_state(valid_updates, initialized_updates, invalid_updates,
             reduction_updates, restricted_updates, released_updates, 
             precondition_updates, anticondition_updates, postcondition_updates,
             dirty_updates, NULL/*guards*/, NULL/*guards*/, applied_events, 
-            need_dst_lock, true/*forward to owner*/,false/*unpack references*/);
-      if (invalidate_overlap)
-      {
-        AutoLock eq(eq_lock); // Retake the lock in exclusive mode
-        if (!set_expr->is_empty())
-        {
-          const bool overlap_covers = 
-            (overlap->get_volume() == set_expr->get_volume());
-          invalidate_state(overlap, overlap_covers, mask, record_invalidate);
-        }
-        else
-          invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
-      }
+            need_dst_lock, true/*forward to owner*/, true/*unpack references*/);
+      // Remove the temporary references that we added to keep everything alive
+      for (std::vector<IndexSpaceExpression*>::const_iterator it =
+            temp_refs.begin(); it != temp_refs.end(); it++)
+        if ((*it)->remove_nested_expression_reference(did))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -20593,7 +20700,6 @@ namespace Legion {
                      IndexSpaceExpression *target_expr, 
                      IndexSpaceExpression *overlap,
                      FieldMask mask, std::vector<RtEvent> &applied_events, 
-                     const bool invalidate_overlap,
                      const bool record_invalidate)
     //--------------------------------------------------------------------------
     {
@@ -20605,8 +20711,8 @@ namespace Legion {
       const bool overlap_covers = (overlap_volume == set_volume); 
       if (overlap_covers)
         overlap = set_expr;
-      // Lock in exclusive mode if we're doing an invalidate
-      AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
+      // Lock in exclusive mode since we're doing an invalidate
+      AutoLock eq(eq_lock);
       if (!is_logical_owner())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -20620,7 +20726,6 @@ namespace Legion {
           overlap->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
-          rez.serialize<bool>(invalidate_overlap);
           rez.serialize<bool>(record_invalidate);
         }
         runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
@@ -20640,14 +20745,11 @@ namespace Legion {
             overlap_covers, mask, false/*pack guards*/, false/*pack invalids*/);
         }
         runtime->send_equivalence_set_clone_response(target_space, rez);
-        if (invalidate_overlap)
-        {
-          if (!set_expr->is_empty())
-            invalidate_state(overlap, overlap_covers, mask, record_invalidate);
-          else
-            invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
-        }
         applied_events.push_back(done_event);
+        if (!set_expr->is_empty())
+          invalidate_state(overlap, overlap_covers, mask, record_invalidate);
+        else
+          invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
       }
     }
 
@@ -21322,8 +21424,7 @@ namespace Legion {
       derez.deserialize(mask);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool invalidate_overlap, record_invalidate;
-      derez.deserialize<bool>(invalidate_overlap);
+      bool record_invalidate;
       derez.deserialize<bool>(record_invalidate);
       std::vector<RtEvent> applied_events;   
       if (ready.exists() && !ready.has_triggered())
@@ -21337,12 +21438,11 @@ namespace Legion {
           runtime->find_or_request_equivalence_set(target, ready);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        dst->clone_from(set, mask, overlap, record_invalidate, applied_events,
-            invalidate_overlap);
+        dst->clone_from(set, mask, overlap, record_invalidate, applied_events);
       }
       else
         set->clone_to_remote(target, target_space, target_expr, overlap, mask,
-            applied_events, invalidate_overlap, record_invalidate);
+            applied_events, record_invalidate);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -22678,7 +22778,7 @@ namespace Legion {
             const bool record_invalidate = 
              (target->context->get_depth() == eit->first->context->get_depth());
             target->clone_from(eit->first, overlap, expression,
-                record_invalidate, ready_events, true/*invalidate overlap*/);
+                record_invalidate, ready_events);
           }
           sit->set_mask -= overlap;
           if (!sit->set_mask)
