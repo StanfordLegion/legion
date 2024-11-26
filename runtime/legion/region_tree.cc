@@ -16579,57 +16579,50 @@ namespace Legion {
                 {
                   if (!runtime->disable_point_wise_analysis)
                   {
-
-                    if (prev.shard_proj != NULL && user.shard_proj != NULL &&
-                        prev.op->get_operation_kind() == Operation::TASK_OP_KIND &&
-                        user.op->get_operation_kind() == Operation::TASK_OP_KIND)
+                    if (prev.shard_proj != NULL && user.shard_proj != NULL)
                     {
-                      if (static_cast<TaskOp*>(user.op)->get_task_kind() ==
-                          TaskOp::INDEX_TASK_KIND &&
-                          static_cast<TaskOp*>(prev.op)->get_task_kind() ==
-                          TaskOp::INDEX_TASK_KIND)
+                      if (prev.op->
+                          region_has_collective(prev.idx, prev.gen) ||
+                          user.op->
+                          region_has_collective(user.idx, user.gen))
                       {
-                        if (prev.op->
-                            region_has_collective(prev.idx, prev.gen) ||
-                            user.op->
-                            region_has_collective(user.idx, user.gen))
+                        logical_analysis.bail_point_wise_analysis = true;
+                      }
+                      if (user.op->
+                          prev_point_wise_user_set(user.idx))
+                      {
+                        // We bail if we have more than one ancestor for now
+                        logical_analysis.bail_point_wise_analysis = true;
+                      }
+                      if (!logical_analysis.bail_point_wise_analysis) {
+                        if(!prev.shard_proj->is_disjoint() ||
+                            !prev.shard_proj->can_perform_name_based_self_analysis()) {
+                          logical_analysis.bail_point_wise_analysis = true;
+                        }
+                        else if ((user.shard_proj->projection->projection_id !=
+                              prev.shard_proj->projection->projection_id) ||
+                            !user.shard_proj->projection->is_functional ||
+                            (!user.shard_proj->projection->is_invertible &&
+                             user.shard_proj->projection->projection_id != 0))
                         {
                           logical_analysis.bail_point_wise_analysis = true;
                         }
-                        if (user.op->
-                            prev_point_wise_user_set(user.idx))
+                        else
                         {
-                          // We bail if we have more than one ancestor for now
-                          logical_analysis.bail_point_wise_analysis = true;
-                        }
-                        if (!logical_analysis.bail_point_wise_analysis) {
-                          if(!prev.shard_proj->is_disjoint() || !prev.shard_proj->can_perform_name_based_self_analysis()) {
-                            logical_analysis.bail_point_wise_analysis = true;
-                          }
-                          else if ((user.shard_proj->projection->projection_id !=
-                                prev.shard_proj->projection->projection_id) ||
-                              !user.shard_proj->projection->is_functional ||
-                              (!user.shard_proj->projection->is_invertible &&
-                               user.shard_proj->projection->projection_id != 0))
+                          bool parent_dominates =
+                            prev.shard_proj->domain->dominates(user.shard_proj->domain);
+                          if(parent_dominates)
                           {
-                            logical_analysis.bail_point_wise_analysis = true;
-                          }
-                          else
-                          {
-                            bool parent_dominates = prev.shard_proj->domain->dominates(user.shard_proj->domain);
-                            if(parent_dominates)
+                            skip_registering_region_dependence = true;
+                            if(!prev.op->set_next_point_wise_user(
+                                user.op, user.gen, prev.gen, prev.idx))
                             {
-                              skip_registering_region_dependence = true;
-                              if(!prev.op->set_next_point_wise_user(
-                                  user.op, user.gen, prev.gen, prev.idx))
-                              {
-                                user.op->record_point_wise_dependence_completed_points_prev_task(
-                                    prev.shard_proj, prev.ctx_index);
-                              }
-                              user.op->set_prev_point_wise_user(
-                                  prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
-                                  user.idx, dtype, prev.idx, prev.index_domain);
+                              user.op->record_point_wise_dependence_completed_points_prev_task(
+                                  prev.shard_proj, prev.ctx_index);
                             }
+                            user.op->set_prev_point_wise_user(
+                                prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
+                                user.idx, dtype, prev.idx, prev.index_domain);
                           }
                         }
                       }
