@@ -529,7 +529,8 @@ namespace Legion {
       const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
-      virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
