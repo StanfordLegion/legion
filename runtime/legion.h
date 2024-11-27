@@ -3797,7 +3797,7 @@ namespace Legion {
       inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
     public:
       void finalize(Context ctx) const;
-      Realm::RegionInstance get_instance() const;
+      Realm::RegionInstance get_instance(void) const;
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;
@@ -3899,8 +3899,8 @@ namespace Legion {
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
     public:
-      void destroy();
-      Realm::RegionInstance get_instance() const;
+      void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
+      Realm::RegionInstance get_instance(void) const;
     protected:
       friend class OutputRegion;
       friend class UntypedDeferredBuffer<COORD_T>;
@@ -3958,7 +3958,7 @@ namespace Legion {
       template<typename T, int DIM, bool BC>
       inline operator DeferredBuffer<T,DIM,COORD_T,BC>(void) const;
     public:
-      inline void destroy(void);
+      inline void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
       inline Realm::RegionInstance get_instance(void) const { return instance; }
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
@@ -10339,7 +10339,8 @@ namespace Legion {
       friend class UntypedDeferredBuffer;
       Realm::RegionInstance create_task_local_instance(Memory memory,
                                 Realm::InstanceLayoutGeneric *layout);
-      void destroy_task_local_instance(Realm::RegionInstance instance);
+      void destroy_task_local_instance(Realm::RegionInstance instance,
+                                Realm::Event precondition);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some

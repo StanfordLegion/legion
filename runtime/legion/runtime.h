@@ -1472,7 +1472,8 @@ namespace Legion {
           RtEvent safe_effects, size_t num_results, PhysicalInstance *result, 
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID creator) = 0;
-      virtual void free_instance(PhysicalInstance instance) = 0;
+      virtual void free_instance(PhysicalInstance instance,
+                                 RtEvent precondition) = 0;
       virtual bool is_released(void) const = 0;
       virtual void release_pool(UniqueID creator) = 0;
       virtual void finalize_pool(RtEvent done) = 0;
@@ -1515,7 +1516,8 @@ namespace Legion {
           RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
-      virtual void free_instance(PhysicalInstance instance) override;
+      virtual void free_instance(PhysicalInstance instance,
+                                 RtEvent precondition) override;
       virtual bool is_released(void) const override;
       virtual void release_pool(UniqueID creator) override;
       virtual void finalize_pool(RtEvent done) override;
@@ -1548,6 +1550,8 @@ namespace Legion {
       std::map<PhysicalInstance,unsigned> allocated;
       // Each backing instance has a start range and use event
       std::map<PhysicalInstance,RtEvent> backing_instances;
+      // Instances that are freed with event preconditions
+      std::map<unsigned,RtEvent> pending_frees;
       // Free lists associated with a specific sizes by powers of 2
       // entry[0] = sizes from [2^0,2^1)
       // entry[1] = sizes from [2^1,2^2)
@@ -1587,16 +1591,19 @@ namespace Legion {
           RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
-      virtual void free_instance(PhysicalInstance instance) override;
+      virtual void free_instance(PhysicalInstance instance,
+                                 RtEvent precondition) override;
       virtual bool is_released(void) const override;
       virtual void release_pool(UniqueID creator) override;
       virtual void finalize_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
-      PhysicalInstance find_local_freed_hole(size_t size, size_t &prev_size);
+      PhysicalInstance find_local_freed_hole(
+          size_t size, size_t &prev_size, RtEvent &ready);
     private:
       TaskTreeCoordinates coordinates;
-      std::map<size_t,std::vector<PhysicalInstance> > freed_instances;
+      std::map<size_t,
+        std::vector<std::pair<PhysicalInstance,RtEvent> > > freed_instances;
       MemoryManager *const manager;
       const size_t max_freed_bytes;
       size_t freed_bytes;

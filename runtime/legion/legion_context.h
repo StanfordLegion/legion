@@ -531,7 +531,8 @@ namespace Legion {
           const char *warning_string = NULL) = 0;
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                       Realm::InstanceLayoutGeneric *layout) = 0;
-      virtual void destroy_task_local_instance(PhysicalInstance instance) = 0;
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition) = 0;
       virtual size_t query_available_memory(Memory target) = 0;
       virtual void release_memory_pool(Memory target) = 0;
     public:
@@ -1742,7 +1743,8 @@ namespace Legion {
           const char *warning_string = NULL);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
-      virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition);
       virtual size_t query_available_memory(Memory target);
       virtual void release_memory_pool(Memory target);
     public:
@@ -1926,6 +1928,14 @@ namespace Legion {
       Mapper::ContextConfigOutput           context_configuration;
       TaskTreeCoordinates                   context_coordinates;
     protected:
+      // TODO: In the future convert these into std::span so that they
+      // are bounded from above by regions.size(), in practice they might
+      // actually be bigger than that since the owner task might have 
+      // output regions which means these will be as big as 
+      // regions.size() + output_regions.size(), but we don't actually
+      // want to think of them that way since the output regions this
+      // task is producing don't have any bearing on the sub-tasks that
+      // we are launching in this context.
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
       // Keep track of inline mapping regions for this task
@@ -3952,7 +3962,8 @@ namespace Legion {
           const char *warning_string = NULL);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
-      virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition);
       virtual size_t query_available_memory(Memory target);
       virtual void release_memory_pool(Memory target);
     public:

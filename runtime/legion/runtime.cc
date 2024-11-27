@@ -8864,7 +8864,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ConcretePool::free_instance(PhysicalInstance instance)
+    void ConcretePool::free_instance(PhysicalInstance instance,
+                                     RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8887,22 +8888,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(backing_finder != backing_instances.end());
 #endif
-        backing_finder->first.destroy(backing_finder->second);
+        backing_finder->first.destroy(
+            Runtime::merge_events(backing_finder->second, precondition));
         backing_instances.erase(backing_finder);
       }
-      else
+      else if (finder->second != SENTINEL)
       {
-        std::map<PhysicalInstance,unsigned>::iterator finder = 
-          allocated.find(instance);
-#ifdef DEBUG_LEGION
-        assert(finder != allocated.end());
-#endif
-        if (finder->second != SENTINEL)
+        if (precondition.exists() && !precondition.has_triggered())
+          pending_frees.insert(std::make_pair(finder->second, precondition));
+        else
           deallocate(finder->second);
       }
       allocated.erase(finder);
       // Finally destroy the external Realm instance that we made
-      instance.destroy();
+      instance.destroy(precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8913,79 +8912,147 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(size > 0);
 #endif
-      // Walk the free lists from the smallest one big enough to have holes
-      // up to the one with the largest holes to find the smallest hole
-      // that we can use for this allocation
-      for (unsigned idx = floor_log2(size); 
-            idx < size_based_free_lists.size(); idx++)
+      bool try_again = true;
+      while (try_again)
       {
-        unsigned index = size_based_free_lists[idx];
-        while (index != SENTINEL)
+        // Walk the free lists from the smallest one big enough to have holes
+        // up to the one with the largest holes to find the smallest hole
+        // that we can use for this allocation
+        for (unsigned idx = floor_log2(size); 
+              idx < size_based_free_lists.size(); idx++)
         {
-          Range *r = &ranges[index];
+          unsigned index = size_based_free_lists[idx];
+          while (index != SENTINEL)
+          {
+            Range *r = &ranges[index];
 
-          size_t offset = 0;
-          if (alignment > 0)
-          {
-            size_t remainder = r->first % alignment;
-            if (remainder > 0)
-              offset = alignment - remainder;
-          }
-          // do we have enough space?
-          if ((r->last - r->first) < (size + offset))
-          {
-            // No, keep going
-            index = r->next_free;
-            continue;
-          }
-          // We have enough space
-          // Remove this from the current size free list
-          remove_from_free_list(index, *r);
-          // but we we may to chop things up to make the exact range
-          alloc_first = r->first + offset;
-          uintptr_t alloc_last = alloc_first + size;
-          // do we need to carve off a new (free) block before us?
-          if (offset > 0)
-          {
-            unsigned new_index = alloc_range(r->first, alloc_first,r->instance);
-            Range &new_prev = ranges[new_index];
-            r = &ranges[index];  // alloc may have moved this!
-            r->first = alloc_first;
-            // insert into all-block dllist
-            new_prev.prev = r->prev;
-            new_prev.next = index;
-            if (r->prev != SENTINEL)
-              ranges[r->prev].next = new_index;
-            r->prev = new_index;
-            // Insert into the free list of the appropriate size
-            add_to_free_list(new_index, new_prev); 
-          }
-          // see if we have leftover space and need to make a new range
-          // to represent the remainder
-          if (alloc_last != r->last) 
-          {
-            // case 2 - leftover at end - put in new range
-            unsigned after_index = alloc_range(alloc_last, r->last,r->instance);
-            Range &r_after = ranges[after_index];
-            r = &ranges[index];  // alloc may have moved this!
-            r->last = alloc_last;
-            // r_after goes after r in all block list
-            r_after.prev = index;
-            r_after.next = r->next;
-            r->next = after_index;
-            if (r_after.next != SENTINEL)
-              ranges[r_after.next].prev = after_index;
-            // Put r_after in the free list of the right size
-            add_to_free_list(after_index, r_after);
-          }
-          // tie this off because we use it to detect allocated-ness
-          r->prev_free = r->next_free = index;
-          // Decrement the number of free bytes available
+            size_t offset = 0;
+            if (alignment > 0)
+            {
+              size_t remainder = r->first % alignment;
+              if (remainder > 0)
+                offset = alignment - remainder;
+            }
+            // do we have enough space?
+            if ((r->last - r->first) < (size + offset))
+            {
+              // No, keep going
+              index = r->next_free;
+              continue;
+            }
+            // We have enough space
+            // Remove this from the current size free list
+            remove_from_free_list(index, *r);
+            // but we we may to chop things up to make the exact range
+            alloc_first = r->first + offset;
+            uintptr_t alloc_last = alloc_first + size;
+            // do we need to carve off a new (free) block before us?
+            if (offset > 0)
+            {
+              unsigned new_index =
+                alloc_range(r->first, alloc_first,r->instance);
+              Range &new_prev = ranges[new_index];
+              r = &ranges[index];  // alloc may have moved this!
+              r->first = alloc_first;
+              // insert into all-block dllist
+              new_prev.prev = r->prev;
+              new_prev.next = index;
+              if (r->prev != SENTINEL)
+                ranges[r->prev].next = new_index;
+              r->prev = new_index;
+              // Insert into the free list of the appropriate size
+              add_to_free_list(new_index, new_prev); 
+            }
+            // see if we have leftover space and need to make a new range
+            // to represent the remainder
+            if (alloc_last != r->last) 
+            {
+              // case 2 - leftover at end - put in new range
+              unsigned after_index = 
+                alloc_range(alloc_last, r->last,r->instance);
+              Range &r_after = ranges[after_index];
+              r = &ranges[index];  // alloc may have moved this!
+              r->last = alloc_last;
+              // r_after goes after r in all block list
+              r_after.prev = index;
+              r_after.next = r->next;
+              r->next = after_index;
+              if (r_after.next != SENTINEL)
+                ranges[r_after.next].prev = after_index;
+              // Put r_after in the free list of the right size
+              add_to_free_list(after_index, r_after);
+            }
+            // tie this off because we use it to detect allocated-ness
+            r->prev_free = r->next_free = index;
+            // Decrement the number of free bytes available
 #ifdef DEBUG_LEGION
-          assert(size <= remaining_bytes);
+            assert(size <= remaining_bytes);
 #endif
-          remaining_bytes -= size;
-          return index;
+            remaining_bytes -= size;
+            return index;
+          }
+        }
+        // If we made it here we couldn't find a hole, see if there
+        // are any pending frees that we can wait for to free up more
+        // space to use for doing the allocation
+        try_again = false;
+        unsigned smallest_index = ranges.size();
+        size_t smallest_hole = std::numeric_limits<size_t>::max();
+        // See if any of the pending frees are done and can be deallocated
+        // and that will allow us to try again
+        for (std::map<unsigned,RtEvent>::iterator it =
+              pending_frees.begin(); it != pending_frees.end(); /*nothing*/)
+        {
+          if (it->second.has_triggered())
+          {
+            try_again = true;
+            deallocate(it->first);
+            std::map<unsigned,RtEvent>::iterator delete_it = it++;
+            pending_frees.erase(delete_it);
+          }
+          else
+          {
+            // See if this has enough space for the allocation
+            const Range &range = ranges[it->first];
+            const size_t hole_size = range.last - range.first;
+            if ((size <= hole_size) && (hole_size < smallest_hole))
+            {
+              smallest_hole = hole_size;
+              smallest_index = it->first;
+            }
+            it++;
+          }
+        }
+        if (!try_again)
+        {
+          if (smallest_index < ranges.size())
+          {
+            // Wait for the smallest hole to be ready
+            try_again = true;
+            std::map<unsigned,RtEvent>::iterator finder =
+              pending_frees.find(smallest_index);
+#ifdef DEBUG_LEGION
+            assert(finder != pending_frees.end());
+#endif
+            deallocate(finder->first);
+            finder->second.wait();
+            pending_frees.erase(finder);
+          }
+          else if (!pending_frees.empty())
+          {
+            // Wait for all the tiny holes to be ready and then try again
+            try_again = true;
+            std::vector<RtEvent> done_events;
+            done_events.reserve(pending_frees.size());
+            for (std::map<unsigned,RtEvent>::const_iterator it =
+                  pending_frees.begin(); it != pending_frees.end(); it++)
+            {
+              deallocate(it->first);
+              done_events.push_back(it->second);
+            }
+            pending_frees.clear();
+            Runtime::merge_events(done_events).wait();
+          }
         }
       }
       // Failed to perform the allocation
@@ -9381,6 +9448,11 @@ namespace Legion {
     {
       if (!released)
       {
+        // Release all the pending frees
+        for (std::map<unsigned,RtEvent>::const_iterator it =
+              pending_frees.begin(); it != pending_frees.end(); it++)
+          deallocate(it->first);
+        pending_frees.clear();
         // Iterate over all the existing allocations and escape their ranges
         // and replace their backing stores with the escaped instances
         std::map<PhysicalInstance,RtEvent> new_backing_instances;
@@ -9683,9 +9755,11 @@ namespace Legion {
       // to use for this instance
       if (!freed_instances.empty())
       {
+        RtEvent ready;
         size_t previous_size = 0;
         Realm::InstanceLayoutGeneric *layout = NULL;
-        PhysicalInstance previous = find_local_freed_hole(size, previous_size);
+        PhysicalInstance previous =
+          find_local_freed_hole(size, previous_size, ready);
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a future instance
@@ -9724,7 +9798,8 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests, creator_uid,
                                                          unique_event);
           PhysicalInstance instance;
-          RtEvent use_event(previous.redistrict(instance, layout, requests));
+          RtEvent use_event(
+              previous.redistrict(instance, layout, requests, ready));
           if (allocator.succeeded())
           {
             size_t bytes_used = instance.get_layout()->bytes_used;
@@ -9740,7 +9815,7 @@ namespace Legion {
           }
           else
             manager->update_remaining_capacity(previous_size);
-          previous = find_local_freed_hole(size, previous_size);
+          previous = find_local_freed_hole(size, previous_size, ready);
         }
         if (layout != NULL)
           delete layout;
@@ -9752,11 +9827,12 @@ namespace Legion {
         // If it doesn't work, free all our freed instances (which are all
         // smaller than the size or we would have found a hole to use) and
         // then try again
-        for (std::map<size_t,std::vector<PhysicalInstance> >::const_iterator
+        for (std::map<size_t,
+             std::vector<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
              fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::vector<PhysicalInstance>::const_iterator it = 
-                fit->second.begin(); it != fit->second.end(); it++)
-            manager->free_task_local_instance(*it);
+          for (std::vector<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+                it = fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->first, it->second);
         freed_instances.clear();
         freed_bytes = 0;
       }
@@ -9776,9 +9852,10 @@ namespace Legion {
 #endif
       if (!freed_instances.empty())
       {
+        RtEvent ready;
         size_t previous_size = 0;
         PhysicalInstance previous =
-          find_local_freed_hole(layout->bytes_used, previous_size);
+          find_local_freed_hole(layout->bytes_used, previous_size, ready);
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a new instance
@@ -9794,7 +9871,8 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests, creator_uid,
                                                          unique_event);
           PhysicalInstance instance;
-          use_event = RtEvent(previous.redistrict(instance, layout, requests));
+          use_event = RtEvent(
+              previous.redistrict(instance, layout, requests, ready));
           if (allocator.succeeded())
           {
             size_t bytes_used = instance.get_layout()->bytes_used;
@@ -9807,7 +9885,8 @@ namespace Legion {
           }
           else
             manager->update_remaining_capacity(previous_size);
-          previous = find_local_freed_hole(layout->bytes_used, previous_size);
+          previous =
+            find_local_freed_hole(layout->bytes_used, previous_size, ready);
         }
         // Try to do the allocation the normal way
         PhysicalInstance instance = manager->create_task_local_instance(
@@ -9818,11 +9897,12 @@ namespace Legion {
         // If it doesn't work, free all our freed instances (which are all
         // smaller than the size or we would have found a hole to use) and
         // then try again
-        for (std::map<size_t,std::vector<PhysicalInstance> >::const_iterator
+        for (std::map<size_t,
+             std::vector<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
              fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::vector<PhysicalInstance>::const_iterator it = 
-                fit->second.begin(); it != fit->second.end(); it++)
-            manager->free_task_local_instance(*it);
+          for (std::vector<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+                it = fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->first, it->second);
         freed_instances.clear();
         freed_bytes = 0;
       }
@@ -9833,18 +9913,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance UnboundPool::find_local_freed_hole(size_t size,
-                                                        size_t &previous_size)
+                                          size_t &previous_size, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
-      std::map<size_t,std::vector<PhysicalInstance> >::iterator finder =
-        freed_instances.lower_bound(size);
+      std::map<size_t,
+        std::vector<std::pair<PhysicalInstance,RtEvent> > >::iterator finder =
+          freed_instances.lower_bound(size);
       if (finder == freed_instances.end())
         return PhysicalInstance::NO_INST;
 #ifdef DEBUG_LEGION
       assert(!finder->second.empty());
       assert(finder->first <= freed_bytes);
 #endif
-      PhysicalInstance result = finder->second.back();
+      PhysicalInstance result = finder->second.back().first;
+      ready = finder->second.back().second;
       finder->second.pop_back();
       freed_bytes -= finder->first;
       if (finder->second.empty())
@@ -9873,14 +9955,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UnboundPool::free_instance(PhysicalInstance instance)
+    void UnboundPool::free_instance(PhysicalInstance instance,
+                                    RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       if (!released && (max_freed_bytes > 0))
       {
         // Add it to the freed instances 
         const size_t size = instance.get_layout()->bytes_used;
-        freed_instances[size].push_back(instance);
+        freed_instances[size].emplace_back(
+            std::make_pair(instance, precondition));
         freed_bytes += size;
         if (max_freed_bytes < freed_bytes)
         {
@@ -9888,11 +9972,13 @@ namespace Legion {
           // until we're back under the limit of bytes we can buffer
           while (!freed_instances.empty())
           {
-            std::map<size_t,std::vector<PhysicalInstance> >::iterator it =
-              freed_instances.begin();
+            std::map<size_t,std::vector<
+              std::pair<PhysicalInstance,RtEvent> > >::iterator it =
+                freed_instances.begin();
             while (!it->second.empty())
             {
-              manager->free_task_local_instance(it->second.back());
+              manager->free_task_local_instance(
+                  it->second.back().first, it->second.back().second);
               it->second.pop_back();
               freed_bytes -= it->first;
               if (freed_bytes <= max_freed_bytes)
@@ -9907,7 +9993,7 @@ namespace Legion {
         }
       }
       else // Release it right away
-        manager->free_task_local_instance(instance);   
+        manager->free_task_local_instance(instance, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -9923,11 +10009,12 @@ namespace Legion {
     {
       if (!released)
       {
-        for (std::map<size_t,std::vector<PhysicalInstance> >::const_iterator
-             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::vector<PhysicalInstance>::const_iterator it = 
-                fit->second.begin(); it != fit->second.end(); it++)
-            manager->free_task_local_instance(*it);
+        for (std::map<size_t,std::vector<
+              std::pair<PhysicalInstance,RtEvent> > >::const_iterator fit =
+              freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::vector<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+                it = fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->first, it->second);
         manager->release_unbound_pool();
         freed_instances.clear();
         freed_bytes = 0;
