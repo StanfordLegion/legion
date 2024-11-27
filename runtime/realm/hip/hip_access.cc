@@ -91,7 +91,8 @@ namespace Realm {
   //
 
   ExternalHipMemoryResource::ExternalHipMemoryResource()
-    : hip_device_id(-1)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalHipMemoryResource))
+    , hip_device_id(-1)
     , base(0)
     , size_in_bytes(0)
     , read_only(false)
@@ -101,16 +102,17 @@ namespace Realm {
                                                        uintptr_t _base,
                                                        size_t _size_in_bytes,
                                                        bool _read_only)
-    : hip_device_id(_hip_device_id)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalHipMemoryResource))
+    , hip_device_id(_hip_device_id)
     , base(_base)
     , size_in_bytes(_size_in_bytes)
     , read_only(_read_only)
   {}
 
-  ExternalHipMemoryResource::ExternalHipMemoryResource(int _hip_device_id,
-                                                       void *_base,
+  ExternalHipMemoryResource::ExternalHipMemoryResource(int _hip_device_id, void *_base,
                                                        size_t _size_in_bytes)
-    : hip_device_id(_hip_device_id)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalHipMemoryResource))
+    , hip_device_id(_hip_device_id)
     , base(reinterpret_cast<uintptr_t>(_base))
     , size_in_bytes(_size_in_bytes)
     , read_only(false)
@@ -119,7 +121,8 @@ namespace Realm {
   ExternalHipMemoryResource::ExternalHipMemoryResource(int _hip_device_id,
                                                        const void *_base,
                                                        size_t _size_in_bytes)
-    : hip_device_id(_hip_device_id)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalHipMemoryResource))
+    , hip_device_id(_hip_device_id)
     , base(reinterpret_cast<uintptr_t>(_base))
     , size_in_bytes(_size_in_bytes)
     , read_only(true)
@@ -156,23 +159,31 @@ namespace Realm {
   //
 
   ExternalHipPinnedHostResource::ExternalHipPinnedHostResource()
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalHipPinnedHostResource);
+  }
 
   ExternalHipPinnedHostResource::ExternalHipPinnedHostResource(uintptr_t _base,
                                                                size_t _size_in_bytes,
                                                                bool _read_only)
     : ExternalMemoryResource(_base, _size_in_bytes, _read_only)
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalHipPinnedHostResource);
+  }
 
   ExternalHipPinnedHostResource::ExternalHipPinnedHostResource(void *_base,
                                                                size_t _size_in_bytes)
     : ExternalMemoryResource(_base, _size_in_bytes)
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalHipPinnedHostResource);
+  }
 
   ExternalHipPinnedHostResource::ExternalHipPinnedHostResource(const void *_base,
                                                                size_t _size_in_bytes)
     : ExternalMemoryResource(_base, _size_in_bytes)
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalHipPinnedHostResource);
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalHipPinnedHostResource::suggested_memory() const

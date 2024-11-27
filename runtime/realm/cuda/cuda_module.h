@@ -16,6 +16,7 @@
 #ifndef REALM_CUDA_H
 #define REALM_CUDA_H
 
+#include <type_traits>
 #include "realm/realm_config.h"
 #include "realm/module.h"
 #include "realm/processor.h"
@@ -29,6 +30,8 @@
 //  struct that those types are pointers to
 struct CUstream_st; // cudaStream_t == CUstream == CUstream_st *
 struct CUevent_st;
+struct CUctx_st;
+struct CUfunc_st;
 
 namespace Realm {
 
@@ -137,6 +140,7 @@ namespace Realm {
       int cfg_d2d_stream_priority = -1;
       bool cfg_use_cuda_ipc = true;
       int cfg_pageable_access = 0;
+      bool cfg_enable_cupti = true;
 
       // resources
       bool resource_discovered = false;
@@ -145,12 +149,20 @@ namespace Realm {
       std::vector<size_t> res_fbmem_sizes;
     };
 
+    struct CudaRedOpDesc {
+      ReductionOpID redop_id = 0;
+      Processor proc = Processor::NO_PROC;
+      CUfunc_st *apply_excl = nullptr;
+      CUfunc_st *apply_nonexcl = nullptr;
+      CUfunc_st *fold_excl = nullptr;
+      CUfunc_st *fold_nonexcl = nullptr;
+    };
 
     // our interface to the rest of the runtime
     class REALM_PUBLIC_API CudaModule : public Module {
     protected:
       CudaModule(RuntimeImpl *_runtime);
-      
+
     public:
       virtual ~CudaModule(void);
 
@@ -207,6 +219,10 @@ namespace Realm {
       bool get_cuda_device_uuid(Processor p, Uuid *uuid) const;
 
       bool get_cuda_device_id(Processor p, int *device) const;
+
+      bool get_cuda_context(Processor p, CUctx_st **context) const;
+
+      bool register_reduction(Event &event, const CudaRedOpDesc *descs, size_t num);
 
     public:
       CudaModuleConfig *config;

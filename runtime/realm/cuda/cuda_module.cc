@@ -49,6 +49,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <utility>
 
 #if CUDA_VERSION < 11030
 // Define cuGetProcAddress if it isn't defined, so we can query for it's existence later
@@ -100,10 +101,12 @@ namespace Realm {
     Logger log_gpudma("gpudma");
     Logger log_cudart("cudart");
     Logger log_cudaipc("cudaipc");
+    Logger log_cupti("cupti");
 
     Logger log_stream("gpustream");
     bool nvml_api_fnptrs_loaded = false;
     bool nvml_initialized = false;
+    bool cupti_api_fnptrs_loaded = false;
     CUresult cuda_init_code = CUDA_ERROR_UNKNOWN;
 
     bool cuda_api_fnptrs_loaded = false;
@@ -141,6 +144,7 @@ namespace Realm {
 #define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
 
     NVML_APIS(DEFINE_FNPTR);
+    CUPTI_APIS(DEFINE_FNPTR);
 #undef DEFINE_FNPTR
 
     // function pointers for cuda hook
@@ -233,15 +237,16 @@ namespace Realm {
       add_event(e, 0, notification);
     }
 
-    void GPUStream::add_event(CUevent event, GPUWorkFence *fence, 
-			      GPUCompletionNotification *notification, GPUWorkStart *start)
+    void GPUStream::add_event(CUevent event, GPUWorkFence *fence,
+                              GPUCompletionNotification *notification,
+                              GPUWorkStart *start)
     {
       bool add_to_worker = false;
       {
-	AutoLock<> al(mutex);
+        AutoLock<> al(mutex);
 
-	// if we didn't already have work AND if there's not an active
-	//  worker issuing copies, request attention
+        // if we didn't already have work AND if there's not an active
+        //  worker issuing copies, request attention
         add_to_worker = pending_events.empty();
 
         PendingEvent e;
@@ -254,7 +259,7 @@ namespace Realm {
       }
 
       if(add_to_worker)
-	worker->add_stream(this);
+        worker->add_stream(this);
     }
 
     void GPUStream::wait_on_streams(const std::set<GPUStream*> &other_streams)
@@ -402,9 +407,71 @@ namespace Realm {
     //
     // class GPUWorkFence
 
-    GPUWorkFence::GPUWorkFence(Realm::Operation *op)
+    GPUWorkFence::GPUWorkFence(GPU *_gpu, Realm::Operation *op)
       : Realm::Operation::AsyncWorkItem(op)
-    {}
+      , gpu(_gpu)
+    {
+      if(op->wants_gpu_work_start() && cupti_api_fnptrs_loaded &&
+         CUPTI_HAS_FNPTR(cuptiActivityEnableContext)) {
+        {
+          AutoLock<> al(gpu->alloc_mutex); // TODO(cperry): more fine grained lock
+          if(gpu->cupti_activity_refcount++ == 0) {
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityEnableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_KERNEL));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityEnableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_MEMCPY));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityEnableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_MEMCPY2));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityEnableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_MEMSET));
+            // Required for the external correlation apis to function
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityEnableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_DRIVER));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityEnableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_RUNTIME));
+          }
+        }
+      }
+    }
+
+    GPUWorkFence::~GPUWorkFence()
+    {
+      if(op->wants_gpu_work_start() && cupti_api_fnptrs_loaded &&
+         CUPTI_HAS_FNPTR(cuptiActivityDisableContext)) {
+        {
+          AutoLock<> al(gpu->alloc_mutex); // TODO(cperry): more fine grained lock
+          if(gpu->cupti_activity_refcount-- == 1) {
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityDisableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_KERNEL));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityDisableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_MEMCPY));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityDisableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_MEMCPY2));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityDisableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_MEMSET));
+            // Required for the external correlation apis to function
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityDisableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_DRIVER));
+            CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityDisableContext)(
+                gpu->context, CUPTI_ACTIVITY_KIND_RUNTIME));
+          }
+        }
+        CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityFlushAll)(0));
+      }
+    }
+
+    void GPUWorkFence::mark_finished(bool successful)
+    {
+      if(op->wants_gpu_work_start()) {
+        if(cupti_api_fnptrs_loaded && CUPTI_HAS_FNPTR(cuptiActivityFlushAll)) {
+          // Flush all the activities for this so we can retrieve them now
+          CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityFlushAll)(0));
+        } else {
+          op->add_gpu_work_end(Clock::current_time_in_nanoseconds());
+        }
+      }
+      AsyncWorkItem::mark_finished(successful);
+    }
 
     void GPUWorkFence::request_cancellation(void)
     {
@@ -764,11 +831,18 @@ namespace Realm {
 
       // we'll use a "work fence" to track when the kernels launched by this task actually
       //  finish - this must be added to the task _BEFORE_ we execute
-      GPUWorkFence *fence = new GPUWorkFence(task);
+      Event finish_event = task->get_finish_event();
+      GPUWorkFence *fence = new GPUWorkFence(gpu, task);
       task->add_async_work_item(fence);
 
-      // event to record the GPU start time for the task, if requested
-      if(task->wants_gpu_work_start()) {
+      // Push the finish event as the unique ID for this task for correlation later.
+      if(cupti_api_fnptrs_loaded &&
+         CUPTI_HAS_FNPTR(cuptiActivityPushExternalCorrelationId) &&
+         finish_event != Event::NO_EVENT) {
+        CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityPushExternalCorrelationId)(
+            CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2, finish_event.id));
+      } else if(task->wants_gpu_work_start()) {
+        // event to record the GPU start time for the task, if requested
         GPUWorkStart *start = new GPUWorkStart(task);
         task->add_async_work_item(start);
         start->enqueue_on_stream(s);
@@ -853,6 +927,15 @@ namespace Realm {
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
       CHECK_CU( CUDA_DRIVER_FNPTR(cuStreamSynchronize)(s->get_stream()) );
 #endif
+
+      // Pop the finish event as the unique ID for this task for correlation later.
+      Event finish_event = task->get_finish_event();
+      if(cupti_api_fnptrs_loaded && (finish_event != Event::NO_EVENT)) {
+        uint64_t id = 0;
+        CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityPopExternalCorrelationId)(
+            CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2, &id));
+        assert(id == finish_event.id);
+      }
 
       // pop the CUDA context for this GPU back off
       gpu->pop_context();
@@ -1115,32 +1198,40 @@ namespace Realm {
 
       return nullptr;
     }
+    bool GPU::register_reduction(ReductionOpID redop_id, CUfunction apply_excl,
+                                 CUfunction apply_nonexcl, CUfunction fold_excl,
+                                 CUfunction fold_nonexcl)
+    {
+      AutoLock<> al(alloc_mutex);
+      return gpu_reduction_table
+          .insert({redop_id, {apply_excl, apply_nonexcl, fold_excl, fold_nonexcl}})
+          .second;
+    }
 
     bool GPUProcessor::register_task(Processor::TaskFuncID func_id,
-				     CodeDescriptor& codedesc,
-				     const ByteArrayRef& user_data)
+                                     CodeDescriptor &codedesc,
+                                     const ByteArrayRef &user_data)
     {
       // see if we have a function pointer to register
       const FunctionPointerImplementation *fpi =
           codedesc.find_impl<FunctionPointerImplementation>();
 
       // if we don't have a function pointer implementation, see if we can make one
-      if(!fpi) {
-        const std::vector<CodeTranslator *> &translators =
-            get_runtime()->get_code_translators();
-        for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
-            it != translators.end(); it++)
-          if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
-            FunctionPointerImplementation *newfpi =
-                (*it)->translate<FunctionPointerImplementation>(codedesc);
-            if(newfpi) {
-              log_taskreg.info() << "function pointer created: trans=" << (*it)->name
-                                 << " fnptr=" << (void *)(newfpi->fnptr);
-              codedesc.add_implementation(newfpi);
-              fpi = newfpi;
-              break;
-            }
+      if(fpi == nullptr) {
+        for(CodeTranslator *const translator : get_runtime()->get_code_translators()) {
+          if(!translator->can_translate<FunctionPointerImplementation>(codedesc)) {
+            continue;
           }
+          FunctionPointerImplementation *newfpi =
+              translator->translate<FunctionPointerImplementation>(codedesc);
+          if(newfpi) {
+            log_taskreg.info() << "function pointer created: trans=" << translator->name
+                               << " fnptr=" << (void *)(newfpi->fnptr);
+            codedesc.add_implementation(newfpi);
+            fpi = newfpi;
+            break;
+          }
+        }
       }
 
       assert(fpi != 0);
@@ -1170,6 +1261,19 @@ namespace Realm {
                               << codedesc.type();
           assert(0);
         }
+        // figure out what type of function we have
+        if(codedesc.type() == TypeConv::from_cpp_type<Processor::TaskFuncPtr>()) {
+          tte.fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
+          tte.stream_aware_fnptr = 0;
+        } else if(codedesc.type() ==
+                  TypeConv::from_cpp_type<Cuda::StreamAwareTaskFuncPtr>()) {
+          tte.fnptr = 0;
+          tte.stream_aware_fnptr = (Cuda::StreamAwareTaskFuncPtr)(fpi->fnptr);
+        } else {
+          log_taskreg.fatal() << "attempt to register a task function of improper type: "
+                              << codedesc.type();
+          assert(0);
+        }
 
         tte.user_data = user_data;
       }
@@ -1183,39 +1287,41 @@ namespace Realm {
     void GPUProcessor::execute_task(Processor::TaskFuncID func_id,
                                     const ByteArrayRef &task_args)
     {
-      if(func_id == Processor::TASK_ID_PROCESSOR_NOP)
+      const GPUTaskTableEntry *tte = nullptr;
+      if(func_id == Processor::TASK_ID_PROCESSOR_NOP) {
         return;
+      }
 
-      std::map<Processor::TaskFuncID, GPUTaskTableEntry>::const_iterator it;
       {
         RWLock::AutoReaderLock al(task_table_mutex);
 
-        it = gpu_task_table.find(func_id);
+        std::map<Processor::TaskFuncID, GPUTaskTableEntry>::const_iterator it =
+            gpu_task_table.find(func_id);
         if(it == gpu_task_table.end()) {
           log_taskreg.fatal() << "task " << func_id << " not registered on " << me;
           assert(0);
         }
+        tte = &it->second;
       }
 
-      const GPUTaskTableEntry &tte = it->second;
-
-      if(tte.stream_aware_fnptr) {
+      if(tte->stream_aware_fnptr) {
         // shouldn't be here without a valid stream
-        assert(ThreadLocal::current_gpu_stream);
+        assert(ThreadLocal::current_gpu_stream != nullptr);
         CUstream stream = ThreadLocal::current_gpu_stream->get_stream();
 
         log_taskreg.debug() << "task " << func_id << " executing on " << me << ": "
-                            << ((void *)(tte.stream_aware_fnptr)) << " (stream aware)";
+                            << ((void *)(tte->stream_aware_fnptr)) << " (stream aware)";
 
-        (tte.stream_aware_fnptr)(task_args.base(), task_args.size(), tte.user_data.base(),
-                                 tte.user_data.size(), me, stream);
+        (tte->stream_aware_fnptr)(task_args.base(), task_args.size(),
+                                  tte->user_data.base(), tte->user_data.size(), me,
+                                  stream);
       } else {
-        assert(tte.fnptr);
+        assert(tte->fnptr != nullptr);
         log_taskreg.debug() << "task " << func_id << " executing on " << me << ": "
-                            << ((void *)(tte.fnptr));
+                            << ((void *)(tte->fnptr));
 
-        (tte.fnptr)(task_args.base(), task_args.size(), tte.user_data.base(),
-                    tte.user_data.size(), me);
+        (tte->fnptr)(task_args.base(), task_args.size(), tte->user_data.base(),
+                     tte->user_data.size(), me);
       }
     }
 
@@ -1503,27 +1609,28 @@ namespace Realm {
     bool GPUFBMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
                                                          size_t& inst_offset)
     {
+      switch(inst->metadata.ext_resource->get_type_id()) {
+      case REALM_HASH_TOKEN(ExternalCudaMemoryResource):
       {
-        ExternalCudaMemoryResource *res = dynamic_cast<ExternalCudaMemoryResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = res->base - base; // offset relative to our base
-          return true;
-        }
+        ExternalCudaMemoryResource *res =
+            static_cast<ExternalCudaMemoryResource *>(inst->metadata.ext_resource);
+        // automatic success
+        inst_offset = res->base - base; // offset relative to our base
+        return true;
+      }
+      case REALM_HASH_TOKEN(ExternalCudaArrayResource):
+      {
+        ExternalCudaArrayResource *res =
+            static_cast<ExternalCudaArrayResource *>(inst->metadata.ext_resource);
+        // automatic success
+        inst_offset = 0;
+        inst->metadata.add_mem_specific(new MemSpecificCudaArray(res->array));
+        return true;
+      }
+      default:
+        break;
       }
 
-      {
-        ExternalCudaArrayResource *res = dynamic_cast<ExternalCudaArrayResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = 0;
-          CUarray array = reinterpret_cast<CUarray>(res->array);
-          inst->metadata.add_mem_specific(new MemSpecificCudaArray(array));
-          return true;
-        }
-      }
-
-      // not a kind we recognize
       return false;
     }
 
@@ -2456,6 +2563,7 @@ namespace Realm {
           .add_option_int("-cuda:mtdma", cfg_multithread_dma)
           .add_option_int_units("-cuda:hostreg", cfg_hostreg_limit, 'm')
           .add_option_int("-cuda:pageable_access", cfg_pageable_access)
+          .add_option_int("-cuda:cupti", cfg_enable_cupti)
           .add_option_int("-cuda:ipc", cfg_use_cuda_ipc);
 #ifdef REALM_USE_CUDART_HIJACK
       cp.add_option_int("-cuda:nongpusync", Cuda::cudart_hijack_nongpu_sync);
@@ -2641,6 +2749,45 @@ namespace Realm {
 #endif
     }
 
+    static bool resolve_cupti_api_fnptrs()
+    {
+#if defined(REALM_USE_LIBDL)
+      void *libcupti = NULL;
+      if(cupti_api_fnptrs_loaded) {
+        return true;
+      }
+      log_gpu.info("dynamically loading libcupti.so");
+      libcupti = dlopen("libcupti.so", RTLD_NOW);
+      if(libcupti == NULL) {
+        log_gpu.info("Failed to retrieve libcupti.so from LD_LIBRARY_PATH, trying "
+                     "/usr/local/cuda/extras/CUPTI/lib64!");
+        libcupti = dlopen("/usr/local/cuda/extras/CUPTI/lib64/libcupti.so", RTLD_NOW);
+        if(libcupti == NULL) {
+          log_gpu.info() << "Could not open libcupti.so" << strerror(errno);
+          return false;
+        }
+      }
+
+#define DRIVER_GET_FNPTR(name)                                                           \
+  do {                                                                                   \
+    void *sym = dlsym(libcupti, STRINGIFY(name));                                        \
+    if(!sym) {                                                                           \
+      log_gpu.info() << "symbol '" STRINGIFY(name) " missing from libcupti.so!";         \
+    }                                                                                    \
+    name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                               \
+  } while(0)
+
+      CUPTI_APIS(DRIVER_GET_FNPTR);
+#undef DRIVER_GET_FNPTR
+
+      log_gpu.info() << "Loaded cupti!";
+      cupti_api_fnptrs_loaded = true;
+      return true;
+#else
+      return false;
+#endif
+    }
+
     /*static*/ ModuleConfig *CudaModule::create_module_config(RuntimeImpl *runtime)
     {
       CudaModuleConfig *config = new CudaModuleConfig();
@@ -2688,6 +2835,215 @@ namespace Realm {
                      static_cast<int>(field_value.valueType));
         break;
       }
+    }
+
+    static std::ostream &operator<<(std::ostream &s, const CUpti_ActivityAPI &activity)
+    {
+      return s << "CUPTIActivityAPI[corrId=" << activity.correlationId << ','
+               << "cbid=" << activity.cbid << ',' << "start=" << activity.start << ','
+               << "end=" << activity.end << ']';
+    }
+
+    static std::ostream &operator<<(std::ostream &s,
+                                    const CUpti_ActivityKernel3 &activity)
+    {
+      return s << "CUPTIActivityKernel[corrId=" << activity.correlationId << ','
+               << "name=" << activity.name << ',' << "devId=" << activity.deviceId << ','
+               << "start=" << activity.start << ',' << "end=" << activity.end << ']';
+    }
+
+    static std::ostream &operator<<(std::ostream &s,
+                                    const CUpti_ActivityExternalCorrelation &activity)
+    {
+      return s << "CUPTIActivityExternalCorrelation[kind=" << activity.externalKind << ','
+               << "extid=" << activity.externalId << ','
+               << "corid=" << activity.correlationId << ']';
+    }
+    static std::ostream &operator<<(std::ostream &s,
+                                    const CUpti_ActivityMemcpy3 &activity)
+    {
+      return s << "CUPTIActivityMemcpy5[start=" << activity.start << ','
+               << "end=" << activity.end << ',' << "corid=" << activity.correlationId
+               << ']';
+    }
+    static std::ostream &operator<<(std::ostream &s,
+                                    const CUpti_ActivityMemcpyPtoP &activity)
+    {
+      return s << "CUPTIActivityMemcpyPtoP4[start=" << activity.start << ','
+               << "end=" << activity.end << ',' << "corid=" << activity.correlationId
+               << ']';
+    }
+    static std::ostream &operator<<(std::ostream &s, const CUpti_ActivityMemset &activity)
+    {
+      return s << "CUPTIActivityMemset[start=" << activity.start << ','
+               << "end=" << activity.end << ',' << "corid=" << activity.correlationId
+               << ']';
+    }
+
+    static std::ostream &operator<<(std::ostream &s, const CUpti_Activity &activity)
+    {
+      switch(activity.kind) {
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_KERNEL:
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
+        return s << reinterpret_cast<const CUpti_ActivityKernel3 &>(activity);
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
+        return s << reinterpret_cast<const CUpti_ActivityExternalCorrelation &>(activity);
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_DRIVER:
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_RUNTIME:
+        return s << reinterpret_cast<const CUpti_ActivityAPI &>(activity);
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_MEMCPY:
+        return s << reinterpret_cast<const CUpti_ActivityMemcpy3 &>(activity);
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_MEMCPY2:
+        return s << reinterpret_cast<const CUpti_ActivityMemcpyPtoP &>(activity);
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_MEMSET:
+        return s << reinterpret_cast<const CUpti_ActivityMemset &>(activity);
+      default:
+        return s << "CUPTIActivityUnknown[kind=" << activity.kind << ']';
+      }
+    }
+
+    static void cupti_handle_activity(CUpti_Activity *record,
+                                      Operation *&current_operation,
+                                      uint64_t &operation_corrId)
+    {
+      // Ugh, to work around the fact that ID(T) is not explicit... Will fix later.
+      if(log_cupti.want_debug()) {
+        std::stringstream ss;
+        ss << *record;
+        log_cupti.debug("Received %s", ss.str().c_str());
+      }
+
+      // Note: The reinterpret_cast types here are carefully chosen to pick the oldest
+      // structure that is forward ABI compatible for all the versions of CUPTI we may
+      // need to support.  When adding items here, make sure it is the oldest that has the
+      // same offsets for the members you're interested in (most of the structures CUPTI
+      // exposes only extend the end of the structure, so usually the oldest defined
+      // structure is fine, but some exceptions exist)
+      switch(record->kind) {
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_MEMCPY:
+      {
+        CUpti_ActivityMemcpy3 *memcpy_activity =
+            reinterpret_cast<CUpti_ActivityMemcpy3 *>(record);
+        if((memcpy_activity->correlationId != operation_corrId) ||
+           (current_operation == nullptr)) {
+          log_cupti.info("\tNot related to the current correlation record, ignoring...");
+          return;
+        }
+        current_operation->add_gpu_work_start(memcpy_activity->start);
+        current_operation->add_gpu_work_end(memcpy_activity->end);
+      } break;
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_MEMCPY2:
+      {
+        CUpti_ActivityMemcpyPtoP *memcpy_activity =
+            reinterpret_cast<CUpti_ActivityMemcpyPtoP *>(record);
+        if((memcpy_activity->correlationId != operation_corrId) ||
+           (current_operation == nullptr)) {
+          log_cupti.info("\tNot related to the current correlation record, ignoring...");
+          return;
+        }
+        current_operation->add_gpu_work_start(memcpy_activity->start);
+        current_operation->add_gpu_work_end(memcpy_activity->end);
+      } break;
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_MEMSET:
+      {
+        CUpti_ActivityMemset4 *memset_activity =
+            reinterpret_cast<CUpti_ActivityMemset4 *>(record);
+        if((memset_activity->correlationId != operation_corrId) ||
+           (current_operation == nullptr)) {
+          log_cupti.info("\tNot related to the current correlation record, ignoring...");
+          return;
+        }
+        current_operation->add_gpu_work_start(memset_activity->start);
+        current_operation->add_gpu_work_end(memset_activity->end);
+      } break;
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_KERNEL:
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
+      {
+        CUpti_ActivityKernel3 *kernel_activity =
+            reinterpret_cast<CUpti_ActivityKernel3 *>(record);
+        if((kernel_activity->correlationId != operation_corrId) ||
+           (current_operation == nullptr)) {
+          log_cupti.info("\tNot related to the current correlation record, ignoring...");
+          return;
+        }
+        current_operation->add_gpu_work_start(kernel_activity->start);
+        current_operation->add_gpu_work_end(kernel_activity->end);
+      } break;
+      case CUpti_ActivityKind::CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION:
+      {
+        // Retrieve the finish_event -> operation for the given external
+        // correlation id so the next records with this correlation id we
+        // find we'll know the operation to update.  This activity is
+        // pushed just before every other real activity.
+        bool poisoned = false;
+        ID id;
+        GenEventImpl *event_impl = nullptr;
+        CUpti_ActivityExternalCorrelation *ext_corr_activity =
+            reinterpret_cast<CUpti_ActivityExternalCorrelation *>(record);
+        if(ext_corr_activity->externalKind != CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2) {
+          log_cupti.info("\tIgnoring unknown external coorelation record");
+          return;
+        }
+        id = ID(ID::IDType(ext_corr_activity->externalId));
+
+        event_impl = get_runtime()->get_genevent_impl(id.convert<Event>());
+        if(event_impl == nullptr) {
+          log_cupti.info("\tCorrelated gen event not found, ignoring...");
+          return;
+        }
+        if(event_impl->has_triggered(id.event_generation(), poisoned)) {
+          log_cupti.info("\tFound an activity record for a task that has already "
+                         "completed.  Ignoring...");
+          return;
+        }
+        current_operation = event_impl->current_trigger_op;
+        operation_corrId = ext_corr_activity->correlationId;
+      } break;
+      default:
+        log_cupti.info("Ignoring unhandled activity %d", static_cast<int>(record->kind));
+        break;
+      }
+    }
+
+    // Quick buffer allocator callback for cupti
+    static void CUPTIAPI cupti_request_buffer_cb(uint8_t **buffer, size_t *size,
+                                                 size_t *max_num_records)
+    {
+      // TODO(cperry): leverage some reuse of the allocated buffers as needed.
+      static const size_t BUFFER_SIZE = 32ULL * 1024ULL * sizeof(uint8_t);
+      static const size_t ALIGNMENT = 128;
+      *size = BUFFER_SIZE;
+      *buffer = reinterpret_cast<uint8_t *>(aligned_alloc(ALIGNMENT, BUFFER_SIZE));
+      *max_num_records = 0;
+    }
+
+    // Handles when a buffer is complete and in need of processing.
+    static void CUPTIAPI cupti_buffer_complete_cb(CUcontext, uint32_t, uint8_t *buffer,
+                                                  size_t size, size_t valid_size)
+    {
+      if(valid_size > 0) {
+        CUpti_Activity *record = nullptr;
+        CUptiResult status = CUPTI_SUCCESS;
+        Operation *current_op = nullptr;
+        uint64_t current_op_corrId = 0;
+        while(status == CUPTI_SUCCESS) {
+          status = CUPTI_FNPTR(cuptiActivityGetNextRecord)(buffer, valid_size, &record);
+          if(status == CUPTI_SUCCESS) {
+            cupti_handle_activity(record, current_op, current_op_corrId);
+          }
+        }
+        if(status != CUPTI_ERROR_MAX_LIMIT_REACHED) {
+          REPORT_CUPTI_ERROR(Logger::LEVEL_ERROR, "cuptiActivityGetNextRecord", status);
+        }
+      }
+      // TODO(cperry): append buffer to free list for reuse?
+      free(buffer);
+    }
+
+    // Quick callback for cupti for timeline correlation
+    static uint64_t CUPTIAPI cupti_timestamp_cb(void)
+    {
+      return Clock::current_time_in_nanoseconds();
     }
 
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime)
@@ -2740,6 +3096,10 @@ namespace Realm {
           log_gpu.info() << "Unable to initialize nvml: Error(" << (unsigned long long)res
                          << ')';
         }
+      }
+
+      if(m->config->cfg_enable_cupti && !resolve_cupti_api_fnptrs()) {
+        log_cupti.info() << "Unable to load cupti, gpu timelines may be inaccurate";
       }
 
       // create GPUInfo
@@ -3536,6 +3896,19 @@ namespace Realm {
       }
 
       Module::create_dma_channels(runtime);
+
+      if(cupti_api_fnptrs_loaded &&
+         CUPTI_HAS_FNPTR(cuptiActivityPushExternalCorrelationId)) {
+        // Wait until the clock is fully calibrated before we register the timestamp
+        // callback, otherwise cupti will normalize to the wrong timestamp and the GPU
+        // timings will be incorrectly translated
+        CHECK_CUPTI(
+            CUPTI_FNPTR(cuptiActivityRegisterTimestampCallback)(cupti_timestamp_cb));
+        CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityRegisterCallbacks)(
+            cupti_request_buffer_cb, cupti_buffer_complete_cb));
+        CHECK_CUPTI(
+            CUPTI_FNPTR(cuptiActivityEnable)(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION));
+      }
     }
 
     // create any code translators provided by the module (default == do nothing)
@@ -3687,6 +4060,62 @@ namespace Realm {
       }
       // can not find the Processor p, so return false
       return false;
+    }
+
+    bool CudaModule::get_cuda_context(Processor p, CUctx_st **context) const
+    {
+      for(const GPU *gpu : gpus) {
+        if((gpu->proc->me) == p) {
+          *context = const_cast<CUcontext>(gpu->context);
+          return true;
+        }
+      }
+      // can not find the Processor p, so return false
+      return false;
+    }
+
+    bool CudaModule::register_reduction(Event &event, const CudaRedOpDesc *descs,
+                                        size_t num)
+    {
+      std::vector<GPU *> redop_gpus(num, nullptr);
+      std::vector<Event> events(num, Event::NO_EVENT);
+
+      // Double check that all specified processors are GPU processors
+      for(size_t didx = 0; didx < num; didx++) {
+        // Ensure there's a reduction operator available
+        ReductionOpUntyped *redop_untyped =
+            get_runtime()->reduce_op_table.get(descs[didx].redop_id, nullptr);
+        if(redop_untyped == nullptr) {
+          log_gpu.debug("Failed to find pre-registered reduction operator");
+          return false;
+        }
+        for(GPU *g : gpus) {
+          if((g->proc->me) == descs[didx].proc) {
+            redop_gpus[didx] = g;
+            break;
+          }
+        }
+        if(redop_gpus[didx] == nullptr) {
+          return false;
+        }
+      }
+
+      bool failed_reg = false;
+      for(size_t didx = 0; didx < num; didx++) {
+        if(!redop_gpus[didx]->register_reduction(
+               descs[didx].redop_id, descs[didx].apply_excl, descs[didx].apply_nonexcl,
+               descs[didx].fold_excl, descs[didx].fold_nonexcl)) {
+          failed_reg = true;
+          break;
+        }
+        // Update everyone's view of the reduction api
+        // TODO: batch this notification to reduce the number of separate messages sent
+        events[didx] = get_runtime()->notify_register_reduction(descs[didx].redop_id);
+      }
+
+      event = Event::merge_events(events);
+
+      return !failed_reg;
     }
 
     ////////////////////////////////////////////////////////////////////////

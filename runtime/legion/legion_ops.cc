@@ -11521,7 +11521,7 @@ namespace Legion {
         if (refinement_node->is_region())
         {
           RegionNode *root = refinement_node->as_region_node();
-          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+          LegionSpy::log_logical_requirement(unique_op_id, creator_req_idx,
                                         true/*region*/,
                                         root->handle.index_space.id,
                                         root->handle.field_space.id,
@@ -11532,7 +11532,7 @@ namespace Legion {
         else
         {
           PartitionNode *root = refinement_node->as_partition_node();
-          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+          LegionSpy::log_logical_requirement(unique_op_id, creator_req_idx,
                                         false/*region*/,
                                         root->handle.index_partition.id,
                                         root->handle.field_space.id,
@@ -11560,7 +11560,7 @@ namespace Legion {
       {
         std::set<FieldID> fields;
         refinement_node->column_source->get_field_set(mask, parent_ctx, fields);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
+        LegionSpy::log_requirement_fields(unique_op_id, creator_req_idx,fields);
       }
     }
 
@@ -15081,7 +15081,7 @@ namespace Legion {
                 continue;
               // Update the dependence type
               DependenceType internal_dtype = 
-                check_dependence_type<true/*reductions interfere*/>(
+                check_dependence_type<true,true/*reductions interfere*/>(
                                 RegionUsage(src_req), RegionUsage(dst_req));
               record_intra_must_epoch_dependence(src_index, src_idx, it->first,
                                                  it->second, internal_dtype);
@@ -15131,7 +15131,7 @@ namespace Legion {
         if (runtime->forest->are_disjoint_tree_only(src_node, dst_node, dummy))
           return false;
         // Update the dependence type
-        dtype = check_dependence_type<true/*reductions interfere*/>(
+        dtype = check_dependence_type<true,true/*reductions interfere*/>(
                           RegionUsage(src_req), RegionUsage(dst_req));
       }
       else

@@ -30,13 +30,7 @@ namespace Realm {
     {
       return ((serdez & b.pc_hash) &&
               (serdez & b.pcs) &&
-#ifdef REALM_USE_LIBDW
-              (serdez & b.symbols) &&
-              (serdez & b.filenames) &&
-              (serdez & b.line_numbers));
-#else
               (serdez & b.symbols));
-#endif
     }
 
 }; // namespace Realm
