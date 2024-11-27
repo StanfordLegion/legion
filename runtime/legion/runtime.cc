@@ -8790,9 +8790,14 @@ namespace Legion {
 #endif
       std::map<PhysicalInstance,unsigned>::iterator finder = 
         allocated.find(instance);
-#ifdef DEBUG_LEGION
-      assert(finder != allocated.end());
-#endif
+      if (finder == allocated.end())
+        REPORT_LEGION_ERROR(ERROR_POOL_USE_AFTER_FREE,
+            "Detected a use-after-free case for instance " IDFMT
+            " in memory %s by task %s (UID %lld) while trying to "
+            "escape the instance for an output region.",
+            instance.id, manager->get_name(), 
+            implicit_context->get_task_name(),
+            implicit_context->get_unique_id())
       const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
       if (layouts == NULL)
       {
@@ -8873,6 +8878,15 @@ namespace Legion {
 #endif
       std::map<PhysicalInstance,unsigned>::iterator finder = 
         allocated.find(instance);
+      if (finder == allocated.end())
+        REPORT_LEGION_ERROR(ERROR_POOL_USE_AFTER_FREE,
+            "Detected a duplicate delete for instance " IDFMT
+            " in memory %s by task %s (UID %lld). This most likely "
+            "means that you called 'destroy' on your deferred buffer "
+            " or deferred value twice which is illegal.",
+            instance.id, manager->get_name(), 
+            implicit_context->get_task_name(),
+            implicit_context->get_unique_id())
 #ifdef DEBUG_LEGION
       assert(finder != allocated.end());
 #endif
@@ -8895,7 +8909,7 @@ namespace Legion {
       else if (finder->second != SENTINEL)
       {
         if (precondition.exists() && !precondition.has_triggered())
-          pending_frees.insert(std::make_pair(finder->second, precondition));
+          pending_frees.emplace(std::make_pair(finder->second, precondition));
         else
           deallocate(finder->second);
       }
