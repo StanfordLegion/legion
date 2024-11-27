@@ -16152,8 +16152,8 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T> &p) const;
     public:
-      void destroy();
-      Realm::RegionInstance get_instance() const;
+      void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
+      Realm::RegionInstance get_instance(void) const;
     protected:
       friend class OutputRegion;
       Realm::RegionInstance instance;
@@ -16644,11 +16644,11 @@ namespace Legion {
 #else
               CB
 #endif
-              >::destroy()
+              >::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance);
+      runtime->destroy_task_local_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
     }
 
@@ -16664,7 +16664,7 @@ namespace Legion {
 #else
               CB
 #endif
-              >::get_instance() const
+              >::get_instance(void) const
     //--------------------------------------------------------------------------
     {
       return instance;
@@ -17182,11 +17182,11 @@ namespace Legion {
 #else
               true
 #endif
-              >::destroy()
+              >::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance);
+      runtime->destroy_task_local_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
     }
 
@@ -17202,7 +17202,7 @@ namespace Legion {
 #else
               true
 #endif
-              >::get_instance() const
+              >::get_instance(void) const
     //--------------------------------------------------------------------------
     {
       return instance;
@@ -17614,11 +17614,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void UntypedDeferredBuffer<T>::destroy(void)
+    inline void UntypedDeferredBuffer<T>::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance);
+      runtime->destroy_task_local_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
       field_size = 0;
       dims = 0;

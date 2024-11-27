@@ -3595,6 +3595,9 @@ namespace Legion {
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(output_regions.empty());
+#endif
       Mapper::ContextConfigOutput configuration;
       configure_execution_context(configuration);
 
@@ -4680,9 +4683,9 @@ namespace Legion {
       // If we haven't computed our virtual mapping information
       // yet (e.g. because we origin mapped) then we have to
       // do that now
-      if (virtual_mapped.size() != regions.size())
+      if (virtual_mapped.empty())
       {
-        virtual_mapped.resize(regions.size());
+        virtual_mapped.resize(regions.size(), false);
         for (unsigned idx = 0; idx < regions.size(); idx++)
           virtual_mapped[idx] = physical_instances[idx].is_virtual_mapping();
       }
@@ -8309,6 +8312,12 @@ namespace Legion {
                              shard_id, get_unique_id());
       if (!leaf_task)
       {
+#ifdef DEBUG_LEGION
+        // Should have checked that we don't have any output regions here
+        assert(output_regions.empty());
+        assert(virtual_mapped.size() == regions.size());
+        assert(parent_req_indexes.size() == regions.size());
+#endif
         // If we have a control replication context then we do the special path.
         const Mapper::ContextConfigOutput &configuration =
           shard_manager->context_configuration;
