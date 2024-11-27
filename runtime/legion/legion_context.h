@@ -1910,6 +1910,14 @@ namespace Legion {
       Mapper::ContextConfigOutput           context_configuration;
       TaskTreeCoordinates                   context_coordinates;
     protected:
+      // TODO: In the future convert these into std::span so that they
+      // are bounded from above by regions.size(), in practice they might
+      // actually be bigger than that since the owner task might have 
+      // output regions which means these will be as big as 
+      // regions.size() + output_regions.size(), but we don't actually
+      // want to think of them that way since the output regions this
+      // task is producing don't have any bearing on the sub-tasks that
+      // we are launching in this context.
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
       // Keep track of inline mapping regions for this task
