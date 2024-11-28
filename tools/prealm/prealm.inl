@@ -60,7 +60,7 @@ public:
   public:
     ProcID proc_id;
     Processor::Kind kind;
-#ifdef LEGION_USE_CUDA
+#ifdef REALM_USE_CUDA
     Realm::Cuda::Uuid cuda_device_uuid;
 #endif
   };
