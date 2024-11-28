@@ -753,11 +753,18 @@ impl Proc {
         self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
-    fn update_prof_task_times(&mut self, prof_uid: ProfUID, create: Timestamp, ready: Timestamp) {
+    fn update_prof_task_times(
+        &mut self,
+        prof_uid: ProfUID,
+        new_creator_uid: Option<ProfUID>,
+        create: Timestamp,
+        ready: Timestamp,
+    ) {
         let entry = self.entries.get_mut(&prof_uid).unwrap();
         assert!(entry.kind == ProcEntryKind::ProfTask);
         assert!(entry.time_range.create.is_none());
         assert!(entry.time_range.ready.is_none());
+        entry.creator = new_creator_uid;
         entry.time_range.create = Some(create);
         entry.time_range.ready = Some(ready);
     }
@@ -3795,11 +3802,16 @@ impl State {
         }
         // for each prof task find it's creator and fill in the appropriate
         // creation and ready times
+        // Note this also swaps the creator from pointing at the thing the profiling
+        // task was profiling (copy, fill, inst, task) over to the task that actually
+        // made the thing that we're profiling so that the right thing is being pointed
+        // to for when we got to do the critical path analysis
         for (prof_uid, (creator_uid, completion)) in profs {
-            let (create, ready) = self.find_prof_task_times(creator_uid, completion);
+            let (new_creator_uid, create, ready) =
+                self.find_prof_task_times(creator_uid, completion);
             let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
             let proc = self.procs.get_mut(&proc_id).unwrap();
-            proc.update_prof_task_times(prof_uid, create, ready);
+            proc.update_prof_task_times(prof_uid, new_creator_uid, create, ready);
         }
         self.has_prof_data = true;
     }
@@ -3808,7 +3820,7 @@ impl State {
         &self,
         creator_uid: ProfUID,
         completion: bool,
-    ) -> (Timestamp, Timestamp) {
+    ) -> (Option<ProfUID>, Timestamp, Timestamp) {
         // See what kind of creator we have for this prof task
         if let Some(proc_id) = self.prof_uid_proc.get(&creator_uid) {
             assert!(completion);
@@ -3818,7 +3830,7 @@ impl State {
             let create = entry.time_range().create.unwrap();
             // Profiling responses are ready when the task is done executing
             let ready = entry.time_range().stop.unwrap();
-            (create, ready)
+            (entry.creator(), create, ready)
         } else if let Some(chan_id) = self.prof_uid_chan.get(&creator_uid) {
             assert!(completion);
             let chan = self.chans.get(&chan_id).unwrap();
@@ -3827,7 +3839,7 @@ impl State {
             let create = entry.time_range().create.unwrap();
             // Profiling response sare ready when the op is done executing
             let ready = entry.time_range().stop.unwrap();
-            (create, ready)
+            (entry.creator(), create, ready)
         } else if let Some(mem_id) = self.insts.get(&creator_uid) {
             let mem = self.mems.get(&mem_id).unwrap();
             let inst = mem.entry(creator_uid);
@@ -3836,11 +3848,11 @@ impl State {
             if completion {
                 // Profiling responses are ready at the same time as the instance is deleted
                 let ready = inst.time_range().stop.unwrap();
-                (create, ready)
+                (inst.creator(), create, ready)
             } else {
                 // Profiling response are ready at the same time as the instance is ready
                 let ready = inst.time_range().ready.unwrap();
-                (create, ready)
+                (inst.creator(), create, ready)
             }
         } else {
             unreachable!();
