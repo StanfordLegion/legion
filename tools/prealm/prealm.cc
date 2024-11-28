@@ -1868,8 +1868,7 @@ void Profiler::decrement_total_outstanding_requests(void) {
   if (previous == 1) {
     Realm::UserEvent to_trigger;
     profiler_lock.wrlock().wait();
-    if ((total_outstanding_requests.load() == 0) &&
-        done_event.exists()){
+    if ((total_outstanding_requests.load() == 0) && done_event.exists()) {
       to_trigger = done_event;
     }
     profiler_lock.unlock();
