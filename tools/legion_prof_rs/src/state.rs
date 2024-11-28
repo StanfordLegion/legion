@@ -3605,7 +3605,7 @@ impl State {
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
-        let base = Base::new(alloc);
+        let base = Base::from_fevent(alloc, fevent);
         self.record_event_node(
             fevent,
             EventEntryKind::CopyEvent,
@@ -3639,7 +3639,7 @@ impl State {
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
-        let base = Base::new(alloc);
+        let base = Base::from_fevent(alloc, fevent);
         self.record_event_node(
             fevent,
             EventEntryKind::FillEvent,
@@ -3665,7 +3665,7 @@ impl State {
     ) {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
+        let base = Base::from_fevent(alloc, fevent); // FIXME: construct here to avoid mutability conflict
         let creator_uid = creator.map(|e| alloc.create_reference(e));
         self.record_event_node(
             fevent,
