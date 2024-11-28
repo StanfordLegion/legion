@@ -3780,6 +3780,20 @@ impl State {
                 }
             }
         }
+        // for each prof task find it's creator and fill in the appropriate
+        // creation and ready times
+        // Note this also swaps the creator from pointing at the thing the profiling
+        // task was profiling (copy, fill, inst, task) over to the task that actually
+        // made the thing that we're profiling so that the right thing is being pointed
+        // to for when we got to do the critical path analysis
+        for (prof_uid, (creator, creator_uid, completion)) in profs {
+            let (new_creator_uid, create, ready) =
+                self.find_prof_task_times(&copies, creator, creator_uid, completion);
+            let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
+            let proc = self.procs.get_mut(&proc_id).unwrap();
+            proc.update_prof_task_times(prof_uid, new_creator_uid, create, ready);
+        }
+        self.has_prof_data = true;
         // put copies into channels
         for (fevent, copy) in copies {
             if !copy.copy_inst_infos.is_empty() {
@@ -3800,24 +3814,12 @@ impl State {
                 }
             }
         }
-        // for each prof task find it's creator and fill in the appropriate
-        // creation and ready times
-        // Note this also swaps the creator from pointing at the thing the profiling
-        // task was profiling (copy, fill, inst, task) over to the task that actually
-        // made the thing that we're profiling so that the right thing is being pointed
-        // to for when we got to do the critical path analysis
-        for (prof_uid, (creator_uid, completion)) in profs {
-            let (new_creator_uid, create, ready) =
-                self.find_prof_task_times(creator_uid, completion);
-            let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
-            let proc = self.procs.get_mut(&proc_id).unwrap();
-            proc.update_prof_task_times(prof_uid, new_creator_uid, create, ready);
-        }
-        self.has_prof_data = true;
     }
 
     fn find_prof_task_times(
         &self,
+        copies: &BTreeMap<EventID, Copy>,
+        creator: EventID,
         creator_uid: ProfUID,
         completion: bool,
     ) -> (Option<ProfUID>, Timestamp, Timestamp) {
@@ -3854,6 +3856,14 @@ impl State {
                 let ready = inst.time_range().ready.unwrap();
                 (inst.creator(), create, ready)
             }
+        } else if let Some(copy) = copies.get(&creator) {
+            // This is a copy that will be split into channels but we can still
+            // get the creator and timing information for it
+            // Profiling responses are created at the same time the op is created
+            let create = copy.time_range.create.unwrap();
+            // Profiling response sare ready when the op is done executing
+            let ready = copy.time_range.stop.unwrap();
+            (copy.creator, create, ready)
         } else {
             unreachable!();
         }
@@ -4291,7 +4301,7 @@ fn process_record(
     insts: &mut BTreeMap<ProfUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
-    profs: &mut BTreeMap<ProfUID, (ProfUID, bool)>,
+    profs: &mut BTreeMap<ProfUID, (EventID, ProfUID, bool)>,
     call_threshold: Timestamp,
 ) {
     match record {
@@ -4978,7 +4988,10 @@ fn process_record(
                 *fevent,
                 *completion,
             );
-            profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
+            profs.insert(
+                entry.base.prof_uid,
+                (*creator, entry.creator.unwrap(), *completion),
+            );
             if !completion {
                 // Special case for instance allocation, record the "start" time for the instance
                 // which we'll use for determining if the instance was allocated immediately or not
