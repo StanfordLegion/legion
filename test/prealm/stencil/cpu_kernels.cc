@@ -15,54 +15,45 @@
 
 #include "cpu_kernels.h"
 
-void stencil(DTYPE* RESTRICT inputPtr,
-             DTYPE* RESTRICT outputPtr,
-             DTYPE* RESTRICT weightPtr,
-             coord_t haloX, coord_t startX, coord_t endX,
-             coord_t startY, coord_t endY)
-{
-#define IN(i, j)     inputPtr[(j) * haloX + i]
-#define OUT(i, j)    outputPtr[(j) * haloX + i]
+void stencil(DTYPE *RESTRICT inputPtr, DTYPE *RESTRICT outputPtr,
+             DTYPE *RESTRICT weightPtr, coord_t haloX, coord_t startX,
+             coord_t endX, coord_t startY, coord_t endY) {
+#define IN(i, j) inputPtr[(j) * haloX + i]
+#define OUT(i, j) outputPtr[(j) * haloX + i]
 #define WEIGHT(i, j) weightPtr[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
   for (coord_t j = startY; j < endY; ++j)
-    for (coord_t i = startX; i < endX; ++i)
-      {
-        for (coord_t jj = -RADIUS; jj <= RADIUS; jj++)
-          OUT(i, j) += WEIGHT(0, jj) * IN(i, j + jj);
-        for (coord_t ii = -RADIUS; ii < 0; ii++)
-          OUT(i, j) += WEIGHT(ii, 0) * IN(i + ii, j);
-        for (coord_t ii = 1; ii <= RADIUS; ii++)
-          OUT(i, j) += WEIGHT(ii, 0) * IN(i + ii, j);
-      }
+    for (coord_t i = startX; i < endX; ++i) {
+      for (coord_t jj = -RADIUS; jj <= RADIUS; jj++)
+        OUT(i, j) += WEIGHT(0, jj) * IN(i, j + jj);
+      for (coord_t ii = -RADIUS; ii < 0; ii++)
+        OUT(i, j) += WEIGHT(ii, 0) * IN(i + ii, j);
+      for (coord_t ii = 1; ii <= RADIUS; ii++)
+        OUT(i, j) += WEIGHT(ii, 0) * IN(i + ii, j);
+    }
 #undef IN
 #undef OUT
 #undef WEIGHT
 }
 
-void increment(DTYPE* RESTRICT inputPtr,
-               coord_t haloX, coord_t startX, coord_t endX,
-               coord_t startY, coord_t endY)
-{
-#define IN(i, j)     inputPtr[(j) * haloX + i]
+void increment(DTYPE *RESTRICT inputPtr, coord_t haloX, coord_t startX,
+               coord_t endX, coord_t startY, coord_t endY) {
+#define IN(i, j) inputPtr[(j) * haloX + i]
   for (coord_t j = startY; j < endY; ++j)
-    for (coord_t i = startX; i < endX; ++i)
-      {
-        IN(i, j) += 1;
-      }
+    for (coord_t i = startX; i < endX; ++i) {
+      IN(i, j) += 1;
+    }
 #undef IN
 #undef OUT
 #undef WEIGHT
 }
 
-void copy2D(DTYPE* RESTRICT inputPtr,
-            DTYPE* RESTRICT outputPtr,
-            coord_t haloX, coord_t startX, coord_t endX,
-            coord_t startY, coord_t endY,
-            coord_t outputHaloX, coord_t outputStartX,
-            coord_t outputStartY)
-{
-#define IN(i, j)     inputPtr[(j) * haloX + i]
-#define OUT(i, j)    outputPtr[(j - (outputStartY - startY)) * outputHaloX + (i - (outputStartX - startX))]
+void copy2D(DTYPE *RESTRICT inputPtr, DTYPE *RESTRICT outputPtr, coord_t haloX,
+            coord_t startX, coord_t endX, coord_t startY, coord_t endY,
+            coord_t outputHaloX, coord_t outputStartX, coord_t outputStartY) {
+#define IN(i, j) inputPtr[(j) * haloX + i]
+#define OUT(i, j)                                                              \
+  outputPtr[(j - (outputStartY - startY)) * outputHaloX +                      \
+            (i - (outputStartX - startX))]
   for (coord_t j = startY; j < endY; ++j)
     for (coord_t i = startX; i < endX; ++i)
       OUT(i, j) = IN(i, j);
