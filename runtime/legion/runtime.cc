@@ -3751,8 +3751,9 @@ namespace Legion {
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-        const RtUserEvent temp_unique_event = Runtime::create_rt_user_event();        
-        Runtime::trigger_event(temp_unique_event);
+        const Realm::UserEvent temp_unique_event =
+          Realm::UserEvent::create_user_event();
+        temp_unique_event.trigger();
 #endif
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
@@ -3760,7 +3761,7 @@ namespace Legion {
         if (implicit_runtime->profiler != NULL)
           implicit_runtime->profiler->add_inst_request(requests, 
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-                      implicit_provenance, temp_unique_event);
+                      implicit_provenance, LgEvent(temp_unique_event));
 #else
                       implicit_provenance, unique_event);
 #endif
@@ -3771,7 +3772,7 @@ namespace Legion {
         if (inst_ready.exists() && (implicit_profiler != NULL))
           implicit_profiler->record_instance_ready(inst_ready, unique_event);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-        inst_event = temp_unique_event; 
+        inst_event = LgEvent(temp_unique_event);
 #endif
         own_inst = true;
         if (resource == NULL)
@@ -3804,9 +3805,9 @@ namespace Legion {
         if (implicit_runtime->profiler != NULL)
         {
           // Need to try to make a unique event
-          RtUserEvent unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(unique);
-          unique_event = unique;
+          Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
           implicit_runtime->profiler->add_inst_request(requests,
                       implicit_provenance, unique_event);
         }
@@ -12273,9 +12274,9 @@ namespace Legion {
       {
         // When Legion Spy is enabled, we want the ready event to be unique.
         // So we create a fresh event and trigger it with the producer event
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
 
       PhysicalManager *manager =
@@ -13684,9 +13685,9 @@ namespace Legion {
       LgEvent unique_event;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
       RtEvent use_event;
       PhysicalInstance instance = create_task_local_instance(creator_uid,
