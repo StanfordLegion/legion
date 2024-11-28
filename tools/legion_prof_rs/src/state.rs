@@ -3150,6 +3150,7 @@ pub enum EventEntryKind {
     ArriveBarrier,
     ReservationAcquire,
     InstanceReady,
+    InstanceDeletion,
     CompletionQueueEvent,
 }
 
@@ -3557,6 +3558,7 @@ impl State {
         time_range: TimeRange,
         creator: EventID,
         fevent: EventID,
+        completion: bool,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
@@ -3576,7 +3578,8 @@ impl State {
             ProcEntryKind::ProfTask,
             time_range,
             Some(creator_uid),
-            None,
+            // Critical path dependence on the thing that created it finishing
+            if completion { Some(creator) } else { None },
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -4168,8 +4171,12 @@ impl State {
         }
     }
 
+    pub fn has_critical_path_data(&self) -> bool {
+        self.event_graph.edge_count() > 0
+    }
+
     pub fn compute_critical_paths(&mut self) {
-        if self.event_graph.edge_count() == 0 {
+        if !self.has_critical_path_data() {
             println!("Info: Realm event graph data was not present in these logs so critical paths will not be available in this profile.");
             // clear the event lookup
             self.event_lookup.clear();
@@ -4853,6 +4860,13 @@ fn process_record(
                 .set_mem(*mem_id)
                 .set_size(*size)
                 .set_creator(creator_uid);
+            state.record_event_node(
+                *fevent,
+                EventEntryKind::InstanceDeletion,
+                inst_uid,
+                *destroy,
+                false,
+            );
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {
@@ -4944,7 +4958,14 @@ fn process_record(
             completion,
         } => {
             let time_range = TimeRange::new_call(*start, *stop);
-            let entry = state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
+            let entry = state.create_prof_task(
+                *proc_id,
+                *op_id,
+                time_range,
+                *creator,
+                *fevent,
+                *completion,
+            );
             profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
             if !completion {
                 // Special case for instance allocation, record the "start" time for the instance
