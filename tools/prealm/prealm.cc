@@ -154,6 +154,7 @@ private:
   bool has_shutdown;
 
 public:
+  bool enabled;
   bool self_profile;
   bool no_critical_paths;
 };
@@ -253,6 +254,8 @@ void ThreadProfiler::add_fill_request(ProfilingRequestSet &requests,
                                       const std::vector<CopySrcDstField> &dsts,
                                       Event critical) {
   Profiler &profiler = Profiler::get_profiler();
+  if (!profiler.enabled)
+    return;
 #ifdef DEBUG_REALM
   profiler.increment_total_outstanding_requests(FILL_PROF);
 #else
@@ -285,6 +288,8 @@ void ThreadProfiler::add_copy_request(ProfilingRequestSet &requests,
                                       const std::vector<CopySrcDstField> &dsts,
                                       Event critical) {
   Profiler &profiler = Profiler::get_profiler();
+  if (!profiler.enabled)
+    return;
 #ifdef DEBUG_REALM
   profiler.increment_total_outstanding_requests(COPY_PROF);
 #else
@@ -319,6 +324,8 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
                                       Processor::TaskFuncID task_id,
                                       Event critical) {
   Profiler &profiler = Profiler::get_profiler();
+  if (!profiler.enabled)
+    return;
 #ifdef DEBUG_REALM
   profiler.increment_total_outstanding_requests(TASK_PROF);
 #else
@@ -348,6 +355,8 @@ Event ThreadProfiler::add_inst_request(ProfilingRequestSet &requests,
                                        const InstanceLayoutGeneric *ilg,
                                        Event critical) {
   Profiler &profiler = Profiler::get_profiler();
+  if (!profiler.enabled)
+    return Event::NO_EVENT;
 #ifdef DEBUG_REALM
   profiler.increment_total_outstanding_requests(INST_PROF);
 #else
@@ -377,6 +386,8 @@ void ThreadProfiler::record_event_wait(Event wait_on, Backtrace &bt) {
   if (!local_proc.exists())
     return;
   Profiler &profiler = Profiler::get_profiler();
+  if (!profiler.enabled)
+    return;
   unsigned long long backtrace_id = profiler.find_backtrace_id(bt);
   event_wait_infos.emplace_back(
       EventWaitInfo{local_proc.id, Processor::get_current_finish_event(),
@@ -388,7 +399,7 @@ void ThreadProfiler::record_event_wait(Event wait_on, Backtrace &bt) {
 
 void ThreadProfiler::record_event_trigger(Event result, Event pre) {
   Profiler &profiler = Profiler::get_profiler();
-  if (profiler.no_critical_paths)
+  if (!profiler.enabled || profiler.no_critical_paths)
     return;
   EventTriggerInfo &info = event_trigger_infos.emplace_back(EventTriggerInfo());
   info.performed = Realm::Clock::current_time_in_nanoseconds();
@@ -411,7 +422,7 @@ void ThreadProfiler::record_event_trigger(Event result, Event pre) {
 
 void ThreadProfiler::record_event_poison(Event result) {
   Profiler &profiler = Profiler::get_profiler();
-  if (profiler.no_critical_paths)
+  if (!profiler.enabled || profiler.no_critical_paths)
     return;
   EventPoisonInfo &info = event_poison_infos.emplace_back(EventPoisonInfo());
   info.performed = Realm::Clock::current_time_in_nanoseconds();
@@ -444,7 +455,7 @@ void ThreadProfiler::record_barrier_use(Event bar) {
 
 void ThreadProfiler::record_barrier_arrival(Event result, Event precondition) {
   Profiler &profiler = Profiler::get_profiler();
-  if (profiler.no_critical_paths)
+  if (!profiler.enabled || profiler.no_critical_paths)
     return;
   BarrierArrivalInfo &info =
       barrier_arrival_infos.emplace_back(BarrierArrivalInfo());
@@ -464,7 +475,7 @@ void ThreadProfiler::record_event_merger(Event result,
   if (!result.exists())
     return;
   Profiler &profiler = Profiler::get_profiler();
-  if (profiler.no_critical_paths)
+  if (!profiler.enabled || profiler.no_critical_paths)
     return;
   // Realm can return one of the preconditions as the result of
   // an event merger as an optimization, to handle that we check
@@ -491,7 +502,7 @@ void ThreadProfiler::record_event_merger(Event result,
 void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
                                                 Event precondition) {
   Profiler &profiler = Profiler::get_profiler();
-  if (profiler.no_critical_paths)
+  if (!profiler.enabled || profiler.no_critical_paths)
     return;
   ReservationAcquireInfo &info =
       reservation_acquire_infos.emplace_back(ReservationAcquireInfo());
@@ -509,7 +520,7 @@ void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
 Event ThreadProfiler::record_instance_ready(RegionInstance inst, Event result,
                                             Event precondition) {
   Profiler &profiler = Profiler::get_profiler();
-  if (profiler.no_critical_paths)
+  if (!profiler.enabled || profiler.no_critical_paths)
     return result;
   if (!result.exists()) {
     Realm::UserEvent rename = Realm::UserEvent::create_user_event();
@@ -532,6 +543,8 @@ void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field) {
   if (!local_proc.exists())
     return;
   Profiler &profiler = Profiler::get_profiler();
+  if (!profiler.enabled)
+    return;
   InstanceUsageInfo &info =
       instance_usage_infos.emplace_back(InstanceUsageInfo());
   info.inst_event = inst.unique_event;
@@ -1026,7 +1039,8 @@ Profiler::Profiler(void)
       output_footprint_threshold(128 << 20 /*128MB*/),
       target_latency(100 /*us*/), total_memory_footprint(0),
       shutdown_wait(Realm::UserEvent::NO_USER_EVENT), return_code(0),
-      has_shutdown(false), self_profile(false), no_critical_paths(false) {
+      has_shutdown(false), enabled(false), self_profile(false),
+      no_critical_paths(false) {
 #ifdef DEBUG_REALM
   for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++)
     total_outstanding_requests[idx] = 0;
@@ -1042,8 +1056,10 @@ void Profiler::parse_command_line(int argc, char **argv) {
       .add_option_bool("-pr:no-critical", no_critical_paths, true)
       .parse_command_line(argc, argv);
   if (file_name.empty()) {
-    log_pr.error() << "PRealm must have a file name specified with -pr:logfile";
-    std::abort();
+    log_pr.warning() << "PRealm did not find a file name specified with "
+                        "-pr:logfile. No profiling will be logged.";
+  } else {
+    enabled = true;
   }
 }
 
@@ -1057,12 +1073,16 @@ void Profiler::parse_command_line(std::vector<std::string> &cmdline,
       .add_option_bool("-pr:no-critical", no_critical_paths, !remove_args)
       .parse_command_line(cmdline);
   if (file_name.empty()) {
-    log_pr.error() << "PRealm must have a file name specified with -pr:logfile";
-    std::abort();
+    log_pr.warning() << "PRealm did not find a file name specified with "
+                        "-pr:logfile. No profiling will be logged.";
+  } else {
+    enabled = true;
   }
 }
 
 void Profiler::initialize(void) {
+  if (!enabled)
+    return;
   Machine machine = Machine::get_machine();
   total_address_spaces = machine.get_address_space_count();
   Realm::Machine::ProcessorQuery local_procs(machine);
@@ -1085,7 +1105,7 @@ void Profiler::initialize(void) {
            "be "
         << "writing to an independent file. The specified file name '"
         << file_name << "' does not contain a '\%' delimiter.";
-    std::abort();
+    exit(1);
   }
 
   // Create the logfile
@@ -1093,7 +1113,7 @@ void Profiler::initialize(void) {
   if (!f) {
     log_pr.error() << "PRealm is unable to open file " << file_name
                    << " for writing";
-    std::abort();
+    exit(1);
   }
   // Log the preamble
   log_preamble();
@@ -1718,14 +1738,16 @@ void Profiler::finalize(void) {
            thread_profilers.begin();
        it != thread_profilers.end(); it++)
     (*it)->finalize();
-  // Get the calibration error
-  const long long calibration_error = Realm::Clock::get_calibration_error();
-  int ID = CALIBRATION_ERR_ID;
-  pr_fwrite(f, (char *)&ID, sizeof(ID));
-  pr_fwrite(f, (char *)&(calibration_error), sizeof(calibration_error));
-  // Close the file
-  pr_fflush(f, Z_FULL_FLUSH);
-  pr_fclose(f);
+  if (enabled) {
+    // Get the calibration error
+    const long long calibration_error = Realm::Clock::get_calibration_error();
+    int ID = CALIBRATION_ERR_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&(calibration_error), sizeof(calibration_error));
+    // Close the file
+    pr_fflush(f, Z_FULL_FLUSH);
+    pr_fclose(f);
+  }
 }
 
 void Profiler::defer_shutdown(Event precondition, int code) {
