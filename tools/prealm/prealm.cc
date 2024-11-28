@@ -1105,7 +1105,6 @@ void Profiler::initialize(void) {
   next_backtrace_id = local_proc.address_space();
   if (!enabled)
     return;
-  done_event = Realm::UserEvent::create_user_event();
   size_t pct = file_name.find_first_of('%', 0);
   if (pct != std::string::npos) {
     std::stringstream ss;
@@ -1745,7 +1744,23 @@ void Profiler::serialize(
 }
 
 void Profiler::finalize(void) {
-  if (!done_event.has_triggered())
+  profiler_lock.wrlock().wait();
+#ifdef DEBUG_REALM
+  bool done = true;
+  for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
+    if (total_outstanding_requests[idx] == 0)
+      continue;
+    done = false;
+    break;
+  }
+  if (!done)
+    done_event = Realm::UserEvent::create_user_event();
+#else
+  if (total_outstanding_requests.load() > 0)
+    done_event = Realm::UserEvent::create_user_event();
+#endif
+  profiler_lock.unlock();
+  if (done_event.exists())
     done_event.wait();
   // Finalize all the instances
   for (std::vector<ThreadProfiler *>::const_iterator it =
@@ -1837,9 +1852,10 @@ void Profiler::decrement_total_outstanding_requests(
     profiler_lock.unlock();
     return;
   }
+  Realm::UserEvent to_trigger = done_event;
   profiler_lock.unlock();
-  assert(!done_event.has_triggered());
-  done_event.trigger(shutdown_precondition);
+  if (to_trigger.exists())
+    to_trigger.trigger(shutdown_precondition);
 }
 #else
 void Profiler::increment_total_outstanding_requests(void) {
@@ -1850,8 +1866,15 @@ void Profiler::decrement_total_outstanding_requests(void) {
   unsigned previous = total_outstanding_requests.fetch_sub(1);
   assert(previous > 0);
   if (previous == 1) {
-    assert(!done_event.has_triggered());
-    done_event.trigger(shutdown_precondition);
+    Realm::UserEvent to_trigger;
+    profiler_lock.wrlock().wait();
+    if ((total_outstanding_requests.load() == 0) &&
+        done_event.exists()){
+      to_trigger = done_event;
+    }
+    profiler_lock.unlock();
+    if (to_trigger.exists())
+      to_trigger.trigger(shutdown_precondition);
   }
 }
 #endif
