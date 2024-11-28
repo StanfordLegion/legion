@@ -133,6 +133,11 @@ legion_cxx_prof_tests = [
     ['test/gather_perf/gather_perf', ['-m', '7']],
 ]
 
+prealm_cxx_prof_tests = [
+    ['test/prealm/saxpy/prealm_saxpy', []],
+    ['test/prealm/stencil/prealm_stencil', ['-ll:cpu', '4']],
+]
+
 legion_fortran_tests = [
     ['tutorial/fortran/00_hello_world/hello_world_fortran', []],
     ['tutorial/fortran/01_tasks_and_futures/tasks_and_futures_fortran', []],
@@ -426,6 +431,17 @@ def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_c
     flags.extend(get_default_args(env))
     from tools.test_prof import run_prof_test
     for test_file, test_flags in legion_cxx_prof_tests:
+        prof_test = [[test_file, test_flags],]
+        run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+        test_file_path = Path(os.path.join(root_dir, test_file))
+        test_dir = test_file_path.parent.absolute()
+        run_prof_test(root_dir, test_dir, tmp_dir)
+
+def run_test_prealm_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    flags = ['-pr:logfile', 'prof_%.gz']
+    flags.extend(get_default_args(env))
+    from tools.test_prof import run_prof_test
+    for test_file, test_flags in prealm_cxx_prof_tests:
         prof_test = [[test_file, test_flags],]
         run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
         test_file_path = Path(os.path.join(root_dir, test_file))
@@ -1285,6 +1301,7 @@ def run_tests(test_modules=None,
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_prof:
                     run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                    run_test_prealm_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if networks:
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:
