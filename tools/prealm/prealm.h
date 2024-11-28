@@ -933,6 +933,7 @@ using Realm::DSOReferenceImplementation;
 #endif
 
 // from subgraph.h
+// TODO: override subgraph construction to add profiling requests
 using Realm::Subgraph;
 using Realm::SubgraphDefinition;
 

@@ -566,14 +566,18 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
   switch (args->kind) {
   case FILL_PROF: {
     ProfilingMeasurements::OperationMemoryUsage usage;
-    response.get_measurement(usage);
+    if (!response.get_measurement(usage))
+      std::abort();
     ProfilingMeasurements::OperationCopyInfo cpinfo;
-    response.get_measurement(cpinfo);
+    if (!response.get_measurement(cpinfo))
+      std::abort();
     ProfilingMeasurements::OperationTimeline timeline;
-    response.get_measurement(timeline);
+    if (!response.get_measurement(timeline))
+      std::abort();
     assert(timeline.is_valid());
     ProfilingMeasurements::OperationFinishEvent fevent;
-    response.get_measurement(fevent);
+    if (!response.get_measurement(fevent))
+      std::abort();
 
     process_mem_desc(usage.target);
 
@@ -616,14 +620,18 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
   }
   case COPY_PROF: {
     ProfilingMeasurements::OperationMemoryUsage usage;
-    response.get_measurement(usage);
+    if (!response.get_measurement(usage))
+      std::abort();
     ProfilingMeasurements::OperationCopyInfo cpinfo;
-    response.get_measurement(cpinfo);
+    if (!response.get_measurement(cpinfo))
+      std::abort();
     ProfilingMeasurements::OperationTimeline timeline;
-    response.get_measurement(timeline);
+    if (!response.get_measurement(timeline))
+      std::abort();
     assert(timeline.is_valid());
     ProfilingMeasurements::OperationFinishEvent fevent;
-    response.get_measurement(fevent);
+    if (!response.get_measurement(fevent))
+      std::abort();
 
     process_mem_desc(usage.source);
     process_mem_desc(usage.target);
@@ -739,13 +747,17 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
   }
   case TASK_PROF: {
     ProfilingMeasurements::OperationProcessorUsage usage;
-    response.get_measurement(usage);
+    if (!response.get_measurement(usage))
+      std::abort();
     ProfilingMeasurements::OperationTimeline timeline;
-    response.get_measurement(timeline);
+    if (!response.get_measurement(timeline))
+      std::abort();
     ProfilingMeasurements::OperationEventWaits waits;
-    response.get_measurement(waits);
+    if (!response.get_measurement(waits))
+      std::abort();
     ProfilingMeasurements::OperationFinishEvent finish;
-    response.get_measurement(finish);
+    if (!response.get_measurement(finish))
+      std::abort();
     assert(timeline.is_valid());
 
     process_proc_desc(usage.proc);
@@ -814,9 +826,11 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
   }
   case INST_PROF: {
     ProfilingMeasurements::InstanceTimeline timeline;
-    response.get_measurement(timeline);
+    if (!response.get_measurement(timeline))
+      std::abort();
     ProfilingMeasurements::InstanceMemoryUsage usage;
-    response.get_measurement(usage);
+    if (!response.get_measurement(usage))
+      std::abort();
 
     process_mem_desc(usage.memory);
 
@@ -1101,10 +1115,10 @@ void Profiler::initialize(void) {
   } else if (total_address_spaces > 1) {
     log_pr.error()
         << "When running in multi-process configurations PRealm requires "
-        << "that all filenames contain a '\%' delimiter so each process will "
+        << "that all filenames contain a '%%' delimiter so each process will "
            "be "
         << "writing to an independent file. The specified file name '"
-        << file_name << "' does not contain a '\%' delimiter.";
+        << file_name << "' does not contain a '%%' delimiter.";
     exit(1);
   }
 
