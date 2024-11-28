@@ -906,9 +906,10 @@ namespace Legion {
         {
           if (!unique_events[idx].exists())
           {
-            const RtUserEvent unique = Runtime::create_rt_user_event();
-            Runtime::trigger_event(unique);
-            unique_events[idx] = unique;
+            const Realm::UserEvent unique =
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            unique_events[idx] = LgEvent(unique);
           }
           runtime->profiler->add_inst_request(requests[idx],
                               get_unique_id(), unique_events[idx]);
@@ -11963,9 +11964,9 @@ namespace Legion {
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
       MemoryManager *manager = runtime->find_memory_manager(memory);
       RtEvent use_event;
@@ -25463,9 +25464,9 @@ namespace Legion {
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
       const size_t footprint = layout->bytes_used;
       std::map<Memory,MemoryPool*>::const_iterator finder =

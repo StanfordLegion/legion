@@ -8827,9 +8827,10 @@ namespace Legion {
           {
             if (!unique_events[idx].exists())
             {
-              const RtUserEvent unique = Runtime::create_rt_user_event();
-              Runtime::trigger_event(unique);
-              unique_events[idx] = unique;
+              const Realm::UserEvent unique = 
+                Realm::UserEvent::create_user_event();
+              unique.trigger();
+              unique_events[idx] = LgEvent(unique);
             }
             manager->runtime->profiler->add_inst_request(requests[idx],
                                       creator_uid, unique_events[idx]);
@@ -9304,9 +9305,10 @@ namespace Legion {
           extra_layouts.push_back(create_layout(size, 1/*alignment*/, offset));
           if (manager->runtime->profiler != NULL)
           {
-            const RtUserEvent unique = Runtime::create_rt_user_event();
-            Runtime::trigger_event(unique);
-            extra_unique_events.push_back(unique);
+            const Realm::UserEvent unique = 
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            extra_unique_events.push_back(LgEvent(unique));
           }
           else
             extra_unique_events.push_back(LgEvent::NO_LG_EVENT);
@@ -9317,9 +9319,10 @@ namespace Legion {
           if ((manager->runtime->profiler != NULL) && 
               !unique_events[idx].exists())
           {
-            const RtUserEvent unique = Runtime::create_rt_user_event();
-            Runtime::trigger_event(unique);
-            unique_events[idx] = unique;
+            const Realm::UserEvent unique = 
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            unique_events[idx] = LgEvent(unique);
           }
           extra_unique_events.push_back(unique_events[idx]);
         }
@@ -9331,9 +9334,10 @@ namespace Legion {
           extra_layouts.push_back(create_layout(size, 1/*alignment*/, offset));
           if (manager->runtime->profiler != NULL)
           {
-            const RtUserEvent unique = Runtime::create_rt_user_event();
-            Runtime::trigger_event(unique);
-            extra_unique_events.push_back(unique);
+            const Realm::UserEvent unique = 
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            extra_unique_events.push_back(LgEvent(unique));
           }
           else
             extra_unique_events.push_back(LgEvent::NO_LG_EVENT);
@@ -9408,9 +9412,10 @@ namespace Legion {
           {
             if (!unique_events[idx].exists())
             {
-              const RtUserEvent unique = Runtime::create_rt_user_event();
-              Runtime::trigger_event(unique);
-              unique_events[idx] = unique;
+              const Realm::UserEvent unique = 
+                Realm::UserEvent::create_user_event();
+              unique.trigger();
+              unique_events[idx] = LgEvent(unique);
             }
             manager->runtime->profiler->add_inst_request(requests[idx],
                                       creator_uid, unique_events[idx]);
@@ -9796,9 +9801,10 @@ namespace Legion {
           if (manager->runtime->legion_spy_enabled || 
               (manager->runtime->profiler != NULL))
           {
-            RtUserEvent unique = Runtime::create_rt_user_event();
-            Runtime::trigger_event(unique);
-            unique_event = unique;
+            const Realm::UserEvent unique =
+                Realm::UserEvent::create_user_event();
+            unique.trigger();
+            unique_event = LgEvent(unique);
           }
           // Try to do the redistrict the previous instance into a new one
           MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
@@ -13022,9 +13028,9 @@ namespace Legion {
         LgEvent unique_event;
         if (runtime->profiler != NULL)
         {
-          RtUserEvent unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(unique);
-          unique_event = unique;
+          const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
         }
         RtEvent use_event;
         PhysicalInstance instance = create_task_local_instance(creator_uid,
