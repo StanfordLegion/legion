@@ -1403,6 +1403,30 @@ impl StateDataSource {
                     ))
                 }
             }
+            EventEntryKind::InstanceDeletion => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(mem_id) = self.state.insts.get(&prof_uid) {
+                    // This means the critical path was the deletion of the instance
+                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let inst = mem.entry(prof_uid);
+                    let stop_time: ts::Timestamp = inst.time_range.stop.unwrap().into();
+                    let inst_name = inst.name(&self.state);
+                    let mem_name = mem.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: inst.base.prof_uid.into(),
+                        title: format!(
+                            "Deletion of {} at {} in {}",
+                            &inst_name, stop_time, mem_name
+                        ),
+                        interval: inst.time_range.into(),
+                        entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from an instance deletion on node {}. Please load the logfile from that node to see it.", node.0
+                    ))
+                }
+            }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution
@@ -1625,7 +1649,7 @@ impl StateDataSource {
                         // on this processor so that we can check to see if it was why we
                         // were delayed from running
                         let mut has_critical = false;
-                        let mut need_critical = true;
+                        let mut need_critical = self.state.has_critical_path_data();
                         // Check to see if we have a critical path event
                         if let Some(critical) = entry.critical() {
                             has_critical = true;
@@ -1903,7 +1927,7 @@ impl StateDataSource {
             // 1. The precondition event can be slow to trigger
             // 2. The caller task can be slow to create it
             // 3. We might need to wait for space in the memory to be freed for it to be ready
-            let mut need_critical = true;
+            let mut need_critical = self.state.has_critical_path_data();
             if let Some(critical) = entry.critical() {
                 if let Some(event_entry) = self.state.find_critical_entry(critical) {
                     // Check to see if the critical entry happened before or after
