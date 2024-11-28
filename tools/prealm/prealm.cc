@@ -834,8 +834,8 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
     info.proc_id = local_proc.id;
     info.start = start;
     info.stop = stop;
-    info.creator = args->provenance;
-    info.finish_event = finish_event;
+    info.creator = finish_event;
+    info.finish_event = Processor::get_current_finish_event();
     profiler.update_footprint(sizeof(info), this);
   }
 #ifdef DEBUG_REALM
