@@ -18,8 +18,8 @@
 void stencil(DTYPE *RESTRICT inputPtr, DTYPE *RESTRICT outputPtr,
              DTYPE *RESTRICT weightPtr, coord_t haloX, coord_t startX,
              coord_t endX, coord_t startY, coord_t endY) {
-#define IN(i, j) inputPtr[(j) * haloX + i]
-#define OUT(i, j) outputPtr[(j) * haloX + i]
+#define IN(i, j) inputPtr[(j)*haloX + i]
+#define OUT(i, j) outputPtr[(j)*haloX + i]
 #define WEIGHT(i, j) weightPtr[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
   for (coord_t j = startY; j < endY; ++j)
     for (coord_t i = startX; i < endX; ++i) {
@@ -37,7 +37,7 @@ void stencil(DTYPE *RESTRICT inputPtr, DTYPE *RESTRICT outputPtr,
 
 void increment(DTYPE *RESTRICT inputPtr, coord_t haloX, coord_t startX,
                coord_t endX, coord_t startY, coord_t endY) {
-#define IN(i, j) inputPtr[(j) * haloX + i]
+#define IN(i, j) inputPtr[(j)*haloX + i]
   for (coord_t j = startY; j < endY; ++j)
     for (coord_t i = startX; i < endX; ++i) {
       IN(i, j) += 1;
@@ -50,7 +50,7 @@ void increment(DTYPE *RESTRICT inputPtr, coord_t haloX, coord_t startX,
 void copy2D(DTYPE *RESTRICT inputPtr, DTYPE *RESTRICT outputPtr, coord_t haloX,
             coord_t startX, coord_t endX, coord_t startY, coord_t endY,
             coord_t outputHaloX, coord_t outputStartX, coord_t outputStartY) {
-#define IN(i, j) inputPtr[(j) * haloX + i]
+#define IN(i, j) inputPtr[(j)*haloX + i]
 #define OUT(i, j)                                                              \
   outputPtr[(j - (outputStartY - startY)) * outputHaloX +                      \
             (i - (outputStartX - startX))]
