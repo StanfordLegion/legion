@@ -19,6 +19,9 @@
 #include "realm.h"
 #include "realm/cmdline.h"
 #include "realm/id.h"
+#ifdef REALM_USE_CUDA
+#include "realm/cuda/cuda_module.h"
+#endif
 
 namespace PRealm {
 // Import a bunch of types directly from the realm public interface
