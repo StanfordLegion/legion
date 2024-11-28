@@ -26,7 +26,9 @@ add_executable(prealm_stencil realm_stencil.cc cpu_kernels.cc prealm.cc)
 target_compile_definitions(prealm_stencil PRIVATE DTYPE=double)
 target_compile_definitions(prealm_stencil PRIVATE RESTRICT=__restrict__)
 target_compile_definitions(prealm_stencil PRIVATE RADIUS=2)
-target_link_libraries(prealm_stencil Legion::Realm ZLIB::ZLIB)
+# We should only need to link against Realm here, but cmake is stupid and 
+# somehow is giving errors about not finding TLS symbols for Legion things
+target_link_libraries(prealm_stencil Legion::Legion Legion::Realm ZLIB::ZLIB)
 target_compile_options(prealm_stencil PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME prealm_stencil COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:prealm_stencil> ${Legion_TEST_ARGS} -ll:cpu 4)

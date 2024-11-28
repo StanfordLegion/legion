@@ -41,7 +41,9 @@ elseif(Legion_USE_HIP)
 else()
   add_executable(prealm_saxpy ${CPU_SOURCES})
 endif()
-target_link_libraries(prealm_saxpy Legion::Realm ZLIB::ZLIB)
+# We should only need to link against Realm here, but cmake is stupid and 
+# somehow is giving errors about not finding TLS symbols for Legion things
+target_link_libraries(prealm_saxpy Legion::Legion Legion::Realm ZLIB::ZLIB)
 target_compile_options(prealm_saxpy PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
   add_test(NAME prealm_saxpy COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:prealm_saxpy> ${Legion_TEST_ARGS})
