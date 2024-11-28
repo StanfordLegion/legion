@@ -20,9 +20,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# We only add the prealm tests if we're building the rust profiler as
-# that is the sign that we are testing profiler
-if(Legion_BUILD_RUST_PROFILER)
+if(Legion_ENABLE_TESTING)
   add_subdirectory(saxpy)
   add_subdirectory(stencil)
 endif()
