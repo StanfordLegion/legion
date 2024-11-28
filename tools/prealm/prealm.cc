@@ -1095,8 +1095,6 @@ void Profiler::parse_command_line(std::vector<std::string> &cmdline,
 }
 
 void Profiler::initialize(void) {
-  if (!enabled)
-    return;
   Machine machine = Machine::get_machine();
   total_address_spaces = machine.get_address_space_count();
   Realm::Machine::ProcessorQuery local_procs(machine);
@@ -1105,6 +1103,8 @@ void Profiler::initialize(void) {
   local_proc = local_procs.first();
   assert(local_proc.exists());
   next_backtrace_id = local_proc.address_space();
+  if (!enabled)
+    return;
   done_event = Realm::UserEvent::create_user_event();
   size_t pct = file_name.find_first_of('%', 0);
   if (pct != std::string::npos) {
