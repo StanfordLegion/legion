@@ -95,6 +95,7 @@ namespace Legion {
     public:
       const RegionUsage usage;
       Operation *const op;
+      unsigned op_kind;
       const size_t ctx_index;
       // Since internal operations have the same ctx_index as their
       // creator we need a way to distinguish them from the creator

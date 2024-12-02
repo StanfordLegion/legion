@@ -16579,7 +16579,10 @@ namespace Legion {
                 {
                   if (!runtime->disable_point_wise_analysis)
                   {
-                    if (prev.shard_proj != NULL && user.shard_proj != NULL)
+                    // TODO: Remove DEPENDENT_PARTITION_OP_KIND filtering (reazulh)
+                    if (prev.shard_proj != NULL && user.shard_proj != NULL &&
+                        prev.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND &&
+                        user.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND)
                     {
                       if (prev.op->
                           region_has_collective(prev.idx, prev.gen) ||

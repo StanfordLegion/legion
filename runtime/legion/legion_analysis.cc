@@ -53,12 +53,20 @@ namespace Legion {
         op->add_mapping_reference(gen);
       if (shard_proj != NULL)
         shard_proj->add_reference();
-      if (op->get_operation_kind() == Operation::TASK_OP_KIND)
-      {
-        if (static_cast<TaskOp*>(op)->get_task_kind() ==
-            TaskOp::INDEX_TASK_KIND)
-          index_domain = static_cast<TaskOp*>(op)->index_domain;
+
+      // TODO:  How to generalize this? (reazulh)
+      if (op->get_operation_kind() == Operation::TASK_OP_KIND) {
+        index_domain = static_cast<TaskOp*>(op)->index_domain;
       }
+      else if (op->get_operation_kind() == Operation::COPY_OP_KIND)
+      {
+        index_domain = static_cast<CopyOp*>(op)->index_domain;
+      }
+      else if (op->get_operation_kind() == Operation::FILL_OP_KIND)
+      {
+        index_domain = static_cast<FillOp*>(op)->index_domain;
+      }
+      op_kind = op->get_operation_kind();
     }
 
     //--------------------------------------------------------------------------
