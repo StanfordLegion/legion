@@ -1067,7 +1067,7 @@ namespace Legion {
     void ReplIndexTask::activate(void)
     //--------------------------------------------------------------------------
     {
-      ReplCollectiveViewCreator<IndexTask>::activate(); 
+      ReplCollectiveViewCreator<IndexTask>::activate();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       serdez_redop_collective = NULL;
@@ -1090,7 +1090,7 @@ namespace Legion {
     void ReplIndexTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask >>::deactivate(false/*free*/);
+      ReplCollectiveViewCreator<IndexTask>::deactivate(false/*free*/);
       if (serdez_redop_collective != NULL)
         delete serdez_redop_collective;
       if (all_reduce_collective != NULL)
@@ -2756,7 +2756,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      ReplPointWiseAnalysable<IndexFillOp>::deactivate(false/*free*/);
+      IndexFillOp::deactivate(false/*free*/);
       remove_launch_space_reference(shard_points);
       if (collective != NULL)
         delete collective;
@@ -3396,7 +3396,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      ReplPointWiseAnalysable<IndexCopyOp>::deactivate(false/*free*/);
+      IndexCopyOp::deactivate(false/*free*/);
       pre_indirection_barriers.clear();
       post_indirection_barriers.clear();
       if (!src_collectives.empty())
@@ -7296,7 +7296,7 @@ namespace Legion {
     void ReplIndexAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> >::deactivate(false/*free*/);
+      ReplCollectiveViewCreator<IndexAttachOp>::deactivate(false/*free*/);
       if (collective != NULL)
         delete collective;
       if (participants != NULL)
@@ -7516,7 +7516,7 @@ namespace Legion {
     void ReplIndexDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> >::deactivate(false/*free*/);
+      ReplCollectiveViewCreator<IndexDetachOp>::deactivate(false/*free*/);
       if (participants != NULL)
         delete participants;
       if (freeop)

@@ -16582,7 +16582,9 @@ namespace Legion {
                     // TODO: Remove DEPENDENT_PARTITION_OP_KIND filtering (reazulh)
                     if (prev.shard_proj != NULL && user.shard_proj != NULL &&
                         prev.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND &&
-                        user.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND)
+                        user.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND &&
+                        prev.op->get_must_epoch_op() == NULL &&
+                        user.op->get_must_epoch_op() == NULL)
                     {
                       if (prev.op->
                           region_has_collective(prev.idx, prev.gen) ||

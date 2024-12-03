@@ -8767,7 +8767,7 @@ namespace Legion {
     void IndexCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      CopyOp::activate();
+      PointWiseAnalysable<CopyOp>::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -9740,7 +9740,7 @@ namespace Legion {
     void PointCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      CopyOp::activate();
+      SinglePointWiseAnalysable<CopyOp>::activate();
       owner = NULL;
     }
 
@@ -9748,7 +9748,7 @@ namespace Legion {
     void PointCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      CopyOp::deactivate(false/*free*/);
+      SinglePointWiseAnalysable<CopyOp>::deactivate(false/*free*/);
       intra_space_mapping_dependences.clear();
       if (freeop)
         runtime->free_point_copy_op(this);
@@ -19044,7 +19044,7 @@ namespace Legion {
     void IndexFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      FillOp::activate();
+      PointWiseAnalysable<FillOp>::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -19057,7 +19057,7 @@ namespace Legion {
     void IndexFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      FillOp::deactivate(false/*free*/);
+      PointWiseAnalysable<FillOp>::deactivate(false/*free*/);
       // We can deactivate our point operations
       for (std::vector<PointFillOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -19568,7 +19568,7 @@ namespace Legion {
     void PointFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      FillOp::activate();
+      SinglePointWiseAnalysable<FillOp>::activate();
       owner = NULL;
     }
 
@@ -19576,7 +19576,7 @@ namespace Legion {
     void PointFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      FillOp::deactivate(false/*free*/);
+      SinglePointWiseAnalysable<FillOp>::deactivate(false/*free*/);
       if (freeop)
         runtime->free_point_fill_op(this);
     }
@@ -20683,7 +20683,7 @@ namespace Legion {
     void IndexAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      CollectiveViewCreator<Operation>::activate();
+      PointWiseAnalysable<CollectiveViewCreator<Operation> >::activate();
       launch_space = NULL;
       points_completed.store(0);
       points_committed = 0;
@@ -20694,7 +20694,7 @@ namespace Legion {
     void IndexAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      CollectiveViewCreator<Operation>::deactivate(false/*free*/);
+      PointWiseAnalysable<CollectiveViewCreator<Operation> >::deactivate(false/*free*/);
       resources = ExternalResources();
       // We can deactivate all of our point operations
       for (std::vector<PointAttachOp*>::const_iterator it =
@@ -21242,7 +21242,7 @@ namespace Legion {
     void PointAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      AttachOp::activate();
+      SinglePointWiseAnalysable<AttachOp>::activate();
       owner = NULL;
     }
 
@@ -21250,7 +21250,7 @@ namespace Legion {
     void PointAttachOp::deactivate(bool freeop) 
     //--------------------------------------------------------------------------
     {
-      AttachOp::deactivate(false/*free*/);
+      SinglePointWiseAnalysable<AttachOp>::deactivate(false/*free*/);
       if (freeop)
         runtime->free_point_attach_op(this);
     }
@@ -21873,7 +21873,7 @@ namespace Legion {
     void IndexDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      CollectiveViewCreator<Operation>::activate();
+      PointWiseAnalysable<CollectiveViewCreator<Operation> >::activate();
       launch_space = NULL;
       points_completed.store(0);
       points_committed = 0;
@@ -21885,7 +21885,7 @@ namespace Legion {
     void IndexDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      CollectiveViewCreator<Operation>::deactivate(false/*free*/);
+      PointWiseAnalysable<CollectiveViewCreator<Operation> >::deactivate(false/*free*/);
       resources = ExternalResources();
       // We can deactivate all of our point operations
       for (std::vector<PointDetachOp*>::const_iterator it =
@@ -22198,7 +22198,7 @@ namespace Legion {
     void PointDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      DetachOp::activate();
+      SinglePointWiseAnalysable<DetachOp>::activate();
       owner = NULL;
     }
 
@@ -22206,7 +22206,7 @@ namespace Legion {
     void PointDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      DetachOp::deactivate(false/*free*/);
+      SinglePointWiseAnalysable<DetachOp>::deactivate(false/*free*/);
       if (freeop)
         runtime->free_point_detach_op(this);
     }
