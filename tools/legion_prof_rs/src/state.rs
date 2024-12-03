@@ -381,6 +381,7 @@ pub trait Container {
         &self,
         ready: Timestamp,
         start: Timestamp,
+        device: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)>;
 
     // For internal use only
@@ -1117,6 +1118,7 @@ impl Container for Proc {
         &self,
         ready: Timestamp,
         start: Timestamp,
+        device: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
         // If this is an I/O processor then there is no concept of a "previous"
         // as there might be multiple ranges executing at the same time
@@ -1125,7 +1127,7 @@ impl Container for Proc {
         }
         let mut result = None;
         // Iterate all the levels of the stack
-        for level in &self.time_points_stacked {
+        for level in self.time_points_stacked(device) {
             if level.is_empty() {
                 // I don't know whey this happens but we'll ignore it
                 continue;
@@ -1172,6 +1174,8 @@ impl Container for Proc {
             // Make sure the running range starts before the start
             if running_start < start {
                 let running_stop = entry.time_range.stop.unwrap();
+                // If you hit this assertion that means that there are two tasks running
+                // at the same time on the processor which shouldn't be possible
                 assert!(running_stop <= start);
                 // We're only interested in ranges that end after the ready time
                 if ready < running_stop {
@@ -1370,6 +1374,7 @@ impl Container for Mem {
         &self,
         _: Timestamp,
         _: Timestamp,
+        _: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
         // No support for this
         None
@@ -1745,6 +1750,7 @@ impl Container for Chan {
         &self,
         _: Timestamp,
         _: Timestamp,
+        _: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
         // No support for this
         None
