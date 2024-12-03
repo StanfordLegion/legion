@@ -1090,7 +1090,7 @@ namespace Legion {
     void ReplIndexTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplCollectiveViewCreator<IndexTask>::deactivate(false/*free*/);
+      ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask >>::deactivate(false/*free*/);
       if (serdez_redop_collective != NULL)
         delete serdez_redop_collective;
       if (all_reduce_collective != NULL)
@@ -2756,7 +2756,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      IndexFillOp::deactivate(false/*free*/);
+      ReplPointWiseAnalysable<IndexFillOp>::deactivate(false/*free*/);
       remove_launch_space_reference(shard_points);
       if (collective != NULL)
         delete collective;
@@ -3396,7 +3396,7 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      IndexCopyOp::deactivate(false/*free*/);
+      ReplPointWiseAnalysable<IndexCopyOp>::deactivate(false/*free*/);
       pre_indirection_barriers.clear();
       post_indirection_barriers.clear();
       if (!src_collectives.empty())
@@ -7296,7 +7296,7 @@ namespace Legion {
     void ReplIndexAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplCollectiveViewCreator<IndexAttachOp>::deactivate(false/*free*/);
+      ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> >::deactivate(false/*free*/);
       if (collective != NULL)
         delete collective;
       if (participants != NULL)
@@ -7516,7 +7516,7 @@ namespace Legion {
     void ReplIndexDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      ReplCollectiveViewCreator<IndexDetachOp>::deactivate(false/*free*/);
+      ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> >::deactivate(false/*free*/);
       if (participants != NULL)
         delete participants;
       if (freeop)

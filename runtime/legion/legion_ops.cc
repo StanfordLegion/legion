@@ -8726,18 +8726,6 @@ namespace Legion {
 #else
       arrive_barriers = launcher.arrive_barriers;
 #endif
-
-      if (!runtime->disable_point_wise_analysis)
-      {
-        size_t region_count = get_region_count();
-        connect_to_prev_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-          connect_to_prev_points[idx] = false;
-        connect_to_next_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-          connect_to_next_points[idx] = false;
-      }
-
       map_id = launcher.map_id;
       tag = launcher.tag; 
       mapper_data_size = launcher.map_arg.get_size();
@@ -8762,6 +8750,17 @@ namespace Legion {
       if (runtime->check_privileges)
         perform_type_checking();
       initialize_copies_with_launcher(launcher);
+
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8781,7 +8780,7 @@ namespace Legion {
     void IndexCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      CopyOp::deactivate(false/*free*/);
+      PointWiseAnalysable<CopyOp>::deactivate(false/*free*/);
       // We can deactivate all of our point operations
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -9621,6 +9620,32 @@ namespace Legion {
       }
       else
         intra_space_dependences[point] = point_mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(op_lock);
+      if (need_to_clear)
+      {
+        Domain local_domain;
+        std::vector<DomainPoint> points;
+        launch_space->get_domain(local_domain);
+
+        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
+        {
+          points.push_back((*dpi));
+        }
+        printf("CLEANING UP\n");
+        parent_ctx->clear_map(context_index, points);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -19434,6 +19459,33 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void IndexFillOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        IndexSpaceNode *local_points = this->get_shard_points();
+        Domain local_domain;
+        local_points->get_domain(local_domain);
+
+        std::vector<DomainPoint> points;
+
+        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
+        {
+          points.push_back((*dpi));
+        }
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Fill Op 
     /////////////////////////////////////////////////////////////
@@ -21126,6 +21178,31 @@ namespace Legion {
       return points.size();
     }
 
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        std::vector<DomainPoint> points;
+
+        for (std::vector<PointAttachOp*>::const_iterator pit =
+              this->points.begin(); pit != this->points.end(); pit++)
+        {
+          points.push_back((*pit)->index_point);
+        }
+
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Attach Op 
     /////////////////////////////////////////////////////////////
@@ -22054,6 +22131,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return points.size();
+    }
+
+
+    //--------------------------------------------------------------------------
+    void IndexDetachOp::clear_context_maps(void)
+    //--------------------------------------------------------------------------
+    {
+      unsigned req_count = this->get_region_count();
+      bool need_to_clear = false;
+      for (unsigned i = 0; i < req_count; i++)
+      {
+        need_to_clear |= this->should_connect_to_next_point(i);
+      }
+      AutoLock o_lock(this->op_lock);
+      if (need_to_clear)
+      {
+        std::vector<DomainPoint> points;
+
+        for (std::vector<PointDetachOp*>::const_iterator pit =
+              this->points.begin(); pit != this->points.end(); pit++)
+        {
+          points.push_back((*pit)->index_point);
+        }
+
+        this->parent_ctx->clear_map(this->context_index, points);
+      }
     }
 
     ///////////////////////////////////////////////////////////// 

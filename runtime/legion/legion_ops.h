@@ -1791,6 +1791,8 @@ namespace Legion {
     public:
       virtual size_t get_collective_points(void) const;
     public:
+      virtual void clear_context_maps(void);
+    public:
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
       void enumerate_points(void);
@@ -3872,6 +3874,8 @@ namespace Legion {
       void handle_point_complete(ApEvent effect);
       void handle_point_commit(void);
       void check_point_requirements(void);
+    public:
+      virtual void clear_context_maps(void);
     protected:
       void log_index_fill_requirement(void);
     public:
@@ -4091,6 +4095,8 @@ namespace Legion {
     public:
       void handle_point_complete(ApEvent effects);
       void handle_point_commit(void);
+    public:
+      virtual void clear_context_maps(void);
     protected:
       void compute_parent_index(void);
       void check_privilege(void);
@@ -4257,6 +4263,8 @@ namespace Legion {
       void handle_point_commit(void);
       virtual const RegionRequirement &get_requirement(unsigned idx = 0) const
       { return requirement; }
+    public:
+      virtual void clear_context_maps(void);
     protected:
       void compute_parent_index(void);
       void log_requirement(void);
