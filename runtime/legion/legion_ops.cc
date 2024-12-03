@@ -21966,6 +21966,18 @@ namespace Legion {
                                         unique_op_id, unordered);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
+
+      if (!runtime->disable_point_wise_analysis)
+      {
+        size_t region_count = get_region_count();
+        connect_to_prev_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
+          connect_to_prev_points[idx] = false;
+        connect_to_next_points.resize(region_count);
+        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
+          connect_to_next_points[idx] = false;
+      }
+
       return result;
     }
 
