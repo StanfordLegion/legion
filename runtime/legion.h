@@ -3744,6 +3744,10 @@ namespace Legion {
       inline DeferredValue<T>& operator=(T value);
     public:
       inline void finalize(Context ctx) const;
+    public:
+      typedef T value_type;
+      typedef T& reference;
+      typedef const T& const_reference;
     protected:
       friend class UntypedDeferredValue;
       DeferredValue(void);
@@ -3770,6 +3774,10 @@ namespace Legion {
       inline void reduce(typename REDOP::RHS val) const;
       __CUDA_HD__
       inline void operator<<=(typename REDOP::RHS val) const;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
     };
 
     /**
@@ -3880,10 +3888,10 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = std::alignment_of<T>());
     protected:
-      Memory get_memory_from_kind(Memory::Kind kind);
-      void initialize_layout(size_t alignment, bool fortran_order_dims);
-      void initialize(Memory memory,
-                      DomainT<DIM,COORD_T> bounds,
+      inline Memory get_memory_from_kind(Memory::Kind kind);
+      inline void initialize_layout(size_t alignment, bool fortran_order_dims);
+      inline void initialize(Memory memory,
+                             DomainT<DIM,COORD_T> bounds,
                       const T *initial_value);
     public:
       __CUDA_HD__
@@ -3899,18 +3907,23 @@ namespace Legion {
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
     public:
-      void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
-      Realm::RegionInstance get_instance(void) const;
+      inline void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
+      __CUDA_HD__
+      inline Realm::RegionInstance get_instance(void) const;
+      __CUDA_HD__
+      inline Rect<DIM,COORD_T> get_bounds(void) const;
+    public:
+      typedef T value_type;
+      typedef T& reference;
+      typedef const T& const_reference;
     protected:
       friend class OutputRegion;
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
       std::array<DimensionKind,DIM> ordering;
+      Rect<DIM,COORD_T> bounds;
       size_t alignment;
-#ifdef LEGION_BOUNDS_CHECKS
-      DomainT<DIM,COORD_T> bounds;
-#endif
     };
 
     /**
