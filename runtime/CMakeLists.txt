@@ -730,6 +730,11 @@ if(REALM_USE_NVTX)
   target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
 endif()
 
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  target_link_libraries(RealmRuntime PRIVATE cpptrace::cpptrace)
+  target_link_libraries(RealmStatic PRIVATE cpptrace::cpptrace)
+endif()
+
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
 set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}_static")
 

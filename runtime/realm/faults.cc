@@ -25,9 +25,9 @@
 #endif
 #include <assert.h>
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-#ifdef REALM_USE_UNWIND // enabled by default
-#include <unwind.h>
-#endif /* REALM_USE_UNWIND */
+#ifdef REALM_USE_CPPTRACE
+#include <cpptrace/cpptrace.hpp>
+#endif /* REALM_USE_CPPTRACE */
 #include <execinfo.h>
 #endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD) */
 #ifdef REALM_HAVE_CXXABI_H
@@ -40,43 +40,6 @@
 #endif
 
 namespace Realm {
-
-// unwind.h is not supported by Windows
-#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-#ifdef REALM_USE_UNWIND
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class UnwindTrace
-
-  struct UnwindTrace {
-    int index;
-    int depth;
-    uintptr_t *rawptrs;
-  };
-
-  static _Unwind_Reason_Code unwind_trace_trampoline(_Unwind_Context *ctx, void *args)
-  {
-    UnwindTrace *trace = reinterpret_cast<UnwindTrace *>(args);
-    if(trace->index >= trace->depth) {
-      return _URC_END_OF_STACK;
-    }
-
-    int ip_before_instruction = 0;
-    uintptr_t ip = _Unwind_GetIPInfo(ctx, &ip_before_instruction);
-
-    // we do not need the first frame
-    if(ip != 0 && trace->index > 0) {
-      if(!ip_before_instruction) {
-        ip--;
-      }
-      trace->rawptrs[trace->index - 1] = ip;
-    }
-    trace->index++;
-    return _URC_NO_REASON;
-  }
-#endif
-#endif
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -167,7 +130,6 @@ namespace Realm {
   //   and records pointers
   void Backtrace::capture_backtrace(int skip /*= 0*/, int max_depth /*= 0*/)
   {
-    uintptr_t *rawptrs;
     // if we weren't given a max depth, pick 100 for now
     if(max_depth <= 0)
       max_depth = 100;
@@ -177,26 +139,32 @@ namespace Realm {
       skip = 0;
     skip++;
 
+#ifdef REALM_USE_CPPTRACE
+    cpptrace::raw_trace raw_trace = cpptrace::generate_raw_trace(skip, max_depth);
+    pcs = std::move(raw_trace.frames);
+#else
     // allocate space for the result of backtrace(), including the stuff on
     //  the front we're going to skip
     assert(sizeof(void *) == sizeof(intptr_t));
-    rawptrs = (uintptr_t *)alloca(sizeof(void *) * (max_depth + skip));
+    pcs.clear();
+    pcs.resize(max_depth + skip, 0);
 #ifdef REALM_ON_WINDOWS
     int count = 0; // TODO: StackWalk appears to be the right API call?
-#elif defined(REALM_USE_UNWIND)
-    UnwindTrace unwind_trace{0, (max_depth + skip), rawptrs};
-    _Unwind_Backtrace(unwind_trace_trampoline, &unwind_trace);
-    int count = unwind_trace.index;
 #else
-    int count = backtrace((void **)rawptrs, max_depth + skip);
+    int count = backtrace((void **)pcs.data(), max_depth + skip);
 #endif
     assert(count >= 0);
-    
-    pcs.clear();
-    symbols.clear();
 
-    if(count > skip)
-      pcs.insert(pcs.end(), rawptrs + skip, rawptrs + count);
+    if(count > skip) {
+      pcs.erase(pcs.begin() + count, pcs.end());
+      pcs.erase(pcs.begin(), pcs.begin() + skip);
+    } else {
+      pcs.clear();
+    }
+
+#endif /* REALM_USE_CPPTRACE */
+
+    symbols.clear();
 
     // recompute the hash too
     pc_hash = compute_hash();
@@ -209,26 +177,46 @@ namespace Realm {
     // have we already done the lookup?
     if(!symbols.empty()) return;
 
-    symbols.resize(pcs.size(), "unknown symbol");
+    symbols.reserve(pcs.size());
 
+#ifdef REALM_USE_CPPTRACE
+    cpptrace::raw_trace raw_trace;
+    raw_trace.frames = std::move(pcs);
+    for(const cpptrace::stacktrace_frame &frame : raw_trace.resolve().frames) {
+      // the resolved trace has more frames than the raw trace,
+      // so we have to use push_back
+      // we do not need "unknown symbol" here becasue frame.to_string
+      // always returns something
+      symbols.push_back(frame.to_string(true));
+    }
+    pcs = std::move(raw_trace.frames);
+#else
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     for(size_t i = 0; i < pcs.size(); i++) {
       // try backtrace_symbols() first
       char **s = backtrace_symbols((void * const *)&(pcs[i]), 1);
       if(s) {
-	symbols[i].assign(s[0]);
-	free(s);
+        symbols.emplace_back(s[0]);
+        free(s);
+      } else {
+        symbols.emplace_back("unknown symbol");
       }
     }
 #endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD) */
+#endif /* REALM_USE_CPPTRACE */
   }
 
   std::ostream& operator<<(std::ostream& os, const Backtrace& bt)
   {
+    os << "stack trace: " << bt.symbols.size() << " frames" << std::endl;
+#ifdef REALM_USE_CPPTRACE
+    for(const std::string &sym : bt.symbols) {
+      os << sym << std::endl;
+    }
+#else
     char *demangle_buffer = 0;
     size_t demangle_len = 0;
 
-    os << "stack trace: " << bt.pcs.size() << " frames" << std::endl;
     for(size_t i = 0; i < bt.pcs.size(); i++) {
       os << "  [" << i << "] = ";
       if(!bt.symbols.empty() && !bt.symbols[i].empty()) {
@@ -269,6 +257,7 @@ namespace Realm {
 
     if(demangle_buffer)
       free(demangle_buffer);
+#endif /* REALM_USE_CPPTRACE */
 
     return os;
   }
