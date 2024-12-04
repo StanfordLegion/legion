@@ -1348,6 +1348,22 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    bool Operation::point_wise_analysable(GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::analyze_point_wise_dependence(const LogicalUser &prev,
+        const LogicalUser &user, LogicalAnalysis &logical_analysis,
+        DependenceType dtype)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
     unsigned Operation::get_output_offset() const
     {
       return LogicalAnalysis::NO_OUTPUT_OFFSET;
@@ -4452,6 +4468,77 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::point_wise_analysable(GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(this->op_lock);
+      if (gen < this->get_generation())
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointWiseAnalysable<OP>::analyze_point_wise_dependence(
+          const LogicalUser &prev, const LogicalUser &user,
+          LogicalAnalysis &logical_analysis, DependenceType dtype)
+    //--------------------------------------------------------------------------
+    {
+      bool point_wise_analysable = false;
+      if (prev.op->point_wise_analysable(prev.gen) &&
+          user.op->point_wise_analysable(user.gen))
+      {
+        if (prev.op->
+            region_has_collective(prev.idx, prev.gen) ||
+            user.op->
+            region_has_collective(user.idx, user.gen))
+        {
+          logical_analysis.bail_point_wise_analysis = true;
+        }
+        if (user.op->
+            prev_point_wise_user_set(user.idx))
+        {
+          // We bail if we have more than one ancestor for now
+          logical_analysis.bail_point_wise_analysis = true;
+        }
+        if (!logical_analysis.bail_point_wise_analysis) {
+          if(!prev.shard_proj->is_disjoint() ||
+              !prev.shard_proj->can_perform_name_based_self_analysis()) {
+            logical_analysis.bail_point_wise_analysis = true;
+          }
+          else if ((user.shard_proj->projection->projection_id !=
+                prev.shard_proj->projection->projection_id) ||
+              !user.shard_proj->projection->is_functional ||
+              (!user.shard_proj->projection->is_invertible &&
+               user.shard_proj->projection->projection_id != 0))
+          {
+            logical_analysis.bail_point_wise_analysis = true;
+          }
+          else
+          {
+            bool parent_dominates =
+              prev.shard_proj->domain->dominates(user.shard_proj->domain);
+            if(parent_dominates)
+            {
+              point_wise_analysable = true;
+              if(!prev.op->set_next_point_wise_user(
+                  user.op, user.gen, prev.gen, prev.idx))
+              {
+                user.op->record_point_wise_dependence_completed_points_prev_task(
+                    prev.shard_proj, prev.ctx_index);
+              }
+              user.op->set_prev_point_wise_user(
+                  prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
+                  user.idx, dtype, prev.idx, prev.index_domain);
+            }
+          }
+        }
+      }
+      return point_wise_analysable;
     }
 
     // Explicit instantiations

@@ -390,6 +390,10 @@ namespace Legion {
         IndexSpaceNode *launch_space = nullptr,
         ShardingFunction *func = nullptr,
         IndexSpace shard_space = IndexSpace::NO_SPACE);
+      virtual bool analyze_point_wise_dependence(const LogicalUser &prev,
+          const LogicalUser &current, LogicalAnalysis &logical_analysis,
+          DependenceType dtype);
+      virtual bool point_wise_analysable(GenerationID gen);
     public:
       inline GenerationID get_generation(void) const { return gen; }
       RtEvent get_mapped_event(void);
@@ -902,6 +906,10 @@ namespace Legion {
       virtual void deactivate(bool free = true);
     public:
       virtual void clear_context_maps(void);
+      virtual bool analyze_point_wise_dependence(const LogicalUser &prev,
+          const LogicalUser &current, LogicalAnalysis &logical_analysis,
+          DependenceType dtype);
+      virtual bool point_wise_analysable(GenerationID gen);
     public:
       virtual bool prev_point_wise_user_set(unsigned region_req_idx);
       virtual bool region_has_collective(unsigned region_idx,

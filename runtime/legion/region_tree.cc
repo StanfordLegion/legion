@@ -16579,59 +16579,9 @@ namespace Legion {
                 {
                   if (!runtime->disable_point_wise_analysis)
                   {
-                    // TODO: Remove DEPENDENT_PARTITION_OP_KIND filtering (reazulh)
-                    if (prev.shard_proj != NULL && user.shard_proj != NULL &&
-                        prev.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND &&
-                        user.op_kind != Operation::DEPENDENT_PARTITION_OP_KIND &&
-                        prev.op->get_must_epoch_op() == NULL &&
-                        user.op->get_must_epoch_op() == NULL)
-                    {
-                      if (prev.op->
-                          region_has_collective(prev.idx, prev.gen) ||
-                          user.op->
-                          region_has_collective(user.idx, user.gen))
-                      {
-                        logical_analysis.bail_point_wise_analysis = true;
-                      }
-                      if (user.op->
-                          prev_point_wise_user_set(user.idx))
-                      {
-                        // We bail if we have more than one ancestor for now
-                        logical_analysis.bail_point_wise_analysis = true;
-                      }
-                      if (!logical_analysis.bail_point_wise_analysis) {
-                        if(!prev.shard_proj->is_disjoint() ||
-                            !prev.shard_proj->can_perform_name_based_self_analysis()) {
-                          logical_analysis.bail_point_wise_analysis = true;
-                        }
-                        else if ((user.shard_proj->projection->projection_id !=
-                              prev.shard_proj->projection->projection_id) ||
-                            !user.shard_proj->projection->is_functional ||
-                            (!user.shard_proj->projection->is_invertible &&
-                             user.shard_proj->projection->projection_id != 0))
-                        {
-                          logical_analysis.bail_point_wise_analysis = true;
-                        }
-                        else
-                        {
-                          bool parent_dominates =
-                            prev.shard_proj->domain->dominates(user.shard_proj->domain);
-                          if(parent_dominates)
-                          {
-                            skip_registering_region_dependence = true;
-                            if(!prev.op->set_next_point_wise_user(
-                                user.op, user.gen, prev.gen, prev.idx))
-                            {
-                              user.op->record_point_wise_dependence_completed_points_prev_task(
-                                  prev.shard_proj, prev.ctx_index);
-                            }
-                            user.op->set_prev_point_wise_user(
-                                prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
-                                user.idx, dtype, prev.idx, prev.index_domain);
-                          }
-                        }
-                      }
-                    }
+                    skip_registering_region_dependence =
+                      user.op->analyze_point_wise_dependence(prev, user,
+                          logical_analysis, dtype);
                   }
                   if(!skip_registering_region_dependence)
                   {
