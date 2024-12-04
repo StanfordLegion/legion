@@ -6717,7 +6717,7 @@ class Operation(object):
         self.used_futures.add(future)
 
     def get_point_task(self, point):
-        assert self.kind == INDEX_TASK_KIND
+        #assert self.kind == INDEX_TASK_KIND
         assert point in self.points
         return self.points[point]
 
@@ -7632,9 +7632,12 @@ class Operation(object):
 
             if current.is_index_op() and current.points:
                 for point in current.points.values():
-                    if point.op not in previous_deps:
-                        queue.append((point.op, target))
-                        previous_deps[point.op] = None
+                    point_op = point
+                    if current.kind == INDEX_TASK_KIND:
+                        point_op = point.op
+                    if point_op not in previous_deps:
+                        queue.append((point_op, target))
+                        previous_deps[point_op] = None
             else:
                 if current.index_owner and current.index_owner not in previous_deps:
                     queue.append((current.index_owner, target))
@@ -13603,19 +13606,25 @@ class State(object):
                 prev_op = context.operations[prev_ctx_idx]
                 next_op = context.operations[next_ctx_idx]
 
-            prev_point_task = prev_op.get_point_task(prev_point)
-            next_point_task = next_op.get_point_task(next_point)
-            dep = MappingDependence(prev_point_task.op, next_point_task.op,
+            prev_point_op = prev_op.get_point_task(prev_point)
+            next_point_op = next_op.get_point_task(next_point)
+
+            if prev_op.kind == INDEX_TASK_KIND:
+                prev_point_op = prev_point_op.op
+            if next_op.kind == INDEX_TASK_KIND:
+                next_point_op = next_point_op.op
+
+            dep = MappingDependence(prev_point_op, next_point_op,
                 prev_region_idx, next_region_idx, dep_type)
             owner_dep = MappingDependence(prev_op, next_op, prev_region_idx,
                     next_region_idx, dep_type)
 
-            prev_point_task.op.add_outgoing(dep)
-            next_point_task.op.add_incoming(dep)
+            prev_point_op.add_outgoing(dep)
+            next_point_op.add_incoming(dep)
 
             prev_op.add_point_wise_outgoing(owner_dep)
             next_op.add_point_wise_incoming(owner_dep)
-            next_point_task.op.add_point_wise_dependences_flag(next_region_idx)
+            next_point_op.add_point_wise_dependences_flag(next_region_idx)
 
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
