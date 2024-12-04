@@ -74,9 +74,7 @@
 
 #cmakedefine REALM_USE_NVTX
 
-#cmakedefine REALM_USE_UNWIND
-
-#cmakedefine REALM_USE_LIBDW
+#cmakedefine REALM_USE_CPPTRACE
 
 #cmakedefine REALM_USE_SHM
 #cmakedefine REALM_HAS_POSIX_FALLOCATE64
