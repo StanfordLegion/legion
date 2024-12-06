@@ -196,9 +196,10 @@ namespace Realm {
     public:
       // create a context for the specified task - the value returned will
       //  be provided to the call to destroy_context
-      virtual void *create_context(Task *task) const = 0;
-
-      virtual void destroy_context(Task *task, void *context) const = 0;
+      virtual void *create_context(Task *task) const { return nullptr; }
+      virtual void destroy_context(Task *task, void *context) const {}
+      virtual void *create_context(InternalTask *task) const { return nullptr; }
+      virtual void destroy_context(InternalTask *task, void *context) const {}
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one

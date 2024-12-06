@@ -44,6 +44,7 @@
 
 // Make sure we have the appropriate defines in place for including realm
 #include "realm.h"
+#include "realm/id.h"
 #include "realm/dynamic_templates.h"
 
 // this may be set before including legion.h to eliminate deprecation warnings
@@ -409,6 +410,7 @@ namespace Legion {
       LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
+      LG_DEFER_MAPPER_COLLECTION_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
@@ -518,6 +520,7 @@ namespace Legion {
         "Defer Index Partition Find Shard Rects",                 \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
+        "Deferred Mapper Instance Collective",                    \
         "Remote View Creation",                                   \
         "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
@@ -753,7 +756,8 @@ namespace Legion {
       MIGRATION_VIRTUAL_CHANNEL = 12,
       TRACING_VIRTUAL_CHANNEL = 13,
       RENDEZVOUS_VIRTUAL_CHANNEL = 14,
-      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
+      PROFILING_VIRTUAL_CHANNEL = 15,
+      MAX_NUM_VIRTUAL_CHANNELS = 16, // this one must be last
     };
 
     enum MessageKind {
@@ -773,8 +777,6 @@ namespace Legion {
       SEND_INDEX_SPACE_CHILD_RESPONSE,
       SEND_INDEX_SPACE_COLORS_REQUEST,
       SEND_INDEX_SPACE_COLORS_RESPONSE,
-      SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
-      SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
       SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST,
       SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE,
       SEND_INDEX_SPACE_RELEASE_COLOR,
@@ -893,9 +895,6 @@ namespace Legion {
       SEND_VIEW_ADD_COPY_USER,
       SEND_VIEW_FIND_LAST_USERS_REQUEST,
       SEND_VIEW_FIND_LAST_USERS_RESPONSE,
-      SEND_VIEW_REPLICATION_REQUEST,
-      SEND_VIEW_REPLICATION_RESPONSE,
-      SEND_VIEW_REPLICATION_REMOVAL,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_RESULT_SIZE,
@@ -1080,6 +1079,8 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
       SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
+      SEND_PROFILER_EVENT_TRIGGER,
+      SEND_PROFILER_EVENT_POISON,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1103,8 +1104,6 @@ namespace Legion {
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \
         "Send Index Space Colors Response",                           \
-        "Send Index Space Remote Expression Request",                 \
-        "Send Index Space Remote Expression Response",                \
         "Send Index Space Generate Color Request",                    \
         "Send Index Space Generate Color Response",                   \
         "Send Index Space Release Color",                             \
@@ -1223,9 +1222,6 @@ namespace Legion {
         "Send View Add Copy User",                                    \
         "Send View Find Last Users Request",                          \
         "Send View Find Last Users Response",                         \
-        "Send View Replication Request",                              \
-        "Send View Replication Response",                             \
-        "Send View Replication Removal",                              \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Result Size",                                    \
@@ -1410,6 +1406,8 @@ namespace Legion {
         "Control Replication Collective Cross Product Exchange",      \
         "Control Replication Collective Tracing Set Deduplication",   \
         "Control Replication Collective Slow Barrier",                \
+        "Send Profiler Event Trigger",                                \
+        "Send Profiler Event Poison",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1661,7 +1659,7 @@ namespace Legion {
     };
 
 #define RUNTIME_CALL_DESCRIPTIONS(name)                               \
-    const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+    const char *name[Internal::LAST_RUNTIME_CALL_KIND] = {            \
       "MapperRuntime::send_message",                                  \
       "MapperRuntime::broadcast",                                     \
       "MapperRuntime::unpack_physical_instance",                      \
@@ -2052,23 +2050,7 @@ namespace Legion {
     class LayoutConstraints;
     class ProjectionFunction;
     class ShardingFunction;
-    class Runtime;
-    // A small interface class for handling profiling responses
-    struct ProfilingResponseBase;
-    class ProfilingResponseHandler {
-    public:
-      virtual void handle_profiling_response(
-                const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response,
-                const void *orig, size_t orig_length) = 0;
-    };
-    struct ProfilingResponseBase {
-    public:
-      ProfilingResponseBase(ProfilingResponseHandler *h)
-        : handler(h) { }
-    public:
-      ProfilingResponseHandler *const handler;
-    };
+    class Runtime; 
 
     // legion_ops.h
     class Provenance;
@@ -2235,6 +2217,7 @@ namespace Legion {
     class LogicalView; // base class for instance and reduction
     class InstanceKey;
     class InstanceView;
+    class ExprView;
     class CollectableView; // pure virtual class
     class IndividualView;
     class CollectiveView;
@@ -2343,6 +2326,8 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly
     extern thread_local TaskContext *implicit_context;
+    // Mapper context if we're inside of a mapper call
+    extern thread_local MappingCallInfo *implicit_mapper_call;
     // Same thing for the runtime
     extern thread_local Runtime *implicit_runtime;
     // Implicit thread-local profiler
@@ -2354,6 +2339,11 @@ namespace Legion {
     // the provenance of meta-task operations for profiling
     // purposes, this has no bearing on correctness
     extern thread_local ::legion_unique_id_t implicit_provenance;
+    // Use this global variable to track name of the "finish event"
+    // for whatever (meta-)task we're running on at the moment.
+    // It should always be the case that the owner node of the
+    // "finish" event" is the same as the node we're on.
+    extern thread_local LgEvent implicit_fevent;
     // Use this to track if we're inside of a registration 
     // callback function which we know to be deduplicated
     enum RegistrationCallbackMode {
@@ -2398,6 +2388,7 @@ namespace Legion {
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
+    friend class Legion::Mapping::MapperRuntime;            \
     friend class Internal::Runtime;                         \
     friend class Internal::FutureImpl;                      \
     friend class Internal::FutureMapImpl;                   \
@@ -2517,6 +2508,7 @@ namespace Legion {
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \
     friend class Internal::MustEpochMappingBroadcast;       \
+    friend class Internal::MappingCallInfo;                 \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
@@ -2892,11 +2884,13 @@ namespace Legion {
       // Override the wait method so we can have our own implementation
       inline void wait(void) const;
       inline void wait_faultaware(bool &poisoned, bool from_application) const;
+      inline bool is_barrier(void) const;
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
+      void record_event_trigger(LgEvent precondition) const;
     };
 
     class PredEvent : public LgEvent {
@@ -3246,10 +3240,6 @@ namespace Legion {
     {
       if (!exists())
         return;
-      // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3268,6 +3258,18 @@ namespace Legion {
         bt.capture_backtrace();
         record_event_wait(local_profiler, bt);
       }
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      Internal::implicit_context = NULL;
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      Internal::implicit_mapper_call = NULL;
+      // Save the implicit fevent
+      LgEvent local_fevent = Internal::implicit_fevent;
+      Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      Internal::implicit_provenance = 0;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3289,6 +3291,17 @@ namespace Legion {
           end_context_wait(local_ctx, false/*from application*/);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (local_profiler != NULL)
+        {
+          // Make sure to restore this before recording
+          Internal::implicit_fevent = local_fevent;
+          Internal::implicit_profiler = local_profiler;
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
@@ -3307,6 +3320,10 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the mapper call back
+      Internal::implicit_mapper_call = local_call;
+      // Write the implicit fevent back
+      Internal::implicit_fevent = local_fevent;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler
@@ -3330,10 +3347,8 @@ namespace Legion {
     {
       if (!exists())
         return;
-      // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
+      if (has_triggered_faultaware(poisoned))
+        return;
 #ifdef DEBUG_LEGION_CALLERS
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
@@ -3352,6 +3367,18 @@ namespace Legion {
         bt.capture_backtrace();
         record_event_wait(local_profiler, bt);
       }
+      // Save the context locally
+      Internal::TaskContext *local_ctx = Internal::implicit_context; 
+      Internal::implicit_context = NULL;
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      Internal::implicit_mapper_call = NULL;
+      // Save the fevent
+      LgEvent local_fevent = Internal::implicit_fevent;
+      Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
+      // Save the task provenance information
+      UniqueID local_provenance = Internal::implicit_provenance;
+      Internal::implicit_provenance = 0;
       // Check to see if we have any local locks to notify
       if (Internal::local_lock_list != NULL)
       {
@@ -3373,6 +3400,17 @@ namespace Legion {
           end_context_wait(local_ctx, from_app);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (local_profiler != NULL)
+        {
+          // Make sure to restore this before recording
+          Internal::implicit_fevent = local_fevent;
+          Internal::implicit_profiler = local_profiler;
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
@@ -3391,6 +3429,10 @@ namespace Legion {
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
+      // Write the mapper call back
+      Internal::implicit_mapper_call = local_call;
+      // Write the implicit fevent back
+      Internal::implicit_fevent = local_fevent;
       // Write the provenance information back
       Internal::implicit_provenance = local_provenance;
       // Restore the local profiler
@@ -3406,6 +3448,14 @@ namespace Legion {
 #endif
       // Write the local reference tracker back
       Internal::implicit_reference_tracker = local_tracker;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LgEvent::is_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+      const Realm::ID identity(id);
+      return identity.is_barrier();
     }
 
   }; // namespace Internal 

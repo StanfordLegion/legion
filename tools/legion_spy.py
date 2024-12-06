@@ -63,7 +63,8 @@ READ_WRITE    = 0x00000007
 WRITE_ONLY    = 0x10000002
 WRITE_DISCARD = 0x10000007
 REDUCE        = 0x00000004
-DISCARD_MASK  = 0x10000000
+INPUT_DISCARD_MASK  = 0x10000000
+OUTPUT_DISCARD_MASK = 0x20000000
 
 EXCLUSIVE = 0
 ATOMIC = 1
@@ -179,11 +180,14 @@ def check_for_anti_dependence(req1, req2, actual):
         else:
             return actual
 
-def compute_dependence_type(req1, req2):
+def compute_dependence_type(req1, req2, exclusive_discard=True):
     if req1.is_no_access() or req2.is_no_access():
         return NO_DEPENDENCE
     elif req1.is_read_only() and req2.is_read_only():
-        return NO_DEPENDENCE
+        if exclusive_discard and req2.is_output_discard():
+            return TRUE_DEPENDENCE
+        else:
+            return NO_DEPENDENCE
     elif req1.is_reduce() and req2.is_reduce():
         if req1.redop == req2.redop:
             return NO_DEPENDENCE
@@ -4937,15 +4941,15 @@ class DataflowTraverser(object):
                 # See a multi-node run of region_reduce_aliased.rg for example
                 self.dataflow_traversal.append(False)
             else:
-                if src in self.state.valid_instances:
+                if src in self.state.previous_instances:
+                    # Still need to traverse to find pending reductions
+                    self.found_previous_dataflow_path = True
+                elif src in self.state.valid_instances:
                     # We found the dataflow path
                     self.found_dataflow_path = True
                     # No need to continue traverse after we found the dataflow path
                     self.perform_copy_analysis(copy, src, dst)
                     return False
-                elif src in self.state.previous_instances:
-                    # Still need to traverse to find pending reductions
-                    self.found_previous_dataflow_path = True
                 self.dataflow_stack.append(src)
                 self.dataflow_traversal.append(True)
                 # Once we traverse through an across copy we don't do it again
@@ -6098,7 +6102,7 @@ class Requirement(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY) and not self.is_discard()
+        return bool(self.priv & READ_ONLY) and not self.is_input_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -6115,8 +6119,11 @@ class Requirement(object):
     def is_reduce(self):
         return self.priv == REDUCE_PRIV
 
-    def is_discard(self):
-        return bool(self.priv & DISCARD_MASK)
+    def is_input_discard(self):
+        return bool(self.priv & INPUT_DISCARD_MASK)
+
+    def is_output_discard(self):
+        return bool(self.priv & OUTPUT_DISCARD_MASK)
 
     def is_collective(self):
         return bool(self.coher & COLLECTIVE_MASK)
@@ -6152,14 +6159,17 @@ class Requirement(object):
             return "NO-ACCESS"
         elif bool(self.priv & WRITE_PRIV):
             if bool(self.priv & READ_PRIV):
-                if bool(self.priv & DISCARD_MASK):
+                if bool(self.priv & INPUT_DISCARD_MASK):
                     return "WRITE-DISCARD"
                 else:
                     return "READ-WRITE"
             else:
                 return "WRITE-ONLY"
         elif bool(self.priv & READ_PRIV):
-            return "READ-ONLY"
+            if bool(self.priv & OUTPUT_DISCARD_MASK):
+                return "READ-ONLY-DISCARD"
+            else:
+                return "READ-ONLY"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
@@ -7100,6 +7110,12 @@ class Operation(object):
                 for req in itervalues(point_task.op.reqs):
                     all_reqs.append((req,point_task.op))
         else:
+            # Check to see if this is an indirection copy, if it is then we're
+            # just going to assume that things are non-interfering since there
+            # is no way to prove that it is non-interfering without knowing 
+            # what the data is in the indirection field(s)
+            if self.kind == COPY_OP_KIND and self.copy_kind > 0:
+                return False
             for point in itervalues(self.points):
                 for req in itervalues(point.reqs):
                     all_reqs.append((req,point))
@@ -7444,7 +7460,7 @@ class Operation(object):
             # This is a single operation
             assert self.launch_shape is None
             assert len(self.reqs) >= len(logical_op.reqs)
-            for idx in xrange(0,len(logical_op.reqs)):
+            for idx in iterkeys(logical_op.reqs):
                 if not self.verify_logical_requirement(idx, logical_op, previous_deps):
                     return False
         return True
@@ -9282,6 +9298,8 @@ class Task(object):
         if self.op.reqs:
             # Find which region requirement privileges were derived from
             for idx,our_req in iteritems(self.op.reqs):
+                if our_req.is_no_access():
+                    continue
                 if child_req.parent is not our_req.logical_node:
                     continue
                 fields_good = True
@@ -9961,7 +9979,7 @@ class PointUser(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY) and not self.is_discard()
+        return bool(self.priv & READ_ONLY) and not self.is_input_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -9978,8 +9996,11 @@ class PointUser(object):
     def is_reduce(self):
         return self.priv == REDUCE
 
-    def is_discard(self):
-        return bool(self.priv & DISCARD_MASK)
+    def is_input_discard(self):
+        return bool(self.priv & INPUT_DISCARD_MASK)
+
+    def is_output_discard(self):
+        return bool(self.priv & OUTPUT_DISCARD_MASK)
 
     def is_collective(self):
         return bool(self.coher & COLLECTIVE_MASK)
@@ -10295,7 +10316,7 @@ class Instance(object):
                 if logical_user.index_owner is not None and \
                         logical_user.index_owner is logical_op.index_owner:
                     continue
-            dep = compute_dependence_type(user, req)
+            dep = compute_dependence_type(user, req, exclusive_discard=False)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 result.add(user.op)
                 # If the previous was an exclusive user there is no
@@ -10325,7 +10346,7 @@ class Instance(object):
             if logical_op is user.logical_op and index != user.index:
                 if not user.is_realm_op() or not reading or user.is_read_only():
                     continue
-            dep = compute_dependence_type(user, inst)
+            dep = compute_dependence_type(user, inst, exclusive_discard=False)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 # We can safely write the same version number on top of a reader
                 if dep == ANTI_DEPENDENCE and redop == 0 and version == user.version:
@@ -12825,10 +12846,14 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         p1 = state.get_task(int(m.group('point1')))
         p2 = state.get_task(int(m.group('point2')))
-        assert p1 not in state.point_point
-        assert p2 not in state.point_point
         # Holdoff on doing the merge until after parsing
-        state.point_point[p1] = p2
+        if p1 in state.point_point:
+            if state.point_point[p1] is not p2:
+                state.point_point[p2] = state.point_point[p1]
+            # No matter what remove the intermediate
+            del state.point_point[p1]
+        else:
+            state.point_point[p2] = p1
         return True
     m = index_point_pat.match(line)
     if m is not None:

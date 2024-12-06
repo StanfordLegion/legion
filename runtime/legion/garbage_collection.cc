@@ -661,14 +661,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_remote_registration(void)
+    RtEvent DistributedCollectable::send_remote_registration(
+                                                        bool passing_global_ref)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(registered_with_runtime);
 #endif
-      RtUserEvent registered_event = Runtime::create_rt_user_event();
+      RtUserEvent registered_event;
+      if (!passing_global_ref)
+        registered_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -692,7 +695,10 @@ namespace Legion {
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
       target->update_remote_instances(source);
-      Runtime::trigger_event(done_event);
+      if (done_event.exists())
+        Runtime::trigger_event(done_event);
+      else
+        target->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

@@ -815,15 +815,15 @@ namespace Legion {
           const RegionRequirement &req = regions[*it];
           if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
             continue;
-          if (IS_WRITE(req))
+          if (!IS_WRITE(req))
+            check_collective_regions.push_back(*it);
+          else if (!IS_COLLECTIVE(req))
             REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
                 "Ignoring request by mapper %s to check for collective usage "
                 "for region requirement %d of task %s (UID %lld) because "
                 "region requirement has writing privileges.",
                 mapper->get_mapper_name(), *it, 
                 get_task_name(), unique_op_id)
-          else
-            check_collective_regions.push_back(*it);
         }
         if (!check_collective_regions.empty())
         {
@@ -1464,7 +1464,7 @@ namespace Legion {
             phase_barriers.begin(); it != phase_barriers.end(); it++)
       {
         arrive_barriers.push_back(*it);
-        Runtime::phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
+        runtime->phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_phase_barrier_arrival(unique_op_id, it->phase_barrier);
       }
@@ -1595,7 +1595,8 @@ namespace Legion {
 #endif
             // Get the interference kind and report it if it is bad
             RegionUsage usage2(logical_regions[indexes[j]]);
-            DependenceType dtype = check_dependence_type<false>(usage1, usage2);
+            DependenceType dtype = 
+              check_dependence_type<false,false>(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
             // There is a special case here for concurrent tasks with both
@@ -2307,12 +2308,6 @@ namespace Legion {
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       untracked_valid_regions.clear();
       if ((execution_context != NULL) && 
           execution_context->remove_base_gc_ref(SINGLE_TASK_REF))
@@ -3599,6 +3594,9 @@ namespace Legion {
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(output_regions.empty());
+#endif
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
@@ -4570,10 +4568,11 @@ namespace Legion {
         Provenance *provenance = get_provenance();
         if (provenance != NULL)
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
-              "Task %s (UID %lld, provenance: %s) used a task "
+              "Task %s (UID %lld, provenance: %.*s) used a task "
               "variant with a maximum return size of %zd but "
               "returned a result of %zd bytes.",
-              get_task_name(), get_unique_id(), provenance->human_str(),
+              get_task_name(), get_unique_id(), int(provenance->human.length()),
+              provenance->human.data(),
               var_impl->return_type_size, instance->size)
         else
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
@@ -4596,9 +4595,9 @@ namespace Legion {
       // If we haven't computed our virtual mapping information
       // yet (e.g. because we origin mapped) then we have to
       // do that now
-      if (virtual_mapped.size() != regions.size())
+      if (virtual_mapped.empty())
       {
-        virtual_mapped.resize(regions.size());
+        virtual_mapped.resize(regions.size(), false);
         for (unsigned idx = 0; idx < regions.size(); idx++)
           virtual_mapped[idx] = physical_instances[idx].is_virtual_mapping();
       }
@@ -4797,6 +4796,10 @@ namespace Legion {
         }
         if (!realm_measurements.empty())
         {
+          // If we're doing profiling we need the fevent to know how to
+          // profile the profiling response
+          if (runtime->profiler != NULL)
+            realm_measurements.insert(Realm::PMID_OP_FINISH_EVENT);
           OpProfilingResponse response(this, 0, 0, false/*fill*/, true/*task*/);
           Realm::ProfilingRequest &request = profiling_requests.add_request(
               runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
@@ -4810,7 +4813,7 @@ namespace Legion {
           if (is_remote() && is_origin_mapped())
           {
 #ifdef DEBUG_LEGION
-            assert(outstanding_profiling_requests.load() == 0);
+            assert(outstanding_profiling_requests == 0);
             assert(!profiling_reported.exists());
 #endif
             outstanding_profiling_requests.store(1);
@@ -4950,19 +4953,29 @@ namespace Legion {
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
         &response, sizeof(response));
+      bool has_finish = false;
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-            copy_profiling_requests.begin(); it != 
+            copy_profiling_requests.begin(); it !=
             copy_profiling_requests.end(); it++)
-        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      {
+        const Realm::ProfilingMeasurementID measurement = 
+          (Realm::ProfilingMeasurementID)*it;
+        request.add_measurement(measurement);
+        if (measurement == Realm::PMID_OP_FINISH_EVENT)
+          has_finish = true;
+      }
+      // Need thetimeline for the operation to know how to profile this
+      // profiling response
+      if (!has_finish && (runtime->profiler != NULL))
+        request.add_measurement(Realm::PMID_OP_FINISH_EVENT);
       handle_profiling_update(count);
       return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+    bool SingleTask::handle_profiling_response(
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4971,7 +4984,10 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id); 
       const OpProfilingResponse *task_prof = 
-            static_cast<const OpProfilingResponse*>(base);
+            static_cast<const OpProfilingResponse*>(response.user_data());
+      Realm::ProfilingMeasurements::OperationFinishEvent finish_event;
+      if (response.get_measurement(finish_event))
+        fevent = LgEvent(finish_event.finish_event);
       // First see if this is a task response for an origin-mapped task
       // on a remote node that needs to be sent back to the origin node
       if (task_prof->task && is_origin_mapped() && is_remote())
@@ -5000,39 +5016,16 @@ namespace Legion {
       else
       {
         // Check to see if we are done mapping, if not then we need to defer
-        // this until we are done mapping so we know how many
-        {
-          AutoLock o_lock(op_lock);
-          if (!mapped_event.has_triggered())
-          {
-            // Save this profiling response for later until we know the
-            // full count of profiling responses
-            profiling_info.resize(profiling_info.size() + 1);
-            SingleProfilingInfo &info = profiling_info.back();
-            info.task_response = task_prof->task; 
-            info.region_requirement_index = task_prof->src;
-            info.fill_response = task_prof->fill;
-            info.buffer_size = orig_length;
-            info.buffer = malloc(orig_length);
-            memcpy(info.buffer, orig, orig_length);
-            if (info.task_response)
-            {
-              // If we had an overhead profiler
-              // see if this is the callback for the task
-              if (execution_context->overhead_profiler != NULL)
-                // This is the callback for the task itself
-                info.profiling_responses.attach_overhead(
-                    execution_context->overhead_profiler);
-            }
-            return;
-          }
-        }
+        // this until we are done mapping so we know how many reports to expect
+        const RtEvent mapped = get_mapped_event();
+        if (!mapped.has_triggered())
+          mapped.wait();
         // If we get here then we can handle the response now
         Mapping::Mapper::TaskProfilingInfo info;
         info.profiling_responses.attach_realm_profiling_response(response);
         info.task_response = task_prof->task; 
         info.region_requirement_index = task_prof->src;
-        info.total_reports = outstanding_profiling_requests.load();
+        info.total_reports = outstanding_profiling_requests;
         info.fill_response = task_prof->fill;
         if (info.task_response)
         {
@@ -5047,10 +5040,12 @@ namespace Legion {
       }
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     } 
 
     //--------------------------------------------------------------------------
@@ -5071,40 +5066,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
-      if (mapper == NULL)
-        mapper = runtime->find_mapper(current_proc, map_id);
-      if (outstanding_profiling_requests.load() > 0)
+      if (outstanding_profiling_requests == 0)
       {
-#ifdef DEBUG_LEGION
-        assert(mapped_event.has_triggered());
-#endif
-        std::vector<SingleProfilingInfo> to_perform;
-        {
-          AutoLock o_lock(op_lock);
-          to_perform.swap(profiling_info);
-        }
-        if (!to_perform.empty())
-        {
-          for (unsigned idx = 0; idx < to_perform.size(); idx++)
-          {
-            SingleProfilingInfo &info = to_perform[idx];
-            const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-            info.total_reports = outstanding_profiling_requests.load();
-            info.profiling_responses.attach_realm_profiling_response(resp);
-            mapper->invoke_task_report_profiling(this, info);
-            free(info.buffer);
-          }
-          const int count = to_perform.size() + 
-              outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-          assert(count <= outstanding_profiling_requests.load());
-#endif
-          if (count == outstanding_profiling_requests.load())
-            Runtime::trigger_event(profiling_reported);
-        }
-      }
-      else
-      {
+        if (mapper == NULL)
+          mapper = runtime->find_mapper(current_proc, map_id);
         // We're not expecting any profiling callbacks so we need to
         // do one ourself to inform the mapper that there won't be any
         Mapping::Mapper::TaskProfilingInfo info;
@@ -7463,7 +7428,7 @@ namespace Legion {
       if (start.exists())
         precondition = Runtime::protect_event(start);
       if (is_replaying())
-        Runtime::phase_barrier_arrive(concurrent_precondition.traced,
+        runtime->phase_barrier_arrive(concurrent_precondition.traced,
             1/*count*/, precondition);
       else
         Runtime::trigger_event(concurrent_precondition.interpreted, 
@@ -7535,7 +7500,7 @@ namespace Legion {
             "as needing 'concurrent_barrier' support in the task variant "
             "registrar.", get_task_name(), get_unique_id())
       }
-      Runtime::phase_barrier_arrive(concurrent_task_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(concurrent_task_barrier, 1/*count*/);
       concurrent_task_barrier.wait();
       Runtime::advance_barrier(concurrent_task_barrier);
 #ifdef DEBUG_LEGION
@@ -8222,6 +8187,12 @@ namespace Legion {
                              shard_id, get_unique_id());
       if (!leaf_task)
       {
+#ifdef DEBUG_LEGION
+        // Should have checked that we don't have any output regions here
+        assert(output_regions.empty());
+        assert(virtual_mapped.size() == regions.size());
+        assert(parent_req_indexes.size() == regions.size());
+#endif
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
@@ -8528,12 +8499,6 @@ namespace Legion {
       output_preconditions.clear();
       commit_preconditions.clear();
       version_infos.clear();
-      if (!profiling_info.empty())
-      {
-        for (unsigned idx = 0; idx < profiling_info.size(); idx++)
-          free(profiling_info[idx].buffer);
-        profiling_info.clear();
-      }
       interfering_requirements.clear();
       point_requirements.clear();
       concurrent_slices.clear();
@@ -9408,7 +9373,7 @@ namespace Legion {
           if (is_recording())
           {
             // Set up a barrier for use with tracing
-            RtBarrier barrier(Realm::Barrier::create_barrier(total_points));
+            RtBarrier barrier = runtime->create_rt_barrier(total_points);
             std::vector<ShardID> participants(1,0);
             tpl->record_concurrent_barrier(this, barrier, 
                 participants, total_points);
@@ -9542,8 +9507,7 @@ namespace Legion {
           VariantImpl *variant = 
             runtime->find_variant_impl(task_id, concurrent_variant);
           if (variant->needs_barrier())
-            concurrent_task_barrier =
-              RtBarrier(Realm::Barrier::create_barrier(total_points));
+            concurrent_task_barrier = runtime->create_rt_barrier(total_points);
         }
         // Swap this vector onto the stack in case the slice task gets deleted
         // out from under us while we are finalizing things
@@ -9896,37 +9860,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDEX_COMMIT_CALL); 
       if (profiling_reported.exists())
       {
-        if (outstanding_profiling_requests.load() > 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(mapped_event.has_triggered());
-#endif
-          std::vector<IndexProfilingInfo> to_perform;
-          {
-            AutoLock o_lock(op_lock);
-            to_perform.swap(profiling_info);
-          }
-          if (!to_perform.empty())
-          {
-            for (unsigned idx = 0; idx < to_perform.size(); idx++)
-            {
-              IndexProfilingInfo &info = to_perform[idx];
-              const Realm::ProfilingResponse resp(info.buffer,info.buffer_size);
-              info.total_reports = outstanding_profiling_requests.load();
-              info.profiling_responses.attach_realm_profiling_response(resp);
-              mapper->invoke_task_report_profiling(this, info);
-              free(info.buffer);
-            }
-            const int count = to_perform.size() +
-                outstanding_profiling_reported.fetch_add(to_perform.size());
-#ifdef DEBUG_LEGION
-            assert(count <= outstanding_profiling_requests.load());
-#endif
-            if (count == outstanding_profiling_requests.load())
-              Runtime::trigger_event(profiling_reported);
-          }
-        }
-        else
+        if (outstanding_profiling_requests == 0)
         {
           // We're not expecting any profiling callbacks so we need to
           // do one ourself to inform the mapper that there won't be any
@@ -9938,7 +9872,8 @@ namespace Legion {
           mapper->invoke_task_report_profiling(this, info);    
           Runtime::trigger_event(profiling_reported);
         }
-        commit_preconditions.insert(profiling_reported);
+        else
+          commit_preconditions.insert(profiling_reported);
       }
       if (must_epoch != NULL)
       {
@@ -10082,56 +10017,57 @@ namespace Legion {
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
         &response, sizeof(response));
+      bool has_finish = false;
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-            copy_profiling_requests.begin(); it != 
+            copy_profiling_requests.begin(); it !=
             copy_profiling_requests.end(); it++)
-        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      {
+        const Realm::ProfilingMeasurementID measurement = 
+          (Realm::ProfilingMeasurementID)*it;
+        request.add_measurement(measurement);
+        if (measurement == Realm::PMID_OP_FINISH_EVENT)
+          has_finish = true;
+      }
+      // Need thetimeline for the operation to know how to profile this
+      // profiling response
+      if (!has_finish && (runtime->profiler != NULL))
+        request.add_measurement(Realm::PMID_OP_FINISH_EVENT);
       handle_profiling_update(count);
       return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+    bool IndexTask::handle_profiling_response(
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent)
     //--------------------------------------------------------------------------
     {
-      const OpProfilingResponse *task_prof = 
-            static_cast<const OpProfilingResponse*>(base);
+      const OpProfilingResponse *task_prof =
+        static_cast<const OpProfilingResponse*>(response.user_data());
+      Realm::ProfilingMeasurements::OperationFinishEvent finish_event;
+      if (response.get_measurement(finish_event))
+        fevent = LgEvent(finish_event.finish_event);
       // Check to see if we are done mapping, if not then we need to defer
-      // this until we are done mapping so we know how many
-      {
-        AutoLock o_lock(op_lock);
-        if (!mapped_event.has_triggered())
-        {
-          // Save this profiling response for later until we know the
-          // full count of profiling responses
-          profiling_info.resize(profiling_info.size() + 1);
-          IndexProfilingInfo &info = profiling_info.back();
-          info.task_response = task_prof->task; 
-          info.region_requirement_index = task_prof->src;
-          info.fill_response = task_prof->fill;
-          info.buffer_size = orig_length;
-          info.buffer = malloc(orig_length);
-          memcpy(info.buffer, orig, orig_length);
-          return;
-        }
-      }
+      // this until we are done mapping so we know how many reports to expect
+      const RtEvent mapped = get_mapped_event();
+      if (!mapped.has_triggered())
+        mapped.wait();
       // If we get here then we can handle the response now
       Mapping::Mapper::TaskProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       info.task_response = task_prof->task; 
       info.region_requirement_index = task_prof->src;
-      info.total_reports = outstanding_profiling_requests.load();
+      info.total_reports = outstanding_profiling_requests;
       info.fill_response = task_prof->fill;
       mapper->invoke_task_report_profiling(this, info);
       const int count = outstanding_profiling_reported.fetch_add(1) + 1;
 #ifdef DEBUG_LEGION
-      assert(count <= outstanding_profiling_requests.load());
+      assert(count <= outstanding_profiling_requests);
 #endif
-      if (count == outstanding_profiling_requests.load())
+      if (count == outstanding_profiling_requests)
         Runtime::trigger_event(profiling_reported);
+      // Always record these as part of profiling
+      return true;
     } 
 
     //--------------------------------------------------------------------------
@@ -10160,7 +10096,7 @@ namespace Legion {
     {
       FutureMapImpl *result = new FutureMapImpl(ctx, this, this->launch_space,
           runtime, runtime->get_available_distributed_id(), get_provenance());
-      future_map_coordinate = result->future_coordinate;
+      future_map_coordinate = result->blocking_index;
       return FutureMap(result);
     }
 
