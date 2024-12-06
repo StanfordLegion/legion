@@ -1139,10 +1139,12 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     assert(dim == other.dim);
-    if ((is_id > 0) || (other.is_id > 0))
-    {
-      assert((is_type == other.is_type) ||
+    // Only allow for one of these to have a sparsity map currently
+    assert(dense() || other.dense());
+    assert((is_type == other.is_type) ||
               (is_type == 0) || (other.is_type == 0));
+    if (!dense() || !other.dense())
+    {
       Domain result;
       IntersectionFunctor functor(*this, other, result);
       Internal::NT_TemplateHelper::demux<IntersectionFunctor>(

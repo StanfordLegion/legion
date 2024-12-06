@@ -1459,11 +1459,11 @@ namespace Legion {
     IndexSpaceOperationT<DIM,T>::~IndexSpaceOperationT(void)
     //--------------------------------------------------------------------------
     {
-      if (this->owner_space == this->context->runtime->address_space)
-      {
-        this->realm_index_space.destroy(realm_index_space_ready);
+      // Only need to delete the tight space here if we're the owner since
+      // we already would have deleted the base realm index space when we
+      // tightened it if it had a sparsity map.
+      if (this->is_owner())
         this->tight_index_space.destroy(tight_index_space_ready);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1548,6 +1548,9 @@ namespace Legion {
       assert(tight_index_space.is_valid());
 #endif
       is_index_space_tight.store(true);
+      if (this->is_owner() && 
+          !realm_index_space.dense() && tight_index_space.dense())
+        realm_index_space.destroy(realm_index_space_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -3006,7 +3009,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(realm_index_space.is_valid());
 #endif
-      Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
+      const Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
 #ifdef DEBUG_LEGION
       assert(tight_space.is_valid());
 #endif
@@ -3023,7 +3026,10 @@ namespace Legion {
           index_space_ready = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
-      old_space.destroy(index_space_valid);
+      // If the old space was not dense and the tightened one is dense
+      // that means we no longer need to hold our sparsity map reference
+      if (!old_space.dense() && tight_space.dense())
+        old_space.destroy(index_space_valid);
       if (context->runtime->legion_spy_enabled || 
           (context->runtime->profiler != NULL))
       {

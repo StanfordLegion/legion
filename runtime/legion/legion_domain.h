@@ -439,15 +439,18 @@ namespace Legion {
       {
         DomainT<N::N,T> is1 = functor->lhs;
         DomainT<N::N,T> is2 = functor->rhs;
-        Realm::ProfilingRequestSet dummy_requests;
-        DomainT<N::N,T> temp;
-        Internal::LgEvent wait_on(
-            DomainT<N::N,T>::compute_intersection(is1, is2,
-              temp, dummy_requests));
-        if (wait_on.exists())
-          wait_on.wait();
-        functor->result = Domain(temp.tighten());
-        temp.destroy();
+        assert(is1.dense() || is2.dense());
+        // Intersect the index spaces
+        DomainT<N::N,T> result;
+        result.bounds = is1.bounds.intersection(is2.bounds);
+        if (!result.bounds.empty())
+        {
+          if (!is1.dense())
+            result.sparsity = is1.sparsity;
+          else if (!is2.dense())
+            result.sparsity = is2.sparsity;
+        }
+        functor->result = Domain(result);
       }
     public:
       const Domain &lhs;
