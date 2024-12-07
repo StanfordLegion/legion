@@ -31,6 +31,7 @@ using namespace Legion::Mapping::Utilities;
 static vector<bishop_mapper_impl_t> mapper_impls;
 static vector<bishop_transition_fn_t> transitions;
 static bishop_mapper_state_init_fn_t mapper_init;
+static bishop_mapper_state_destroy_fn_t mapper_destroy;
 
 namespace Legion {
   namespace Mapping {
@@ -47,8 +48,8 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
        it != local_procs.end(); it++)
   {
     BishopMapper* mapper =
-      new BishopMapper(mapper_impls, transitions, mapper_init, rt, machine,
-                       *it);
+      new BishopMapper(mapper_impls, transitions, mapper_init, mapper_destroy,
+          rt, machine, *it);
     runtime->replace_default_mapper(mapper, *it);
   }
 }
@@ -58,13 +59,15 @@ register_bishop_mappers(bishop_mapper_impl_t* _mapper_impls,
                         unsigned _num_mapper_impls,
                         bishop_transition_fn_t* _transitions,
                         unsigned _num_transitions,
-                        bishop_mapper_state_init_fn_t _mapper_init)
+                        bishop_mapper_state_init_fn_t _mapper_init,
+                        bishop_mapper_state_destroy_fn_t _mapper_destroy)
 {
   for (unsigned i = 0; i < _num_mapper_impls; ++i)
     mapper_impls.push_back(_mapper_impls[i]);
   for (unsigned i = 0; i < _num_transitions; ++i)
     transitions.push_back(_transitions[i]);
   mapper_init = _mapper_init;
+  mapper_destroy = _mapper_destroy;
 
   Runtime::add_registration_callback(
       bishop_mapper_registration_callback);
@@ -294,7 +297,7 @@ bishop_physical_region_get_fields(legion_physical_region_t pr_)
 
 typedef std::pair<size_t, std::pair<LogicalRegion, Memory> > InstanceCacheKey;
 typedef std::map<InstanceCacheKey,
-                 legion_physical_instance_t*> InstanceCache;
+                 std::pair<legion_physical_instance_t*, size_t> > InstanceCache;
 
 bishop_instance_cache_t
 bishop_instance_cache_create()
@@ -302,6 +305,20 @@ bishop_instance_cache_create()
   bishop_instance_cache_t cache_;
   cache_.impl = new InstanceCache;
   return cache_;
+}
+
+void
+bishop_instance_cache_destroy(bishop_instance_cache_t cache_)
+{
+  InstanceCache *cache = (InstanceCache*)cache_.impl;
+
+  for (InstanceCache::iterator it = cache->begin(); it != cache->end(); it++)
+  {
+    for (unsigned idx = 0; idx < it->second.second; idx++)
+      legion_physical_instance_destroy(it->second.first[idx]);
+    free(it->second.first);
+  }
+  delete cache;
 }
 
 legion_physical_instance_t*
@@ -320,7 +337,7 @@ bishop_instance_cache_get_cached_instances(bishop_instance_cache_t cache_,
     return NULL;
   else
   // TODO: Some layout constraints may require multiple instances
-    return finder->second;
+    return finder->second.first;
 }
 
 bool
@@ -328,7 +345,8 @@ bishop_instance_cache_register_instances(bishop_instance_cache_t cache_,
                                          size_t idx,
                                          legion_logical_region_t lr_,
                                          legion_memory_t memory_,
-                                         legion_physical_instance_t *instances)
+                                         legion_physical_instance_t *instances,
+                                         size_t num_instances)
 {
   InstanceCache *cache = (InstanceCache*)cache_.impl;
 
@@ -338,16 +356,20 @@ bishop_instance_cache_register_instances(bishop_instance_cache_t cache_,
   InstanceCache::iterator finder = cache->find(key);
   if (finder != cache->end())
   {
+    for (unsigned idx = 0; idx < num_instances; idx++) {
 #ifdef DEBUG_LEGION
-    assert(CObjectWrapper::unwrap(*finder->second)->get_instance_id() ==
-        CObjectWrapper::unwrap(*instances)->get_instance_id());
+      assert(CObjectWrapper::unwrap(finder->second.first[idx])->get_instance_id() ==
+          CObjectWrapper::unwrap(instances[idx])->get_instance_id());
 #endif
+      // Need to release the references that we were passed
+      legion_physical_instance_destroy(instances[idx]); 
+    }
     return false;
   }
   else
   {
     // TODO: Some layout constraints may require multiple instances
-    (*cache)[key] = instances;
+    cache->emplace(std::make_pair(key, std::make_pair(instances, num_instances)));
     return true;
   }
 }
@@ -360,6 +382,13 @@ bishop_slice_cache_create()
   bishop_slice_cache_t cache_;
   cache_.impl = new SliceCache;
   return cache_;
+}
+
+void
+bishop_slice_cache_destroy(bishop_slice_cache_t cache_)
+{
+  SliceCache *cache = (SliceCache*)cache_.impl;
+  delete cache;
 }
 
 bool
