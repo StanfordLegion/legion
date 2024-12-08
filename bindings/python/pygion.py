@@ -535,7 +535,8 @@ _redop_ids = {}
 def _fill_redop_ids():
     operators = ['+', '-', '*', '/', 'max', 'min']
     types = [bool_, int8, int16, int32, int64, uint8, uint16, uint32, uint64, None, float32, float64, None, complex64, complex128]
-    next_id = 1048576
+    # LEGION_MAX_APPLICATION_REDOP_ID + 1 is now a new base
+    next_id = 1048577
     for operator in operators:
         _redop_ids[operator] = {}
         for type in types:

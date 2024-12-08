@@ -797,23 +797,9 @@ namespace Realm {
 
       // multiple concurrent cuda reduces ok
       static const bool is_ordered = false;
-      
-      // helper method here so that GPUreduceRemoteChannel can use it too
-      static bool is_gpu_redop(ReductionOpID redop_id);
 
-      // override this because we have to be picky about which reduction ops
-      //  we support
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
-         
+      virtual bool supports_redop(ReductionOpID redop_id) const;
+
       virtual RemoteChannelInfo *construct_remote_info() const;
 
       virtual XferDes *create_xfer_des(uintptr_t dma_op,
@@ -857,18 +843,6 @@ namespace Realm {
       friend class GPUreduceRemoteChannelInfo;
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
-
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
-
     };
 
 

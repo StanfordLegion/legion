@@ -32,32 +32,52 @@ namespace Realm {
     // the ability to add CUDA kernels to a reduction op is only available
     //  when using a compiler that understands CUDA
     namespace ReductionKernels {
-      template <typename REDOP, bool EXCL>
-      __global__ void apply_cuda_kernel(uintptr_t lhs_base,
-                                        uintptr_t lhs_stride,
-                                        uintptr_t rhs_base,
-                                        uintptr_t rhs_stride,
-                                        size_t count,
-                                        REDOP redop)
+
+      template <typename LHS, typename RHS, typename F>
+      __device__ void iter_cuda_kernel(uintptr_t lhs_base, uintptr_t lhs_stride,
+                                       uintptr_t rhs_base, uintptr_t rhs_stride,
+                                       size_t count, F func, void *context = nullptr)
       {
-        size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-        for(size_t idx = tid; tid < count; tid += blockDim.x * gridDim.x)
-          redop.template apply_cuda<EXCL>(*reinterpret_cast<typename REDOP::LHS *>(lhs_base + idx * lhs_stride),
-                                          *reinterpret_cast<const typename REDOP::RHS *>(rhs_base + idx * rhs_stride));
+        const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+        for(size_t idx = tid; idx < count; idx += blockDim.x * gridDim.x) {
+          (*func)(*reinterpret_cast<LHS *>(lhs_base + idx * lhs_stride),
+                  *reinterpret_cast<const RHS *>(rhs_base + idx * rhs_stride), context);
+        }
       }
 
       template <typename REDOP, bool EXCL>
-      __global__ void fold_cuda_kernel(uintptr_t rhs1_base,
-                                       uintptr_t rhs1_stride,
-                                       uintptr_t rhs2_base,
-                                       uintptr_t rhs2_stride,
-                                       size_t count,
-                                       REDOP redop)
+      __device__ void redop_apply_wrapper(typename REDOP::LHS &lhs,
+                                          const typename REDOP::RHS &rhs, void *context)
       {
-        size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-        for(size_t idx = tid; tid < count; tid += blockDim.x * gridDim.x)
-          redop.template fold_cuda<EXCL>(*reinterpret_cast<typename REDOP::RHS *>(rhs1_base + idx * rhs1_stride),
-                                         *reinterpret_cast<const typename REDOP::RHS *>(rhs2_base + idx * rhs2_stride));
+        REDOP &redop = *reinterpret_cast<REDOP *>(context);
+        redop.template apply_cuda<EXCL>(lhs, rhs);
+      }
+      template <typename REDOP, bool EXCL>
+      __device__ void redop_fold_wrapper(typename REDOP::RHS &rhs1,
+                                         const typename REDOP::RHS &rhs2, void *context)
+      {
+        REDOP &redop = *reinterpret_cast<REDOP *>(context);
+        redop.template fold_cuda<EXCL>(rhs1, rhs2);
+      }
+
+      template <typename REDOP, bool EXCL>
+      __global__ void apply_cuda_kernel(uintptr_t lhs_base, uintptr_t lhs_stride,
+                                        uintptr_t rhs_base, uintptr_t rhs_stride,
+                                        size_t count, REDOP redop)
+      {
+        iter_cuda_kernel<typename REDOP::LHS, typename REDOP::RHS>(
+            lhs_base, lhs_stride, rhs_base, rhs_stride, count,
+            redop_apply_wrapper<REDOP, EXCL>, (void *)&redop);
+      }
+
+      template <typename REDOP, bool EXCL>
+      __global__ void fold_cuda_kernel(uintptr_t rhs1_base, uintptr_t rhs1_stride,
+                                       uintptr_t rhs2_base, uintptr_t rhs2_stride,
+                                       size_t count, REDOP redop)
+      {
+        iter_cuda_kernel<typename REDOP::RHS, typename REDOP::RHS>(
+            rhs1_base, rhs1_stride, rhs2_base, rhs2_stride, count,
+            redop_fold_wrapper<REDOP, EXCL>, (void *)&redop);
       }
     };
 

@@ -13,22 +13,24 @@
  * limitations under the License.
  */
 
+#ifndef __REALM_SAXPY__
+#define __REALM_SAXPY__
 
-#ifndef __LEGION_TERRA_CUDART_HIJACK_H__
-#define __LEGION_TERRA_CUDART_HIJACK_H__
+#include "prealm.h"
 
-#ifdef __cplusplus
-extern "C" {
+using namespace PRealm;
+
+enum {
+  FID_X = 101,
+  FID_Y = 102,
+  FID_Z = 103,
+};
+
+struct SaxpyArgs {
+public:
+  RegionInstance x_inst, y_inst, z_inst;
+  float alpha;
+  Rect<1> bounds;
+};
+
 #endif
-
-void** hijackCudaRegisterFatBinary(const void*);
-
-void hijackCudaRegisterFunction(void**, const void*, char*);
-
-void hijackCudaRegisterFatBinaryEnd(void**);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // __LEGION_TERRA_CUDART_HIJACK_H__

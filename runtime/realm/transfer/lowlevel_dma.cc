@@ -257,8 +257,8 @@ namespace Realm {
                       static_cast<void *>(&cb), ret);
         if (ret != 0)
         {
-          const char *message = realm_strerror(errno);
-          log_aio.fatal("Failed asynchronous IO write [%d]: %s", errno, message);
+          const char *message = realm_strerror(ret);
+          log_aio.fatal("Failed asynchronous IO write [%d]: %s", ret, message);
           abort();
         }
       }
@@ -345,8 +345,8 @@ namespace Realm {
                       static_cast<void *>(&cb), ret);
         if (ret != 0)
         {
-          const char *message = realm_strerror(errno);
-          log_aio.fatal("Failed asynchronous IO read [%d]: %s", errno, message);
+          const char *message = realm_strerror(ret);
+          log_aio.fatal("Failed asynchronous IO read [%d]: %s", ret, message);
           abort();
         }
       }

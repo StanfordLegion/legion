@@ -19,8 +19,14 @@
 #include "realm/cuda/cuda_module.h"
 
 #include <memory>
+#include <unordered_map>
+#if !defined(CUDA_ENABLE_DEPRECATED)
+// Ignore deprecation warnings from cuda headers
+#define CUDA_ENABLE_DEPRECATED 1
+#endif
 #include <cuda.h>
 #include <nvml.h>
+#include <cupti.h>
 #if defined(REALM_USE_CUDART_HIJACK)
 #include <cuda_runtime_api.h>   // For cudaDeviceProp
 #endif
@@ -98,6 +104,24 @@
     }                                                                                    \
   } while(0)
 
+#define IS_DEFAULT_STREAM(stream)                                                        \
+  (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) ||                                  \
+   ((stream) == CU_STREAM_PER_THREAD))
+
+#define REPORT_CUPTI_ERROR(level, cmd, ret)                                              \
+  do {                                                                                   \
+    log_gpu.newmsg(level) << __FILE__ << '(' << __LINE__ << "):" << cmd << " = " << ret; \
+  } while(0)
+
+#define CHECK_CUPTI(cmd)                                                                 \
+  do {                                                                                   \
+    CUptiResult ret = (cmd);                                                             \
+    if(ret != CUPTI_SUCCESS) {                                                           \
+      REPORT_NVML_ERROR(Logger::LEVEL_ERROR, #cmd, ret);                                 \
+      abort();                                                                           \
+    }                                                                                    \
+  } while(0)
+
 namespace Realm {
 
   namespace Cuda {
@@ -158,6 +182,17 @@ namespace Realm {
 
     extern CudaModule *cuda_module_singleton;
 
+    class GPUContextManager : public TaskContextManager {
+    public:
+      GPUContextManager(GPU *_gpu, GPUProcessor *proc);
+      void *create_context(Task *task) const override;
+      void destroy_context(Task *task, void *context) const override;
+      void *create_context(InternalTask *task) const override;
+      void destroy_context(InternalTask *task, void *context) const override;
+      GPU *gpu = nullptr;
+      GPUProcessor *proc = nullptr; // TODO(cperry): delete me
+    };
+
     // an interface for receiving completion notification for a GPU operation
     //  (right now, just copies)
     class GPUCompletionNotification {
@@ -167,25 +202,12 @@ namespace Realm {
       virtual void request_completed(void) = 0;
     };
 
-    class GPUPreemptionWaiter : public GPUCompletionNotification {
-    public:
-      GPUPreemptionWaiter(GPU *gpu);
-      virtual ~GPUPreemptionWaiter(void) {}
-
-    public:
-      virtual void request_completed(void);
-
-    public:
-      void preempt(void);
-
-    private:
-      GPU *const gpu;
-      Event wait_event;
-    };
-
     class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
     public:
-      GPUWorkFence(Realm::Operation *op);
+      GPUWorkFence(GPU *gpu, Realm::Operation *op);
+      ~GPUWorkFence();
+
+      virtual void mark_finished(bool successful);
 
       virtual void request_cancellation(void);
 
@@ -201,6 +223,7 @@ namespace Realm {
 
     protected:
       static void cuda_callback(CUstream stream, CUresult res, void *data);
+      GPU *gpu = nullptr;
     };
 
     class GPUWorkStart : public Realm::Operation::AsyncWorkItem {
@@ -380,15 +403,6 @@ namespace Realm {
 
       GPUAllocation &add_allocation(GPUAllocation &&alloc);
 
-#ifdef REALM_USE_CUDART_HIJACK
-      void register_fat_binary(const FatBin *data);
-      void register_variable(const RegisteredVariable *var);
-      void register_function(const RegisteredFunction *func);
-
-      CUfunction lookup_function(const void *func);
-      CUdeviceptr lookup_variable(const void *var);
-#endif
-
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
       void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
       void create_dynamic_fb_memory(RuntimeImpl *runtime, size_t max_size);
@@ -416,10 +430,15 @@ namespace Realm {
       bool is_accessible_host_mem(const MemoryImpl *mem) const;
       bool is_accessible_gpu_mem(const MemoryImpl *mem) const;
 
+      bool register_reduction(ReductionOpID redop_id, CUfunction apply_excl,
+                              CUfunction apply_nonexcl, CUfunction fold_excl,
+                              CUfunction fold_nonexcl);
+
     protected:
       CUmodule load_cuda_module(const void *data);
 
     public:
+      ContextSynchronizer ctxsync;
       CudaModule *module = nullptr;
       GPUInfo *info = nullptr;
       GPUWorker *worker = nullptr;
@@ -479,6 +498,7 @@ namespace Realm {
       std::vector<GPUStream *> task_streams;
       atomic<unsigned> next_task_stream = atomic<unsigned>(0);
       atomic<unsigned> next_d2d_stream = atomic<unsigned>(0);
+      size_t cupti_activity_refcount = 0;
 
       GPUEventPool event_pool;
 
@@ -498,11 +518,14 @@ namespace Realm {
       Mutex alloc_mutex;
       const CudaIpcMapping *find_ipc_mapping(Memory mem) const;
 
-#ifdef REALM_USE_CUDART_HIJACK
-      std::map<const FatBin *, CUmodule> device_modules;
-      std::map<const void *, CUfunction> device_functions;
-      std::map<const void *, CUdeviceptr> device_variables;
-#endif
+      struct GPUReductionOpEntry {
+        CUfunction apply_nonexcl = nullptr;
+        CUfunction apply_excl = nullptr;
+        CUfunction fold_nonexcl = nullptr;
+        CUfunction fold_excl = nullptr;
+      };
+
+      std::unordered_map<ReductionOpID, GPUReductionOpEntry> gpu_reduction_table;
     };
 
     // helper to push/pop a GPU's context by scope
@@ -530,77 +553,11 @@ namespace Realm {
 
     protected:
       virtual void execute_task(Processor::TaskFuncID func_id,
-				const ByteArrayRef& task_args);
+                                const ByteArrayRef &task_args);
 
-    public:
-      static GPUProcessor *get_current_gpu_proc(void);
-
-#ifdef REALM_USE_CUDART_HIJACK
-      // calls that come from the CUDA runtime API
-      void push_call_configuration(dim3 grid_dim, dim3 block_dim,
-                                   size_t shared_size, void *stream);
-      void pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
-                                  size_t *shared_size, void *stream);
-#endif
-
-      void stream_wait_on_event(CUstream stream, CUevent event);
-      void stream_synchronize(CUstream stream);
-      void device_synchronize(void);
-
-#ifdef REALM_USE_CUDART_HIJACK
-      void event_record(CUevent event, CUstream stream);
-      
-      void configure_call(dim3 grid_dim, dim3 block_dim,
-			  size_t shared_memory, CUstream stream);
-      void setup_argument(const void *arg, size_t size, size_t offset);
-      void launch(const void *func);
-      void launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim, 
-                         void **args, size_t shared_memory, 
-                         CUstream stream, bool cooperative = false);
-#endif
-
-      void gpu_memcpy(void *dst, const void *src, size_t size);
-      void gpu_memcpy_async(void *dst, const void *src, size_t size,
-                            CUstream stream);
-#ifdef REALM_USE_CUDART_HIJACK
-      void gpu_memcpy2d(void *dst, size_t dpitch, const void *src, size_t spitch,
-                        size_t width, size_t height);
-      void gpu_memcpy2d_async(void *dst, size_t dpitch, const void *src, 
-                              size_t spitch, size_t width, size_t height, 
-                              CUstream stream);
-      void gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
-				size_t offset);
-      void gpu_memcpy_to_symbol_async(const void *dst, const void *src, size_t size,
-				      size_t offset,
-				      CUstream stream);
-      void gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
-				  size_t offset);
-      void gpu_memcpy_from_symbol_async(void *dst, const void *src, size_t size,
-					size_t offset,
-					CUstream stream);
-#endif
-
-      void gpu_memset(void *dst, int value, size_t count);
-      void gpu_memset_async(void *dst, int value, size_t count, CUstream stream);
     public:
       GPU *gpu;
 
-      // data needed for kernel launches
-      struct LaunchConfig {
-        dim3 grid;
-        dim3 block;
-        size_t shared;
-	LaunchConfig(dim3 _grid, dim3 _block, size_t _shared);
-      };
-      struct CallConfig : public LaunchConfig {
-        CUstream stream; 
-        CallConfig(dim3 _grid, dim3 _block, size_t _shared, CUstream _stream);
-      };
-      std::vector<CallConfig> launch_configs;
-      std::vector<char> kernel_args;
-      std::vector<CallConfig> call_configs;
-      bool block_on_synchronize;
-      ContextSynchronizer ctxsync;
     protected:
       Realm::CoreReservation *core_rsrv;
 
@@ -1033,44 +990,30 @@ namespace Realm {
       CUfunction kernel;
       const void *kernel_host_proxy;
       GPUStream *stream;
+      std::vector<GPU *> src_gpus;
+      std::vector<bool> src_is_ipc;
     };
 
     class GPUreduceChannel : public SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes> {
     public:
-      GPUreduceChannel(GPU* _gpu, BackgroundWorkManager *bgwork);
+      GPUreduceChannel(GPU *_gpu, BackgroundWorkManager *bgwork);
 
       // multiple concurrent cuda reduces ok
       static const bool is_ordered = false;
 
       // helper method here so that GPUreduceRemoteChannel can use it too
-      static bool is_gpu_redop(ReductionOpID redop_id);
+      bool supports_redop(ReductionOpID redop_id) const override;
 
-      // override this because we have to be picky about which reduction ops
-      //  we support
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
+      RemoteChannelInfo *construct_remote_info() const override;
 
-      virtual RemoteChannelInfo *construct_remote_info() const;
+      XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node, XferDesID guid,
+                               const std::vector<XferDesPortInfo> &inputs_info,
+                               const std::vector<XferDesPortInfo> &outputs_info,
+                               int priority, XferDesRedopInfo redop_info,
+                               const void *fill_data, size_t fill_size,
+                               size_t fill_total) override;
 
-      virtual XferDes *create_xfer_des(uintptr_t dma_op,
-				       NodeID launch_node,
-				       XferDesID guid,
-				       const std::vector<XferDesPortInfo>& inputs_info,
-				       const std::vector<XferDesPortInfo>& outputs_info,
-				       int priority,
-				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size,
-                                       size_t fill_total);
-
-      long submit(Request** requests, long nr);
+      long submit(Request **requests, long nr) override;
 
     protected:
       friend class GPUreduceXferDes;
@@ -1101,17 +1044,6 @@ namespace Realm {
       friend class GPUreduceRemoteChannelInfo;
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
-
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
     };
 
     // active message for establishing cuda ipc mappings
@@ -1450,10 +1382,26 @@ namespace Realm {
   __op__(cuPointerGetAttributes, CUDA_VERSION);                                          \
   __op__(cuDriverGetVersion, CUDA_VERSION);                                              \
   __op__(cuMemAdvise, CUDA_VERSION);                                                     \
+  __op__(cuMemPrefetchAsync, CUDA_VERSION);                                              \
+  __op__(cuCtxSetSharedMemConfig, CUDA_VERSION);                                         \
+  __op__(cuCtxSetCacheConfig, CUDA_VERSION);                                             \
+  __op__(cuCtxSetLimit, CUDA_VERSION);                                                   \
+  __op__(cuCtxGetLimit, CUDA_VERSION);                                                   \
+  __op__(cuFuncSetAttribute, CUDA_VERSION);                                              \
+  __op__(cuFuncSetCacheConfig, CUDA_VERSION);                                            \
+  __op__(cuFuncSetSharedMemConfig, CUDA_VERSION);                                        \
+  __op__(cuFuncGetAttribute, CUDA_VERSION);                                              \
+  __op__(cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags, CUDA_VERSION);            \
+  __op__(cuArray3DCreate, CUDA_VERSION);                                                 \
+  __op__(cuArrayDestroy, CUDA_VERSION);                                                  \
+  __op__(cuSurfObjectCreate, CUDA_VERSION);                                              \
+  __op__(cuSurfObjectDestroy, CUDA_VERSION);                                             \
+  __op__(cuLaunchCooperativeKernel, CUDA_VERSION);                                       \
+  __op__(cuModuleGetGlobal, CUDA_VERSION);                                               \
   __op__(cuLaunchHostFunc, CUDA_VERSION);
 
 // We specify the exact version for this api so we can pass it to cuGetProcAddress later.
-// This allows us to use
+// This allows us to use the API even if it doesn't exist in our toolkit
 #define CUDA_DRIVER_APIS_12050(__op__) __op__(cuCtxRecordEvent, 12050);
 
 #define CUDA_DRIVER_APIS(__op__)                                                         \
@@ -1522,6 +1470,25 @@ namespace Realm {
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
     NVML_APIS(DECL_FNPTR_EXTERN)
 #undef DECL_FNPTR_EXTERN
+
+#define CUPTI_APIS(__op__)                                                               \
+  __op__(cuptiActivityRegisterCallbacks);                                                \
+  __op__(cuptiActivityEnable);                                                           \
+  __op__(cuptiActivityDisable);                                                          \
+  __op__(cuptiActivityEnableContext);                                                    \
+  __op__(cuptiActivityDisableContext);                                                   \
+  __op__(cuptiActivityFlushAll);                                                         \
+  __op__(cuptiActivityGetNextRecord);                                                    \
+  __op__(cuptiActivityRegisterTimestampCallback);                                        \
+  __op__(cuptiActivityPushExternalCorrelationId);                                        \
+  __op__(cuptiActivityPopExternalCorrelationId);
+
+#define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
+    CUPTI_APIS(DECL_FNPTR_EXTERN)
+#undef DECL_FNPTR_EXTERN
+
+#define CUPTI_HAS_FNPTR(name) (name##_fnptr != nullptr)
+#define CUPTI_FNPTR(name) (assert(name##_fnptr != nullptr), name##_fnptr)
 
   }; // namespace Cuda
 

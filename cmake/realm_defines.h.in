@@ -52,6 +52,8 @@
 #cmakedefine GASNET_CONDUIT_UCX 1
 #cmakedefine GASNET_CONDUIT_OFI 1
 
+#cmakedefine REALM_USE_GASNETEX_WRAPPER
+
 #cmakedefine REALM_USE_MPI
 #cmakedefine REALM_MPI_HAS_COMM_SPLIT_TYPE
 
@@ -72,9 +74,7 @@
 
 #cmakedefine REALM_USE_NVTX
 
-#cmakedefine REALM_USE_UNWIND
-
-#cmakedefine REALM_USE_LIBDW
+#cmakedefine REALM_USE_CPPTRACE
 
 #cmakedefine REALM_USE_SHM
 #cmakedefine REALM_HAS_POSIX_FALLOCATE64

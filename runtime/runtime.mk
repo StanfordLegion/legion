@@ -111,14 +111,20 @@ else
 CC_FLAGS	+= -fPIC
 FC_FLAGS	+= -fPIC
 NVCC_FLAGS	+= -Xcompiler -fPIC
-HIPCC_FLAGS     += -fPIC
+ifeq ($(strip $(HIP_TARGET)),CUDA)
+HIPCC_FLAGS += -Xcompiler -fPIC
+else
+HIPCC_FLAGS += -fPIC
+endif
 ifeq ($(shell uname -s),Darwin)
 SLIB_LEGION     := liblegion.dylib
 SLIB_REALM      := librealm.dylib
+SLIB_REALM_GASNETEX_WRAPPER    :=librealm_gex_wrapper.dylib
 OUTFILE		?=
 else
 SLIB_LEGION     := liblegion.so
 SLIB_REALM      := librealm.so
+SLIB_REALM_GASNETEX_WRAPPER    :=librealm_gex_wrapper.so
 OUTFILE		?=
 endif
 # shared libraries can link against other shared libraries
@@ -560,7 +566,7 @@ endif
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
-INC_FLAGS	+= -I$(CUDA)/include
+INC_FLAGS	+= -I$(CUDA)/include -I$(CUDA)/extras/CUPTI/include
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -g -O0
 #NVCC_FLAGS	+= -G
@@ -677,10 +683,26 @@ endif
 endif
 
 # Realm uses GASNet if requested (detect both gasnet1 and gasnetex here)
+REALM_USE_GASNETEX_WRAPPER := 0
+REALM_GASNETEX_WRAPPER_EXPORT_HEADER :=
+REALM_GASNETEX_WRAPPER_INC_FLAGS ?=
+REALM_GASNETEX_WRAPPER_LD_FLAGS ?=
 ifeq ($(strip $(USE_NETWORK)),1)
 ifeq ($(findstring gasnet,$(REALM_NETWORKS)),gasnet)
   ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
     REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX
+    REALM_GASNETEX_WRAPPER_EXPORT_HEADER := $(DEFINE_HEADERS_DIR)/gex_export.h
+    ifeq ($(strip $(USE_GASNETEX_WRAPPER)),1)
+      # enable gasnetex wrapper requires build shared lib
+      ifeq ($(strip $(SHARED_OBJECTS)),0)
+        $(error USE_GASNETEX_WRAPPER requires SHARED_OBJECTS to be 1)
+      endif
+			ifeq ($(strip $(DEBUG)),1)
+			  REALM_GASNETEX_WRAPPER_INC_FLAGS += -DDEBUG_REALM_GEX
+		  endif
+      REALM_USE_GASNETEX_WRAPPER = 1
+      REALM_CC_FLAGS	+= -DREALM_USE_GASNETEX_WRAPPER
+    endif
   else
     ifeq ($(strip $(REALM_NETWORKS)),gasnet1)
       REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
@@ -709,13 +731,23 @@ ifeq ($(findstring gasnet,$(REALM_NETWORKS)),gasnet)
   endif
   # Suck in some GASNET variables that they define
   include $(GASNET)/include/$(strip $(CONDUIT))-conduit/$(strip $(CONDUIT))-par.mak
-  INC_FLAGS += $(GASNET_INCLUDES)
+  # if dlopen gasnetex wrapper, we only need to set inc and ld_flags for the wrapper
+  ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+	  REALM_GASNETEX_WRAPPER_INC_FLAGS += $(GASNET_INCLUDES)
+	  ifeq ($(strip $(USE_GASNETEX_WRAPPER)),1)
+      REALM_GASNETEX_WRAPPER_LD_FLAGS += $(GASNET_LIBS)
+		else
+		  LEGION_LD_FLAGS += $(GASNET_LIBS)
+		endif
+  else
+    INC_FLAGS += $(GASNET_INCLUDES)
+    LEGION_LD_FLAGS += $(GASNET_LIBS)
+  endif
   # I don't like some of the flags gasnet includes here like _GNU_SOURCE=1 in lot of cases which makes
   # this inherently non-portable code. We use many more compilers than just GNU
   #CC_FLAGS += $(GASNET_DEFINES)
   #LD_FLAGS += $(GASNET_LDFLAGS)
   REALM_CC_FLAGS += -DGASNET_CONDUIT_$(shell echo '$(CONDUIT)' | tr '[:lower:]' '[:upper:]')
-  LEGION_LD_FLAGS += $(GASNET_LIBS)
   # Check if GASNet needs MPI for interop support
   ifeq ($(strip $(GASNET_LD_REQUIRES_MPI)),1)
     USE_MPI = 1
@@ -810,36 +842,6 @@ ifeq ($(strip $(USE_ZLIB)),1)
   SLIB_LEGION_DEPS += -l$(ZLIB_LIBNAME)
 endif
 
-# capture backtrace using unwind
-REALM_BACKTRACE_USE_UNWIND ?= 1
-ifeq ($(strip $(REALM_BACKTRACE_USE_UNWIND)),1)
-  REALM_CC_FLAGS += -DREALM_USE_UNWIND
-endif
-
-# analyze backtrace using libdw
-REALM_BACKTRACE_USE_LIBDW ?= 0
-ifeq ($(strip $(REALM_BACKTRACE_USE_LIBDW)),1)
-  ifndef LIBDW_PATH
-    # we try to find header in /usr/include and lib in /usr/lib/x86_64-linux-gnu
-    LIBDW_HEADER := $(wildcard /usr/include/elfutils/libdwfl.h)
-    ifeq ($(LIBDW_HEADER),)
-      $(error Can not find elfutils/libdwfl.h in /usr/include, please set LIBDW_PATH explicitly)
-    endif
-    LIBDW_LIBRARY := $(wildcard /usr/lib/*/libdw.so)
-    ifeq ($(LIBDW_LIBRARY),)
-      $(error Can not find libdw in /usr/lib/x86_64-linux-gnu, please set LIBDW_PATH explicitly)
-    endif
-    LIBDW_PATH = /usr
-    LIBDW_LIBRARY_PATH := $(abspath $(dir $(LIBDW_LIBRARY)))
-  else
-    LIBDW_LIBRARY_PATH := $(LIBDW_PATH)/lib
-  endif
-  REALM_CC_FLAGS += -DREALM_USE_LIBDW
-  INC_FLAGS += -I$(LIBDW_PATH)/include
-  LEGION_LD_FLAGS += -L$(LIBDW_LIBRARY_PATH) -ldw
-  SLIB_REALM_DEPS += -L$(LIBDW_LIBRARY_PATH) -ldw
-endif
-
 ifeq ($(strip $(DEBUG)),1)
   ifeq ($(strip $(DARWIN)),1)
     CFLAGS	+= -O0 -glldb
@@ -931,6 +933,17 @@ $(error Legion requires a C++ compiler that supports at least C++17)
 endif
 endif
 
+# analyze backtrace using libdw
+REALM_BACKTRACE_USE_CPPTRACE ?= 0
+ifeq ($(strip $(REALM_BACKTRACE_USE_CPPTRACE)),1)
+  ifndef CPPTRACE_PATH
+    $(error CPPTRACE_PATH variable is not defined, aborting build)
+  endif
+  REALM_CC_FLAGS += -DREALM_USE_CPPTRACE
+  INC_FLAGS    += -I$(CPPTRACE_PATH)/include
+  LEGION_LD_FLAGS    += -L$(CPPTRACE_PATH)/lib -lcpptrace -ldwarf -lzstd
+  SLIB_REALM_DEPS    += -L$(CPPTRACE_PATH)/lib -lcpptrace -ldwarf -lzstd
+endif
 
 # if requested, add --defcheck flags to the compile line so that the
 #  cxx_defcheck wrapper can verify that source files include the configuration
@@ -986,7 +999,9 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
     $(LG_RT_DIR)/realm/deppart/preimage.cc \
     $(LG_RT_DIR)/realm/deppart/byfield.cc \
     $(LG_RT_DIR)/realm/deppart/setops.cc \
+    $(LG_RT_DIR)/realm/comp_queue_impl.cc \
     $(LG_RT_DIR)/realm/event_impl.cc \
+    $(LG_RT_DIR)/realm/barrier_impl.cc \
     $(LG_RT_DIR)/realm/rsrv_impl.cc \
     $(LG_RT_DIR)/realm/proc_impl.cc \
     $(LG_RT_DIR)/realm/mem_impl.cc \
@@ -1011,8 +1026,9 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnet1/gasnet1_module.cc \
 endif
 ifeq ($(findstring gasnetex,$(REALM_NETWORKS)),gasnetex)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/gasnetex/gasnetex_module.cc \
-	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_internal.cc \
-	           $(LG_RT_DIR)/realm/gasnetex/gasnetex_handlers.cc
+               $(LG_RT_DIR)/realm/gasnetex/gasnetex_internal.cc
+REALM_GASNETEX_WRAPPER_SRC := $(LG_RT_DIR)/realm/gasnetex/gasnetex_wrapper/gasnetex_handlers.cc \
+                              $(LG_RT_DIR)/realm/gasnetex/gasnetex_wrapper/gasnetex_wrapper.cc
 endif
 ifeq ($(findstring mpi,$(REALM_NETWORKS)),mpi)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/mpi/mpi_module.cc \
@@ -1113,7 +1129,6 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
-                    $(LG_RT_DIR)/legion/index_space_value.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 LEGION_HIP_SRC   += $(LG_RT_DIR)/legion/legion_redop.cu
@@ -1271,6 +1286,9 @@ INSTALL_HEADERS += legion_fortran_types.mod \
 		   legion_fortran_c_interface.mod \
 		   legion_fortran.mod
 endif
+ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+INSTALL_HEADERS += realm/gasnetex/gasnetex_wrapper/gasnetex_wrapper.h
+endif
 
 # General shell commands
 SHELL	:= /bin/sh
@@ -1321,6 +1339,14 @@ endif
 ifeq ($(strip $(USE_HIP)),1)
 APP_OBJS	+= $(HIP_SRC:.cu=.cu.o)
 LEGION_OBJS     += $(LEGION_HIP_SRC:.cu=.cu.o)
+endif
+
+ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+REALM_GASNETEX_WRAPPER_OBJS := $(REALM_GASNETEX_WRAPPER_SRC:.cc=.cc.o)
+endif
+# set it back to empty
+ifeq ($(strip $(REALM_USE_GASNETEX_WRAPPER)),0)
+SLIB_REALM_GASNETEX_WRAPPER =
 endif
 
 # Provide build rules unless the user asks us not to
@@ -1374,7 +1400,7 @@ DEP_FILES += $(LEGION_INST_OBJS:.o=.d)
 DEP_FILES += $(MAPPER_OBJS:.o=.d)
 -include $(DEP_FILES)
 
-$(OUTFILE) : $(APP_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
+$(OUTFILE) : $(APP_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_REALM_GASNETEX_WRAPPER)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(APP_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS)
 
@@ -1383,17 +1409,27 @@ $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
 
-$(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
+$(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS)
 	rm -f $@
 	$(AR) rcs $@ $^
+
 else
 $(SLIB_LEGION) : $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(SLIB_REALM)
 	rm -f $@
 	$(CXX) $(SO_FLAGS) -o $@ $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LD_FLAGS) $(SLIB_LEGION_DEPS)
 
+ifeq ($(strip $(REALM_USE_GASNETEX_WRAPPER)),1)
+$(SLIB_REALM_GASNETEX_WRAPPER) : $(REALM_GASNETEX_WRAPPER_OBJS)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) $(REALM_GASNETEX_WRAPPER_LD_FLAGS) $(SLIB_REALM_DEPS)
 $(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS)
 	rm -f $@
 	$(CXX) $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) $(SLIB_REALM_DEPS)
+else
+$(SLIB_REALM) : $(REALM_OBJS) $(REALM_INST_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS)
+	rm -f $@
+	$(CXX) $(SO_FLAGS) -o $@ $^ $(LD_FLAGS) $(SLIB_REALM_DEPS)
+endif
 endif
 
 $(filter %.c.o,$(APP_OBJS)) : %.c.o : %.c $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
@@ -1441,7 +1477,7 @@ $(LG_RT_DIR)/realm/deppart/byfield_%.cc :
 REALM_OBJS += $(REALM_INST_OBJS)
 endif
 
-$(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+$(REALM_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_CXX_CHECK) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_DEFCHECK)
 
 ifeq ($(strip $(USE_CUDA)),1)
@@ -1453,6 +1489,11 @@ $(REALM_CUHOOK_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HE
 $(SLIB_REALM_CUHOOK) : $(REALM_CUHOOK_OBJS)
 	rm -f $@
 	$(CXX) --shared $(SO_FLAGS) -o $@ $^ -L$(CUDA)/lib64/stubs -lcuda -Xlinker -rpath=$(CUDA)/lib64
+endif
+
+ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+$(REALM_GASNETEX_WRAPPER_OBJS) : %.cc.o : %.cc $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
+	$(CXX) -MMD -o $@ -c $< $(CC_FLAGS) $(REALM_CXX_CHECK) $(REALM_SYMBOL_VISIBILITY) $(INC_FLAGS) $(REALM_GASNETEX_WRAPPER_INC_FLAGS)
 endif
 
 ifneq ($(USE_PGI),1)
@@ -1528,10 +1569,10 @@ endif
 
 ifdef LG_INSTALL_DIR
 clean::
-	$(RM) -f $(OUTFILE) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
+	$(RM) -f $(OUTFILE) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS) $(SLIB_REALM_GASNETEX_WRAPPER) $(REALM_GASNETEX_WRAPPER_OBJS) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 else
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(APP_OBJS) $(REALM_OBJS) $(REALM_INST_OBJS) $(LEGION_OBJS) $(LEGION_INST_OBJS) $(MAPPER_OBJS) $(LG_RT_DIR)/*mod *.mod $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER) $(DEP_FILES) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS) $(SLIB_REALM_GASNETEX_WRAPPER) $(REALM_GASNETEX_WRAPPER_OBJS) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 endif
 
 ifeq ($(strip $(USE_LLVM)),1)
@@ -1582,4 +1623,16 @@ $(REALM_FATBIN_SRC): $(REALM_FATBIN)
 	echo 'extern const unsigned char realm_fatbin[];' >> $@
 	echo 'extern const size_t realm_fatbin_len;' >> $@
 	xxd -i $< | sed 's/unsigned/const unsigned/g' | sed 's/unsigned int/size_t/g' >> $@
+endif
+
+# build gex_export.h
+ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
+$(REALM_GASNETEX_WRAPPER_EXPORT_HEADER):
+	@echo "generating $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER) ..."
+	@echo "#ifndef GEX_EXPORT_H" > $@
+	@echo "#define GEX_EXPORT_H" >> $@
+	@echo "" >> $@
+	@echo "#define GEX_EXPORT __attribute__((visibility(\"default\")))" >> $@
+	@echo "" >> $@
+	@echo "#endif" >> $@
 endif

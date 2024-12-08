@@ -56,8 +56,8 @@ namespace Realm {
 
   class GASNetEXRemoteMemory : public RemoteMemory {
   public:
-    GASNetEXRemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-			 uintptr_t _regbase, gex_EP_Index_t _ep_index);
+    GASNetEXRemoteMemory(Memory _me, size_t _size, Memory::Kind k, uintptr_t _regbase,
+                         gex_ep_index_t _ep_index);
 
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -66,13 +66,11 @@ namespace Realm {
 
   protected:
     uintptr_t regbase;
-    gex_EP_Index_t ep_index;
+    gex_ep_index_t ep_index;
   };
 
-  GASNetEXRemoteMemory::GASNetEXRemoteMemory(Memory _me, size_t _size,
-					     Memory::Kind k,
-					     uintptr_t _regbase,
-					     gex_EP_Index_t _ep_index)
+  GASNetEXRemoteMemory::GASNetEXRemoteMemory(Memory _me, size_t _size, Memory::Kind k,
+                                             uintptr_t _regbase, gex_ep_index_t _ep_index)
     : RemoteMemory(_me, _size, k, MKIND_RDMA)
     , regbase(_regbase)
     , ep_index(_ep_index)
@@ -106,19 +104,18 @@ namespace Realm {
 
   class GASNetEXIBMemory : public IBMemory {
   public:
-    GASNetEXIBMemory(Memory _me, size_t _size, Memory::Kind k,
-		     uintptr_t _regbase, gex_EP_Index_t _ep_index);
+    GASNetEXIBMemory(Memory _me, size_t _size, Memory::Kind k, uintptr_t _regbase,
+                     gex_ep_index_t _ep_index);
 
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
   protected:
     uintptr_t regbase;
-    gex_EP_Index_t ep_index;
+    gex_ep_index_t ep_index;
   };
 
   GASNetEXIBMemory::GASNetEXIBMemory(Memory _me, size_t _size, Memory::Kind k,
-				     uintptr_t _regbase,
-				     gex_EP_Index_t _ep_index)
+                                     uintptr_t _regbase, gex_ep_index_t _ep_index)
     : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
     , regbase(_regbase)
     , ep_index(_ep_index)
@@ -139,16 +136,11 @@ namespace Realm {
 
   class GASNetEXMessageImpl : public ActiveMessageImpl {
   public:
-    GASNetEXMessageImpl(GASNetEXInternal *_internal,
-			NodeID _target,
-			unsigned short _msgid,
-			size_t _header_size,
-			size_t _max_payload_size,
-			const void *_src_payload_addr,
-			size_t _src_payload_lines,
-			size_t _src_payload_line_stride,
-			uintptr_t _dest_payload_addr,
-			gex_EP_Index_t _dest_ep_index);
+    GASNetEXMessageImpl(GASNetEXInternal *_internal, NodeID _target,
+                        unsigned short _msgid, size_t _header_size,
+                        size_t _max_payload_size, const void *_src_payload_addr,
+                        size_t _src_payload_lines, size_t _src_payload_line_stride,
+                        uintptr_t _dest_payload_addr, gex_ep_index_t _dest_ep_index);
     GASNetEXMessageImpl(GASNetEXInternal *_internal,
 			const Realm::NodeSet &_targets,
 			unsigned short _msgid,
@@ -179,7 +171,7 @@ namespace Realm {
     size_t header_size;
     PendingCompletion *comp;
     static const size_t INLINE_SIZE = 128;
-    gex_AM_Arg_t msg_data[INLINE_SIZE / sizeof(gex_AM_Arg_t)];
+    gex_am_arg_t msg_data[INLINE_SIZE / sizeof(gex_am_arg_t)];
 #if 0
     size_t header_size;
     struct FullHeader : public BaseMedium {
@@ -192,16 +184,11 @@ namespace Realm {
 #endif
   };
 
-  GASNetEXMessageImpl::GASNetEXMessageImpl(GASNetEXInternal *_internal,
-					   NodeID _target,
-					   unsigned short _msgid,
-					   size_t _header_size,
-					   size_t _max_payload_size,
-					   const void *_src_payload_addr,
-					   size_t _src_payload_lines,
-					   size_t _src_payload_line_stride,
-					   uintptr_t _dest_payload_addr,
-					   gex_EP_Index_t _dest_ep_index)
+  GASNetEXMessageImpl::GASNetEXMessageImpl(
+      GASNetEXInternal *_internal, NodeID _target, unsigned short _msgid,
+      size_t _header_size, size_t _max_payload_size, const void *_src_payload_addr,
+      size_t _src_payload_lines, size_t _src_payload_line_stride,
+      uintptr_t _dest_payload_addr, gex_ep_index_t _dest_ep_index)
     : internal(_internal)
     , target(_target)
     , is_multicast(false)
@@ -223,7 +210,7 @@ namespace Realm {
 	payload_base = const_cast<void *>(src_payload_addr);
       } else if((header_padded + payload_size) <= INLINE_SIZE) {
 	// offer up the rest of our internal storage for the payload
-	payload_base = &msg_data[header_padded / sizeof(gex_AM_Arg_t)];
+        payload_base = &msg_data[header_padded / sizeof(gex_am_arg_t)];
       } else {
 	// internal logic will have to find us some memory to use
 	payload_base = nullptr;
@@ -267,7 +254,7 @@ namespace Realm {
 	payload_base = const_cast<void *>(src_payload_addr);
       } else if((header_padded + payload_size) <= INLINE_SIZE) {
 	// we can use the rest of our internal storage
-	payload_base = &msg_data[header_padded / sizeof(gex_AM_Arg_t)];
+        payload_base = &msg_data[header_padded / sizeof(gex_am_arg_t)];
       } else {
 	// have to dynamically allocate storage
 	payload_base = malloc(payload_size);
@@ -408,13 +395,7 @@ namespace Realm {
     , cfg_outbuf_count(64)
     , cfg_outbuf_size(256 << 10 /* 256 KB*/)
     , cfg_force_rma(false)
-      // in GASNet releases before 2021.8.3, bugs 4148 and 4150 made RMA puts
-      // unsafe to use for ibv + CUDA_UVA memory, so disable them by default
-#if REALM_GEX_RELEASE < 20210803
-    , cfg_use_rma_put(false)
-#else
     , cfg_use_rma_put(true)
-#endif
     , cfg_am_limit(0)
     , internal(nullptr)
   {}
@@ -432,30 +413,6 @@ namespace Realm {
 
     mod->internal = new GASNetEXInternal(mod, runtime);
 
-    // set some gasnet-related environment variables, taking care not to
-    //  overwrite anything explicitly set by the user
-
-    // do not probe amount of pinnable memory
-    setenv("GASNET_PHYSMEM_PROBE", "0", 0 /*no overwrite*/);
-
-    // do not comment about on-demand-paging, which we are uninterested in
-    setenv("GASNET_ODP_VERBOSE", "0", 0 /*no overwrite*/);
-
-    // if we are using the ibv conduit with multiple-hca support, we need
-    //  to enable fenced puts to work around gasnet bug 3447
-    //  (https://gasnet-bugs.lbl.gov/bugzilla/show_bug.cgi?id=3447), but
-    //  we can't set the flag if gasnet does NOT have multiple-hca support
-    //  because it'll print warnings
-    // in 2021.3.0 and earlier releases, there is no official way to detect
-    //  this, and we can't even see the internal GASNETC_HAVE_FENCED_PUTS
-    //  define, so we use the same condition that's used to set that in
-    //  gasnet_core_internal.h and hope it doesn't change
-    // releases after 2021.3.0 will define/expose GASNET_IBV_MULTIRAIL for us
-    //  to look at
-#if GASNET_IBV_MULTIRAIL || GASNETC_IBV_MAX_HCAS_CONFIGURE
-    setenv("GASNET_USE_FENCED_PUTS", "1", 0 /*no overwrite*/);
-#endif
-
 #ifdef REALM_GASNETEX_MODULE_DYNAMIC
     // if we're a dynamic module, we can't have GASNet trying to do stuff
     //  in atexit handlers - we will have been unloaded at that point
@@ -468,7 +425,16 @@ namespace Realm {
 
     // GASNetEX no longer modifies argc/argv, but we've got it here, so share
     //  with gasnet anyway
-    mod->internal->init(argc, argv);
+    if(!mod->internal->init(argc, argv)) {
+      delete mod;
+      return nullptr;
+    }
+
+    // in GASNet releases before 2021.8.3, bugs 4148 and 4150 made RMA puts
+    // unsafe to use for ibv + CUDA_UVA memory, so disable them by default
+    if(gex_wrapper_handle.GEX_RELEASE < 20210803) {
+      mod->cfg_use_rma_put = false;
+    }
 
     return mod;
   }
@@ -526,6 +492,14 @@ namespace Realm {
                           << min_obufs << " - if memory capacity issues result, reduce outbuf size using -gex:obsize";
       cfg_outbuf_count = min_obufs;
     }
+
+    // the gasnet UDP job spawner (amudprun) seems to buffer stdout, so make stderr the
+    // default
+    if(gex_wrapper_handle.conduit == GEX_WRAPPER_CONDUIT_UDP &&
+       Config::logname == "stdout") {
+      log_gex.warning() << "GASNet UDP job spawner could buffer stdout, so please set "
+                           "-logfile to stderr or filename";
+    }
   }
 
   // "attaches" to the network, if that is meaningful - attempts to
@@ -562,7 +536,7 @@ namespace Realm {
       if((seg->flags & NetworkSegmentInfo::OptionFlags::OnDemandRegistration) != 0)
         continue;
 
-      gex_EP_Index_t ep_index = 0;
+      gex_ep_index_t ep_index = 0;
       bool ok = internal->attempt_binding(seg->base, seg->bytes,
 					  seg->memtype, seg->memextra,
 					  &ep_index);
@@ -681,8 +655,8 @@ namespace Realm {
     // if checksums are enabled, we'll tack it on to the end of the header
     //  to avoid any alignment issues
     if(cfg_do_checksums)
-      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
-                                 sizeof(gex_AM_Arg_t));
+      header_size =
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     GASNetEXMessageImpl *impl = new(storage_base) GASNetEXMessageImpl(internal,
@@ -706,8 +680,8 @@ namespace Realm {
     // if checksums are enabled, we'll tack it on to the end of the header
     //  to avoid any alignment issues
     if(cfg_do_checksums)
-      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
-                                 sizeof(gex_AM_Arg_t));
+      header_size =
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     // TODO: pass along the full LocalAddress so that we don't have to do
@@ -729,7 +703,7 @@ namespace Realm {
     //  to avoid any alignment issues
     if(cfg_do_checksums)
       header_size =
-          roundup_pow2(header_size + sizeof(gex_AM_Arg_t), sizeof(gex_AM_Arg_t));
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     GASNetEXMessageImpl *impl = new(storage_base)
@@ -751,8 +725,8 @@ namespace Realm {
     // if checksums are enabled, we'll tack it on to the end of the header
     //  to avoid any alignment issues
     if(cfg_do_checksums)
-      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
-                                 sizeof(gex_AM_Arg_t));
+      header_size =
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     assert(storage_size >= sizeof(GASNetEXMessageImpl));
     if(targets.size() == 1) {
@@ -787,8 +761,8 @@ namespace Realm {
 						 size_t header_size)
   {
     if(cfg_do_checksums)
-      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
-                                 sizeof(gex_AM_Arg_t));
+      header_size =
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     return internal->recommended_max_payload(target, 0 /*ep_index*/,
 					     with_congestion,
@@ -801,8 +775,8 @@ namespace Realm {
 						 size_t header_size)
   {
     if(cfg_do_checksums)
-      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
-                                 sizeof(gex_AM_Arg_t));
+      header_size =
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     if(targets.size() == 1) {
       // optimization - if there's exactly 1 target, redirect to the unicast mode
@@ -824,8 +798,8 @@ namespace Realm {
 						 size_t header_size)
   {
     if(cfg_do_checksums)
-      header_size = roundup_pow2(header_size + sizeof(gex_AM_Arg_t),
-                                 sizeof(gex_AM_Arg_t));
+      header_size =
+          roundup_pow2(header_size + sizeof(gex_am_arg_t), sizeof(gex_am_arg_t));
 
     return internal->recommended_max_payload(target,
 					     dest_payload_addr.extra,
