@@ -677,18 +677,36 @@ public:
 						   p_l_test,
 						   Realm::ProfilingRequestSet(),
 						   e1);
+    for(unsigned idx = 0; idx < p_img_left.size(); idx++) {
+      p_img_left[idx].destroy(e4);
+    }
     Event e5 = IndexSpace<1>::compute_differences(p_img_right_i, p_cells,
 						   p_ri_test,
 						   Realm::ProfilingRequestSet(),
 						   e2);
+    for(unsigned idx = 0; idx < p_img_right_i.size(); idx++) {
+      p_img_right_i[idx].destroy(e5);
+    }
     Event e6 = IndexSpace<1>::compute_differences(p_img_right_b, p_ghost,
 						   p_rb_test,
 						   Realm::ProfilingRequestSet(),
 						   e3);
+    for(unsigned idx = 0; idx < p_img_right_b.size(); idx++) {
+      p_img_right_b[idx].destroy(e6);
+    }
 #endif
     errors += check_empty(e4, p_l_test, "p_l_test");
     errors += check_empty(e5, p_ri_test, "p_ri_test");
     errors += check_empty(e6, p_rb_test, "p_rb_test");
+    for(unsigned idx = 0; idx < p_l_test.size(); idx++) {
+      p_l_test[idx].destroy(e4);
+    }
+    for(unsigned idx = 0; idx < p_ri_test.size(); idx++) {
+      p_ri_test[idx].destroy(e5);
+    }
+    for(unsigned idx = 0; idx < p_rb_test.size(); idx++) {
+      p_rb_test[idx].destroy(e6);
+    }
 
     return errors;
   }
@@ -819,6 +837,20 @@ public:
 	}
         pf[0]++;
       }
+    }
+    for(unsigned idx = 0; idx < p_cells.size(); idx++) {
+      p_cells[idx].destroy();
+    }
+    for(unsigned idx = 0; idx < p_faces.size(); idx++) {
+      p_faces[idx].destroy();
+    }
+    for(unsigned i = 0; i < p_facetypes.size(); i++) {
+      for(unsigned j = 0; j < p_facetypes[i].size(); j++) {
+        p_facetypes[i][j].destroy();
+      }
+    }
+    for(unsigned idx = 0; idx < p_ghost.size(); idx++) {
+      p_ghost[idx].destroy();
     }
 
     return errors;
@@ -1145,7 +1177,13 @@ public:
     if(wait_on_events) e8.wait();
 
     // all done - wait on e7 and e8, which dominate every other operation
-    return Event::merge_events(e7, e8);
+    Event e9 = Event::merge_events(e7, e8);
+
+    for(unsigned idx = 0; idx < p_nodes.size(); idx++) {
+      p_nodes[idx].destroy(e9);
+    }
+
+    return e9;
   }
 
   virtual int perform_dynamic_checks(void)
@@ -1195,10 +1233,28 @@ public:
                                                    p_out_test,
 						   Realm::ProfilingRequestSet(),
                                                    Event::merge_events(e2, e4));
+    for(unsigned idx = 0; idx < p_in_img.size(); idx++) {
+      p_in_img[idx].destroy(e5);
+    }
+    for(unsigned idx = 0; idx < p_out_img.size(); idx++) {
+      p_out_img[idx].destroy(e6);
+    }
 #endif
 
     errors += check_empty(e5, p_in_test, "p_in_test");
     errors += check_empty(e6, p_out_test, "p_out_test");
+    for(unsigned idx = 0; idx < p_pvt_and_shr.size(); idx++) {
+      p_pvt_and_shr[idx].destroy(e5);
+    }
+    for(unsigned idx = 0; idx < p_all.size(); idx++) {
+      p_all[idx].destroy(e6);
+    }
+    for(unsigned idx = 0; idx < p_in_test.size(); idx++) {
+      p_in_test[idx].destroy(e5);
+    }
+    for(unsigned idx = 0; idx < p_out_test.size(); idx++) {
+      p_out_test[idx].destroy(e6);
+    }
 
     return errors;
   }
@@ -1292,6 +1348,21 @@ public:
 	  errors++;
 	}
       }
+    }
+
+    is_shared.destroy();
+    is_private.destroy();
+    for(unsigned idx = 0; idx < p_pvt.size(); idx++) {
+      p_pvt[idx].destroy();
+    }
+    for(unsigned idx = 0; idx < p_shr.size(); idx++) {
+      p_shr[idx].destroy();
+    }
+    for(unsigned idx = 0; idx < p_ghost.size(); idx++) {
+      p_ghost[idx].destroy();
+    }
+    for (unsigned idx = 0; idx < p_edges.size(); idx++) {
+      p_edges[idx].destroy();
     }
 
     return errors;
@@ -1669,6 +1740,7 @@ public:
 						 Realm::ProfilingRequestSet(),
 						 e1);
     if(wait_on_events) e2.wait();
+    bad_sides.destroy(e2);
 
     // subtract bad zones to get good zones
     IndexSpace<1> good_zones;
@@ -1676,6 +1748,7 @@ public:
 						  Realm::ProfilingRequestSet(),
 						  e2);
     if(wait_on_events) e3.wait();
+    bad_zones.destroy(e3);
 
     // now do actual partitions with just good zones
     std::vector<int> colors(numpc);
@@ -1688,6 +1761,7 @@ public:
 						    Realm::ProfilingRequestSet(),
 						    e3);
     if(wait_on_events) e4.wait();
+    good_zones.destroy(e4);
 
     // preimage of zones is sides
     Event e5 = is_sides.create_subspaces_by_preimage(side_mapsz_field_data,
@@ -1749,18 +1823,36 @@ public:
 						   p_z_test,
 						   Realm::ProfilingRequestSet(),
 						   e1);
+    for(unsigned idx = 0; idx < p_img_mapsz.size(); idx++) {
+      p_img_mapsz[idx].destroy(e4);
+    }
     Event e5 = IndexSpace<1>::compute_differences(p_img_mapsp1, p_points,
 						   p_p_test,
 						   Realm::ProfilingRequestSet(),
 						   e2);
+    for(unsigned idx = 0; idx < p_img_mapsp1.size(); idx++) {
+      p_img_mapsp1[idx].destroy(e5);
+    }
     Event e6 = IndexSpace<1>::compute_differences(p_img_mapss3, p_sides,
 						   p_s_test,
 						   Realm::ProfilingRequestSet(),
 						   e3);
+    for(unsigned idx = 0; idx < p_img_mapss3.size(); idx++) {
+      p_img_mapss3[idx].destroy(e6);
+    }
 #endif
     errors += check_empty(e4, p_z_test, "p_z_test");
     errors += check_empty(e5, p_p_test, "p_p_test");
     errors += check_empty(e6, p_s_test, "p_s_test");
+    for(unsigned idx = 0; idx < p_z_test.size(); idx++) {
+      p_z_test[idx].destroy(e4);
+    }
+    for(unsigned idx = 0; idx < p_p_test.size(); idx++) {
+      p_p_test[idx].destroy(e5);
+    }
+    for(unsigned idx = 0; idx < p_s_test.size(); idx++) {
+      p_s_test[idx].destroy(e6);
+    }
 
     return errors;
   }
@@ -1847,6 +1939,16 @@ public:
 	  }
 	}
       }
+
+    for(unsigned idx = 0; idx < p_zones.size(); idx++) {
+      p_zones[idx].destroy();
+    }
+    for(unsigned idx = 0; idx < p_sides.size(); idx++) {
+      p_sides[idx].destroy();
+    }
+    for(unsigned idx = 0; idx < p_points.size(); idx++) {
+      p_points[idx].destroy();
+    }
     
     return errors;
   }
@@ -2108,6 +2210,9 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
   for(int i = 0; i < num_pieces; i++) {
     log_app.debug() << "preimage[" << i << "] = " << ss_preimages[i];
     dump_sparse_index_space("", ss_preimages[i]);
+    ss_by_color[i].destroy();
+    ss_images[i].destroy();
+    ss_preimages[i].destroy();
   }
 
   
@@ -2304,7 +2409,9 @@ RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::~RandomAffineTest(void)
-{}
+{
+  
+}
 
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
@@ -2531,14 +2638,38 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::verify_results(
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
+  int result = 0;
   for (size_t i = 0; i < transforms.size(); i++) {
     if (verify_results(root2, transforms[i], dense_images, dense_preimages) ||
         verify_results(root2_sparse, transforms[i], sparse_images,
                        sparse_preimages)) {
-      return 1;
+      result++;
     }
   }
-  return 0;
+  root1.destroy();
+  root2.destroy();
+  root2_sparse.destroy();
+  for(unsigned i = 0; i < dense_images.size(); i++) {
+    for(unsigned j = 0; j < dense_images[i].size(); j++) {
+      dense_images[i][j].destroy();
+    }
+  }
+  for(unsigned i = 0; i < sparse_images.size(); i++) {
+    for (unsigned j = 0; j < sparse_images[i].size(); j++) {
+      sparse_images[i][j].destroy();
+    }
+  }
+  for(unsigned i = 0; i < dense_preimages.size(); i++) {
+    for(unsigned j = 0; j < dense_preimages[i].size(); j++) {
+      dense_preimages[i][j].destroy();
+    }
+  }
+  for(unsigned i = 0; i < sparse_preimages.size(); i++) {
+    for (unsigned j = 0; j < sparse_preimages[i].size(); j++) {
+      sparse_preimages[i][j].destroy();
+    }
+  }
+  return result;
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
