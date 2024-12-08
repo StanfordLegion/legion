@@ -236,7 +236,6 @@ namespace Realm {
       if(added.exists()) {
         events.push_back(added);
       }
-
     }
 
     for(size_t i = 0; i < n; i++) {

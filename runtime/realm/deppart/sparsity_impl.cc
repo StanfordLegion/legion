@@ -53,7 +53,6 @@ namespace Realm {
     }
   }
 
-
   Event SparsityMapRefCounter::add_references_async(unsigned count)
   {
     Event event = Event::NO_EVENT;
