@@ -182,16 +182,22 @@ namespace Realm {
       // 1) empty lhs
       if(l.empty()) {
         results[i] = r;
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         continue;
       }
 
       // 2) empty rhs
       if(rhss[li].empty()) {
         results[i] = l;
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         continue;
       }
 
@@ -210,8 +216,11 @@ namespace Realm {
       // 5) same sparsity map (or none) and simple union for bbox
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
         results[i] = IndexSpace<N, T>(l.bounds.union_bbox(r.bounds), l.sparsity);
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         continue;
       }
 
@@ -223,8 +232,10 @@ namespace Realm {
         op = new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
-      events.push_back(
-          SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+      Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+      if(added.exists()) {
+        events.push_back(added);
+      }
 
       //results[i].sparsity.add_references();
     }
@@ -283,16 +294,22 @@ namespace Realm {
       // 2) rhs is dense or has same sparsity map
       if(r.dense() || (r.sparsity == l.sparsity)) {
         results[i] = IndexSpace<N, T>(l.bounds.intersection(r.bounds), l.sparsity);
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         continue;
       }
 
       // 3) lhs is dense
       if(l.dense()) {
         results[i] = IndexSpace<N, T>(l.bounds.intersection(r.bounds), r.sparsity);
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         continue;
       }
 
@@ -305,8 +322,10 @@ namespace Realm {
         events.push_back(e);
       }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
-      events.push_back(
-          SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+      Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+      if(added.exists()) {
+        events.push_back(added);
+      }
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -363,8 +382,11 @@ namespace Realm {
       // 2) empty rhs
       if(r.empty()) {
         results[i] = l;
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         //results[i].sparsity.add_references();
         continue;
       }
@@ -372,8 +394,11 @@ namespace Realm {
       // 3) no overlap between lhs and rhs
       if(!l.bounds.overlaps(r.bounds)) {
         results[i] = l;
-        events.push_back(
-            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+        Event added =
+            SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
         // results[i].sparsity.add_references();
         continue;
       }
@@ -389,8 +414,11 @@ namespace Realm {
         Rect<N, T> sdiff;
         if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
           results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
-          events.push_back(
-              SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+          Event added =
+              SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+          if(added.exists()) {
+            events.push_back(added);
+          }
           continue;
         }
       }
@@ -403,8 +431,10 @@ namespace Realm {
         op = new DifferenceOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
-      events.push_back(
-          SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1));
+      Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references_async(1);
+      if(added.exists()) {
+        events.push_back(added);
+      }
       //results[i].sparsity.add_references();
     }
 
@@ -442,13 +472,6 @@ namespace Realm {
       result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
-      if(!result.dense()) {
-        // TODO(apryakhin@): Check all plases to make sure we aren't
-        // adding an event for non-existent sparsity maps.
-        events.push_back(
-            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
-        // result.sparsity.add_references();
-      }
 
       for(size_t i = 1; i < subspaces.size(); i++) {
         // empty rhs - skip
@@ -465,7 +488,6 @@ namespace Realm {
         //  merge-into-rectangle case?
         // rhs dense and contains lhs - take rhs
         if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
-          result.sparsity.remove_references();
           result = subspaces[i];
           continue;
         }
@@ -478,14 +500,20 @@ namespace Realm {
         UnionOperation<N, T> *op =
             new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
 
-        result.sparsity.remove_references();
         result = op->add_union(subspaces);
-        events.push_back(
-            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
 
         op->launch(wait_on);
         was_inline = false;
         break;
+      }
+
+      if(!was_inline || !result.dense()) {
+        // TODO(apryakhin@): Check all places to make sure we aren't
+        // adding an event for non-existent sparsity maps.
+        Event added = SparsityMapRefCounter(result.sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
       }
     }
 
@@ -526,29 +554,22 @@ namespace Realm {
       result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
-      if(!result.dense()) {
-        events.push_back(
-            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
-      }
 
       for(size_t i = 1; i < subspaces.size(); i++) {
         // no point in continuing if our result is empty
         if(result.empty()) {
-          result.sparsity.remove_references();
           result.sparsity.id = 0; // forget any sparsity map we had
           break;
         }
 
         // empty rhs - result is empty
         if(subspaces[i].empty()) {
-          result.sparsity.remove_references();
           result = IndexSpace<N, T>::make_empty();
           break;
         }
 
         // disjointness of lhs and rhs bounds - result is empty
         if(!result.bounds.overlaps(subspaces[i].bounds)) {
-          result.sparsity.remove_references();
           result = IndexSpace<N, T>::make_empty();
           break;
         }
@@ -561,11 +582,8 @@ namespace Realm {
 
         // lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
         if(result.dense()) {
-          result.sparsity.remove_references();
           result.bounds = result.bounds.intersection(subspaces[i].bounds);
           result.sparsity = subspaces[i].sparsity;
-          events.push_back(
-              SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
           continue;
         }
 
@@ -577,15 +595,18 @@ namespace Realm {
         IntersectionOperation<N, T> *op =
             new IntersectionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
 
-        result.sparsity.remove_references();
         result = op->add_intersection(subspaces);
-
-        events.push_back(
-            SparsityMapRefCounter(result.sparsity.id).add_references_async(1));
 
         op->launch(wait_on);
         was_inline = false;
         break;
+      }
+
+      if(!was_inline || !result.dense()) {
+        Event added = SparsityMapRefCounter(result.sparsity.id).add_references_async(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
       }
     }
 
@@ -632,14 +653,12 @@ namespace Realm {
   template <int N, typename T>
   UnionMicroOp<N,T>::~UnionMicroOp(void)
   {
-    sparsity_output.remove_references();
   }
 
   template <int N, typename T>
   void UnionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
   {
     sparsity_output = _sparsity;
-    sparsity_output.add_references();
   }
 
   template <int N, typename T>
@@ -1175,14 +1194,12 @@ namespace Realm {
   template <int N, typename T>
   IntersectionMicroOp<N, T>::~IntersectionMicroOp(void)
   {
-    //sparsity_output.remove_references();
   }
 
   template <int N, typename T>
   void IntersectionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
   {
     sparsity_output = _sparsity;
-    //sparsity_output.add_references();
   }
 
   template <int N, typename T>
@@ -1336,14 +1353,12 @@ namespace Realm {
   template <int N, typename T>
   DifferenceMicroOp<N,T>::~DifferenceMicroOp(void)
   {
-    sparsity_output.remove_references();
   }
 
   template <int N, typename T>
   void DifferenceMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
   {
     sparsity_output = _sparsity;
-    sparsity_output.add_references();
   }
 
   template <int N, typename T>
