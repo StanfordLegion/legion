@@ -171,10 +171,16 @@ bool test_case(const char *name,
       }
 #endif
     if(!found) {
+#ifdef USE_CONTAINS_ALL
+      is_cover.destroy();
+#endif
       log_app.error() << name << ": missing coverage: " << input_rects[i] << " not in " << PrettyVector<Rect<N,T> >(covering);
       return false;
     }
   }
+#ifdef USE_CONTAINS_ALL
+  is_cover.destroy();
+#endif
 
   // verify non-overlapping
   for(size_t i = 0; i < covering.size(); i++)
@@ -480,6 +486,7 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
 		  is, vol, input_rects, 1, -1, true, &covering)) return false;
     if(covering[0] != is.bounds) {
       log_app.error() << "fail test 1: bounds=" << is.bounds << " covering=" << PrettyVector<Rect<N,T> >(covering);
+      is.destroy();
       return false;
     }
   }
@@ -492,6 +499,7 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
 		  is, vol, input_rects, 0, 0, true, &covering)) return false;
     if(covering.size() > input_rects.size()) {
       log_app.error() << "fail test 2: too many rects: covering=" << PrettyVector<Rect<N,T> >(covering);
+      is.destroy();
       return false;
     }
   }
@@ -503,6 +511,7 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
 		  is, vol, input_rects, input_rects.size(), 0, true, &covering)) return false;
     if(covering.size() > input_rects.size()) {
       log_app.error() << "fail test 3: too many rects: covering=" << PrettyVector<Rect<N,T> >(covering);
+      is.destroy();
       return false;
     }
   }
@@ -515,7 +524,10 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
     std::vector<Rect<N,T> > covering;
     if(!test_case("test 4",
 		  is, vol, input_rects, target, -1,
-		  required, &covering)) return false;
+		  required, &covering)) {
+      is.destroy();
+      return false;
+    }
     // but we'll warn if it fails when it "should" work
     if(covering.empty() && warn_heuristic) {
       log_app.warning() << "unconstrained clumping failed: target=" << target << " input=" << PrettyVector<Rect<N,T> >(input_rects);
@@ -536,7 +548,10 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
     std::vector<Rect<N,T> > covering;
     if(!test_case("test 5",
 		  is, vol, input_rects, target, max_overhead,
-		  required, &covering)) return false;
+		  required, &covering)) {
+      is.destroy();
+      return false;
+    }
     // but we'll warn if it fails when it "should" work
     if((target >= num_clumps) && covering.empty() && warn_heuristic) {
       log_app.warning() << "clumping failed: target=" << target << " num_clumps=" << num_clumps << " input=" << PrettyVector<Rect<N,T> >(input_rects);
@@ -555,10 +570,12 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
     if(input_rects.size() > 5)
       is.compute_covering((input_rects.size() + 2) >> 1, -1, covering2);
     
-    if(!test_copies(m, is, input_rects, covering1, covering2))
+    if(!test_copies(m, is, input_rects, covering1, covering2)) {
+      is.destroy();
       return false;
+    }
   }
-
+  is.destroy();
   return true;
 }
 
