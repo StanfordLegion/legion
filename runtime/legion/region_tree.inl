@@ -4310,6 +4310,8 @@ namespace Legion {
             child_ready = ApEvent(
                 Realm::IndexSpace<DIM,T>::compute_intersection(
                   parent_space, child_space, result, requests, parent_ready));
+            // Free up the old child space once the intersection is done
+            child_space.destroy(child_ready);
             child_space = result;
             if (child_ready.exists())
               result_events.insert(child_ready);
@@ -5909,9 +5911,13 @@ namespace Legion {
       if (index_points.size() == get_volume())
         return handle;
       Realm::IndexSpace<DIM,T> realm_is(index_points);
+      bool consumed = false;
       const Domain domain((DomainT<DIM,T>(realm_is)));
-      return context->runtime->find_or_create_index_slice_space(domain, 
-                                    handle.get_type_tag(), provenance);
+      IndexSpace result = context->runtime->find_or_create_index_slice_space(
+          domain, handle.get_type_tag(), provenance, consumed);
+      if (!consumed)
+        realm_is.destroy();
+      return result;
     }
 
     //--------------------------------------------------------------------------

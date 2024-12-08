@@ -1081,6 +1081,20 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  inline void Domain::destroy(void)
+  //----------------------------------------------------------------------------
+  {
+    if (!dense())
+    {
+      DestroyFunctor functor(*this);
+      Internal::NT_TemplateHelper::demux<DestroyFunctor>(is_type, &functor);
+    }
+    is_type = 0;
+    is_id = 0;
+    dim = 0;
+  }
+
+  //----------------------------------------------------------------------------
   inline size_t Domain::get_volume(void) const
   //----------------------------------------------------------------------------
   {

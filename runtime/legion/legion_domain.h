@@ -333,6 +333,9 @@ namespace Legion {
 
     bool empty(void) const;
 
+    // Will destroy the underlying Realm index space
+    void destroy(void);
+
     size_t get_volume(void) const;
 
     __CUDA_HD__
@@ -428,6 +431,18 @@ namespace Legion {
     public:
       const Domain &domain;
       size_t &result;
+    };
+    struct DestroyFunctor {
+    public:
+      DestroyFunctor(const Domain &d) : domain(d) { }
+      template<typename N, typename T>
+      static inline void demux(DestroyFunctor *functor)
+      {
+        DomainT<N::N,T> is = functor->domain;
+        is.destroy();
+      }
+    public:
+      const Domain &domain;
     };
     struct IntersectionFunctor {
     public:

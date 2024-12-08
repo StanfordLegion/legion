@@ -3589,14 +3589,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InnerContext::find_index_launch_space(const Domain &domain,
+    IndexSpace InnerContext::find_index_launch_space(Domain domain,
                                                      Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       std::map<Domain,IndexSpace>::const_iterator finder =
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())
+      {
+        domain.destroy();
         return finder->second;
+      }
       IndexSpace result;
       switch (domain.get_dim())
       {

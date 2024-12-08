@@ -452,11 +452,13 @@ namespace Legion {
                 const Point<DIM,coord_t> point = it->first; \
                 points[index++] = point; \
               } \
-              Realm::IndexSpace<DIM,coord_t> space(points); \
+              DomainT<DIM,coord_t> space(points); \
               /* Make sure this is tight for determinism */ \
-              space = space.tighten(); \
-              const DomainT<DIM,coord_t> domaint(space); \
-              point_domain = domaint; \
+              DomainT<DIM,coord_t> tight = space.tighten(); \
+              /* Free up the sparsity map it was removed*/ \
+              if (tight.dense()) \
+                space.destroy(); \
+              point_domain = tight; \
               break; \
             }
             LEGION_FOREACH_N(DIMFUNC)
@@ -464,7 +466,7 @@ namespace Legion {
             default:
               assert(false);
           }
-          IndexSpace point_space = 
+          IndexSpace point_space =
             ctx->find_index_launch_space(point_domain, provenance);
           point_set = runtime->forest->get_node(point_space);
           point_set->add_base_expression_reference(RUNTIME_REF);
@@ -27554,7 +27556,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
-                                       TypeTag type_tag, Provenance *provenance)
+                       TypeTag type_tag, Provenance *provenance, bool &consumed)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -27563,23 +27565,80 @@ namespace Legion {
       const std::pair<Domain,TypeTag> key(domain, type_tag);
       {
         AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
-        std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
+        std::map<std::pair<Domain,TypeTag>,
+          std::pair<IndexSpace,RtUserEvent> >::const_iterator finder =
+          index_slice_spaces.find(key);
+        if (finder != index_slice_spaces.end() && finder->second.first.exists())
+        {
+          consumed = false;
+          return finder->second.first;
+        }
+      }
+      RtEvent wait_on;
+      {
+        // Retake the lock in excluisve mode
+        AutoLock is_lock(is_slice_lock);
+        // See if we lost the race
+        std::map<std::pair<Domain,TypeTag>,
+          std::pair<IndexSpace,RtUserEvent> >::iterator finder =
           index_slice_spaces.find(key);
         if (finder != index_slice_spaces.end())
-          return finder->second;
+        {
+          if (finder->second.first.exists())
+          {
+            consumed = false;
+            return finder->second.first;
+          }
+          else if (!finder->second.second.exists())
+            finder->second.second = Runtime::create_rt_user_event();
+          wait_on = finder->second.second;
+        }
+        else
+        {
+          // Insert it as a guard since we're going to make it
+          index_slice_spaces.emplace(std::make_pair(key,std::make_pair(
+                  IndexSpace::NO_SPACE,RtUserEvent::NO_RT_USER_EVENT)));
+        }
       }
-      const IndexSpace result(get_unique_index_space_id(),
-                              get_unique_index_tree_id(), type_tag);
-      const DistributedID did = get_available_distributed_id();
-      forest->create_index_space(result, &domain, did, provenance);
-      if (legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? std::string_view() : provenance->human);
-      // Overwrite and leak for now, don't care too much as this 
-      // should occur infrequently
-      AutoLock is_lock(is_slice_lock);
-      index_slice_spaces[key] = result;
-      return result;
+      if (!wait_on.exists())
+      {
+        consumed = true;
+        const IndexSpace result(get_unique_index_space_id(),
+                                get_unique_index_tree_id(), type_tag);
+        const DistributedID did = get_available_distributed_id();
+        forest->create_index_space(result, &domain, did, provenance);
+        if (legion_spy_enabled)
+          LegionSpy::log_top_index_space(result.id, address_space,
+              (provenance == NULL) ? std::string_view() : provenance->human);
+        // Overwrite and leak for now, don't care too much as this 
+        // should occur infrequently
+        AutoLock is_lock(is_slice_lock);
+        std::map<std::pair<Domain,TypeTag>,
+          std::pair<IndexSpace,RtUserEvent> >::iterator finder =
+            index_slice_spaces.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != index_slice_spaces.end());
+        assert(!finder->second.first.exists());
+#endif
+        finder->second.first = result;
+        if (finder->second.second.exists())
+          Runtime::trigger_event(finder->second.second);
+        return result;
+      }
+      else
+      {
+        consumed = false;
+        wait_on.wait();
+        AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
+          std::map<std::pair<Domain,TypeTag>,
+            std::pair<IndexSpace,RtUserEvent> >::const_iterator finder =
+            index_slice_spaces.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != index_slice_spaces.end());
+        assert(finder->second.first.exists());
+#endif
+        return finder->second.first;
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -27755,9 +27814,10 @@ namespace Legion {
         it->second->prepare_for_shutdown();
       // Destroy any index slice spaces that we made during execution
       std::set<RtEvent> applied;
-      for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
+      for (std::map<std::pair<Domain,TypeTag>,
+            std::pair<IndexSpace,RtUserEvent> >::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, address_space, applied);
+        forest->destroy_index_space(it->second.first, address_space, applied);
       for (std::map<ProjectionID,ProjectionFunction*>::const_iterator it =
            projection_functions.begin(); it != projection_functions.end(); it++)
         it->second->prepare_for_shutdown();

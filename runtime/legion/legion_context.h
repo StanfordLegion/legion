@@ -635,10 +635,6 @@ namespace Legion {
                                                ReductionOpID redop,
                                                Provenance *provenance);
     public:
-      // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &domain,
-                                         Provenance *provenance);
-    public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,
                                        size_t size, bool own);
@@ -1168,8 +1164,8 @@ namespace Legion {
                                              Provenance *provenance);
     public:
       // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &domain,
-                                         Provenance *provenance);
+      IndexSpace find_index_launch_space(Domain domain,
+          Provenance *provenance);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
