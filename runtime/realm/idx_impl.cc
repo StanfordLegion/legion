@@ -129,10 +129,7 @@ namespace Realm {
     return *this;
   }
 
-  void IndexSpaceGeneric::destroy(Event wait_on)
-  {
-    impl->destroy(wait_on);
-  }
+  void IndexSpaceGeneric::destroy(Event wait_on) { impl->destroy(wait_on); }
 
   template <int N, typename T>
   const IndexSpace<N,T>& IndexSpaceGeneric::as_index_space() const

@@ -435,7 +435,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(int id = 0; id < TEST_CASES; id++) {
 
       roots.push_back(IndexSpace<1>(rects));
-      //roots.back().sparsity.add_references();
 
       std::vector<IndexSpace<1>> lhs;
       roots.back()
@@ -443,7 +442,6 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
           .wait();
 
       roots.push_back(IndexSpace<1>(rects1));
-      //roots.back().sparsity.add_references();
 
       std::vector<IndexSpace<1>> rhs_diff;
       roots.back()

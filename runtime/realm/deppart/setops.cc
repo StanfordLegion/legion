@@ -237,7 +237,6 @@ namespace Realm {
         events.push_back(added);
       }
 
-      //results[i].sparsity.add_references();
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -387,7 +386,6 @@ namespace Realm {
         if(added.exists()) {
           events.push_back(added);
         }
-        //results[i].sparsity.add_references();
         continue;
       }
 
@@ -399,7 +397,6 @@ namespace Realm {
         if(added.exists()) {
           events.push_back(added);
         }
-        // results[i].sparsity.add_references();
         continue;
       }
 
@@ -435,7 +432,6 @@ namespace Realm {
       if(added.exists()) {
         events.push_back(added);
       }
-      //results[i].sparsity.add_references();
     }
 
     for(size_t i = 0; i < n; i++) {
@@ -652,8 +648,7 @@ namespace Realm {
 
   template <int N, typename T>
   UnionMicroOp<N,T>::~UnionMicroOp(void)
-  {
-  }
+  {}
 
   template <int N, typename T>
   void UnionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
@@ -1161,7 +1156,6 @@ namespace Realm {
   {
     bool ok = ((s >> inputs) &&
 	       (s >> sparsity_output));
-    sparsity_output.add_references();
     assert(ok);
   }
 
@@ -1193,8 +1187,7 @@ namespace Realm {
 
   template <int N, typename T>
   IntersectionMicroOp<N, T>::~IntersectionMicroOp(void)
-  {
-  }
+  {}
 
   template <int N, typename T>
   void IntersectionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
@@ -1329,7 +1322,6 @@ namespace Realm {
   {
     bool ok = ((s >> inputs) &&
 	       (s >> sparsity_output));
-    //sparsity_output.add_references();
     assert(ok);
   }
 
@@ -1352,8 +1344,7 @@ namespace Realm {
 
   template <int N, typename T>
   DifferenceMicroOp<N,T>::~DifferenceMicroOp(void)
-  {
-  }
+  {}
 
   template <int N, typename T>
   void DifferenceMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
@@ -1742,14 +1733,12 @@ namespace Realm {
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    //sparsity.add_references();
 
     std::vector<IndexSpace<N,T> > ops(2);
     ops[0] = lhs;
     ops[1] = rhs;
     inputs.push_back(ops);
     outputs.push_back(sparsity);
-    //outputs.back().add_references();
 
     return output;
   }
@@ -1785,11 +1774,9 @@ namespace Realm {
       }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
-    ///sparsity.add_references();
 
     inputs.push_back(ops);
     outputs.push_back(sparsity);
-    //outputs.back().add_references();
 
     return output;
   }
