@@ -1357,8 +1357,7 @@ namespace Legion {
       std::vector<std::pair<SliceTask*,AddressSpace> > concurrent_slices;
     public:
       using Operation::record_point_wise_dependence;
-      virtual bool region_has_collective(unsigned region_idx,
-          GenerationID gen);
+      virtual bool region_has_collective();
       virtual void clear_context_maps(void);
     public:
       static void process_slice_find_point_wise_dependence(

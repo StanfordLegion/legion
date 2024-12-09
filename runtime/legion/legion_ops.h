@@ -393,7 +393,7 @@ namespace Legion {
       virtual bool analyze_point_wise_dependence(const LogicalUser &prev,
           const LogicalUser &current, LogicalAnalysis &logical_analysis,
           DependenceType dtype);
-      virtual bool point_wise_analysable(GenerationID gen);
+      virtual bool point_wise_analysable(void);
     public:
       inline GenerationID get_generation(void) const { return gen; }
       RtEvent get_mapped_event(void);
@@ -714,8 +714,7 @@ namespace Legion {
       virtual bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen,
           unsigned region_idx);
-      virtual bool region_has_collective(unsigned region_idx,
-          GenerationID gen);
+      virtual bool region_has_collective(void);
       virtual bool prev_point_wise_user_set(unsigned region_req_idx);
       virtual bool need_forward_progress(void);
     public:
@@ -909,11 +908,10 @@ namespace Legion {
       virtual bool analyze_point_wise_dependence(const LogicalUser &prev,
           const LogicalUser &current, LogicalAnalysis &logical_analysis,
           DependenceType dtype);
-      virtual bool point_wise_analysable(GenerationID gen);
+      virtual bool point_wise_analysable(void);
     public:
       virtual bool prev_point_wise_user_set(unsigned region_req_idx);
-      virtual bool region_has_collective(unsigned region_idx,
-          GenerationID gen);
+      //virtual bool region_has_collective(void);
       virtual bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen,
           unsigned region_idx);

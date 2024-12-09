@@ -54,7 +54,12 @@ namespace Legion {
       if (shard_proj != NULL)
         shard_proj->add_reference();
 
+      point_wise_analysable = op->point_wise_analysable();
+      region_has_collective = op->region_has_collective();
+
       // TODO:  How to generalize this? (reazulh)
+      // Virtual function in Operation class
+      // Get the IndexSpaceNode and ref count instead of storing value
       if (op->get_operation_kind() == Operation::TASK_OP_KIND) {
         index_domain = static_cast<TaskOp*>(op)->index_domain;
       }

@@ -10456,6 +10456,7 @@ namespace Legion {
       }
     }
 
+    // TODO: move to ReplContext
     //--------------------------------------------------------------------------
     void InnerContext::handle_point_wise_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------

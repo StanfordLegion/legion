@@ -95,7 +95,6 @@ namespace Legion {
     public:
       const RegionUsage usage;
       Operation *const op;
-      unsigned op_kind;
       const size_t ctx_index;
       // Since internal operations have the same ctx_index as their
       // creator we need a way to distinguish them from the creator
@@ -104,6 +103,10 @@ namespace Legion {
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
       Domain index_domain = Domain::NO_DOMAIN;
+    public:
+      unsigned op_kind;
+      bool point_wise_analysable;
+      bool region_has_collective;
 #ifdef LEGION_SPY
       const UniqueID uid;
 #endif
@@ -1467,6 +1470,7 @@ namespace Legion {
         Operation *previous_index_task;
         GenerationID previous_index_task_generation;
         size_t ctx_index;
+        // TODO: Just store the shard_proj and guard dep_type with Define for spy
         unsigned dep_type;
         unsigned region_idx;
     };

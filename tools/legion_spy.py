@@ -7603,6 +7603,7 @@ class Operation(object):
             if self.state.bad_graph_on_error:
                 self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
+                breakpoint()
                 assert False
         else:
             return True
@@ -7679,6 +7680,7 @@ class Operation(object):
                 if self.state.bad_graph_on_error:
                     self.state.dump_bad_graph(self.context, tree_id, field)
                 if self.state.assert_on_error:
+                    breakpoint()
                     assert False
             elif need_fence and (previous_deps[prev_op] is None or
                     (field,tree_id) not in previous_deps[prev_op]):

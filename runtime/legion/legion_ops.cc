@@ -1349,7 +1349,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::point_wise_analysable(GenerationID gen)
+    bool Operation::point_wise_analysable(void)
     //--------------------------------------------------------------------------
     {
       return false;
@@ -2767,11 +2767,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::region_has_collective(
-        unsigned region_idx, GenerationID gen)
+    bool Operation::region_has_collective(void)
     //--------------------------------------------------------------------------
     {
-      assert(false);
       return false;
     }
 
@@ -4229,14 +4227,15 @@ namespace Legion {
       completed_point_list.clear();
     }
 
+    /*
     //--------------------------------------------------------------------------
     template<typename OP>
-    bool PointWiseAnalysable<OP>::region_has_collective(
-        unsigned region_idx, GenerationID gen)
+    bool PointWiseAnalysable<OP>::region_has_collective(void)
     //--------------------------------------------------------------------------
     {
       return false;
     }
+    */
 
     //--------------------------------------------------------------------------
     template<typename OP>
@@ -4472,12 +4471,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    bool PointWiseAnalysable<OP>::point_wise_analysable(GenerationID gen)
+    bool PointWiseAnalysable<OP>::point_wise_analysable(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(this->op_lock);
-      if (gen < this->get_generation())
-        return false;
       return true;
     }
 
@@ -4489,13 +4485,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool point_wise_analysable = false;
-      if (prev.op->point_wise_analysable(prev.gen) &&
-          user.op->point_wise_analysable(user.gen))
+      if (prev.point_wise_analysable &&
+          user.point_wise_analysable)
       {
-        if (prev.op->
-            region_has_collective(prev.idx, prev.gen) ||
-            user.op->
-            region_has_collective(user.idx, user.gen))
+        if (prev.region_has_collective ||
+            user.region_has_collective)
         {
           logical_analysis.bail_point_wise_analysis = true;
         }
@@ -4537,6 +4531,9 @@ namespace Legion {
             }
           }
         }
+        /*if(!point_wise_analysable) {
+          printf("SKIPPING: %d prev_context_index: %lld name: %s prev_region_idx: %d  user_context_index: %lld  name: %s user_region_idx: %d\n", this->get_context()->runtime->address_space, prev.ctx_index, static_cast<IndexTask*>(prev.op)->get_task_name(), prev.idx, user.ctx_index, static_cast<IndexTask*>(user.op)->get_task_name(), user.idx);
+        }*/
       }
       return point_wise_analysable;
     }

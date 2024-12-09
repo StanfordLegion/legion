@@ -16583,7 +16583,7 @@ namespace Legion {
                       user.op->analyze_point_wise_dependence(prev, user,
                           logical_analysis, dtype);
                   }
-                  if(!skip_registering_region_dependence)
+                  if (!skip_registering_region_dependence)
                   {
                     // If we can validate a region record which of our
                     // predecessors regions we are validating, otherwise
