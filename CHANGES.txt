@@ -1,6 +1,19 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 24.12.0 (December 20, 2024)
+  * Legion
+    - ...
+  * Regent
+    - Support for running without the CUDA hijack
+    - Support for NVIDIA Hopper GPU architecture
+  * Tools
+    - Support for exporting profiles to NVTXW format
+    - Simplifications that may improve performance by removing
+       obsolete features
+  * Realm
+    - ...
+
 Version 24.09.0 (September 27, 2024)
   * Legion
     - Bug fixes for control replication and multi-node configurations
