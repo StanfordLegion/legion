@@ -2891,7 +2891,8 @@ namespace Legion {
       LegionProfiler *profiler;
       RegionTreeForest *const forest;
       VirtualManager *virtual_manager;
-      Processor utility_group;
+      Processor local_group; // all local processors
+      Processor utility_group; // all utility processors
       const size_t num_utility_procs;
     public:
       const InputArgs input_args;
@@ -4214,6 +4215,7 @@ namespace Legion {
     public:
       void add_to_ready_queue(Processor p, TaskOp *task_op);
     public:
+      inline Processor find_local_group(void) { return local_group; }
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
       ProcessorMask find_processor_mask(const std::vector<Processor> &procs);

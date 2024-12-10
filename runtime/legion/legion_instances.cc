@@ -3777,7 +3777,7 @@ namespace Legion {
       ProfilingResponseBase base(this, creator_id, false/*completion*/);
 #ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
-          runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+          runtime->find_local_group(), LG_LEGION_PROFILING_ID,
           &base, sizeof(base), LG_RESOURCE_PRIORITY);
       req.add_measurement<Realm::ProfilingMeasurements::InstanceAllocResult>();
       // Create a user event to wait on for the result of the profiling response

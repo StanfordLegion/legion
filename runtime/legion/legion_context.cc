@@ -920,7 +920,7 @@ namespace Legion {
         bases.emplace_back(
             ProfilingResponseBase(&allocators[idx], get_unique_id(), false));
         Realm::ProfilingRequest &req = requests[idx].add_request(
-            runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+            runtime->find_local_group(), LG_LEGION_PROFILING_ID,
             &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
         req.add_measurement<
           Realm::ProfilingMeasurements::InstanceAllocResult>();

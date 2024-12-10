@@ -8864,7 +8864,7 @@ namespace Legion {
           bases.emplace_back(
               ProfilingResponseBase(&allocators[idx], creator_uid, false));
           Realm::ProfilingRequest &req = requests[idx].add_request(
-              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
               &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
@@ -9377,7 +9377,7 @@ namespace Legion {
           bases.emplace_back(
               ProfilingResponseBase(&allocators[idx], creator_uid, false));
           Realm::ProfilingRequest &req = requests[idx].add_request(
-              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
               &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
@@ -9449,7 +9449,7 @@ namespace Legion {
           bases.emplace_back(
               ProfilingResponseBase(&allocators[idx], creator_uid, false));
           Realm::ProfilingRequest &req = requests[idx].add_request(
-              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
               &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
@@ -9812,7 +9812,7 @@ namespace Legion {
           ProfilingResponseBase base(&allocator, creator_uid, false);
           Realm::ProfilingRequestSet requests;
           Realm::ProfilingRequest &req = requests.add_request(
-              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
               &base, sizeof(base), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
@@ -9895,7 +9895,7 @@ namespace Legion {
           ProfilingResponseBase base(&allocator, creator_uid, false);
           Realm::ProfilingRequestSet requests;
           Realm::ProfilingRequest &req = requests.add_request(
-              manager->runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
               &base, sizeof(base), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
@@ -13549,7 +13549,7 @@ namespace Legion {
         TaskLocalInstanceAllocator allocator(unique_event);
         ProfilingResponseBase base(&allocator, creator_uid, false);
         Realm::ProfilingRequest &req = requests.add_request(
-            runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+            runtime->find_local_group(), LG_LEGION_PROFILING_ID,
             &base, sizeof(base), LG_RESOURCE_PRIORITY);
         req.add_measurement<
           Realm::ProfilingMeasurements::InstanceAllocResult>();
@@ -19735,13 +19735,20 @@ namespace Legion {
           std::vector<Processor> util_group(locals.begin(), locals.end());
           utility_group = ProcessorGroup::create_group(util_group);
         }
+        local_group = utility_group;
       }
-      else if (local_utils.size() == 1)
-        utility_group = *(local_utils.begin());
       else
       {
-        std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
-        utility_group = ProcessorGroup::create_group(util_g);
+        if (local_utils.size() == 1)
+          utility_group = *(local_utils.begin());
+        else
+        {
+          std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
+          utility_group = ProcessorGroup::create_group(util_g);
+        }
+        std::vector<Processor> all_local(locals.begin(), locals.end());
+        all_local.insert(all_local.end(),local_utils.begin(),local_utils.end());
+        local_group = ProcessorGroup::create_group(all_local);
       }
 #ifdef DEBUG_LEGION
       assert(utility_group.exists());
