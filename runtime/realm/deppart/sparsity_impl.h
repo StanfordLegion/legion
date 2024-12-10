@@ -84,7 +84,7 @@ namespace Realm {
   template <int N, typename T>
   class SparsityMapImpl : public SparsityMapPublicImpl<N,T> {
   public:
-    SparsityMapImpl(SparsityMap<N,T> _me);
+    SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers);
 
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
@@ -164,7 +164,7 @@ namespace Realm {
     bool precise_requested, approx_requested;
     Event precise_ready_event, approx_ready_event;
     NodeSet remote_precise_waiters, remote_approx_waiters;
-    NodeSet remote_sharers;
+    NodeSet &remote_subscribers;
     size_t sizeof_precise;
   };
 
@@ -178,7 +178,6 @@ namespace Realm {
 
     void init(ID _me, unsigned _init_owner);
     void recycle(void);
-    void subscribe(NodeID node);
     void unsubscribe(NodeID node);
 
     void add_references(unsigned count, Event wait_on = Event::NO_EVENT);
@@ -199,8 +198,6 @@ namespace Realm {
 
     bool need_refcount;
 
-    Mutex mutex;
-
     // need a type-erased deleter
     typedef void(*Deleter)(void *);
     Deleter map_deleter;
@@ -208,13 +205,12 @@ namespace Realm {
     template <int N, typename T>
     SparsityMapImpl<N, T> *get_or_create(SparsityMap<N, T> me);
 
-    struct SubscribeDeleteMessage {
+    struct UnsubscribeMessage {
       ::realm_id_t id;
-      static void handle_message(NodeID sender, const SubscribeDeleteMessage &msg,
+      static void handle_message(NodeID sender, const UnsubscribeMessage &msg,
                                  const void *data, size_t datalen);
     };
-    static ActiveMessageHandlerReg<SubscribeDeleteMessage>
-        subscribe_delete_message_handler_reg;
+    static ActiveMessageHandlerReg<UnsubscribeMessage> unsubscribe_message_handler_reg;
   };
 
 }; // namespace Realm
