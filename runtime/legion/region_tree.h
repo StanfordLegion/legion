@@ -25,6 +25,7 @@
 #include "legion/garbage_collection.h"
 
 #include <algorithm>
+#include <numeric>
 
 namespace Legion {
   namespace Internal {
