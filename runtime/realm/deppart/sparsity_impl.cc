@@ -286,30 +286,27 @@ namespace Realm {
   {
     if(!need_refcount)
       return;
+    // Should be on the owner node when we get these messages
+    assert(Network::my_node_id == NodeID(me.sparsity_creator_node()));
     if(wait_on.has_triggered()) {
       const unsigned remaining = references.fetch_sub_acqrel(count);
       assert(remaining >= count);
       if(remaining == count) {
-        if(Network::my_node_id == NodeID(me.sparsity_creator_node()) &&
-           !subscribers.empty()) {
-          // count is now zero, set it to the number of subscribers so that they
-          // will each decrement it as they ack their invalidation
-          // Put in a guard while we're iterating the subscribers too
-          references.store(subscribers.size() + 1);
+        if(!subscribers.empty()) {
+          // Take the lock and send out messages to all the subscribers
+          // to make sure tell them to do their invalidations, once we
+          // get the last invalidation ack then we can clean up
+          // Need to hold the lock in case messages come back while we're
+          // still iterating the set of subscribers
+          AutoLock<> al(mutex);
           // broadcast delete to remote subscribers
           for(NodeID node : subscribers) {
             ActiveMessage<
-                typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+                typename SparsityMapImplWrapper::SubscribeDeleteMessage>
                 amsg(node);
             amsg.add_remote_completion(RemoveReferenceAcknowledeged(this, node));
             amsg->id = me.id;
-            amsg->count = 0;
             amsg.commit();
-          }
-          // Remove our guard and see if we got all the acks
-          if(references.fetch_sub_acqrel(1) == 1) {
-            subscribers.clear();
-            recycle();
           }
         } else {
           assert(subscribers.empty());
@@ -369,40 +366,48 @@ namespace Realm {
   void SparsityMapImplWrapper::subscribe(NodeID node)
   {
     assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+    AutoLock<> al(mutex);
+    // Check if we were already deleted
     if(references.load() == 0) {
-      assert(subscribers.empty());
-      assert(map_impl.load() == nullptr);
-      // already deleted
-      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+      ActiveMessage<typename SparsityMapImplWrapper::SubscribeDeleteMessage>
           amsg(node);
       amsg->id = me.id;
-      amsg->count = 0;
       amsg.commit();
     } else {
-      AutoLock<> al(mutex);
       subscribers.add(node);
     }
   }
 
   void SparsityMapImplWrapper::unsubscribe(NodeID node)
   {
-    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
-    assert(subscribers.contains(node));
-    const unsigned remaining = references.fetch_sub_acqrel(1);
-    assert(remaining >= 1);
-    if(remaining == 1) {
-      subscribers.clear();
-      recycle();
+    bool recycle_now;
+    if(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id) {
+      // Received ack on the owner node
+      AutoLock<> al(mutex);
+      assert(subscribers.contains(node));
+      subscribers.remove(node);
+      recycle_now = subscribers.empty();
+    } else {
+      // Invalidating on a remote node so recycle immediately
+      recycle_now = true;
     }
+    if(recycle_now)
+      recycle();
   }
 
   void SparsityMapImplWrapper::SubscribeDeleteMessage::handle_message(
       NodeID sender, const SubscribeDeleteMessage &msg, const void *data, size_t datalen)
   {
+    const NodeID owner(ID(msg.id).sparsity_creator_node());
     SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
-    if(wrapper) {
+    if(owner == Network::my_node_id) {
+      // Sent a subscription to the owner node
       assert(sender != Network::my_node_id);
       wrapper->subscribe(sender);
+    } else {
+      // Received a subscription deletion from the owner
+      assert(sender == owner);
+      wrapper->unsubscribe(sender);
     }
   }
 
