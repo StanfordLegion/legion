@@ -51,7 +51,7 @@ namespace Realm {
 
     if(!images[i].dense()) {
       e = Event::merge_events(
-          {e, SparsityMapRefCounter(images[i].sparsity.id).add_references_async(1)});
+          {e, SparsityMapRefCounter(images[i].sparsity.id).add_references(1)});
     }
 
     log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> "
@@ -85,7 +85,7 @@ namespace Realm {
       images[i] = op->add_source_with_difference(sources[i], diff_rhss[i]);
       if(!images[i].dense()) {
         e = Event::merge_events(
-            {e, SparsityMapRefCounter(images[i].sparsity.id).add_references_async(1)});
+            {e, SparsityMapRefCounter(images[i].sparsity.id).add_references(1)});
       }
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
     }

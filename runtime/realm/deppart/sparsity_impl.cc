@@ -35,57 +35,40 @@ namespace Realm {
 
   SparsityMapRefCounter::SparsityMapRefCounter(::realm_id_t _id)
     : id(_id)
-  {}
-
-  void SparsityMapRefCounter::add_references(unsigned count)
   {
-    if(ID(*this).is_sparsity()) {
-      NodeID owner = ID(*this).sparsity_creator_node();
-      if(owner == Network::my_node_id) {
-        get_runtime()->get_sparsity_impl(*this)->add_references(count);
-      } else {
-        ActiveMessage<typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
-            amsg(owner);
-        amsg->id = id;
-        amsg->count = count;
-        amsg.commit();
-      }
+    assert(ID(id).is_sparsity());
+  }
+
+  Event SparsityMapRefCounter::add_references(unsigned count)
+  {
+    NodeID owner = ID(id).sparsity_creator_node();
+    if(owner == Network::my_node_id) {
+      get_runtime()->get_sparsity_impl(*this)->add_references(count, Event::NO_EVENT);
+      return Event::NO_EVENT;
+    } else {
+      const Event event = GenEventImpl::create_genevent()->current_event();
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapAddReferenceMessage> amsg(
+          owner);
+      amsg->id = id;
+      amsg->count = count;
+      amsg->wait_on = event;
+      amsg.commit();
+      return event;
     }
   }
 
-  Event SparsityMapRefCounter::add_references_async(unsigned count)
+  void SparsityMapRefCounter::remove_references(unsigned count, Event wait_on)
   {
-    Event event = Event::NO_EVENT;
-    if(ID(*this).is_sparsity()) {
-      event = GenEventImpl::create_genevent()->current_event();
-      NodeID owner = ID(*this).sparsity_creator_node();
-      if(owner == Network::my_node_id) {
-        get_runtime()->get_sparsity_impl(*this)->add_references(count, event);
-      } else {
-        ActiveMessage<typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
-            amsg(owner);
-        amsg->id = id;
-        amsg->count = count;
-        amsg->wait_on = event;
-        amsg.commit();
-      }
-    }
-    return event;
-  }
-
-  void SparsityMapRefCounter::remove_references(unsigned count)
-  {
-    if(ID(*this).is_sparsity()) {
-      NodeID owner = ID(*this).sparsity_creator_node();
-      if(owner == Network::my_node_id) {
-        get_runtime()->get_sparsity_impl(*this)->remove_references(count);
-      } else {
-        ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
-            amsg(owner);
-        amsg->id = id;
-        amsg->count = count;
-        amsg.commit();
-      }
+    NodeID owner = ID(*this).sparsity_creator_node();
+    if(owner == Network::my_node_id) {
+      get_runtime()->get_sparsity_impl(id)->remove_references(count, wait_on);
+    } else {
+      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+          amsg(owner);
+      amsg->id = id;
+      amsg->count = count;
+      amsg->wait_on = wait_on;
+      amsg.commit();
     }
   }
 
@@ -93,20 +76,14 @@ namespace Realm {
       NodeID sender, const SparsityMapAddReferenceMessage &msg, const void *data,
       size_t datalen)
   {
-    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
-    if(wrapper) {
-      wrapper->add_references(msg.count, msg.wait_on);
-    }
+    get_runtime()->get_sparsity_impl(msg.id)->add_references(msg.count, msg.wait_on);
   }
 
   void SparsityMapRefCounter::SparsityMapRemoveReferencesMessage::handle_message(
       NodeID sender, const SparsityMapRemoveReferencesMessage &msg, const void *data,
       size_t datalen)
   {
-    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.id);
-    if(wrapper) {
-      wrapper->remove_references(msg.count);
-    }
+    get_runtime()->get_sparsity_impl(msg.id)->remove_references(msg.count, msg.wait_on);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -115,23 +92,22 @@ namespace Realm {
 
   class DeferredDestroy : public EventWaiter {
   public:
-    typedef ::realm_id_t id_t;
-    DeferredDestroy(id_t id)
-      : sparsity_map_id(id)
+    DeferredDestroy(SparsityMapImplWrapper *wrap, unsigned cnt)
+      : wrapper(wrap)
+      , count(cnt)
     {}
 
     virtual void event_triggered(bool poisoned, TimeLimit work_until)
     {
-      if(NodeID(ID(sparsity_map_id).sparsity_creator_node()) == Network::my_node_id) {
-        get_runtime()->get_sparsity_impl(sparsity_map_id)->destroy();
-      }
+      wrapper->remove_references(count, Event::NO_EVENT);
       delete this;
     }
 
     virtual void print(std::ostream &os) const {}
     virtual Event get_finish_event(void) const { return Event::NO_EVENT; }
 
-    id_t sparsity_map_id;
+    SparsityMapImplWrapper *const wrapper;
+    const unsigned count;
   };
 
   ////////////////////////////////////////////////////////////////////////
@@ -147,36 +123,21 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::destroy(Event wait_on)
+  void SparsityMap<N, T>::destroy(Event wait_on, unsigned count)
   {
-    NodeID owner = ID(*this).sparsity_creator_node();
-    if(owner == Network::my_node_id) {
-      SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(*this);
-      if(wait_on.has_triggered()) {
-        wrapper->destroy();
-      } else {
-        EventImpl::add_waiter(wait_on, new DeferredDestroy(id));
-      }
-    } else {
-      ActiveMessage<typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
-          amsg(owner);
-      amsg->id = id;
-      amsg->count = 1;
-      amsg->wait_on = wait_on;
-      amsg.commit();
-    }
+    return SparsityMapRefCounter(id).remove_references(count, wait_on);
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::add_references(unsigned count)
+  Event SparsityMap<N, T>::add_reference(unsigned count)
   {
-    SparsityMapRefCounter(id).add_references(count);
+    return SparsityMapRefCounter(id).add_references(count);
   }
 
   template <int N, typename T>
-  void SparsityMap<N, T>::remove_references(unsigned count)
+  void SparsityMap<N, T>::remove_reference(unsigned count, Event wait_on)
   {
-    SparsityMapRefCounter(id).remove_references(count);
+    return SparsityMapRefCounter(id).remove_references(count, wait_on);
   }
 
   // if 'always_create' is false and the points/rects completely fill their
@@ -293,8 +254,6 @@ namespace Realm {
     }
   }
 
-  void SparsityMapImplWrapper::destroy(void) { remove_references(/*count=*/1); }
-
   void SparsityMapImplWrapper::add_references(unsigned count, Event wait_on)
   {
     if(need_refcount) {
@@ -319,11 +278,12 @@ namespace Realm {
     NodeID node;
   };
 
-  void SparsityMapImplWrapper::remove_references(unsigned count)
+  void SparsityMapImplWrapper::remove_references(unsigned count, Event wait_on)
   {
-    if(need_refcount) {
-      assert(references.load() >= count);
-      if(references.fetch_sub_acqrel(count) == count) {
+    if(wait_on.has_triggered()) {
+      const unsigned remaining = references.fetch_sub_acqrel(count);
+      assert(remaining >= count);
+      if(remaining == count) {
         assert(Network::my_node_id == NodeID(me.sparsity_creator_node()) ||
                subscribers.empty());
 
@@ -344,6 +304,8 @@ namespace Realm {
           recycle();
         }
       }
+    } else {
+      EventImpl::add_waiter(wait_on, new DeferredDestroy(this, count));
     }
   }
 
@@ -1856,11 +1818,6 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::SetContribCountMessage> SparsityMapImpl<N,T>::set_contrib_count_msg_reg;
 
-  template <int N, typename T>
-  /*static*/ ActiveMessageHandlerReg<
-      typename SparsityMapImpl<N, T>::SparsityMapDestroyMessage>
-      SparsityMapImpl<N, T>::sparse_map_destroy_message_handler_reg;
-
   /*static*/ ActiveMessageHandlerReg<
       typename SparsityMapRefCounter::SparsityMapAddReferenceMessage>
       SparsityMapRefCounter::sparse_untyped_add_references_message_handler_reg;
@@ -1916,23 +1873,6 @@ namespace Realm {
   {
     log_part.info() << "received contributor count: sparsity=" << msg.sparsity << " count=" << msg.count;
     SparsityMapImpl<N,T>::lookup(msg.sparsity)->set_contributor_count(msg.count);
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SparsityMapDestroyMessage
-
-  template <int N, typename T>
-  /*static*/ void SparsityMapImpl<N, T>::SparsityMapDestroyMessage::handle_message(
-      NodeID sender, const SparsityMapDestroyMessage &msg, const void *data,
-      size_t datalen)
-  {
-    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(msg.sparsity_map);
-    if(msg.wait_on.has_triggered()) {
-      wrapper->destroy();
-    } else {
-      EventImpl::add_waiter(msg.wait_on, new DeferredDestroy(msg.sparsity_map.id));
-    }
   }
 
 #define DOIT(N,T) \

@@ -45,10 +45,8 @@ namespace Realm {
     id_t id;
     SparsityMapRefCounter(::realm_id_t id);
 
-    void add_references(unsigned count);
-    Event add_references_async(unsigned count);
-
-    void remove_references(unsigned count);
+    [[nodiscard]] Event add_references(unsigned count);
+    void remove_references(unsigned count, Event wait_on);
 
     struct SparsityMapAddReferenceMessage {
       id_t id;
@@ -152,22 +150,12 @@ namespace Realm {
 				 const void *data, size_t datalen);
     };
 
-    struct SparsityMapDestroyMessage {
-      SparsityMap<N, T> sparsity_map;
-      Event wait_on;
-
-      static void handle_message(NodeID sender, const SparsityMapDestroyMessage &msg,
-                                 const void *data, size_t datalen);
-    };
-
   protected:
     void finalize(void);
 
     static ActiveMessageHandlerReg<RemoteSparsityRequest> remote_sparsity_request_reg;
     static ActiveMessageHandlerReg<RemoteSparsityContrib> remote_sparsity_contrib_reg;
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
-    static ActiveMessageHandlerReg<SparsityMapDestroyMessage>
-        sparse_map_destroy_message_handler_reg;
 
     atomic<int> remaining_contributor_count;
     atomic<int> total_piece_count, remaining_piece_count;
@@ -189,13 +177,12 @@ namespace Realm {
     ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
-    void destroy(void);
     void recycle(void);
     void subscribe(NodeID node);
     void unsubscribe(NodeID node);
 
     void add_references(unsigned count, Event wait_on = Event::NO_EVENT);
-    void remove_references(unsigned count);
+    void remove_references(unsigned count, Event wait_on);
 
     static ID make_id(const SparsityMapImplWrapper &dummy, int owner, ID::IDType index)
     {

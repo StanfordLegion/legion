@@ -75,20 +75,40 @@ namespace Realm {
 
     /**
      * Destroy the sparsity map.
+     * This method is synonymous with removing an ownership
+     * reference from the sparsity map. Note that each sparsity
+     * map is given one ownership reference when it is created
+     * so the client must either call destroy or remove_reference
+     * once in order to clean up the sparsity map. The creation
+     * event for the sparsity map must have a happens-before
+     * relationship with the wait-on even of the destroy call.
      * @param wait_on a precondition event
      */
-    void destroy(Event wait_on = Event::NO_EVENT);
+    void destroy(Event wait_on = Event::NO_EVENT, unsigned count = 1);
 
     /**
-     * Add one reference to the sparsity map.
+     * Add an ownership reference to the sparsity map. Calling
+     * this method requires the client perform an additional call
+     * to 'destroy' which will remove the reference. The event
+     * returned by this method must be waited on before calling
+     * 'destroy' or must be passed as a precondition to 'destroy'.
+     * @param count how many references to add
+     * @return the event for when references have been applied
      */
-    void add_references(unsigned count = 1);
+    Event add_reference(unsigned count = 1);
 
     /**
-     * Remove references from the sparsity map.
-     * @param count a number of references to remove
+     * Remove an ownership reference from this sparsity map.
+     * This method is synonymous with destroying a sparsity map.
+     * Note that each sparsity map is given one ownership reference
+     * when it is created so the client must either call destroy or
+     * remove_reference once in order to clean up the sparsity map.
+     * The event returned from add_reference must have a happens-before
+     * relationship with the wait-on even of the remove_reference call.
+     * @param count the number of references to remove
+     * @param wait_on a precondition event before removing the references
      */
-    void remove_references(unsigned count = 1);
+    void remove_reference(unsigned count = 1, Event wait_on = Event::NO_EVENT);
 
     /**
      * Lookup the public implementation object for this sparsity map.
