@@ -377,7 +377,6 @@ namespace Realm {
   void SparsityMapImplWrapper::UnsubscribeMessage::handle_message(
       NodeID sender, const UnsubscribeMessage &msg, const void *data, size_t datalen)
   {
-    const NodeID owner(ID(msg.id).sparsity_creator_node());
     get_runtime()->get_sparsity_impl(msg.id)->unsubscribe(sender);
   }
 
