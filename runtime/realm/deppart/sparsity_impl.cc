@@ -36,11 +36,13 @@ namespace Realm {
   SparsityMapRefCounter::SparsityMapRefCounter(::realm_id_t _id)
     : id(_id)
   {
-    assert(ID(id).is_sparsity());
+    assert((id == 0) || ID(id).is_sparsity());
   }
 
   Event SparsityMapRefCounter::add_references(unsigned count)
   {
+    if(id == 0)
+      return Event::NO_EVENT;
     NodeID owner = ID(id).sparsity_creator_node();
     if(owner == Network::my_node_id) {
       get_runtime()->get_sparsity_impl(*this)->add_references(count, Event::NO_EVENT);
@@ -59,6 +61,8 @@ namespace Realm {
 
   void SparsityMapRefCounter::remove_references(unsigned count, Event wait_on)
   {
+    if(id == 0)
+      return;
     NodeID owner = ID(*this).sparsity_creator_node();
     if(owner == Network::my_node_id) {
       get_runtime()->get_sparsity_impl(id)->remove_references(count, wait_on);
@@ -280,6 +284,8 @@ namespace Realm {
 
   void SparsityMapImplWrapper::remove_references(unsigned count, Event wait_on)
   {
+    if(!need_refcount)
+      return;
     if(wait_on.has_triggered()) {
       const unsigned remaining = references.fetch_sub_acqrel(count);
       assert(remaining >= count);
