@@ -284,23 +284,29 @@ namespace Realm {
       const unsigned remaining = references.fetch_sub_acqrel(count);
       assert(remaining >= count);
       if(remaining == count) {
-        assert(Network::my_node_id == NodeID(me.sparsity_creator_node()) ||
-               subscribers.empty());
-
-        // broadcast delete to remote subscribers
-        for(NodeID node : subscribers) {
-          ActiveMessage<
-              typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
-              amsg(node);
-          amsg.add_remote_completion(RemoveReferenceAcknowledeged(this, node));
-          amsg->id = me.id;
-          amsg->count = 0;
-          amsg.commit();
-        }
-
-        if(Network::my_node_id != NodeID(me.sparsity_creator_node()) ||
-           subscribers.empty()) {
-
+        if(Network::my_node_id == NodeID(me.sparsity_creator_node()) &&
+           !subscribers.empty()) {
+          // count is now zero, set it to the number of subscribers so that they
+          // will each decrement it as they ack their invalidation
+          // Put in a guard while we're iterating the subscribers too
+          references.store(subscribers.size() + 1);
+          // broadcast delete to remote subscribers
+          for(NodeID node : subscribers) {
+            ActiveMessage<
+                typename SparsityMapRefCounter::SparsityMapRemoveReferencesMessage>
+                amsg(node);
+            amsg.add_remote_completion(RemoveReferenceAcknowledeged(this, node));
+            amsg->id = me.id;
+            amsg->count = 0;
+            amsg.commit();
+          }
+          // Remove our guard and see if we got all the acks
+          if(references.fetch_sub_acqrel(1) == 1) {
+            subscribers.clear();
+            recycle();
+          }
+        } else {
+          assert(subscribers.empty());
           recycle();
         }
       }
@@ -374,13 +380,12 @@ namespace Realm {
 
   void SparsityMapImplWrapper::unsubscribe(NodeID node)
   {
-    AutoLock<> al(mutex);
-
     assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
-
     assert(subscribers.contains(node));
-    subscribers.remove(node);
-    if(subscribers.empty()) {
+    const unsigned remaining = references.fetch_sub_acqrel(1);
+    assert(remaining >= 1);
+    if(remaining == 1) {
+      subscribers.clear();
       recycle();
     }
   }
