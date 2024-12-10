@@ -1481,6 +1481,10 @@ namespace Legion {
       virtual void serialize(Serializer &rez) = 0;
       static MemoryPool* deserialize(Deserializer &derez, Runtime *runtime);
     public:
+      static constexpr FieldID FID = 0; 
+      static Realm::InstanceLayoutGeneric* create_layout(size_t size,
+          size_t alignment, size_t offset = 0);
+    public:
       const size_t max_alignment;
     };
 
@@ -1535,10 +1539,6 @@ namespace Legion {
           PhysicalInstance *results, LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID creator);
       static unsigned floor_log2(uint64_t size);
-    public:
-      static constexpr FieldID FID = 0;
-      static Realm::InstanceLayoutGeneric* create_layout(size_t size,
-          size_t alignment, size_t offset = 0);
     private:
       MemoryManager *const manager;
       const size_t limit;

@@ -8600,6 +8600,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ Realm::InstanceLayoutGeneric* MemoryPool::create_layout(
+                                   size_t size, size_t alignment, size_t offset)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(alignment > 0);
+#endif
+      const DomainT<1,coord_t> bounds = (size == 0) ?
+        Rect<1>(1, 0) : Rect<1>(offset, Point<1>(offset + size - 1));
+      const std::vector<Realm::FieldID> field_ids(1, FID);
+      const std::vector<size_t> field_sizes(1, sizeof(uint8_t));
+      Realm::InstanceLayoutConstraints constraints(field_ids, field_sizes,
+                                                 0/*blocking*/);
+      const int dim_order[] = {0};
+      Realm::InstanceLayoutGeneric *layout =
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
+                                                             constraints,
+                                                             dim_order);
+      layout->alignment_reqd = alignment;
+      return layout;
+    }
+
+    //--------------------------------------------------------------------------
     ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
         size_t alignment, RtEvent use, MemoryManager *man)
       : MemoryPool(alignment), manager(man), limit(remain),
@@ -9694,30 +9717,7 @@ namespace Legion {
         rez.serialize(PhysicalInstance::NO_INST);
         rez.serialize(RtEvent::NO_RT_EVENT); 
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ Realm::InstanceLayoutGeneric* ConcretePool::create_layout(
-                                   size_t size, size_t alignment, size_t offset)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(alignment > 0);
-#endif
-      const DomainT<1,coord_t> bounds = (size == 0) ?
-        Rect<1>(1, 0) : Rect<1>(offset, Point<1>(offset + size - 1));
-      const std::vector<Realm::FieldID> field_ids(1, FID);
-      const std::vector<size_t> field_sizes(1, sizeof(uint8_t));
-      Realm::InstanceLayoutConstraints constraints(field_ids, field_sizes,
-                                                 0/*blocking*/);
-      const int dim_order[] = {0};
-      Realm::InstanceLayoutGeneric *layout =
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
-                                                             constraints,
-                                                             dim_order);
-      layout->alignment_reqd = alignment;
-      return layout;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     UnboundPool::UnboundPool(MemoryManager *man, UnboundPoolScope s,
@@ -9769,6 +9769,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(size > 0);
       assert(!released);
 #endif
       // Check to see if we have a local freed instance that is big enough
@@ -9871,6 +9872,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!released);
 #endif
+      if (layout->bytes_used == 0)
+      {
+        // Special case for empty instances, we don't need to talk to anyone
+        Realm::InstanceLayoutGeneric *layout = create_layout(0, 1);
+        PhysicalInstance instance;
+        const Realm::ProfilingRequestSet empty_requests;
+        use_event = RtEvent(PhysicalInstance::create_instance(
+              instance, manager->memory, layout->clone(), empty_requests));
+        return instance;
+      }
       if (!freed_instances.empty())
       {
         RtEvent ready;
@@ -9984,6 +9995,12 @@ namespace Legion {
       {
         // Add it to the freed instances 
         const size_t size = instance.get_layout()->bytes_used;
+        // Special case for empty instances
+        if (size == 0)
+        {
+          instance.destroy(precondition);
+          return;
+        }
         freed_instances[size].emplace_back(
             std::make_pair(instance, precondition));
         freed_bytes += size;
