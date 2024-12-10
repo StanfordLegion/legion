@@ -2308,6 +2308,7 @@ namespace Legion {
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
       virtual void record_intra_space_dependences(unsigned idx,
                                const std::vector<DomainPoint> &region_deps) = 0;
+      virtual void record_point_wise_dependence(LogicalRegion lr, unsigned region_idx) = 0;
       virtual const Mappable* as_mappable(void) const = 0;
     }; 
 

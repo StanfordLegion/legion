@@ -4023,17 +4023,16 @@ class LogicalVerificationState(object):
                 # all of their local points are
                 need_fence = False
 
-            has_verification_mapping_dependence = logical_op.has_verification_mapping_dependence(
+            has_verification_mapping_dependence, has_point_wise_dependence = logical_op.has_verification_mapping_dependence(
                     logical_op.reqs[req.index], prev_logical,
                     prev_logical.reqs[prev_req.index], dep_type,
-                    self.field, need_fence, previous_deps,
-                    op.has_point_wise_dependence(req.index))
+                    self.field, need_fence, previous_deps)
             if has_verification_mapping_dependence:
                 return dominates,True
-            elif op.has_point_wise_dependence(req.index):
+            elif has_point_wise_dependence:
                 has_mapping_dependence = op.has_mapping_dependence(req,
                         prev_op, prev_req, dep_type, self.field,
-                        op.has_point_wise_dependence(req.index))
+                        has_point_wise_dependence)
                 if has_mapping_dependence:
                     return dominates, True
                 else:
@@ -6600,7 +6599,12 @@ class Operation(object):
         assert index in self.point_wise_dependences
         self.point_wise_dependences[index] = True
 
-    def has_point_wise_dependence(self, index):
+    def has_point_wise_dependence(self, index=None):
+        if not index:
+            for index in self.point_wise_dependences:
+                if self.point_wise_dependences[index]:
+                    return True
+            return False
         assert index in self.point_wise_dependences
         return self.point_wise_dependences[index]
 
@@ -7603,7 +7607,6 @@ class Operation(object):
             if self.state.bad_graph_on_error:
                 self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
-                breakpoint()
                 assert False
         else:
             return True
@@ -7655,21 +7658,21 @@ class Operation(object):
                     previous_deps[next_op] = None
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
-                                            field, need_fence, previous_deps,
-                                            has_point_wise_dependence):
+            field, need_fence, previous_deps):
         tree_id = req.logical_node.tree_id
+        has_point_wise_dependence = False
         # Do a quick check to see if it is in the previous deps
         if prev_op in previous_deps:
             if need_fence:
                 # Check to see if the previous dependence had an intermediate close
                 if previous_deps[prev_op] is not None and (field,tree_id) in previous_deps[prev_op]:
-                    return True
+                    return (True, has_point_wise_dependence)
                 # else we haven't computed it with a fence yet
             else:
                 # We already found this prev_op as a previous dependence
-                return True
-        self.has_verification_transitive_mapping_dependence(prev_op, need_fence, 
-                                                    field, tree_id, previous_deps)
+                return (True, has_point_wise_dependence)
+        has_point_wise_dependence = self.has_verification_transitive_mapping_dependence(prev_op,
+                need_fence, field, tree_id, previous_deps)
         if not has_point_wise_dependence:
             # Did not find it so issue the error and return false
             if prev_op not in previous_deps:
@@ -7680,7 +7683,6 @@ class Operation(object):
                 if self.state.bad_graph_on_error:
                     self.state.dump_bad_graph(self.context, tree_id, field)
                 if self.state.assert_on_error:
-                    breakpoint()
                     assert False
             elif need_fence and (previous_deps[prev_op] is None or
                     (field,tree_id) not in previous_deps[prev_op]):
@@ -7694,13 +7696,14 @@ class Operation(object):
                 if self.state.assert_on_error:
                     assert False
             else:
-                return True
-        return False
+                return (True, has_point_wise_dependence)
+        return (False, has_point_wise_dependence)
 
     def has_verification_transitive_mapping_dependence(self, prev_op, need_fence, 
                                                     field, tree_id, previous_deps):
         # Equal is for stupid must epoch launches
         assert prev_op.get_context_index() <= self.get_context_index()
+        has_point_wise_dependence = False
         if not need_fence:
             # If we don't need a close then we can do BFS which is much more efficient
             # at finding dependences of things nearby in the graph
@@ -7714,6 +7717,8 @@ class Operation(object):
                         queue.append(op)
             while queue:
                 current = queue.popleft()
+                if current.has_point_wise_dependence():
+                    has_point_wise_dependence = True
                 if not current.logical_incoming:
                     continue
                 # If this operation comes earlier in the program than the
@@ -7726,7 +7731,9 @@ class Operation(object):
                         continue
                     previous_deps[next_op] = None
                     if next_op is prev_op:
-                        return True
+                        if next_op.has_point_wise_dependence():
+                            has_point_wise_dependence = True
+                        return has_point_wise_dependence
                     queue.append(next_op)
         else:
             # First BFS to find all the close fence operations that we can reach 
@@ -7782,6 +7789,7 @@ class Operation(object):
                             continue
                         next_op.generation = next_gen
                         queue.append(next_op)
+        return has_point_wise_dependence
 
     def analyze_previous_interference(self, next_op, next_req, reachable):
         if not self.reqs:
@@ -13627,6 +13635,9 @@ class State(object):
             prev_op.add_point_wise_outgoing(owner_dep)
             next_op.add_point_wise_incoming(owner_dep)
             next_point_op.add_point_wise_dependences_flag(next_region_idx)
+            next_op.add_point_wise_dependences_flag(next_region_idx)
+            prev_point_op.add_point_wise_dependences_flag(prev_region_idx)
+            prev_op.add_point_wise_dependences_flag(prev_region_idx)
 
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection

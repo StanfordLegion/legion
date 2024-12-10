@@ -4214,17 +4214,21 @@ namespace Legion {
     void PointWiseAnalysable<OP>::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      clear_context_maps();
+      if (!this->runtime->disable_point_wise_analysis)
+        clear_context_maps();
 
       OP::deactivate(freeop);
 
-      point_wise_dependences.clear();
-      connect_to_prev_points.clear();
-      connect_to_next_points.clear();
+      if (!this->runtime->disable_point_wise_analysis)
+      {
+        point_wise_dependences.clear();
+        connect_to_prev_points.clear();
+        connect_to_next_points.clear();
 
-      pending_point_wise_dependences.clear();
-      prev_index_tasks.clear();
-      completed_point_list.clear();
+        pending_point_wise_dependences.clear();
+        prev_index_tasks.clear();
+        completed_point_list.clear();
+      }
     }
 
     /*
@@ -18299,6 +18303,13 @@ namespace Legion {
     {
       // Should never get here because our requirements are always read-only
       assert(false);
+    }
+
+    void PointDepPartOp::record_point_wise_dependence(
+        LogicalRegion lr, unsigned region_idx)
+    {
+      // We call it for all ProjoectionPoint(s).
+      // Do nothing in this case.
     }
 
     /////////////////////////////////////////////////////////////

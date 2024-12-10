@@ -1882,7 +1882,7 @@ namespace Legion {
                                const std::vector<DomainPoint> &region_deps);
       virtual const Mappable* as_mappable(void) const { return this; }
     public:
-      using Operation::record_point_wise_dependence;
+      using ProjectionPoint::record_point_wise_dependence;
       virtual void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
     public:
@@ -3738,6 +3738,10 @@ namespace Legion {
                                const std::vector<DomainPoint> &region_deps);
       virtual const Mappable* as_mappable(void) const { return this; }
     public:
+      using ProjectionPoint::record_point_wise_dependence;
+      virtual void record_point_wise_dependence(LogicalRegion lr,
+            unsigned region_idx);
+    public:
       DependentPartitionOp *owner;
     };
 
@@ -3934,7 +3938,7 @@ namespace Legion {
                                const std::vector<DomainPoint> &region_deps);
       virtual const Mappable* as_mappable(void) const { return this; }
     public:
-      using Operation::record_point_wise_dependence;
+      using ProjectionPoint::record_point_wise_dependence;
       virtual void record_point_wise_dependence(LogicalRegion lr,
             unsigned region_idx);
     public:
