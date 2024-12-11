@@ -117,7 +117,7 @@
   do {                                                                                   \
     CUptiResult ret = (cmd);                                                             \
     if(ret != CUPTI_SUCCESS) {                                                           \
-      REPORT_NVML_ERROR(Logger::LEVEL_ERROR, #cmd, ret);                                 \
+      REPORT_CUPTI_ERROR(Logger::LEVEL_ERROR, #cmd, ret);                                \
       abort();                                                                           \
     }                                                                                    \
   } while(0)
