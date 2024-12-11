@@ -4535,9 +4535,6 @@ namespace Legion {
             }
           }
         }
-        /*if(!point_wise_analysable) {
-          printf("SKIPPING: %d prev_context_index: %lld name: %s prev_region_idx: %d  user_context_index: %lld  name: %s user_region_idx: %d\n", this->get_context()->runtime->address_space, prev.ctx_index, static_cast<IndexTask*>(prev.op)->get_task_name(), prev.idx, user.ctx_index, static_cast<IndexTask*>(user.op)->get_task_name(), user.idx);
-        }*/
       }
       return point_wise_analysable;
     }
@@ -9731,7 +9728,6 @@ namespace Legion {
         {
           points.push_back((*dpi));
         }
-        printf("CLEANING UP\n");
         parent_ctx->clear_map(context_index, points);
       }
     }

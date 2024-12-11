@@ -4027,6 +4027,8 @@ class LogicalVerificationState(object):
                     logical_op.reqs[req.index], prev_logical,
                     prev_logical.reqs[prev_req.index], dep_type,
                     self.field, need_fence, previous_deps)
+            if logical_op.uid == 43 and prev_logical.uid == 39:
+                breakpoint()
             if has_verification_mapping_dependence:
                 return dominates,True
             elif has_point_wise_dependence:
@@ -6332,8 +6334,8 @@ class Operation(object):
         self.equivalence_set_uses = None
         # Flags to indicate existence of point-wise dependences
         self.point_wise_dependences = None
-        self.logical_point_wise_incoming = None # Point-wise Operation dependences
-        self.logical_point_wise_outgoing = None # Point-wise Operation dependences
+        self.logical_point_wise_incoming = set() # Point-wise Operation dependences
+        self.logical_point_wise_outgoing = set() # Point-wise Operation dependences
         self.point_wise_incoming = None # Point-wise Mapping dependences
         self.point_wise_outgoing = None # Point-wise Mapping dependences
 
@@ -6657,8 +6659,6 @@ class Operation(object):
         if self.point_wise_incoming is None:
             self.point_wise_incoming = set()
         self.point_wise_incoming.add(dep)
-        if self.logical_point_wise_incoming is None:
-            self.logical_point_wise_incoming = set()
         self.logical_point_wise_incoming.add(dep.op1)
 
     def add_point_wise_outgoing(self, dep):
@@ -6666,8 +6666,6 @@ class Operation(object):
         if self.point_wise_outgoing is None:
             self.point_wise_outgoing = set()
         self.point_wise_outgoing.add(dep)
-        if self.logical_point_wise_outgoing is None:
-            self.logical_point_wise_outgoing = set()
         self.logical_point_wise_outgoing.add(dep.op2)
 
     def add_equivalence_incoming(self, eq, src):
@@ -13635,10 +13633,48 @@ class State(object):
 
             prev_op.add_point_wise_outgoing(owner_dep)
             next_op.add_point_wise_incoming(owner_dep)
+
             next_point_op.add_point_wise_dependences_flag(next_region_idx)
             next_op.add_point_wise_dependences_flag(next_region_idx)
             prev_point_op.add_point_wise_dependences_flag(prev_region_idx)
             prev_op.add_point_wise_dependences_flag(prev_region_idx)
+
+        # We can have cases where there is no point task in one of the shards.
+        # To handle that case we need to make sure we sense it and create
+        # a dependence between the two operations
+        for dep_info in self.point_wise_deps:
+            (ctx, repl_id, prev_ctx_idx, prev_region_idx, prev_point, prev_shard,
+                    next_ctx_idx, next_region_idx, next_point, next_shard, dep_type) = dep_info
+            repl = self.get_repl(repl_id)
+
+            if repl.shards:
+                prev_ctx = repl.shards[prev_shard]
+                prev_op = prev_ctx.operations[(prev_ctx_idx)]
+
+                next_ctx = repl.shards[next_shard]
+                next_op = next_ctx.operations[(next_ctx_idx)]
+
+                for shard in repl.shards:
+                    if shard == prev_shard:
+                        continue
+                    repl_prev_ctx = repl.shards[shard]
+                    repl_prev_op = repl_prev_ctx.operations[(prev_ctx_idx)]
+
+                    repl_next_ctx = repl.shards[shard]
+                    repl_next_op = repl_next_ctx.operations[(next_ctx_idx)]
+
+                    if (len(repl_prev_op.logical_point_wise_outgoing) !=
+                            len(prev_op.logical_point_wise_outgoing)):
+                        # A difference in length indicates that there was no point task
+                        # of this index space executed in this shard.
+                        owner_dep = MappingDependence(repl_prev_op, repl_next_op, prev_region_idx,
+                                next_region_idx, dep_type)
+
+                        repl_prev_op.add_point_wise_outgoing(owner_dep)
+                        repl_next_op.add_point_wise_incoming(owner_dep)
+
+                        repl_next_op.add_point_wise_dependences_flag(next_region_idx)
+                        repl_prev_op.add_point_wise_dependences_flag(prev_region_idx)
 
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
