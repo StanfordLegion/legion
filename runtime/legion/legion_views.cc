@@ -497,8 +497,8 @@ namespace Legion {
       // otherwise we can get into issues of soundness
       if (!current_to_filter.empty())
         verify_current_to_filter(dominated, current_to_filter);
-      if (!trace_recording && (!dead_users.empty() || 
-           !previous_to_filter.empty() || !current_to_filter.empty()))
+      if (!dead_users.empty() || 
+          !previous_to_filter.empty() || !current_to_filter.empty())
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -650,8 +650,8 @@ namespace Legion {
       // otherwise we can get into issues of soundness
       if (!current_to_filter.empty())
         verify_current_to_filter(dominated, current_to_filter);
-      if (!trace_recording && (!dead_users.empty() || 
-           !previous_to_filter.empty() || !current_to_filter.empty()))
+      if (!dead_users.empty() || 
+          !previous_to_filter.empty() || !current_to_filter.empty())
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);

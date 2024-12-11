@@ -26,6 +26,7 @@
 
 #include <numeric>
 #include <algorithm>
+#include <numeric>
 
 namespace Legion {
   namespace Internal {

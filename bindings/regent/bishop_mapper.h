@@ -38,6 +38,7 @@ namespace Legion {
         BishopMapper(const std::vector<bishop_mapper_impl_t>&,
                      const std::vector<bishop_transition_fn_t>&,
                      bishop_mapper_state_init_fn_t,
+                     bishop_mapper_state_destroy_fn_t,
                      MapperRuntime*, Machine, Processor);
         virtual ~BishopMapper();
 
@@ -62,6 +63,7 @@ namespace Legion {
         std::vector<bishop_transition_fn_t> transitions;
 
         bishop_mapper_state_init_fn_t mapper_init;
+        bishop_mapper_state_destroy_fn_t mapper_destroy;
         bishop_mapper_state_t mapper_state;
         legion_mapper_runtime_t runtime_;
     };

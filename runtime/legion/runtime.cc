@@ -13780,7 +13780,7 @@ namespace Legion {
     bool MemoryManager::TaskLocalInstanceAllocator::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
                                        const void *orig, size_t orig_length,
-                                       LgEvent &fevent)
+                                       LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13801,6 +13801,7 @@ namespace Legion {
 #endif
       success = result.success; 
       fevent = unique_event;
+      failed_alloc = !result.success;
       // Can't read anything after trigger the event as the object
       // might be deleted after we do that
       Runtime::trigger_event(ready);
@@ -35526,6 +35527,7 @@ namespace Legion {
       const ProfilingResponseBase *base = 
         static_cast<const ProfilingResponseBase*>(response.user_data());
       LgEvent fevent;
+      bool failed_alloc = false;
       if (base->handler == NULL)
       {
         // This is the remote message case
@@ -35535,13 +35537,15 @@ namespace Legion {
         const long long t_start = Realm::Clock::current_time_in_nanoseconds();
         // Check to see if should report this profiling
         if (runtime->profiler->handle_profiling_response(response, args,
-                                                         arglen, fevent))
+              arglen, fevent, failed_alloc))
         {
+          if (failed_alloc)
+            runtime->profiler->handle_failed_instance_allocation();
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);
           implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
-              fevent, finish_event, base->completion);
+              fevent, finish_event, base->completion || failed_alloc);
         }
       }
       else if (runtime->profiler != NULL)
@@ -35549,17 +35553,20 @@ namespace Legion {
         const long long t_start = Realm::Clock::current_time_in_nanoseconds();
         // Check to see if should report this profiling
         if (base->handler->handle_profiling_response(response, args, arglen, 
-                                                     fevent))
+                                                     fevent, failed_alloc))
         {
+          if (failed_alloc)
+            runtime->profiler->handle_failed_instance_allocation();
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);
           implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
-              fevent, finish_event, base->completion);
+              fevent, finish_event, base->completion || failed_alloc);
         }
       }
       else
-        base->handler->handle_profiling_response(response, args, arglen,fevent);
+        base->handler->handle_profiling_response(response, args, arglen,
+            fevent, failed_alloc);
     }
 
     //--------------------------------------------------------------------------

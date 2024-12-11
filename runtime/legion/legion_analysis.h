@@ -3742,7 +3742,7 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             std::vector<RtEvent> &applied_events,
             const bool needs_lock, const bool forward_to_owner,
-            const bool unpack_references);
+            const bool unpack_tracing_references);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
@@ -3760,7 +3760,7 @@ namespace Legion {
             const TraceViewSet *anticondition_updates,
             const TraceViewSet *postcondition_updates,
             const FieldMaskSet<IndexSpaceExpression> *dirty_updates,
-            const bool pack_references);
+            const bool pack_references, const bool pack_tracing_references);
     public:
       static void handle_make_owner(const void *args);
       static void handle_apply_state(const void *args);

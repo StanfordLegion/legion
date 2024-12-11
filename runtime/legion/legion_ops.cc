@@ -1911,7 +1911,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool Operation::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -5457,7 +5457,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MapOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig, 
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8042,7 +8042,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool CopyOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11359,7 +11359,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool PostCloseOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12488,7 +12488,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool AcquireOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13309,7 +13309,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ReleaseOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -17308,7 +17308,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool DependentPartitionOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

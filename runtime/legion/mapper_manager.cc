@@ -35,7 +35,7 @@ namespace Legion {
                                      Operation *op, bool prioritize)
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
-            operation->get_acquired_instances_ref()), 
+            operation->get_acquired_instances_ref()), profiling_ranges(NULL),
         start_time(0), reentrant(manager->initially_reentrant)
     //--------------------------------------------------------------------------
     {
@@ -55,6 +55,17 @@ namespace Legion {
 #endif
       manager->finish_mapper_call(this);
       implicit_mapper_call = NULL;
+      if (profiling_ranges != NULL)
+      {
+        if (!profiling_ranges->empty())
+          REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
+            "Detected mismatched profiling range calls, missing %zd stop calls "
+            "at the end of mapper call %s by mapper %s for %s (UID %lld)",
+            profiling_ranges->size(), get_mapper_call_name(),
+            get_mapper_name(), operation->get_logging_name(),
+            operation->get_unique_op_id())
+        delete profiling_ranges;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -142,6 +153,50 @@ namespace Legion {
         }
       }
       return all_acquired;
+    }
+
+    //--------------------------------------------------------------------------
+    void MappingCallInfo::start_profiling_range(void)
+    //--------------------------------------------------------------------------
+    {
+      if (implicit_profiler != NULL)
+      {
+        const long long start = Realm::Clock::current_time_in_nanoseconds();
+        if (profiling_ranges == NULL)
+          profiling_ranges = new std::vector<long long>();
+        profiling_ranges->push_back(start);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MappingCallInfo::stop_profiling_range(const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      if (prov == NULL)
+        REPORT_LEGION_ERROR(ERROR_MISSING_PROFILING_PROVENANCE,
+            "Missing provenance string for mapper profiling range "
+            "in mapper call %s by mapper %s for %s (UID %lld)", 
+            get_mapper_call_name(), get_mapper_name(),
+            operation->get_logging_name(), operation->get_unique_op_id())
+      if (implicit_profiler != NULL)
+      {
+        Provenance *provenance = 
+          implicit_runtime->find_or_create_provenance(prov, strlen(prov));
+        if ((profiling_ranges == NULL) || profiling_ranges->empty())
+          REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
+            "Detected mismatched profiling range calls, received a stop call "
+            "without a corresponding start call in mapper call %s by mapper %s "
+            "for %s (UID %lld) at %.*s", get_mapper_call_name(),
+            get_mapper_name(), operation->get_logging_name(),
+            operation->get_unique_op_id(), int(provenance->human.length()),
+            provenance->human.data())
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        implicit_profiler->record_application_range(provenance->pid,
+            profiling_ranges->back(), stop);
+        profiling_ranges->pop_back();
+        if (provenance->remove_reference())
+          delete provenance;
+      }
     }
 
     /////////////////////////////////////////////////////////////

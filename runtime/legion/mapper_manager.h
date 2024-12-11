@@ -419,12 +419,15 @@ namespace Legion {
           const std::vector<MappingInstance> &instances,
           std::vector<unsigned> *to_erase = NULL, 
           bool filter_acquired_instances = false);
+      void start_profiling_range(void);
+      void stop_profiling_range(const char *provenance);
     public:
       MapperManager*const               manager;
       RtUserEvent                       resume;
       const MappingCallKind             kind;
       Operation*const                   operation;
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
+      std::vector<long long>*           profiling_ranges;
       long long                         start_time;
       long long                         pause_time;
       bool                              reentrant;
