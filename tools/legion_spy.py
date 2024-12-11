@@ -6601,9 +6601,10 @@ class Operation(object):
 
     def has_point_wise_dependence(self, index=None):
         if not index:
-            for index in self.point_wise_dependences:
-                if self.point_wise_dependences[index]:
-                    return True
+            if self.point_wise_dependences:
+                for index in self.point_wise_dependences:
+                    if self.point_wise_dependences[index]:
+                        return True
             return False
         assert index in self.point_wise_dependences
         return self.point_wise_dependences[index]
