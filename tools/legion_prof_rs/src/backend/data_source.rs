@@ -1017,6 +1017,7 @@ impl StateDataSource {
                                     .find_previous_executing_entry(
                                         interval.start.into(),
                                         interval.stop.into(),
+                                        device,
                                     )
                                 {
                                     item_meta.fields.push((
@@ -1796,7 +1797,7 @@ impl StateDataSource {
                     ));
                     // See if there was something previously executing that delayed us
                     if let Some((previous, start_time, stop_time)) =
-                        proc.find_previous_executing_entry(ready, start)
+                        proc.find_previous_executing_entry(ready, start, device)
                     {
                         fields.push((
                             self.fields.previous_executing,

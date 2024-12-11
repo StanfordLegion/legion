@@ -725,9 +725,22 @@ endif()
 #------------------------------------------------------------------------------#
 # Backtrace configuration
 #------------------------------------------------------------------------------#
-option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
-if(Legion_BACKTRACE_USE_UNWIND)
-  set(REALM_USE_UNWIND ON)
+option(Legion_BACKTRACE_USE_CPPTRACE "Use cpptrace to capture backtrace" OFF)
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  set(REALM_USE_CPPTRACE ON)
+  # TODO: move CPM outside when we download other packages through CPM
+  set(CPM_URL https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.40.2/CPM.cmake)
+  file(
+    DOWNLOAD
+    ${CPM_URL}
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake
+  )
+  include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
+  CPMFindPackage(
+    NAME cpptrace
+    GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+    GIT_TAG v0.7.3
+  )
 endif()
 
 #------------------------------------------------------------------------------#

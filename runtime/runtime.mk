@@ -842,12 +842,6 @@ ifeq ($(strip $(USE_ZLIB)),1)
   SLIB_LEGION_DEPS += -l$(ZLIB_LIBNAME)
 endif
 
-# capture backtrace using unwind
-REALM_BACKTRACE_USE_UNWIND ?= 1
-ifeq ($(strip $(REALM_BACKTRACE_USE_UNWIND)),1)
-  REALM_CC_FLAGS += -DREALM_USE_UNWIND
-endif
-
 ifeq ($(strip $(DEBUG)),1)
   ifeq ($(strip $(DARWIN)),1)
     CFLAGS	+= -O0 -glldb
@@ -939,6 +933,17 @@ $(error Legion requires a C++ compiler that supports at least C++17)
 endif
 endif
 
+# analyze backtrace using libdw
+REALM_BACKTRACE_USE_CPPTRACE ?= 0
+ifeq ($(strip $(REALM_BACKTRACE_USE_CPPTRACE)),1)
+  ifndef CPPTRACE_PATH
+    $(error CPPTRACE_PATH variable is not defined, aborting build)
+  endif
+  REALM_CC_FLAGS += -DREALM_USE_CPPTRACE
+  INC_FLAGS    += -I$(CPPTRACE_PATH)/include
+  LEGION_LD_FLAGS    += -L$(CPPTRACE_PATH)/lib -lcpptrace -ldwarf -lzstd
+  SLIB_REALM_DEPS    += -L$(CPPTRACE_PATH)/lib -lcpptrace -ldwarf -lzstd
+endif
 
 # if requested, add --defcheck flags to the compile line so that the
 #  cxx_defcheck wrapper can verify that source files include the configuration
