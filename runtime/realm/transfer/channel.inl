@@ -196,7 +196,7 @@ namespace Realm {
 	  {
 	    AutoLock<> al(mutex);
 	    was_empty = in_ordered_worker || ready_xds.empty();
-	    ready_xds.push_front(xd);
+	    ready_xds.push_back(xd);
 	    in_ordered_worker = false;
 	  }
 
