@@ -122,7 +122,9 @@ namespace Realm {
     class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
     public:
       GPUWorkFence(Realm::Operation *op);
-      
+
+      virtual void mark_finished(bool successful);
+
       virtual void request_cancellation(void);
 
       void enqueue_on_stream(GPUStream *stream);
