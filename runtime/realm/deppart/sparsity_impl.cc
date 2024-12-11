@@ -341,6 +341,10 @@ namespace Realm {
       return static_cast<SparsityMapImpl<N,T> *>(impl);
     }
 
+    // Set these in case they weren't set by init (happens on remote nodes)
+    this->me = me.id;
+    this->owner = this->me.sparsity_creator_node();
+
     // create one and try to swap it in
     SparsityMapImpl<N, T> *new_impl = new SparsityMapImpl<N, T>(me, subscribers);
 
@@ -1015,6 +1019,15 @@ namespace Realm {
       amsg->count = count;
       amsg.commit();
     }
+  }
+
+  template <int N, typename T>
+  void SparsityMapImpl<N, T>::record_remote_contributor(NodeID contributor)
+  {
+    assert(contributor != Network::my_node_id);
+    assert(NodeID(ID(me).sparsity_creator_node()) == Network::my_node_id);
+    AutoLock<> al(mutex);
+    remote_subscribers.add(contributor);
   }
 
   template <int N, typename T>
@@ -1842,11 +1855,10 @@ namespace Realm {
     log_part.info() << "received remote contribution: sparsity=" << msg.sparsity << " len=" << datalen;
     size_t count = datalen / sizeof(Rect<N,T>);
     assert((datalen % sizeof(Rect<N,T>)) == 0);
-    SparsityMapImpl<N,T>::lookup(msg.sparsity)->contribute_raw_rects((const Rect<N,T> *)data,
-								     count,
-								     msg.piece_count,
-                                                                     msg.disjoint,
-                                                                     msg.total_count);
+    SparsityMapImpl<N, T> *impl = SparsityMapImpl<N, T>::lookup(msg.sparsity);
+    impl->record_remote_contributor(sender);
+    impl->contribute_raw_rects((const Rect<N, T> *)data, count, msg.piece_count,
+                               msg.disjoint, msg.total_count);
   }
 
 

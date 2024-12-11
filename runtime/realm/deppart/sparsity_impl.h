@@ -100,6 +100,7 @@ namespace Realm {
     //  the sparsity map - once all of those contributions arrive, we can
     //  finalize the sparsity map
     void set_contributor_count(int count);
+    void record_remote_contributor(NodeID contributor);
 
     void contribute_nothing(void);
     void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects,
