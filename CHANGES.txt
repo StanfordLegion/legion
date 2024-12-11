@@ -12,7 +12,15 @@ Version 24.12.0 (December 20, 2024)
     - Simplifications that may improve performance by removing
        obsolete features
   * Realm
-    - ...
+    - Remove the need for dynamic_cast in ExternalResource
+    - Support for CUPTI profiling
+    - Support for registring per GPU reduction operations via CUfunction
+    - Add a flag and default disable ATS/HMM support and shared CPU memories
+    - Support for scalable barrier via radix tree
+    - Support for querying resources of NUMA
+    - Support for backtrace via cpptrace
+    - More unit tests
+    - CI coverage for HIP with NVIDIA backend
 
 Version 24.09.0 (September 27, 2024)
   * Legion
