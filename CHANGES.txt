@@ -3,7 +3,7 @@ attempt is made to keep this list accurate for the master branch.
 
 Version 24.12.0 (December 20, 2024)
   * Legion
-    - ...
+    - Numerous bug fixes
   * Regent
     - Support for running without the CUDA hijack
     - Support for NVIDIA Hopper GPU architecture
