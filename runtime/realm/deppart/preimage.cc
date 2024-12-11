@@ -51,7 +51,7 @@ namespace Realm {
      preimages[i] = op->add_target(targets[i]);
      if(!preimages[i].dense()) {
        e = Event::merge_events(
-           {e, SparsityMapRefCounter(preimages[i].sparsity.id).add_references_async(1)});
+           {e, SparsityMapRefCounter(preimages[i].sparsity.id).add_references(1)});
      }
      log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> "
                       << preimages[i] << " (" << e << ")";
