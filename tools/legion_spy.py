@@ -4027,8 +4027,6 @@ class LogicalVerificationState(object):
                     logical_op.reqs[req.index], prev_logical,
                     prev_logical.reqs[prev_req.index], dep_type,
                     self.field, need_fence, previous_deps)
-            if logical_op.uid == 43 and prev_logical.uid == 39:
-                breakpoint()
             if has_verification_mapping_dependence:
                 return dominates,True
             elif has_point_wise_dependence:
