@@ -9961,6 +9961,7 @@ namespace Legion {
       ready = finder->second.back().second;
       finder->second.pop_back();
       freed_bytes -= finder->first;
+      previous_size = finder->first;
       if (finder->second.empty())
         freed_instances.erase(finder);
       return result;
