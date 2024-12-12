@@ -1536,8 +1536,11 @@ namespace Legion {
         // No need to do anything with the output local precondition
         // We already added it to the complete_effects when we made
         // the collective at the beginning
-        if (collective_done.exists())
+        if (collective_done.exists() && !collective_done.has_triggered())
+        {
+          AutoLock o_lock(op_lock);
           commit_preconditions.insert(collective_done);
+        }
       }
       // Now call the base version of this to finish making
       // the instances for the future results
