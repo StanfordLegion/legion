@@ -103,10 +103,11 @@ namespace Legion {
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
       Domain index_domain = Domain::NO_DOMAIN;
+      IndexSpaceNode *launch_space;
     public:
       unsigned op_kind;
       bool point_wise_analysable;
-      bool region_has_collective;
+      bool has_collective;
 #ifdef LEGION_SPY
       const UniqueID uid;
 #endif
@@ -1453,25 +1454,36 @@ namespace Legion {
       public:
         PointWisePrevOpInfo(ProjectionFunction *projection,
             ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
+            IndexSpaceNode *launch_space,
             Operation *previous_index_task,
-            GenerationID previous_index_task_generation, size_t ctx_index, unsigned dep_type,
+            GenerationID previous_index_task_generation, size_t ctx_index,
+#ifdef LEGION_SPY
+            unsigned dep_type,
+#endif
             unsigned region_idx)
           : projection(projection), sharding(sharding), sharding_domain(sharding_domain),
           index_domain(index_domain),
+          launch_space(launch_space),
           previous_index_task(previous_index_task),
           previous_index_task_generation(previous_index_task_generation),
-          ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
+          ctx_index(ctx_index),
+#ifdef LEGION_SPY
+          dep_type(dep_type),
+#endif
+          region_idx(region_idx)
       {}
       public:
         ProjectionFunction *projection;
         ShardingFunction *sharding;
         IndexSpaceNode *sharding_domain;
         Domain index_domain;
+        IndexSpaceNode *launch_space;
         Operation *previous_index_task;
         GenerationID previous_index_task_generation;
         size_t ctx_index;
-        // TODO: Just store the shard_proj and guard dep_type with Define for spy
+#ifdef LEGION_SPY
         unsigned dep_type;
+#endif
         unsigned region_idx;
     };
 

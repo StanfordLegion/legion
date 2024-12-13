@@ -708,15 +708,19 @@ namespace Legion {
       virtual bool set_prev_point_wise_user(Operation *prev_op,
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
-          unsigned region_idx, unsigned dep_type,
+          unsigned region_idx,
+#ifdef LEGION_SPY
+          unsigned dep_type,
+#endif
           unsigned prev_region_idx,
-          Domain index_domain);
+          Domain index_domain, IndexSpaceNode *launch_space);
       virtual bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen,
           unsigned region_idx);
-      virtual bool region_has_collective(void);
+      virtual bool has_collective(void);
       virtual bool prev_point_wise_user_set(unsigned region_req_idx);
       virtual bool need_forward_progress(void);
+      virtual IndexSpaceNode *get_launch_space(void);
     public:
       Runtime *const runtime;
     protected:
@@ -911,16 +915,18 @@ namespace Legion {
       virtual bool point_wise_analysable(void);
     public:
       virtual bool prev_point_wise_user_set(unsigned region_req_idx);
-      //virtual bool region_has_collective(void);
       virtual bool set_next_point_wise_user(Operation *next_op,
           GenerationID next_gen, GenerationID user_gen,
           unsigned region_idx);
       virtual bool set_prev_point_wise_user(Operation *prev_op,
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
-          unsigned region_idx, unsigned dep_type,
+          unsigned region_idx,
+#ifdef LEGION_SPY
+          unsigned dep_type,
+#endif
           unsigned prev_region_idx,
-          Domain index_domain);
+          Domain index_domain, IndexSpaceNode *launch_space);
       virtual void record_point_wise_dependence_completed_points_prev_task(
           ProjectionSummary *shard_proj,
           uint64_t context_index);
@@ -939,6 +945,7 @@ namespace Legion {
           LogicalRegion lr, Domain index_domain,
           std::vector<DomainPoint> &points)
       {
+        // Needs to be the whole set of points even in control replicated case.
         if (req.handle_type == LEGION_PARTITION_PROJECTION)
           {
             projection->functor->invert(lr,
@@ -1798,6 +1805,7 @@ namespace Legion {
       virtual size_t get_collective_points(void) const;
     public:
       virtual void clear_context_maps(void);
+      virtual IndexSpaceNode* get_launch_space(void);
     public:
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
@@ -3886,6 +3894,7 @@ namespace Legion {
       void check_point_requirements(void);
     public:
       virtual void clear_context_maps(void);
+      virtual IndexSpaceNode* get_launch_space(void);
     protected:
       void log_index_fill_requirement(void);
     public:

@@ -638,8 +638,12 @@ namespace Legion {
     void LogicalTrace::set_prev_point_wise_user(Operation *prev_op,
         GenerationID prev_gen, uint64_t prev_ctx_index,
         ProjectionSummary *shard_proj,
-        unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
-        Domain index_domain,
+        unsigned region_idx,
+#ifdef LEGION_SPY
+        unsigned dep_type,
+#endif
+        unsigned prev_region_idx,
+        Domain index_domain, IndexSpaceNode *launch_space,
         Operation *source)
     //--------------------------------------------------------------------------
     {
@@ -663,8 +667,12 @@ namespace Legion {
                               TracePointWisePrevOpInfo(
                                   shard_proj,
                                   index_domain,
+                                  launch_space,
                                   prev_finder->second.first,
-                                  prev_gen, prev_ctx_index, dep_type,
+                                  prev_gen, prev_ctx_index,
+#ifdef LEGION_SPY
+                                  dep_type,
+#endif
                                   prev_region_idx)
                               });
 
@@ -701,9 +709,14 @@ namespace Legion {
           op->set_prev_point_wise_user(
               op_info.op, op_info.gen, op_info.context_index,
               prev_info_finder->second.shard_proj,
-              i, prev_info_finder->second.dep_type,
+              i,
+#ifdef LEGION_SPY
+              prev_info_finder->second.dep_type,
+#endif
               prev_info_finder->second.region_idx,
-              prev_info_finder->second.index_domain);
+              prev_info_finder->second.index_domain,
+              prev_info_finder->second.launch_space
+              );
         }
       }
     }

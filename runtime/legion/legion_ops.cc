@@ -2746,9 +2746,12 @@ namespace Legion {
         Operation *prev_op,
         GenerationID prev_gen, uint64_t prev_ctx_index,
         ProjectionSummary *shard_proj,
-        unsigned region_idx, unsigned dtype,
+        unsigned region_idx,
+#ifdef LEGION_SPY
+        unsigned dtype,
+#endif
         unsigned prev_region_idx,
-        Domain index_domain)
+        Domain index_domain, IndexSpaceNode *launch_space)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -2767,7 +2770,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::region_has_collective(void)
+    bool Operation::has_collective(void)
     //--------------------------------------------------------------------------
     {
       return false;
@@ -2787,6 +2790,13 @@ namespace Legion {
     {
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* Operation::get_launch_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -4195,7 +4205,6 @@ namespace Legion {
 
     // Explicit instantiations
     template class PointWiseAnalysable<CollectiveViewCreator<TaskOp> >;
-    template class PointWiseAnalysable<CopyOp>;
 
     /////////////////////////////////////////////////////////////
     // PointWiseAnalysable
@@ -4231,16 +4240,6 @@ namespace Legion {
       }
     }
 
-    /*
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::region_has_collective(void)
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-    */
-
     //--------------------------------------------------------------------------
     template<typename OP>
     bool PointWiseAnalysable<OP>::prev_point_wise_user_set(
@@ -4257,17 +4256,23 @@ namespace Legion {
         Operation *prev_op,
         GenerationID prev_gen, uint64_t prev_ctx_index,
         ProjectionSummary *shard_proj,
-        unsigned region_idx, unsigned dep_type,
+        unsigned region_idx,
+#ifdef LEGION_SPY
+        unsigned dep_type,
+#endif
         unsigned prev_region_idx,
-        Domain index_domain)
+        Domain index_domain, IndexSpaceNode *launch_space)
     //--------------------------------------------------------------------------
     {
       assert (index_domain != Domain::NO_DOMAIN);
       if ((this->trace != NULL) && this->trace->is_recording())
       {
         this->trace->set_prev_point_wise_user(prev_op, prev_gen,
-            prev_ctx_index, shard_proj, region_idx, dep_type,
-            prev_region_idx, index_domain, this);
+            prev_ctx_index, shard_proj, region_idx,
+#ifdef LEGION_SPY
+            dep_type,
+#endif
+            prev_region_idx, index_domain, launch_space, this);
       }
       AutoLock o_lock(this->op_lock);
       prev_index_tasks.insert({
@@ -4277,8 +4282,11 @@ namespace Legion {
                                   shard_proj->sharding,
                                   shard_proj->sharding_domain,
                                   index_domain,
+                                  launch_space,
                                   prev_op, prev_gen, prev_ctx_index,
+#ifdef LEGION_SPY
                                   dep_type,
+#endif
                                   prev_region_idx)
                               });
       set_connect_to_prev_point(region_idx);
@@ -4431,8 +4439,11 @@ namespace Legion {
           this->get_requirement(region_idx);
         std::vector<DomainPoint> previous_index_task_points;
 
+        Domain index_domain;
+        finder->second.launch_space->get_domain(index_domain);
+
         get_points(req, finder->second.projection,
-            lr, finder->second.index_domain,
+            lr, index_domain,
             previous_index_task_points);
 
         if (previous_index_task_points.size() > 1)
@@ -4492,8 +4503,8 @@ namespace Legion {
       if (prev.point_wise_analysable &&
           user.point_wise_analysable)
       {
-        if (prev.region_has_collective ||
-            user.region_has_collective)
+        if (prev.has_collective ||
+            user.has_collective)
         {
           logical_analysis.bail_point_wise_analysis = true;
         }
@@ -4531,7 +4542,11 @@ namespace Legion {
               }
               user.op->set_prev_point_wise_user(
                   prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
-                  user.idx, dtype, prev.idx, prev.index_domain);
+                  user.idx,
+#ifdef LEGION_SPY
+                  dtype,
+#endif
+                  prev.idx, prev.index_domain, prev.launch_space);
             }
           }
         }
@@ -9730,6 +9745,13 @@ namespace Legion {
         }
         parent_ctx->clear_map(context_index, points);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexCopyOp::get_launch_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return launch_space;
     }
 
     /////////////////////////////////////////////////////////////
@@ -19575,6 +19597,13 @@ namespace Legion {
         }
         this->parent_ctx->clear_map(this->context_index, points);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexFillOp::get_launch_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return launch_space;
     }
 
     ///////////////////////////////////////////////////////////// 

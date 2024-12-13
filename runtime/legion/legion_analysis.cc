@@ -55,22 +55,11 @@ namespace Legion {
         shard_proj->add_reference();
 
       point_wise_analysable = op->point_wise_analysable();
-      region_has_collective = op->region_has_collective();
+      has_collective = op->has_collective();
 
-      // TODO:  How to generalize this? (reazulh)
-      // Virtual function in Operation class
-      // Get the IndexSpaceNode and ref count instead of storing value
-      if (op->get_operation_kind() == Operation::TASK_OP_KIND) {
-        index_domain = static_cast<TaskOp*>(op)->index_domain;
-      }
-      else if (op->get_operation_kind() == Operation::COPY_OP_KIND)
-      {
-        index_domain = static_cast<CopyOp*>(op)->index_domain;
-      }
-      else if (op->get_operation_kind() == Operation::FILL_OP_KIND)
-      {
-        index_domain = static_cast<FillOp*>(op)->index_domain;
-      }
+      launch_space = op->get_launch_space();
+      if (launch_space != NULL)
+        launch_space->add_base_valid_ref(CONTEXT_REF);
       op_kind = op->get_operation_kind();
     }
 
@@ -82,6 +71,10 @@ namespace Legion {
         op->remove_mapping_reference(gen);
       if ((shard_proj != NULL) && shard_proj->remove_reference())
         delete shard_proj;
+
+      if (launch_space != NULL &&
+          launch_space->remove_base_valid_ref(CONTEXT_REF))
+        delete launch_space;
     }
 
     //--------------------------------------------------------------------------

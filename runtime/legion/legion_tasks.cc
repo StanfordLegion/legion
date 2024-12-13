@@ -10271,18 +10271,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::region_has_collective(void)
+    bool IndexTask::has_collective(void)
     //--------------------------------------------------------------------------
     {
-      /*
-      // TODO: check if the vector is empty or not
-      if (std::binary_search(
-            check_collective_regions.begin(),
-            check_collective_regions.end(), region_idx))
-        return true;
-
-      return false;
-      */
       return check_collective_regions.size() > 0;
     }
 
@@ -10309,6 +10300,13 @@ namespace Legion {
         }
         parent_ctx->clear_map(context_index, points);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexTask::get_launch_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return launch_space;
     }
 
     //--------------------------------------------------------------------------

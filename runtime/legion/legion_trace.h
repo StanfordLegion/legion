@@ -87,22 +87,34 @@ namespace Legion {
       public:
         TracePointWisePrevOpInfo(ProjectionSummary *shard_proj,
             Domain &index_domain,
+            IndexSpaceNode *launch_space,
             unsigned op_idx,
-            GenerationID prev_op_gen, size_t ctx_index, unsigned dep_type,
+            GenerationID prev_op_gen, size_t ctx_index,
+#ifdef LEGION_SPY
+            unsigned dep_type,
+#endif
             unsigned region_idx)
           : shard_proj(shard_proj),
             index_domain(index_domain),
+            launch_space(launch_space),
           op_idx(op_idx),
           prev_op_gen(prev_op_gen),
-          ctx_index(ctx_index), dep_type(dep_type), region_idx(region_idx)
+          ctx_index(ctx_index),
+#ifdef LEGION_SPY
+          dep_type(dep_type),
+#endif
+          region_idx(region_idx)
       {}
       public:
         ProjectionSummary *shard_proj;
         Domain index_domain;
+        IndexSpaceNode *launch_space;
         unsigned op_idx;
         GenerationID prev_op_gen;
         size_t ctx_index;
+#ifdef LEGION_SPY
         unsigned dep_type;
+#endif
         unsigned region_idx;
       };
       struct OperationInfo {
@@ -189,8 +201,12 @@ namespace Legion {
       void set_prev_point_wise_user(Operation *prev_op,
           GenerationID prev_gen, uint64_t prev_ctx_index,
           ProjectionSummary *shard_proj,
-          unsigned region_idx, unsigned dep_type, unsigned prev_region_idx,
-          Domain index_domain,
+          unsigned region_idx,
+#ifdef LEGION_SPY
+          unsigned dep_type,
+#endif
+          unsigned prev_region_idx,
+          Domain index_domain, IndexSpaceNode *launch_space,
           Operation *source);
       void set_point_wise_dependences(size_t index, Operation *op);
     public:
