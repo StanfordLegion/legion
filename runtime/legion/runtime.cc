@@ -466,8 +466,8 @@ namespace Legion {
             default:
               assert(false);
           }
-          IndexSpace point_space =
-            ctx->find_index_launch_space(point_domain, provenance);
+          IndexSpace point_space = ctx->find_index_launch_space(
+              point_domain, provenance, true/*take ownership of domain*/);
           point_set = runtime->forest->get_node(point_space);
           point_set->add_base_expression_reference(RUNTIME_REF);
         }
@@ -6152,7 +6152,8 @@ namespace Legion {
           {
             DomainPoint lo; lo.dim = extents.dim;
             Domain domain(lo, extents - 1);
-            if (region->row_source->set_domain(domain, true/*broadcast*/))
+            if (region->row_source->set_domain(domain, ApEvent::NO_AP_EVENT,
+                  true/*take ownership*/, true/*broadcast*/))
               assert(false); // should never end up deleting this
           }
           else
@@ -6176,7 +6177,8 @@ namespace Legion {
                 domain.rect_data[off] = 0;
                 domain.rect_data[domain.dim + off] = extents[idx] - 1;
               }
-              if (region->row_source->set_domain(domain, true/*broadcast*/))
+              if (region->row_source->set_domain(domain, ApEvent::NO_AP_EVENT,
+                    true/*take ownership*/, true/*broadcast*/))
                 assert(false); // should never end up deleting this
             }
             context->owner_task->record_output_extent(index, color, extents);
@@ -27556,7 +27558,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
-                       TypeTag type_tag, Provenance *provenance, bool &consumed)
+                  bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -27570,7 +27572,11 @@ namespace Legion {
           index_slice_spaces.find(key);
         if (finder != index_slice_spaces.end() && finder->second.first.exists())
         {
-          consumed = false;
+          if (take_ownership && !domain.dense())
+          {
+            Domain copy = domain;
+            copy.destroy();
+          }
           return finder->second.first;
         }
       }
@@ -27586,7 +27592,11 @@ namespace Legion {
         {
           if (finder->second.first.exists())
           {
-            consumed = false;
+            if (take_ownership && !domain.dense())
+            {
+              Domain copy = domain;
+              copy.destroy();
+            }
             return finder->second.first;
           }
           else if (!finder->second.second.exists())
@@ -27602,11 +27612,11 @@ namespace Legion {
       }
       if (!wait_on.exists())
       {
-        consumed = true;
         const IndexSpace result(get_unique_index_space_id(),
                                 get_unique_index_tree_id(), type_tag);
         const DistributedID did = get_available_distributed_id();
-        forest->create_index_space(result, &domain, did, provenance);
+        forest->create_index_space(result, domain, take_ownership,
+                                   did, provenance);
         if (legion_spy_enabled)
           LegionSpy::log_top_index_space(result.id, address_space,
               (provenance == NULL) ? std::string_view() : provenance->human);
@@ -27627,7 +27637,11 @@ namespace Legion {
       }
       else
       {
-        consumed = false;
+        if (take_ownership && !domain.dense())
+        {
+          Domain copy = domain;
+          copy.destroy();
+        }
         wait_on.wait();
         AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
           std::map<std::pair<Domain,TypeTag>,

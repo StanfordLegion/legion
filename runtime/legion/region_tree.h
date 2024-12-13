@@ -160,7 +160,8 @@ namespace Legion {
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
       IndexSpaceNode* create_index_space(IndexSpace handle, 
-                              const Domain *domain,
+                              const Domain &domain,
+                              bool take_ownership,
                               DistributedID did, 
                               Provenance *provenance,
                               CollectiveMapping *mapping = NULL,
@@ -690,8 +691,8 @@ namespace Legion {
 #endif
     public:
       // We know the domain of the index space
-      IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 
-                                  bool is_domain, IndexPartNode *par, 
+      IndexSpaceNode* create_node(IndexSpace is, const Domain &domain, 
+                                  bool take_ownership, IndexPartNode *par, 
                                   LegionColor color, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
@@ -2232,10 +2233,9 @@ namespace Legion {
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
       virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
-      
-      virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
-      virtual bool set_bounds(const void *bounds, bool is_domain, 
-                              bool inititializing, ApEvent is_ready) = 0;
+      virtual bool set_domain(const Domain &domain, ApEvent is_ready,
+          bool take_ownership, bool broadcast = false, 
+          bool initializing = false) = 0;
       virtual bool set_output_union(
             const std::map<DomainPoint,DomainPoint> &sizes) = 0;
       virtual void tighten_index_space(void) = 0;
@@ -2303,8 +2303,7 @@ namespace Legion {
       bool intersects_with(IndexPartNode *rhs, bool compute = true);
       bool dominates(IndexSpaceNode *rhs);
     public:
-      virtual void pack_index_space(Serializer &rez, 
-                                    bool include_size) const = 0;
+      virtual void pack_index_space(Serializer &rez) const = 0; 
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source) = 0;
     public:
@@ -2486,9 +2485,9 @@ namespace Legion {
       // attention to the event returned as a precondition as it 
       // is guaranteed to be a no-event
       virtual ApEvent get_domain(Domain &domain, bool need_tight);
-      virtual bool set_domain(const Domain &domain, bool broadcast = false);
-      virtual bool set_bounds(const void *bounds, bool is_domain, 
-                              bool inititializing, ApEvent is_ready);
+      virtual bool set_domain(const Domain &domain, ApEvent is_ready,
+          bool take_ownership, bool broadcast = false,
+          bool initializing = false);
       virtual bool set_output_union(
                 const std::map<DomainPoint,DomainPoint> &sizes);
       virtual void tighten_index_space(void);
@@ -2533,7 +2532,7 @@ namespace Legion {
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
       virtual size_t compute_color_offset(LegionColor color);
     public:
-      virtual void pack_index_space(Serializer &rez, bool include_size) const;
+      virtual void pack_index_space(Serializer &rez) const;
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
     public:

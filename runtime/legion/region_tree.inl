@@ -1630,12 +1630,14 @@ namespace Legion {
         new_expr_id = expr_id;
       AutoLock i_lock(inter_lock, 1, false/*exclusive*/);
       if (is_index_space_tight.load())
-        return context->create_node(handle, &tight_index_space, false/*domain*/,
+        return context->create_node(handle, Domain(tight_index_space),
+                          false/*take ownership*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
                           collective_mapping, true/*add root ref*/);
       else
-        return context->create_node(handle, &realm_index_space, false/*domain*/,
+        return context->create_node(handle, Domain(realm_index_space),
+                          false/*take ownership*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
                           collective_mapping, true/*add root ref*/);
@@ -2811,8 +2813,7 @@ namespace Legion {
               rez.serialize(IndexPartition::NO_PART);
               rez.serialize(handle);
             }
-            pack_index_space(rez, false/*include size*/);
-            rez.serialize(valid);
+            pack_index_space(rez);
           }
           IndexSpaceSetFunctor functor(context->runtime, source, rez);
           map_over_remote_instances(functor);
@@ -2884,31 +2885,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain,bool broadcast)
+    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain, ApEvent ready,
+        bool take_ownership, bool broadcast, bool initializing)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(domain.exists());
+#endif
       const DomainT<DIM,T> realm_space = domain;
-      return set_realm_index_space(realm_space, ApEvent::NO_AP_EVENT,
-          false/*init*/, broadcast, context->runtime->address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::set_bounds(const void *bounds, bool is_domain,
-                                          bool initialization, ApEvent is_ready)
-    //--------------------------------------------------------------------------
-    {
-      if (is_domain)
+      if (!take_ownership && !realm_space.dense())
       {
-        const DomainT<DIM,T> temp_space = *static_cast<const Domain*>(bounds);
-        return set_realm_index_space(temp_space, is_ready, initialization);
+        ApEvent added(realm_index_space.sparsity.add_reference());
+        if (added.exists())
+        {
+          if (ready.exists())
+            ready = Runtime::merge_events(NULL, ready, added);
+          else
+            ready = added;
+        }
       }
-      else
-      {
-        const DomainT<DIM,T> temp_space =
-          *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
-        return set_realm_index_space(temp_space, is_ready, initialization);
-      }
+      return set_realm_index_space(realm_space, ready, initializing,
+          broadcast, context->runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -3044,7 +3041,8 @@ namespace Legion {
 #endif
       Realm::IndexSpace<DIM,T> local_space;
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
-      return context->create_node(new_handle, &local_space, false/*domain*/,
+      return context->create_node(new_handle, Domain(local_space), 
+                              false/*take ownership*/,
                               NULL/*parent*/, 0/*color*/, did, initialized,
                               provenance, ready, new_expr_id,
                               collective_mapping, true/*add root reference*/);
@@ -3686,17 +3684,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::pack_index_space(Serializer &rez,
-                                                  bool include_size) const
+    void IndexSpaceNodeT<DIM,T>::pack_index_space(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(index_space_set.load());
 #endif
-      if (include_size)
-        rez.serialize<size_t>(sizeof(realm_index_space));
       // No need for the lock, held by the caller
       rez.serialize(realm_index_space);
+      rez.serialize(index_space_valid);
     }
 
     //--------------------------------------------------------------------------
@@ -5886,12 +5882,9 @@ namespace Legion {
       if (index_points.size() == get_volume())
         return handle;
       Realm::IndexSpace<DIM,T> realm_is(index_points);
-      bool consumed = false;
       const Domain domain((DomainT<DIM,T>(realm_is)));
       IndexSpace result = context->runtime->find_or_create_index_slice_space(
-          domain, handle.get_type_tag(), provenance, consumed);
-      if (!consumed)
-        realm_is.destroy();
+          domain, true/*take ownership*/, handle.get_type_tag(), provenance);
       return result;
     }
 

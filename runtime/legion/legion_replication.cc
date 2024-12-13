@@ -2023,7 +2023,8 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain))
+          if (parent->set_domain(root_domain, ApEvent::NO_AP_EVENT,
+                false/*take ownership*/))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already

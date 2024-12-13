@@ -5320,14 +5320,10 @@ namespace Legion {
                         get_unique_id(), slice.proc.id)
         // Check to see if we need to get an index space for this domain
         if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
-        {
-          bool consumed = false;
           slice.domain_is = 
             runtime->find_or_create_index_slice_space(slice.domain,
-                  internal_space.get_type_tag(), get_provenance(), consumed);
-          if (!consumed)
-            slice.domain.destroy();
-        }
+                slice.take_ownership, internal_space.get_type_tag(),
+                get_provenance());
         if (slice.domain_is.get_type_tag() != internal_space.get_type_tag())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
@@ -8728,7 +8724,8 @@ namespace Legion {
           lo[dim] = extents[c];
           hi[dim] = extents[c + 1] - 1;
         }
-        if (child->set_domain(Domain(lo, hi), true/*broadcast*/))
+        if (child->set_domain(Domain(lo, hi), ApEvent::NO_AP_EVENT,
+              false/*take ownership*/, true/*broadcast*/))
           delete child;
       }
 
@@ -8774,7 +8771,8 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain))
+          if (parent->set_domain(root_domain, ApEvent::NO_AP_EVENT,
+                false/*take ownership*/))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already

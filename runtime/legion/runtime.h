@@ -4052,7 +4052,7 @@ namespace Legion {
                           TaskContext *ctx, uint64_t coord, IndexSpace domain,
                           Provenance *provenance);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
-          TypeTag type_tag, Provenance *provenance, bool &consumed);
+          bool take_ownership, TypeTag type_tag, Provenance *provenance);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);

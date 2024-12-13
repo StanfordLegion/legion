@@ -10132,7 +10132,8 @@ namespace Legion {
                   "The type of futures for index space domains must be a "
                   "Domain.", parent_ctx->get_task_name(), 
                   parent_ctx->get_unique_id(), sizeof(Domain))
-            if (owner && index_space_node->set_domain(*domain)) 
+            if (owner && index_space_node->set_domain(*domain,
+                  ApEvent::NO_AP_EVENT, true/*take ownership*/))
               delete index_space_node;
             break;      
           }
