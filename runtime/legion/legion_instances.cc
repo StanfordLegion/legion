@@ -3661,7 +3661,7 @@ namespace Legion {
         creator_id(cid), instance(PhysicalInstance::NO_INST), 
         field_space_node(node), instance_domain(expr), tree_id(tid), 
         redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-        piece_list_size(0), valid(true)
+        piece_list_size(0), valid(true), allocated(false)
     //--------------------------------------------------------------------------
     {
       if (pl != NULL)
@@ -3768,6 +3768,7 @@ namespace Legion {
       profiling_ready = Runtime::create_rt_user_event();
 #endif
 #ifdef DEBUG_LEGION
+      assert(!allocated);
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       LgEvent unique_event;
@@ -3796,18 +3797,17 @@ namespace Legion {
         precondition.wait();
       ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
             requests, instance, unique_event));
-      if (!instance.exists())
-      {
-        if (unsat_kind != NULL)
-          *unsat_kind = LEGION_MEMORY_CONSTRAINT;
-        if (unsat_index != NULL)
-          *unsat_index = 0;
-        return NULL;
-      }
+      allocated = instance.exists();
 #endif
       // If we couldn't make it then we are done
-      if (!instance.exists())
+      if (!allocated)
       {
+        if (instance.exists())
+        {
+          // Destroy the instance ID so Realm can reclaim the ID
+          instance.destroy();
+          instance = PhysicalInstance::NO_INST;
+        }
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
@@ -3914,7 +3914,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool InstanceBuilder::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3934,14 +3934,10 @@ namespace Legion {
       assert(measured);
 #endif
       // If we failed then clear the instance name since it is not valid
-      if (!result.success)
-      {
-        // Destroy the instance first so that Realm can reclaim the ID
-        instance.destroy();
-        instance = PhysicalInstance::NO_INST;
-        if (runtime->profiler != NULL)
-          runtime->profiler->handle_failed_instance_allocation();
-      }
+      if (result.success)
+        allocated = true;
+      else
+        failed_alloc = true;
       fevent = current_unique_event;
       // No matter what trigger the event
       // Can't read anything after trigger the event as the object

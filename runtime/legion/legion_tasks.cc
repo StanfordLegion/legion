@@ -4975,7 +4975,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool SingleTask::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10042,7 +10042,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool IndexTask::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
       const OpProfilingResponse *task_prof =

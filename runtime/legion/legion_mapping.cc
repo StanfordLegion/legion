@@ -641,6 +641,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperRuntime::start_profiling_range(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->start_profiling_range();
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::stop_profiling_range(MapperContext ctx,
+                                             const char *prov) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->stop_profiling_range(prov);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::update_mappable_tag(MapperContext ctx,
                            const Mappable &mappable, MappingTagID new_tag) const
     //--------------------------------------------------------------------------

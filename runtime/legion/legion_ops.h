@@ -538,7 +538,7 @@ namespace Legion {
       // Report a profiling result for this operation
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       // To notify  
       ApEvent get_completion_event(void);
@@ -1277,7 +1277,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -1499,7 +1499,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2162,7 +2162,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2348,7 +2348,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2457,7 +2457,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3490,7 +3490,7 @@ namespace Legion {
       // Report a profiling result for this operation
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;

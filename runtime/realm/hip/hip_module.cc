@@ -306,6 +306,14 @@ namespace Realm {
       : Realm::Operation::AsyncWorkItem(op)
     {}
 
+    void GPUWorkFence::mark_finished(bool successful)
+    {
+      if(op->wants_gpu_work_start()) {
+        op->add_gpu_work_end(Clock::current_time_in_nanoseconds());
+      }
+      AsyncWorkItem::mark_finished(successful);
+    }
+
     void GPUWorkFence::request_cancellation(void)
     {
       // ignored - no way to shoot down HIP work
