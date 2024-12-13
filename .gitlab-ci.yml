@@ -218,6 +218,9 @@ cache: &global_cache
   TEST_REGENT: "0"
   LEGION_WARNINGS_FATAL: "1"
 
+.realm: &realm # test realm using makefile
+  TEST_REALM: "1"
+
 .ctest: &ctest
   TEST_CTEST: "1"
 
@@ -1252,10 +1255,10 @@ clang14_cxx20_release_regent:
     <<: [*clang14, *terra14, *release, *cxx20_normal, *regent]
 
 # HIP CUDA tests:
-nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion:
+nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion_realm:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *short, *shared]
+    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *realm, *short, *shared]
 
 # CUDA tests:
 nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:
