@@ -2023,6 +2023,13 @@ namespace Legion {
       void disable_reentrant(MapperContext ctx) const;
     public:
       //------------------------------------------------------------------------
+      // These two methods allow mappers to define their own profile ranges
+      // inside of the profiler. Each start call must be matched with a 
+      // corresponding stop call inside of the same mapper context.
+      void start_profiling_range(MapperContext ctx) const;
+      void stop_profiling_range(MapperContext ctx,const char *provenance) const;
+    public:
+      //------------------------------------------------------------------------
       // Methods for updating mappable data 
       // The mapper is responsible for atomicity of these calls 
       // (usually through the choice of mapper synchronization model) 

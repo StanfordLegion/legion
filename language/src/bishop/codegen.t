@@ -928,11 +928,24 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
               c.bishop_logger_debug(
                 "[map_task] initialize instance cache for region %d", [idx - 1])
             end
+            if not[cache_success_var] then
+              -- Failed to cache which means something else beat us to the cache
+              -- Free up our allocation and get the new cached values
+              -- This should happen very rarely and only really at start-up
+              c.free([inst_var])
+              [inst_var] = c.bishop_instance_cache_get_cached_instances(
+                [instance_cache_var], [idx - 1], [region_var], [target.value])
+              -- This better have succeeded now
+              std.assert([inst_var] ~= [&c.legion_physical_instance_t](nil), "must hit in cache")
+              -- Probably don't need to acquire again but since this happens
+              -- rarely let's just do it to be safe
+              var success =
+                c.legion_mapper_runtime_acquire_instances([rt_var], [ctx_var],
+                    [inst_var], 1)
+              std.assert(success, "instance acquire must succeed")
+            end
             c.legion_map_task_output_chosen_instances_add([map_task_output_var],
               [inst_var], 1)
-            if not[cache_success_var] then
-              c.free([inst_var])
-            end
           end
         end
       end
