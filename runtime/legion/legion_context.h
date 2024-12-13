@@ -132,6 +132,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context 
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance) = 0;
       virtual IndexSpace create_index_space(const Future &future,
@@ -1168,6 +1169,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,
@@ -2575,6 +2577,7 @@ namespace Legion {
     public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future, 
@@ -3546,6 +3549,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,

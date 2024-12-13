@@ -3952,25 +3952,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, const Domain &domain,
-                                           TypeTag type_tag, const char *prov)
+                        TypeTag type_tag, const char *prov, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       Internal::AutoProvenance provenance(prov);
-      switch (domain.get_dim())
+      if (type_tag == 0)
       {
+        switch (domain.get_dim())
+        {
 #define DIMFUNC(DIM) \
         case DIM:                       \
           {                             \
-            if (type_tag == 0) \
-              type_tag = TYPE_TAG_##DIM##D; \
-            return ctx->create_index_space(domain, type_tag, provenance); \
+            type_tag = TYPE_TAG_##DIM##D; \
+            break; \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
         default:
           assert(false);
+        }
       }
-      return IndexSpace::NO_SPACE;
+      return ctx->create_index_space(
+          domain, take_ownership, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------

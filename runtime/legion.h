@@ -5095,11 +5095,15 @@ namespace Legion {
        * @param type_tag optional type tag to use for the index space
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
+       * @param take_ownership whether Legion should take ownership of the
+       *                       sparsity map or not, if not then Legion will
+       *                       add its own reference
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, const Domain &bounds,
                                     TypeTag type_tag = 0,
-                                    const char *provenance = NULL);
+                                    const char *provenance = NULL,
+                                    const bool take_ownership = false);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
@@ -5108,7 +5112,8 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
                                     const DomainT<DIM,COORD_T> &bounds,
-                                    const char *provenance = NULL);
+                                    const char *provenance = NULL,
+                                    const bool take_ownership = false);
       ///@}
       ///@{
       /**

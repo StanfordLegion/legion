@@ -3502,12 +3502,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space(const Domain &bounds, 
-                                       TypeTag type_tag, Provenance *provenance)
+    IndexSpace InnerContext::create_index_space(const Domain &bounds,
+        bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      return create_index_space_internal(bounds, type_tag, provenance, false);
+      return create_index_space_internal(
+          bounds, type_tag, provenance, take_ownership);
     }
 
     //--------------------------------------------------------------------------
@@ -13810,8 +13811,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::create_index_space(const Domain &domain, 
-                                       TypeTag type_tag, Provenance *provenance)
+    IndexSpace ReplicateContext::create_index_space(const Domain &domain,
+        bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -13822,11 +13823,13 @@ namespace Legion {
                              (i > 0), provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE, __func__);
         hasher.hash(domain, "domain");
+        hasher.hash(take_ownership, "take ownership");
         hasher.hash(type_tag, "type_tag");
         if (hasher.verify(__func__))
           break;
       }
-      return create_index_space_replicated(domain, type_tag, provenance,false);
+      return create_index_space_replicated(
+          domain, type_tag, provenance, take_ownership);
     }
 
     //--------------------------------------------------------------------------
@@ -22501,7 +22504,7 @@ namespace Legion {
       {
         const Domain domain =
           Rect<2>(Point<2>(0,0),Point<2>(shard_sizes.size()-1,upper_bound-1));
-        handle = InnerContext::create_index_space(domain,
+        handle = InnerContext::create_index_space(domain,true/*take ownership*/,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
       }
       else
@@ -22517,7 +22520,7 @@ namespace Legion {
           offset += shard_sizes[idx];
         }
         const Domain domain = Realm::IndexSpace<2,coord_t>(rects);
-        handle = InnerContext::create_index_space(domain,
+        handle = InnerContext::create_index_space(domain,true/*take ownership*/,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
       }
       IndexSpaceNode *node = runtime->forest->get_node(handle);
@@ -23756,7 +23759,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space(const Domain &bounds, 
-                                       TypeTag type_tag, Provenance *provenance)
+        bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
