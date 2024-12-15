@@ -420,11 +420,7 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_
 
   // wait for copies to finish
   done_events.push_back(wait_for);
-  Event::merge_events(done_events).wait();
-
-  is.destroy();
-  src_is.destroy();
-  dst_is.destroy();
+  Event::merge_events(done_events).wait(); 
 
   for(typename std::vector<TransposeExperiment<N> *>::const_iterator it =
           experiments.begin();
@@ -436,6 +432,10 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_
                     << " time=" << (1e-9 * (*it)->nanoseconds) << " bw=" << bw;
     delete *it;
   }
+
+  is.destroy();
+  src_is.destroy();
+  dst_is.destroy();
 }
 
 template <int N, typename T>
