@@ -1345,14 +1345,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	}
     }
 
-    // Don't use leak sanitizer on this function since it intentionally leaks
-    // the allocation made when REALM_DEFAULT_ARGS is set and address sanitizer
-    // does not like that
-#if defined(REALM_COMPILER_IS_GCC) || defined(REALM_COMPILER_IS_CLANG)
-    __attribute__((no_sanitize("leak")))
-#endif
-    bool
-    RuntimeImpl::network_init(int *argc, char ***argv)
+    bool RuntimeImpl::network_init(int *argc, char ***argv)
     {
       // if we're given empty or non-existent argc/argv, start from a
       //  dummy command line with a single string (which is supposed to be
@@ -1412,25 +1405,31 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  if(!starts.empty()) {
 	    int new_argc = local_argc + starts.size();
 	    const char **new_argv = (const char **)(malloc((new_argc + 1) * sizeof(char *)));
-	    // new args go after argv[0] and anything that looks like a
-	    //  positional argument (i.e. doesn't start with -)
-	    int before_new = 0;
-	    while(before_new < local_argc) {
-	      if((before_new > 0) && (local_argv[before_new][0] == '-'))
-		break;
-	      new_argv[before_new] = local_argv[before_new];
-	      before_new++;
-	    }
-	    for(size_t i = 0; i < starts.size(); i++)
-	      new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
-	    for(int i = before_new; i < local_argc; i++)
-	      new_argv[i + starts.size()] = local_argv[i];
-	    new_argv[new_argc] = 0;
+            // new args go after argv[0] and anything that looks like a
+            //  positional argument (i.e. doesn't start with -)
+            int before_new = 0;
+            while(before_new < local_argc) {
+              if((before_new > 0) && (local_argv[before_new][0] == '-'))
+                break;
+              new_argv[before_new] = local_argv[before_new];
+              before_new++;
+            }
+            for(size_t i = 0; i < starts.size(); i++)
+              new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
+            for(int i = before_new; i < local_argc; i++)
+              new_argv[i + starts.size()] = local_argv[i];
+            new_argv[new_argc] = 0;
 
-	    local_argc = new_argc;
-	    local_argv = new_argv;
-	  }
-	}
+            local_argc = new_argc;
+            local_argv = new_argv;
+            // We intentionally leak this allocation so tell leak sanitizer
+#if defined(REALM_COMPILER_IS_GCC) || defined(REALM_COMPILER_IS_CLANG)
+#if __has_feature(leak_sanitizer)
+            __lsan_ignore_object(new_argv);
+#endif
+#endif
+          }
+        }
       }
 
       module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
