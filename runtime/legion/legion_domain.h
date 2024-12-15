@@ -465,7 +465,11 @@ namespace Legion {
             result.sparsity = is1.sparsity;
           else if (!is2.dense())
             result.sparsity = is2.sparsity;
+          else
+            result.sparsity.id = 0;
         }
+        else
+          result.sparsity.id = 0;
         functor->result = Domain(result);
       }
     public:
