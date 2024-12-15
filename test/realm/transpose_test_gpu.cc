@@ -422,6 +422,10 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_
   done_events.push_back(wait_for);
   Event::merge_events(done_events).wait();
 
+  is.destroy();
+  src_is.destroy();
+  dst_is.destroy();
+
   for(typename std::vector<TransposeExperiment<N> *>::const_iterator it =
           experiments.begin();
       it != experiments.end(); ++it) {
