@@ -340,14 +340,7 @@ namespace Legion {
       static inline void end_task(Context ctx, T *result)
       {
         StructHandler<T,std::is_class<T>::value>::end_task(ctx, result);
-      }
-
-      // Specialization for Domain
-      template<>
-      inline void end_task<Domain>(Context ctx, Domain *result)
-      {
-        Runtime::legion_task_postamble(ctx, *result, true/*take ownership*/);
-      }
+      } 
 
       template<typename T>
       static inline Future from_value(const T *value)
@@ -493,6 +486,13 @@ namespace Legion {
       };
 
     }; // Serialization namespace
+
+    // Specialization for Domain
+    template<>
+    inline void LegionSerialization::end_task<Domain>(Context ctx, Domain *result)
+    {
+      Runtime::legion_task_postamble(ctx, *result, true/*take ownership*/);
+    }
 
     // Special namespace for providing multi-dimensional 
     // array syntax on accessors 
