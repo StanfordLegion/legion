@@ -14,6 +14,7 @@ variables:
   CCACHE_BASEDIR: $CI_PROJECT_DIR
   CCACHE_DIR: $CI_PROJECT_DIR/ccache
   USE_CCACHE: "1"
+  REALM_DEFAULT_ARGS: "-ll:enable_sparsity_refcount" # Check no sparsity maps are leaked
 
 cache: &global_cache
   key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
@@ -276,8 +277,6 @@ cache: &global_cache
 before_script:
   - set -e
   - uname -a
-  # Make sure that we are ref-counting all sparsity maps for CI tests
-  - export REALM_DEFAULT_ARGS="-ll:enable_sparsity_refcount"
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       export THREADS=$(nproc --all)
