@@ -167,7 +167,7 @@ namespace Realm {
       size_t res_sysmem_size = 0;
 
       // sparstiy maps
-      bool enable_sparsity_refcount = true;
+      bool enable_sparsity_refcount = false;
 
       // barriers
       int barrier_broadcast_radix = 4;
