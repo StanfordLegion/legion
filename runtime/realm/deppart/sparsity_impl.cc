@@ -27,7 +27,6 @@
 namespace Realm {
 
   extern Logger log_part;
-  extern Logger log_dpops;
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -225,9 +224,9 @@ namespace Realm {
   {
     if(map_impl.load() != 0) {
       if(need_refcount) {
-        log_dpops.fatal() << "leaking sparsity map me:" << me
-                          << " refs:" << references.load()
-                          << " node:" << Network::my_node_id;
+        log_part.fatal() << "leaking sparsity map me:" << me
+                         << " refs:" << references.load()
+                         << " node:" << Network::my_node_id;
         assert(0);
       }
       (*map_deleter)(map_impl.load());
