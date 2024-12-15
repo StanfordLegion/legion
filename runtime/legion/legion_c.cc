@@ -500,6 +500,8 @@ legion_domain_coloring_color_domain(legion_domain_coloring_t dc_,
 {
   DomainColoring *dc = CObjectWrapper::unwrap(dc_);
   Domain domain = CObjectWrapper::unwrap(domain_);
+  // Must be dense or tracking of ownership for sparsity maps is broken
+  assert(domain.dense());
   (*dc)[color] = domain;
 }
 
@@ -919,7 +921,8 @@ legion_index_partition_create_coloring(
     runtime->create_index_space(ctx, color_space);
   IndexPartition ip = runtime->create_partition_by_domain(ctx, parent,
       domains, index_color_space, true/*perform intersections*/,
-      (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color);
+      (disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND), part_color,
+      nullptr/*provenance*/, true/*take ownership*/);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -950,6 +953,8 @@ legion_index_partition_create_domain_coloring(
         coloring->begin(); it != coloring->end(); it++)
   {
     Point<1,coord_t> color(it->first);
+    // Must be dense or tracking ownership of sparsity maps is broken
+    assert(it->second.dense());
     domains[color] = it->second;
   }
   // Make an index space for the color space
@@ -1024,7 +1029,8 @@ legion_index_partition_create_point_coloring(
   // Make an index space for the color space
   IndexSpace index_color_space = runtime->create_index_space(ctx, color_space);
   IndexPartition ip = runtime->create_partition_by_domain(ctx, parent, domains,
-      index_color_space, true/*perform intersections*/, part_kind, color);
+      index_color_space, true/*perform intersections*/, part_kind, color,
+      nullptr/*provenance*/, true/*take ownership*/);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -1288,7 +1294,8 @@ legion_index_partition_create_multi_domain_point_coloring(
   // Make an index space for the color space
   IndexSpace index_color_space = runtime->create_index_space(ctx, color_space);
   IndexPartition ip = runtime->create_partition_by_domain(ctx, parent, domains,
-    index_color_space, true/*perform intersections*/, part_kind, color);
+    index_color_space, true/*perform intersections*/, part_kind, color,
+    nullptr/*provenance*/, true/*take ownership*/);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -1492,9 +1499,12 @@ legion_index_partition_create_by_domain(
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
   std::map<DomainPoint,Domain> domains;
-  for (unsigned idx = 0; idx < num_color_domains; idx++)
-    domains[CObjectWrapper::unwrap(colors_[idx])] = 
-      CObjectWrapper::unwrap(domains_[idx]);
+  for (unsigned idx = 0; idx < num_color_domains; idx++) {
+    Domain domain = CObjectWrapper::unwrap(domains_[idx]);
+    // Must be dense or tracking of sparsity map references is broken
+    assert(domain.dense());
+    domains[CObjectWrapper::unwrap(colors_[idx])] = domain;
+  }
 
   IndexPartition ip =
     runtime->create_partition_by_domain(ctx, parent, domains, 
