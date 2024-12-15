@@ -1345,11 +1345,14 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	}
     }
 
-    // Don't use address sanitizer on this function since it intentionally leaks
+    // Don't use leak sanitizer on this function since it intentionally leaks
     // the allocation made when REALM_DEFAULT_ARGS is set and address sanitizer
     // does not like that
-    __attribute__((no_sanitize("address"))) bool RuntimeImpl::network_init(int *argc,
-                                                                           char ***argv)
+#if defined(REALM_COMPILER_IS_GCC) || defined(REALM_COMPILER_IS_CLANG)
+    __attribute__((no_sanitize("leak")))
+#endif
+    bool
+    RuntimeImpl::network_init(int *argc, char ***argv)
     {
       // if we're given empty or non-existent argc/argv, start from a
       //  dummy command line with a single string (which is supposed to be
