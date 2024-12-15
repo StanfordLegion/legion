@@ -4452,7 +4452,7 @@ namespace Legion {
         const DomainPoint color = 
           partition->color_space->delinearize_color_to_point(*itr);
         ApEvent child_ready;
-        Realm::IndexSpace<DIM,T> child_space;
+        DomainT<DIM,T> child_space;
         if (future_map_domain.contains(color))
         {
           std::map<DomainPoint,FutureImpl*>::const_iterator finder =
@@ -4468,8 +4468,15 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
                 "An invalid future size was found in a partition by domain "
                 "call. All futures must contain Domain objects.")
-          const DomainT<DIM,T> domaint = *domain;
-          child_space = domaint;
+          child_space = *domain;
+          // Add a reference to the child space and wait for it to be
+          // added to ensure that it gets added before the future releases
+          // the reference that it is holding
+          if (!child_space.dense())
+          {
+            const RtEvent added(child_space.sparsity.add_reference());
+            added.wait();
+          }
           if (perform_intersections)
           {
             Realm::ProfilingRequestSet requests;
@@ -4480,8 +4487,10 @@ namespace Legion {
             child_ready = ApEvent(
                 Realm::IndexSpace<DIM,T>::compute_intersection(
                   parent_space, child_space, result, requests, parent_ready));
-            // Free up the old child space once the intersection is done
-            child_space.destroy(child_ready);
+            // Remove the reference that we added on the child space
+            if (!child_space.dense())
+              child_space.destroy(child_ready);
+            // We take ownership of the new result index space
             child_space = result;
             if (child_ready.exists())
               result_events.insert(child_ready);
