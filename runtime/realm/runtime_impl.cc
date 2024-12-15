@@ -966,6 +966,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
         .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
         .add_option_int("-ll:ext_sysmem", use_ext_sysmem)
+        .add_option_bool("-ll:enable_sparsity_refcount", enable_sparsity_refcount)
         .add_option_int("-ll:barrier_radix", barrier_broadcast_radix);
 
     // config for RuntimeImpl
