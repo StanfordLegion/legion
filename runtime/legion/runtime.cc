@@ -4095,9 +4095,7 @@ namespace Legion {
     Domain FutureMapImpl::get_domain(void) const
     //--------------------------------------------------------------------------
     {
-      Domain result;
-      future_map_domain->get_domain(result);
-      return result;
+      return future_map_domain->get_tight_domain();
     }
 
     //--------------------------------------------------------------------------
@@ -4299,8 +4297,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      Domain domain;
-      future_map_domain->get_domain(domain);
+      Domain domain = future_map_domain->get_tight_domain();
       const size_t needed = domain.get_volume();
       AutoLock fm_lock(future_map_lock);
 #ifdef DEBUG_LEGION
@@ -4556,9 +4553,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain->contains_point(point));
 #endif
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4585,9 +4581,8 @@ namespace Legion {
     {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_all_futures(previous_futures);
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -4640,9 +4635,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain->contains_point(point));
 #endif
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4669,9 +4663,8 @@ namespace Legion {
     {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_shard_local_futures(shard, previous_futures);
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         if (transform.functor->is_invertible())
@@ -4801,8 +4794,7 @@ namespace Legion {
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      Domain domain;
-      shard_domain->get_domain(domain);
+      Domain domain = shard_domain->get_tight_domain();
       const ShardID owner_shard = 
         sharding_function.load()->find_owner(point, domain);
       // Figure out which node has this future
@@ -4911,8 +4903,7 @@ namespace Legion {
                                       std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
-      Domain sharding_domain;
-      shard_domain->get_domain(sharding_domain);
+      Domain sharding_domain = shard_domain->get_tight_domain();
       if (sharding_function == NULL)
       {
         RtEvent wait_on = get_sharding_function_ready();
@@ -4926,8 +4917,7 @@ namespace Legion {
       if (!local_space.exists())
         return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
-      Domain domain;
-      local_points->get_domain(domain);
+      Domain domain = local_points->get_tight_domain();
       std::vector<RtEvent> ready_events;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
@@ -5500,8 +5490,7 @@ namespace Legion {
           }
           if (need_padded_bounds)
           {
-            Domain domain;
-            bounds->get_domain(domain);
+            Domain domain = bounds->get_tight_domain();
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
@@ -5612,8 +5601,7 @@ namespace Legion {
           // If this is a padded instance, then we know that this is an affine
           // instance so we can get it's index space expression and it should
           // be dense so then we can just add the offsets
-          Domain bounds;
-          manager->instance_domain->get_domain(bounds);
+          Domain bounds = manager->instance_domain->get_tight_domain();
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
@@ -6307,8 +6295,7 @@ namespace Legion {
     void OutputRegionImpl::finalize(void)
     //--------------------------------------------------------------------------
     {
-      Domain domain;
-      region->row_source->get_domain(domain);
+      Domain domain = region->row_source->get_tight_domain();
       // Create a Realm instance and update the physical manager
       // for each output field
       for (std::map<FieldID,ReturnedInstanceInfo>::iterator it =
@@ -16460,8 +16447,7 @@ namespace Legion {
                          unsigned index, IndexSpaceNode *projection_space) const
     //--------------------------------------------------------------------------
     {
-      Domain launch_domain;
-      projection_space->get_domain(launch_domain);
+      Domain launch_domain = projection_space->get_tight_domain();
       if (node->is_region())
       {
         RegionNode *region = node->as_region_node();
@@ -16585,9 +16571,9 @@ namespace Legion {
                   op->get_provenance());
       if (!local_space.exists())
         return result;
-      Domain local_domain, launch_domain;
+      Domain local_domain;
       forest->find_domain(local_space, local_domain);
-      launch_space->get_domain(launch_domain);
+      Domain launch_domain = launch_space->get_tight_domain();
       std::map<RegionTreeNode*,ProjectionNode*> node_map;
       node_map[root] = result;
       Mappable *mappable = is_functional ? NULL : op->get_mappable();

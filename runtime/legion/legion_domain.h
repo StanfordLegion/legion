@@ -334,7 +334,7 @@ namespace Legion {
     bool empty(void) const;
 
     // Will destroy the underlying Realm index space
-    void destroy(void);
+    void destroy(Realm::Event wait_on = Realm::Event::NO_EVENT);
 
     size_t get_volume(void) const;
 
@@ -434,15 +434,16 @@ namespace Legion {
     };
     struct DestroyFunctor {
     public:
-      DestroyFunctor(const Domain &d) : domain(d) { }
+      DestroyFunctor(const Domain &d, Realm::Event e) : domain(d), event(e) { }
       template<typename N, typename T>
       static inline void demux(DestroyFunctor *functor)
       {
         DomainT<N::N,T> is = functor->domain;
-        is.destroy();
+        is.destroy(functor->event);
       }
     public:
       const Domain &domain;
+      const Realm::Event event;
     };
     struct IntersectionFunctor {
     public:

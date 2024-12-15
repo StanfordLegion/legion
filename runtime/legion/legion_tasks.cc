@@ -5608,9 +5608,8 @@ namespace Legion {
       {
         // Only pack the IDs for our local points
         IndexSpaceNode *node = runtime->forest->get_node(internal_space);
-        Domain local_domain;
-        node->get_domain(local_domain);
-        size_t local_size = local_domain.get_volume();
+        Domain local_domain = node->get_tight_domain();;
+        size_t local_size = node->get_volume();
         rez.serialize(local_size);
         const std::map<DomainPoint,DistributedID> &handles =
           future_handles->handles;
@@ -8628,8 +8627,7 @@ namespace Legion {
     {
       // First, we collect all the extents of local outputs.
       // While doing this, we also check the alignment.
-      Domain color_space;
-      part->color_space->get_domain(color_space);
+      Domain color_space = part->color_space->get_tight_domain();
 #ifdef DEBUG_LEGION
       assert(color_space.dense());
 #endif
@@ -8848,7 +8846,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_domain(index_domain);
+        index_domain = launch_space->get_tight_domain();
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -8978,7 +8976,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_domain(index_domain);
+        index_domain = launch_space->get_tight_domain();
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
@@ -9200,10 +9198,7 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
           IndexSpaceNode* node = runtime->forest->get_node(color_space);
-          Domain color_domain;
-          node->get_domain(color_domain);
-          // No need to wait on the ready event since it is tight
-
+          Domain color_domain = node->get_tight_domain();
           if (req.global_indexing && !color_domain.dense())
             REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_REGION_PROJECTION,
               "The global indexing mode requires the color space of an "

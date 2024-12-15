@@ -37,11 +37,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndirectRecord::IndirectRecord(RegionTreeForest *forest,
                                    const RegionRequirement &req,
-                                   const InstanceSet &insts)
+                                   const InstanceSet &insts,
+                                   size_t total_points)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
-      domain_ready = is->get_domain(domain, false/*tight*/);
+      ApUserEvent to_trigger;
+      domain_ready = is->get_loose_domain(domain, to_trigger);
+      // This call adds 'total_points' references to the sparsity map of
+      // the domain (if there is one). Each point will then make a 
+      // CopyAcrossUnstructured object that will own a reference and then
+      // remove the reference when the CopyAcrossUnstructured object is
+      // deleted. Note this is necessary for handling tracing cases where
+      // the CopyAcrossUnstructure object can outlive the operation that
+      // created it and we need to keep the sparsity maps alive.
+      RtEvent added;
+      if (!domain.dense())
+        added = is->add_sparsity_map_references(domain, total_points);
 #ifdef LEGION_SPY
       index_space = req.region.get_index_space();
 #endif
@@ -80,6 +92,13 @@ namespace Legion {
         assert(found);
 #endif
       }
+      // Wait for the sparsity map references to be added if necessary
+      if (added.exists() && !added.has_triggered())
+        added.wait();
+      // If we had a to_trigger event we can trigger it now since we added
+      // our own references to the sparsity map at this point to keep it alive
+      if (to_trigger.exists())
+        Runtime::trigger_event(NULL, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -1079,7 +1098,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      node->get_domain(launch_domain);
+      launch_domain = node->get_tight_domain();
     }
 
     //--------------------------------------------------------------------------
@@ -6266,6 +6285,18 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    CopyAcrossUnstructured::~CopyAcrossUnstructured(void)
+    //--------------------------------------------------------------------------
+    {
+      // Need to release the sparsity map references being held by the 
+      // indirect records
+      for (unsigned idx = 0; idx < src_indirections.size(); idx++)
+        src_indirections[idx].domain.destroy(last_copy);
+      for (unsigned idx = 0; idx < dst_indirections.size(); idx++)
+        dst_indirections[idx].domain.destroy(last_copy);
+    }
+
+    //--------------------------------------------------------------------------
     void CopyAcrossUnstructured::initialize_source_fields(
        RegionTreeForest *forest, const RegionRequirement &req,
        const InstanceSet &insts, const PhysicalTraceInfo &trace_info)
@@ -8238,7 +8269,7 @@ namespace Legion {
             !collective_mapping->contains(target)))
       {
         rez.serialize<bool>(true);
-        pack_index_space(rez);
+        pack_index_space(rez, true/*pack reference*/);
       }
       else
         rez.serialize<bool>(false);
@@ -8760,6 +8791,21 @@ namespace Legion {
       IndexSpaceNode *node = forest->get_node(handle);
       node->release_color(color);
       node->unpack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::record_index_space_user(ApEvent user)
+    //--------------------------------------------------------------------------
+    {
+      if (user.exists() && !user.has_triggered_faultignorant())
+      {
+        AutoLock n_lock(node_lock);
+        // Try popping entries off the front of the list
+        while (!index_space_users.empty() &&
+            index_space_users.front().has_triggered_faultignorant())
+          index_space_users.pop_front();
+        index_space_users.push_back(user);
+      }
     }
 
     //--------------------------------------------------------------------------

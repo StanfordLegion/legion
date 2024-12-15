@@ -164,8 +164,7 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Domain::NO_DOMAIN;
-      Domain domain;
-      impl->instance_domain->get_domain(domain);
+      Domain domain = impl->instance_domain->get_tight_domain();
       return domain;
     }
 

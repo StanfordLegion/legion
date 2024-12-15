@@ -18405,8 +18405,7 @@ namespace Legion {
             sid, implicit, true/*internal*/, check_space);
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
-      Domain domain;
-      domain_node->get_domain(domain);
+      Domain domain = domain_node->get_tight_domain();
       FutureMap result;
       if (collective)
       {
@@ -18544,8 +18543,7 @@ namespace Legion {
           map->set_sharding_function(function, false/*own*/);
         }
         // Check that all the points abide by the sharding function
-        Domain domain;
-        domain_node->get_domain(domain);
+        Domain domain = domain_node->get_tight_domain();
         for (std::map<DomainPoint,Future>::const_iterator it =
               futures.begin(); it != futures.end(); it++)
           if (function->find_owner(it->first, domain) != owner_shard->shard_id)
@@ -20146,10 +20144,10 @@ namespace Legion {
         // For the identity projection function we know how to compute this
         // without performing any communication between the shards
         IndexSpaceNode *launch_space = proj_info.projection_space;
-        Domain launch_domain, shard_domain;
-        launch_space->get_domain(launch_domain);
+        Domain launch_domain = launch_space->get_tight_domain();
+        Domain shard_domain;
         if (proj_info.sharding_space != NULL)
-          proj_info.sharding_space->get_domain(shard_domain);
+          shard_domain = proj_info.sharding_space->get_tight_domain();
         else
           shard_domain = launch_domain;
         if (state->owner->is_region())

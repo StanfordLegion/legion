@@ -1081,12 +1081,12 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  inline void Domain::destroy(void)
+  inline void Domain::destroy(Realm::Event wait_on)
   //----------------------------------------------------------------------------
   {
     if (!dense())
     {
-      DestroyFunctor functor(*this);
+      DestroyFunctor functor(*this, wait_on);
       Internal::NT_TemplateHelper::demux<DestroyFunctor>(is_type, &functor);
     }
     is_type = 0;
