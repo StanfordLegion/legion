@@ -15,16 +15,16 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-project(LegionExample_allreduce)
+project(LegionExample_point_wise_dependence_analysis)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(allreduce allreduce.cc)
-target_link_libraries(allreduce Legion::Legion)
-target_compile_options(allreduce PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
+add_executable(point_wise_dependence_analysis point_wise_dependence_analysis.cc)
+target_link_libraries(point_wise_dependence_analysis Legion::Legion)
+target_compile_options(point_wise_dependence_analysis PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME allreduce COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:allreduce> ${Legion_TEST_ARGS})
+  add_test(NAME point_wise_dependence_analysis COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:point_wise_dependence_analysis> ${Legion_TEST_ARGS})
 endif()
