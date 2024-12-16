@@ -14211,8 +14211,9 @@ namespace Legion {
       if (!launch_space.exists())
       {
         if (!launch_domain.exists())
-          compute_launch_space(launcher);
-        launch_space = ctx->find_index_launch_space(launch_domain, provenance);
+          launch_space = compute_launch_space(launcher, provenance);
+        else
+          launch_space = ctx->find_index_launch_space(launch_domain,provenance);
       }
       if (!launch_domain.exists())
       {
@@ -14859,7 +14860,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::compute_launch_space(const MustEpochLauncher &launcher)
+    IndexSpace MustEpochOp::compute_launch_space(
+                      const MustEpochLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       const size_t single_tasks = launcher.single_tasks.size();
@@ -14922,6 +14924,8 @@ namespace Legion {
             default:
               assert(false);
           }
+          return parent_ctx->find_index_launch_space(launch_domain,
+              provenance, true/*take ownership*/);
         }
         else // Easy case of a single index task
         {
@@ -14929,6 +14933,7 @@ namespace Legion {
           if (!launch_domain.exists())
             forest->find_domain(
                 launcher.index_tasks[0].launch_space, launch_domain);
+          return parent_ctx->find_index_launch_space(launch_domain, provenance);
         }
       }
       else
@@ -14958,11 +14963,14 @@ namespace Legion {
             default:
               assert(false);
           }
+          return parent_ctx->find_index_launch_space(launch_domain,
+              provenance, true/*take ownership*/);
         }
         else // Easy case of a single point task
         {
           DomainPoint point = launcher.single_tasks[0].point;
           launch_domain = Domain(point, point);
+          return parent_ctx->find_index_launch_space(launch_domain, provenance);
         }
       }
     }
