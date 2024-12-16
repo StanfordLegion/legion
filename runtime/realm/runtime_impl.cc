@@ -96,6 +96,7 @@ static char *strndup(const char *src, size_t maxlen)
   size_t actlen = strnlen(src, maxlen);
   char *dst = (char *)malloc(actlen + 1);
   strncpy(dst, src, actlen);
+  dst[actlen] = '\0';
   return dst;
 }
 #endif
