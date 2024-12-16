@@ -277,6 +277,7 @@ void point_wise_analysable_task(const Task *task,
   assert(task->regions[0].privilege_fields.size() == 1);
 
   const Point<1> point = task->index_point;
+  if(point.x() == 0) usleep(1000);
 }
 
 int main(int argc, char **argv)
