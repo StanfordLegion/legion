@@ -1334,6 +1334,7 @@ namespace Legion {
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid) const;
+      bool has_non_default_mapper(void) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -1500,7 +1501,7 @@ namespace Legion {
       public:
         virtual bool handle_profiling_response(
             const Realm::ProfilingResponse &response, const void *orig,
-            size_t orig_length, LgEvent &fevent);
+            size_t orig_length, LgEvent &fevent, bool &failed_alloc);
         inline bool succeeded(void) const
         {
           if (!ready.has_triggered())
@@ -2973,6 +2974,7 @@ namespace Legion {
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
+      bool has_non_default_mapper(void) const;
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                 MapperID map_id, Processor proc, bool is_default = false);
     public:
@@ -3128,10 +3130,6 @@ namespace Legion {
                                            Serializer &rez);
       void send_index_space_colors_response(AddressSpaceID target,
                                             Serializer &rez);
-      void send_index_space_remote_expression_request(AddressSpaceID target,
-                                                      Serializer &rez);
-      void send_index_space_remote_expression_response(AddressSpaceID target,
-                                                       Serializer &rez);
       void send_index_space_generate_color_request(AddressSpaceID target,
                                                    Serializer &rez);
       void send_index_space_generate_color_response(AddressSpaceID target,
@@ -3333,12 +3331,6 @@ namespace Legion {
                                              Serializer &rez);
       void send_view_find_last_users_response(AddressSpaceID target,
                                               Serializer &rez);
-#ifdef ENABLE_VIEW_REPLICATION
-      void send_view_replication_request(AddressSpaceID target,Serializer &rez);
-      void send_view_replication_response(AddressSpaceID target,
-                                          Serializer &rez);
-      void send_view_replication_removal(AddressSpaceID target,Serializer &rez);
-#endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_result_size(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -3590,10 +3582,6 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
-      void handle_index_space_remote_expression_request(Deserializer &derez,
-                                                        AddressSpaceID source);
-      void handle_index_space_remote_expression_response(Deserializer &derez,
-                                                         AddressSpaceID source);
       void handle_index_space_generate_color_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_index_space_generate_color_response(Deserializer &derez);
@@ -3753,13 +3741,6 @@ namespace Legion {
       void handle_view_find_last_users_request(Deserializer &derez,
                                                AddressSpaceID source);
       void handle_view_find_last_users_response(Deserializer &derez);
-#ifdef ENABLE_VIEW_REPLICATION
-      void handle_view_replication_request(Deserializer &derez,
-                                           AddressSpaceID source);
-      void handle_view_replication_response(Deserializer &derez);
-      void handle_view_replication_removal(Deserializer &derez, 
-                                           AddressSpaceID source);
-#endif
       void handle_manager_request(Deserializer &derez);
       void handle_future_result(Deserializer &derez);
       void handle_future_result_size(Deserializer &derez,
@@ -6074,10 +6055,6 @@ namespace Legion {
           break;
         case SEND_INDEX_SPACE_COLORS_RESPONSE:
           break;
-        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
-          break;
-        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
-          return EXPRESSION_VIRTUAL_CHANNEL;
         case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
           break;
         case SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE:
@@ -6337,12 +6314,6 @@ namespace Legion {
           break;
         case SEND_VIEW_FIND_LAST_USERS_RESPONSE:
           break;
-        case SEND_VIEW_REPLICATION_REQUEST:
-          return UPDATE_VIRTUAL_CHANNEL;
-        case SEND_VIEW_REPLICATION_RESPONSE:
-          return UPDATE_VIRTUAL_CHANNEL;
-        case SEND_VIEW_REPLICATION_REMOVAL:
-          return UPDATE_VIRTUAL_CHANNEL;
         case SEND_MANAGER_REQUEST:
           break;
         case SEND_FUTURE_RESULT:

@@ -556,7 +556,7 @@ namespace Realm {
     // if we're not configured yet, delay the message
     if(!configured) {
       size_t bytes = sizeof(DelayedMessage) + msglen;
-      void *ptr = malloc(bytes);
+      void *ptr = ::operator new(bytes);
       assert(ptr != 0);
       DelayedMessage *d = new(ptr) DelayedMessage;
       d->next_msg = 0;
@@ -613,12 +613,9 @@ namespace Realm {
     while(delayed_message_head != 0) {
       DelayedMessage *next = delayed_message_head->next_msg;
       if(delayed_message_head->level >= log_level)
-	log_msg(delayed_message_head->level,
-		delayed_message_head->msgdata(),
-		delayed_message_head->msglen);
-      // was allocated with malloc, not new
-      delayed_message_head->~DelayedMessage();
-      free(delayed_message_head);
+        log_msg(delayed_message_head->level, delayed_message_head->msgdata(),
+                delayed_message_head->msglen);
+      delete delayed_message_head;
       delayed_message_head = next;
     }
   }
@@ -626,33 +623,21 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class LoggerMessage
-    
 
-  LoggerMessage& LoggerMessage::vprintf(const char *typeName, LoggerMessageID messageID, const char *fmt, va_list args)
+  LoggerMessage &LoggerMessage::vprintf(const char *fmt, va_list args)
   {
     if(active) {
       static const int MAXLEN = 4096;
-       char msg[MAXLEN] = {0};
-       if(messageID != RESERVED_LOGGER_MESSAGE_ID) {
-          snprintf(msg, MAXLEN, "[%s %d] ", typeName, messageID);
-       }
-       int prefixLength = strlen(msg);
+      char msg[MAXLEN] = {0};
+      int prefixLength = strlen(msg);
       int full = prefixLength + vsnprintf(msg + prefixLength, MAXLEN - prefixLength, fmt, args);
       // If this is an error or a warning, print out the full string
       // no matter what
       if((full >= MAXLEN) && ((level == Logger::LEVEL_FATAL) || 
           (level == Logger::LEVEL_ERROR) || (level == Logger::LEVEL_WARNING))) {
          char *full_msg;
-         if(messageID == RESERVED_LOGGER_MESSAGE_ID) {
-            full_msg = (char*)malloc(full+1);
-            vsnprintf(full_msg, full+1, fmt, args);
-         } else {
-            const int MAX_LENGTH_MESSAGE_ID = 16;
-            int full_msg_size = full+1+MAX_LENGTH_MESSAGE_ID+2;
-            full_msg = (char*)malloc(full_msg_size);
-            snprintf(full_msg, full_msg_size, "[%d] ", messageID);
-            vsnprintf(full_msg + strlen(full_msg), full+1, fmt, args);
-         }
+         full_msg = (char *)malloc(full + 1);
+         vsnprintf(full_msg, full + 1, fmt, args);
          get_stream() << full_msg;
         free(full_msg);
       } else {
@@ -661,10 +646,5 @@ namespace Realm {
     }
     return *this;
   }
-    
-    LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
-    {
-        return vprintf(NULL, RESERVED_LOGGER_MESSAGE_ID, fmt, args);
-    }
 
 }; // namespace Realm

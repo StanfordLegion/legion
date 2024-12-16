@@ -48,7 +48,7 @@ set(REALM_GASNETEX_WRAPPER_SRCS
 
 add_library(realm_gex_wrapper_objs OBJECT ${REALM_GASNETEX_WRAPPER_SRCS})
 
-if (${GEX_BUILD_SHARED})
+if (${GEX_WRAPPER_BUILD_SHARED})
   add_library(realm_gex_wrapper SHARED)
 else()
   add_library(realm_gex_wrapper STATIC)
@@ -63,7 +63,7 @@ target_include_directories(realm_gex_wrapper_objs
       PUBLIC
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
       $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/exports>)
-target_link_libraries(realm_gex_wrapper_objs PRIVATE GASNet::GASNet)
+target_link_libraries(realm_gex_wrapper_objs PUBLIC GASNet::GASNet)
 set_target_properties(realm_gex_wrapper_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(realm_gex_wrapper_objs PROPERTIES CXX_VISIBILITY_PRESET hidden)
 set_target_properties(realm_gex_wrapper_objs PROPERTIES VISIBILITY_INLINES_HIDDEN YES)

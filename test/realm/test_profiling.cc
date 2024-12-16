@@ -7,6 +7,8 @@
 #include <time.h>
 
 #include "realm.h"
+#include "realm/cuda/cuda_module.h"
+#include "realm/hip/hip_module.h"
 #include "realm/profiling.h"
 
 #include "osdep.h"
@@ -15,6 +17,15 @@ using namespace Realm;
 using namespace Realm::ProfilingMeasurements;
 
 Logger log_app("app");
+
+#ifdef REALM_USE_CUDA
+#include "cuda.h"
+extern void launch_spin_kernel(uint64_t t_ns, CUstream);
+#endif
+
+#ifdef REALM_USE_HIP
+extern void launch_spin_kernel(uint64_t t_ns, unifiedHipStream_t *);
+#endif
 
 // Task IDs, some IDs are reserved so start at first available number
 enum {
@@ -68,20 +79,38 @@ struct ChildTaskArgs {
   Event wait_on = Event::NO_EVENT;
 };
 
-void child_task(const void *args, size_t arglen, 
-		const void *userdata, size_t userlen, Processor p)
+void child_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
+                Processor p)
 {
   log_app.print() << "starting task on processor " << p;
   assert(arglen == sizeof(ChildTaskArgs));
-  const ChildTaskArgs& cargs = *(const ChildTaskArgs *)args;
+  const ChildTaskArgs &cargs = *(const ChildTaskArgs *)args;
   if(cargs.wait_on.exists()) {
     cargs.wait_on.wait();
   }
   if(cargs.hang) {
     // create a user event and wait on it - hangs unless somebody cancels us
     UserEvent::create_user_event().wait();
-  } else
+  } else {
     usleep(cargs.sleep_useconds);
+  }
+
+#ifdef REALM_USE_CUDA
+  Realm::Cuda::CudaModule *module =
+      Realm::Runtime::get_runtime().get_module<Realm::Cuda::CudaModule>("cuda");
+  if(module != nullptr) {
+    launch_spin_kernel(10000, module->get_task_cuda_stream());
+  }
+#endif // REALM_USE_CUDA
+
+#ifdef REALM_USE_HIP
+  Realm::Hip::HipModule *module =
+      Realm::Runtime::get_runtime().get_module<Realm::Hip::HipModule>("hip");
+  if(module != nullptr) {
+    launch_spin_kernel(10000, module->get_task_hip_stream());
+  }
+#endif // REALM_USE_HIP
+
 #ifdef REALM_USE_EXCEPTIONS
   bool inject_fault = *(const bool *)args;
   if(inject_fault) {
@@ -92,14 +121,23 @@ void child_task(const void *args, size_t arglen,
     buffer[3] = 44;
     // this causes a fatal error if Realm doesn't have exception support, so don't
     //  do it in that case
-    Processor::report_execution_fault(44, buffer, 4*sizeof(int));
+    Processor::report_execution_fault(44, buffer, 4 * sizeof(int));
   }
 #endif
+
   log_app.print() << "ending task on processor " << p;
 }
 
 Barrier response_counter;
 int expected_responses_remaining = 0;
+
+struct ResponseTaskArgs {
+  bool has_gpu_work = false;
+  union {
+    InstanceStatus::Result exp_result;
+    realm_id_t id;
+  } test_result;
+};
 
 void response_task(const void *args, size_t arglen,
 		   const void *userdata, size_t userlen, Processor p)
@@ -112,6 +150,9 @@ void response_task(const void *args, size_t arglen,
   printf("\n");
 
   Realm::ProfilingResponse pr(args, arglen);
+  const ResponseTaskArgs *response_args =
+      reinterpret_cast<const ResponseTaskArgs *>(pr.user_data());
+  assert(pr.user_data_size() == sizeof(ResponseTaskArgs));
 
   OperationStatus::Result result = OperationStatus::COMPLETED_SUCCESSFULLY;
   if(pr.has_measurement<OperationStatus>()) {
@@ -159,10 +200,14 @@ void response_task(const void *args, size_t arglen,
 	   op_timeline->start_time,
 	   op_timeline->end_time,
 	   op_timeline->end_time - op_timeline->start_time);
-    // start and end should at least be ordered
-    if(result != OperationStatus::CANCELLED)
+    // start and end should at least be ordered if we didn't terminate early or were
+    // cancelled It is possible if the task didn't have any gpu work the start and end
+    // times would be INVALID_TIMESTAMP.
+    if(response_args->has_gpu_work && (result != OperationStatus::CANCELLED)) {
       assert(op_timeline->start_time >= 0);
-    assert(op_timeline->end_time >= op_timeline->start_time);
+    }
+    assert((result == OperationStatus::TERMINATED_EARLY) ||
+           (op_timeline->start_time <= op_timeline->end_time));
     delete op_timeline;
   } else
     printf("no gpu timeline\n");
@@ -195,8 +240,7 @@ void response_task(const void *args, size_t arglen,
     if(pr.get_measurement(stat)) {
       std::cout << "inst status = " << stat.result << "\n";
 
-      assert(pr.user_data_size() == sizeof(InstanceStatus::Result));
-      InstanceStatus::Result exp_result = *(const InstanceStatus::Result *)(pr.user_data());
+      InstanceStatus::Result exp_result = response_args->test_result.exp_result;
       if(exp_result != stat.result) {
 	std::cout << "mismatch!  expected " << exp_result << "\n";
 	exit(1);
@@ -228,15 +272,6 @@ void response_task(const void *args, size_t arglen,
     delete inst_timeline;
   } else
     printf("no instance timeline\n");
-
-  if(pr.user_data_size() > 0) {
-    printf("user data = %zd (", pr.user_data_size());
-    unsigned char *data = (unsigned char *)(pr.user_data());
-    for(size_t i = 0; i < pr.user_data_size(); i++)
-      printf(" %02x", data[i]);
-    printf(" )\n");
-  } else
-    printf("no user data\n");
 
   if(__sync_sub_and_fetch(&expected_responses_remaining, 1) < 0) {
     printf("HELP!  Too many responses received!\n");
@@ -292,9 +327,12 @@ void top_level_task(const void *args, size_t arglen,
   // choose the last cpu/gpu, which is likely to be on a different node
   Processor profile_cpu = all_cpus.front();
   Processor task_proc = (has_gpus ? all_gpus.back() : all_cpus.back());
+  ResponseTaskArgs response_task_arg;
+  response_task_arg.has_gpu_work = has_gpus;
+  response_task_arg.test_result.id = task_proc.id;
   ProfilingRequestSet prs;
-  ProfilingRequest& pr = prs.add_request(profile_cpu, RESPONSE_TASK,
-					 &task_proc, sizeof(task_proc));
+  ProfilingRequest &pr = prs.add_request(profile_cpu, RESPONSE_TASK, &response_task_arg,
+                                         sizeof(response_task_arg));
   pr.add_measurement<OperationStatus>()
     .add_measurement<OperationTimeline>()
     .add_measurement<OperationEventWaits>()
@@ -384,12 +422,15 @@ void top_level_task(const void *args, size_t arglen,
     ProfilingRequestSet prs;
     Memory mem = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
     assert(mem.exists());
-    InstanceStatus::Result exp_result = InstanceStatus::DESTROYED_SUCCESSFULLY;
-    prs.add_request(profile_cpu, RESPONSE_TASK, &exp_result, sizeof(exp_result))
-      .add_measurement<InstanceStatus>()
-      .add_measurement<InstanceAllocResult>()
-      .add_measurement<InstanceTimeline>()
-      .add_measurement<InstanceMemoryUsage>();
+    ResponseTaskArgs response_task_arg;
+    response_task_arg.has_gpu_work = false;
+    response_task_arg.test_result.exp_result = InstanceStatus::DESTROYED_SUCCESSFULLY;
+    prs.add_request(profile_cpu, RESPONSE_TASK, &response_task_arg,
+                    sizeof(response_task_arg))
+        .add_measurement<InstanceStatus>()
+        .add_measurement<InstanceAllocResult>()
+        .add_measurement<InstanceTimeline>()
+        .add_measurement<InstanceMemoryUsage>();
     RegionInstance inst;
     Event e = RegionInstance::create_instance(inst, mem, is,
 					      std::vector<size_t>(1, 8),
@@ -434,12 +475,15 @@ void top_level_task(const void *args, size_t arglen,
     ProfilingRequestSet prs;
     Memory mem = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
     assert(mem.exists());
-    InstanceStatus::Result exp_result = InstanceStatus::FAILED_ALLOCATION;
-    prs.add_request(profile_cpu, RESPONSE_TASK, &exp_result, sizeof(exp_result))
-      .add_measurement<InstanceStatus>()
-      .add_measurement<InstanceAllocResult>()
-      .add_measurement<InstanceTimeline>()
-      .add_measurement<InstanceMemoryUsage>();
+    ResponseTaskArgs response_task_arg;
+    response_task_arg.has_gpu_work = false;
+    response_task_arg.test_result.exp_result = InstanceStatus::FAILED_ALLOCATION;
+    prs.add_request(profile_cpu, RESPONSE_TASK, &response_task_arg,
+                    sizeof(response_task_arg))
+        .add_measurement<InstanceStatus>()
+        .add_measurement<InstanceAllocResult>()
+        .add_measurement<InstanceTimeline>()
+        .add_measurement<InstanceMemoryUsage>();
     RegionInstance inst;
     Event e = RegionInstance::create_instance(inst, mem, is,
 					      std::vector<size_t>(1, 1024),

@@ -47,8 +47,11 @@ list(APPEND REALM_SRC
   realm/deppart/sparsity_impl.inl
   realm/atomics.h           realm/atomics.inl
   realm/bgwork.h            realm/bgwork.cc
+  realm/comp_queue_impl.h   realm/comp_queue_impl.cc
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
+  realm/barrier_impl.h        realm/barrier_impl.cc
+  realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
@@ -420,8 +423,12 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   # cmake won't include GASNet::GASNet in the exported link libraries
   #  because we're doing a shared build, so force that
   if(NOT REALM_USE_GASNETEX_WRAPPER AND REALM_USE_GASNETEX)
-    target_link_libraries(RealmRuntime PRIVATE $<LINK_ONLY:realm_gex_wrapper_objs>)
-    install(TARGETS realm_gex_wrapper_objs EXPORT LegionTargets)
+    target_sources(RealmRuntime PRIVATE $<TARGET_OBJECTS:realm_gex_wrapper_objs>)
+    target_include_directories(RealmRuntime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/realm/gasnetex/gasnetex_wrapper/exports")
+    target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
+    if (BUILD_SHARED_LIBS)
+      target_link_libraries(RealmRuntime INTERFACE $<LINK_ONLY:GASNet::GASNet>)
+    endif()
   elseif(NOT REALM_USE_GASNETEX_WRAPPER)
     target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
     if (BUILD_SHARED_LIBS)
@@ -437,16 +444,16 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
       # get the list of libraries and filter only those that are not in the
       #  (gasnet) install dir - the gasnet ones are sucked into librealm.so
       get_target_property(gasnet_ext_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
-      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      list(FILTER gasnet_ext_libs EXCLUDE REGEX "^${GASNet_ROOT_DIR}")
       set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_ext_libs} PARENT_SCOPE)
-    elseif()
+    else()
       # get the list of libraries and filter out those that are not in the
       #  (gasnet) install dir
       get_target_property(gasnet_all_libs GASNet::${GASNet_CONDUIT}-par INTERFACE_LINK_LIBRARIES)
       set(gasnet_libs "${gasnet_all_libs}")
-      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_INSTALL_DIR}")
+      list(FILTER gasnet_libs INCLUDE REGEX "^${GASNet_ROOT_DIR}")
       set(gasnet_installed_libs ${gasnet_libs})
-      string(REGEX REPLACE "${GASNet_INSTALL_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
+      string(REGEX REPLACE "${GASNet_ROOT_DIR}/([^/;]*/)*" "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/" gasnet_installed_libs "${gasnet_all_libs}")
       install(FILES ${gasnet_libs} DESTINATION ${CMAKE_INSTALL_LIBDIR})
       set(GASNET_LINK_LIBRARIES_FOR_INSTALL ${gasnet_installed_libs} PARENT_SCOPE)
     endif()
@@ -510,6 +517,7 @@ if(Legion_USE_CUDA)
     else()
       # without Kokkos interop, we can just add the hijack directly
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
+      target_sources(RealmStatic PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
   else()
     if(REALM_CUDA_DYNAMIC_LOAD)
@@ -530,6 +538,9 @@ if(Legion_USE_CUDA)
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
   target_compile_definitions(RealmStatic INTERFACE USE_CUDA)
 
+  target_include_directories(RealmRuntime PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  target_include_directories(RealmStatic PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
   set_target_cuda_standard(RealmStatic STANDARD ${Legion_CUDA_STANDARD})
@@ -545,9 +556,9 @@ if(Legion_USE_CUDA)
   endif()
   target_include_directories(realm_cuhook PRIVATE
                             ${CMAKE_CURRENT_SOURCE_DIR}
-                            ${PROJECT_BINARY_DIR}/runtime)
+                            ${PROJECT_BINARY_DIR}/runtime
+                            ${CUDAToolkit_CUPTI_INCLUDE_DIR})
   target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
-  add_dependencies(RealmRuntime realm_cuhook)
   install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
@@ -640,6 +651,9 @@ if(Legion_USE_Kokkos)
   get_property(kokkos_include_dirs
                TARGET Kokkos::kokkoscore
                PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  if(Legion_USE_CUDA)
+    list(APPEND kokkos_include_dirs ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  endif()
   list(TRANSFORM kokkos_include_dirs PREPEND "-I")
   list(APPEND kokkos_compile_options ${kokkos_include_dirs}
                                      "-I${CMAKE_CURRENT_SOURCE_DIR}"
@@ -716,11 +730,9 @@ if(REALM_USE_NVTX)
   target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
 endif()
 
-if(Legion_BACKTRACE_USE_LIBDW)
-  target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
-  target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
-  target_include_directories(RealmStatic PRIVATE ${LIBDW_INCLUDE_DIR})
-  target_link_libraries(RealmStatic PRIVATE ${LIBDW_LIBRARY})
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  target_link_libraries(RealmRuntime PRIVATE cpptrace::cpptrace)
+  target_link_libraries(RealmStatic PRIVATE cpptrace::cpptrace)
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
@@ -778,7 +790,6 @@ list(APPEND LEGION_SRC
   legion.h
   legion/bitmask.h
   legion/garbage_collection.h             legion/garbage_collection.cc
-  legion/index_space_value.h              legion/index_space_value.cc
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc

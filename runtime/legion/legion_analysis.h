@@ -824,18 +824,15 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, bool copy, bool covers);
-      PhysicalUser(const PhysicalUser &rhs);
+          ApEvent term, UniqueID op_id, unsigned index, bool copy, bool covers);
+      PhysicalUser(const PhysicalUser &rhs) = delete;
       ~PhysicalUser(void);
     public:
-      PhysicalUser& operator=(const PhysicalUser &rhs);
-    public:
-      void pack_user(Serializer &rez, const AddressSpaceID target) const;
-      static PhysicalUser* unpack_user(Deserializer &derez, 
-              RegionTreeForest *forest, const AddressSpaceID source);
+      PhysicalUser& operator=(const PhysicalUser &rhs) = delete;
     public:
       const RegionUsage usage;
       IndexSpaceExpression *const expr;
+      const ApEvent term_event;
       const UniqueID op_id;
       const unsigned index; // region requirement index
       const bool copy_user; // is this from a copy or an operation
@@ -1033,7 +1030,8 @@ namespace Legion {
       virtual bool is_disjoint(void) const = 0;
       virtual bool is_leaves_only(void) const = 0;
       virtual bool is_unique_shards(void) const = 0;
-      virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
+      virtual bool interferes(ProjectionNode *other,
+          ShardID local, bool &dominates) const = 0;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1058,7 +1056,8 @@ namespace Legion {
       virtual bool is_disjoint(void) const;
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
-      virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      virtual bool interferes(ProjectionNode *other,
+          ShardID local, bool &dominates) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1067,7 +1066,8 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
-      bool has_interference(ProjectionRegion *other, ShardID local) const;
+      bool has_interference(ProjectionRegion *other, ShardID local,
+                            bool &dominates) const;
       void add_user(ShardID shard);
       void add_child(ProjectionPartition *child);
     public:
@@ -1093,7 +1093,8 @@ namespace Legion {
       virtual bool is_disjoint(void) const;
       virtual bool is_leaves_only(void) const;
       virtual bool is_unique_shards(void) const;
-      virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      virtual bool interferes(ProjectionNode *other,
+          ShardID local, bool &dominates) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1102,7 +1103,8 @@ namespace Legion {
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
-      bool has_interference(ProjectionPartition *other, ShardID local) const;
+      bool has_interference(ProjectionPartition *other, ShardID local,
+                            bool &dominates) const;
       void add_child(ProjectionRegion *child);
     public:
       PartitionNode *const partition;
@@ -1373,7 +1375,7 @@ namespace Legion {
                                           const ProjectionInfo &proj_info);
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
-                          ProjectionSummary *one, ProjectionSummary *two);
+          ProjectionSummary *one, ProjectionSummary *two, bool &dominates);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1445,7 +1447,8 @@ namespace Legion {
       // be pruned out once they are no longer alive
       std::list<ProjectionSummary*> projection_summary_cache;
       std::unordered_map<ProjectionSummary*,
-        std::unordered_map<ProjectionSummary*,bool> > interfering_shards;
+        std::unordered_map<ProjectionSummary*,
+         std::pair<bool/*interferes*/,bool/*dominates*/> > > interfering_shards;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -3341,7 +3344,8 @@ namespace Legion {
                             FieldMaskSet<CopyFillGuard> &reduction_fill_updates,
                             TraceViewSet *precondition_updates,
                             TraceViewSet *anticondition_updates,
-                            TraceViewSet *postcondition_updates);
+                            TraceViewSet *postcondition_updates,
+                            FieldMaskSet<IndexSpaceExpression> *dirty_updates);
         void release_references(void) const;
       public:
         EquivalenceSet *const set;
@@ -3356,6 +3360,7 @@ namespace Legion {
         TraceViewSet *precondition_updates;
         TraceViewSet *anticondition_updates;
         TraceViewSet *postcondition_updates;
+        FieldMaskSet<IndexSpaceExpression> *dirty_updates;
         std::set<IndexSpaceExpression*> *const expr_references;
         const RtUserEvent done_event;
         const bool forward_to_owner;
@@ -3452,8 +3457,7 @@ namespace Legion {
                       const FieldMask &clone_mask,
                       IndexSpaceExpression *clone_expr,
                       const bool record_invalidate,
-                      std::vector<RtEvent> &applied_events, 
-                      const bool invalidate_overlap);
+                      std::vector<RtEvent> &applied_events); 
       bool filter_partial_invalidations(const FieldMask &mask, 
                                         RtUserEvent &filtered);
       void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
@@ -3704,14 +3708,12 @@ namespace Legion {
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           IndexSpaceExpression *clone_expr,
                           std::vector<RtEvent> &applied_events,
-                          const bool invalidate_overlap,
                           const bool record_invalidate,
                           const bool need_dst_lock = true);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
-                    const bool invalidate_overlap,
                     const bool record_invalidate);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask,
@@ -3730,6 +3732,7 @@ namespace Legion {
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
             TraceViewSet *&postcondition_updates, 
+            FieldMaskSet<IndexSpaceExpression> *&dirty_updates,
             DistributedID target, IndexSpaceExpression *target_expr) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
@@ -3744,11 +3747,12 @@ namespace Legion {
             TraceViewSet *precondition_updates,
             TraceViewSet *anticondition_updates,
             TraceViewSet *postcondition_updates,
+            FieldMaskSet<IndexSpaceExpression> *dirty_updates,
             FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             std::vector<RtEvent> &applied_events,
             const bool needs_lock, const bool forward_to_owner,
-            const bool unpack_references);
+            const bool unpack_tracing_references);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
@@ -3765,7 +3769,8 @@ namespace Legion {
             const TraceViewSet *precondition_updates,
             const TraceViewSet *anticondition_updates,
             const TraceViewSet *postcondition_updates,
-            const bool pack_references);
+            const FieldMaskSet<IndexSpaceExpression> *dirty_updates,
+            const bool pack_references, const bool pack_tracing_references);
     public:
       static void handle_make_owner(const void *args);
       static void handle_apply_state(const void *args);
@@ -3839,6 +3844,7 @@ namespace Legion {
       TraceViewSet                                      *tracing_preconditions;
       TraceViewSet                                      *tracing_anticonditions;
       TraceViewSet                                      *tracing_postconditions;
+      FieldMaskSet<IndexSpaceExpression>                *tracing_dirty_fields;
     protected:
       // This tracks the most recent copy-fill aggregator for each field in 
       // read-only cases so that reads the depend on each other are ordered

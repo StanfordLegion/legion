@@ -71,7 +71,7 @@ fn accumulate_statistics(
     }
     for entry in proc.entries() {
         match entry.kind {
-            ProcEntryKind::Task(_, _) | ProcEntryKind::GPUKernel(_, _) => {
+            ProcEntryKind::Task(..) | ProcEntryKind::GPUKernel(..) => {
                 let stats = task_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());

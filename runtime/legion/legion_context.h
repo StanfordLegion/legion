@@ -529,7 +529,8 @@ namespace Legion {
       const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual PhysicalInstance create_task_local_instance(Memory memory,
                                         Realm::InstanceLayoutGeneric *layout);
-      virtual void destroy_task_local_instance(PhysicalInstance instance);
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -1716,7 +1717,7 @@ namespace Legion {
           Operation *op, unsigned index, const RegionRequirement &req,
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
-                                          ProjectionSummary *two);
+          ProjectionSummary *two, bool &dominates);
       virtual bool match_timeouts(std::vector<LogicalUser*> &timeouts,
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);
@@ -1916,6 +1917,14 @@ namespace Legion {
       Mapper::ContextConfigOutput           context_configuration;
       TaskTreeCoordinates                   context_coordinates;
     protected:
+      // TODO: In the future convert these into std::span so that they
+      // are bounded from above by regions.size(), in practice they might
+      // actually be bigger than that since the owner task might have 
+      // output regions which means these will be as big as 
+      // regions.size() + output_regions.size(), but we don't actually
+      // want to think of them that way since the output regions this
+      // task is producing don't have any bearing on the sub-tasks that
+      // we are launching in this context.
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
       // Keep track of inline mapping regions for this task
@@ -2942,7 +2951,7 @@ namespace Legion {
           Operation *op, unsigned index, const RegionRequirement &req,
           LogicalState *owner, const ProjectionInfo &proj_info);
       virtual bool has_interfering_shards(ProjectionSummary *one,
-                                          ProjectionSummary *two);
+          ProjectionSummary *two, bool &dominates);
       virtual bool match_timeouts(std::vector<LogicalUser*> &timeouts,
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);

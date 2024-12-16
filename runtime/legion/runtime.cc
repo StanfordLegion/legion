@@ -2695,13 +2695,14 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_FUTURE_USE,
                 "Illegal use of future produced in context %s (UID %lld) "
                 "but consumed in context %s (UID %lld) by operation %s "
-                "(UID %lld) launched from %s. Futures are only permitted "
+                "(UID %lld) launched from %.*s. Futures are only permitted "
                 "to be used in the task sub-tree rooted by the context "
                 "that produced the future.", context->get_task_name(),
                 context->get_unique_id(), consumer_context->get_task_name(), 
                 consumer_context->get_unique_id(),
                 consumer_op->get_logging_name(),
-                consumer_op->get_unique_op_id(), provenance->human_str())
+                consumer_op->get_unique_op_id(), 
+                int(provenance->human.length()), provenance->human.data())
           }
         }
       }
@@ -3641,8 +3642,9 @@ namespace Legion {
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-        const RtUserEvent temp_unique_event = Runtime::create_rt_user_event();        
-        Runtime::trigger_event(temp_unique_event);
+        const Realm::UserEvent temp_unique_event =
+          Realm::UserEvent::create_user_event();
+        temp_unique_event.trigger();
 #endif
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
@@ -3650,7 +3652,7 @@ namespace Legion {
         if (implicit_runtime->profiler != NULL)
           implicit_runtime->profiler->add_inst_request(requests, 
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-                      implicit_provenance, temp_unique_event);
+                      implicit_provenance, LgEvent(temp_unique_event));
 #else
                       implicit_provenance, unique_event);
 #endif
@@ -3661,7 +3663,7 @@ namespace Legion {
         if (inst_ready.exists() && (implicit_profiler != NULL))
           implicit_profiler->record_instance_ready(inst_ready, unique_event);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-        inst_event = temp_unique_event; 
+        inst_event = LgEvent(temp_unique_event);
 #endif
         own_inst = true;
         if (resource == NULL)
@@ -3694,9 +3696,9 @@ namespace Legion {
         if (implicit_runtime->profiler != NULL)
         {
           // Need to try to make a unique event
-          RtUserEvent unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(unique);
-          unique_event = unique;
+          Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
           implicit_runtime->profiler->add_inst_request(requests,
                       implicit_provenance, unique_event);
         }
@@ -7549,6 +7551,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ProcessorManager::has_non_default_mapper(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock, 0/*mode*/, false/*exclusive*/);
+      for (std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+            it = mappers.begin(); it != mappers.end(); it++)
+        if (!it->second.first->is_default_mapper)
+          return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void ProcessorManager::perform_scheduling(void)
     //--------------------------------------------------------------------------
     {
@@ -10253,9 +10267,9 @@ namespace Legion {
       {
         // When Legion Spy is enabled, we want the ready event to be unique.
         // So we create a fresh event and trigger it with the producer event
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
 
       PhysicalManager *manager =
@@ -10824,9 +10838,9 @@ namespace Legion {
       PhysicalInstance instance = PhysicalInstance::NO_INST;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
       if (eager)
       {
@@ -11009,7 +11023,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MemoryManager::FutureInstanceAllocator::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig, 
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11029,8 +11043,11 @@ namespace Legion {
       assert(measured);
 #endif
       success.store(result.success);
-      Runtime::trigger_event(ready);
       fevent = unique_event;
+      failed_alloc = !result.success;
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
+      Runtime::trigger_event(ready);
       return true;
     }
 
@@ -12331,18 +12348,6 @@ namespace Legion {
               runtime->handle_index_space_colors_response(derez);
               break;
             }
-          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
-            {
-              runtime->handle_index_space_remote_expression_request(derez,
-                                                          remote_address_space);
-              break;
-            }
-          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
-            {
-              runtime->handle_index_space_remote_expression_response(derez,
-                                                          remote_address_space);
-              break;
-            }
           case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
             {
               runtime->handle_index_space_generate_color_request(derez,
@@ -12982,25 +12987,6 @@ namespace Legion {
               runtime->handle_view_find_last_users_response(derez);
               break;
             }
-#ifdef ENABLE_VIEW_REPLICATION
-          case SEND_VIEW_REPLICATION_REQUEST:
-            {
-              runtime->handle_view_replication_request(derez, 
-                                                       remote_address_space);
-              break;
-            }
-          case SEND_VIEW_REPLICATION_RESPONSE:
-            {
-              runtime->handle_view_replication_response(derez);
-              break;
-            }
-          case SEND_VIEW_REPLICATION_REMOVAL:
-            {
-              runtime->handle_view_replication_removal(derez, 
-                                                       remote_address_space);
-              break;
-            }
-#endif
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez);
@@ -19991,6 +19977,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_non_default_mapper(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+        if (it->second->has_non_default_mapper())
+          return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     ProjectionID Runtime::generate_dynamic_projection_id(
                                                    bool check_context/*= true*/)
     //--------------------------------------------------------------------------
@@ -21762,25 +21759,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_remote_expression_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-        SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST, rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_index_space_remote_expression_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-          SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE, rez,
-          true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_space_generate_color_request(AddressSpaceID target,
                                                           Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22913,35 +22891,6 @@ namespace Legion {
       find_messenger(target)->send_message(SEND_VIEW_FIND_LAST_USERS_RESPONSE,
                                           rez, true/*flush*/, true/*response*/);
     }
-
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_request(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_REQUEST, rez,
-                                                                true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_response(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_RESPONSE, rez,
-                                              true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_removal(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_REMOVAL, rez,
-                                                                true/*flush*/);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
@@ -24497,22 +24446,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_remote_expression_request(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_expression_request(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_remote_expression_response(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_expression_response(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_index_space_generate_color_request(Deserializer &derez,
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -25429,31 +25362,6 @@ namespace Legion {
     {
       PhysicalManager::handle_manager_request(derez, this);
     }
-
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_request(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_request(derez, this, source);
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_removal(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_removal(derez, this, source);
-    }
-#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     void Runtime::handle_future_result(Deserializer &derez)
@@ -27785,7 +27693,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -32450,7 +32358,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
+      log_run.fatal("LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32461,7 +32369,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
+      log_run.error("LEGION ERROR: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32473,7 +32381,7 @@ namespace Legion {
                                          const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
+      log_run.warning("LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
       if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
       {
@@ -33105,6 +33013,7 @@ namespace Legion {
       const ProfilingResponseBase *base = 
         static_cast<const ProfilingResponseBase*>(response.user_data());
       LgEvent fevent;
+      bool failed_alloc = false;
       if (base->handler == NULL)
       {
         // This is the remote message case
@@ -33114,13 +33023,15 @@ namespace Legion {
         const long long t_start = Realm::Clock::current_time_in_nanoseconds();
         // Check to see if should report this profiling
         if (runtime->profiler->handle_profiling_response(response, args,
-                                                         arglen, fevent))
+              arglen, fevent, failed_alloc))
         {
+          if (failed_alloc)
+            runtime->profiler->handle_failed_instance_allocation();
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);
           implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
-              fevent, finish_event, base->completion);
+              fevent, finish_event, base->completion || failed_alloc);
         }
       }
       else if (runtime->profiler != NULL)
@@ -33128,17 +33039,20 @@ namespace Legion {
         const long long t_start = Realm::Clock::current_time_in_nanoseconds();
         // Check to see if should report this profiling
         if (base->handler->handle_profiling_response(response, args, arglen, 
-                                                     fevent))
+                                                     fevent, failed_alloc))
         {
+          if (failed_alloc)
+            runtime->profiler->handle_failed_instance_allocation();
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);
           implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
-              fevent, finish_event, base->completion);
+              fevent, finish_event, base->completion || failed_alloc);
         }
       }
       else
-        base->handler->handle_profiling_response(response, args, arglen,fevent);
+        base->handler->handle_profiling_response(response, args, arglen,
+            fevent, failed_alloc);
     }
 
     //--------------------------------------------------------------------------

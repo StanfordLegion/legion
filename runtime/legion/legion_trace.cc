@@ -364,7 +364,7 @@ namespace Legion {
         // Recording
         if (op->is_internal_op())
           // We don't need to register internal operations
-          return SIZE_MAX;
+          return std::numeric_limits<size_t>::max();
         const size_t index = replay_info.size();
         const size_t op_index = operations.size();
         op_map[key] = std::make_pair(op_index,index);
@@ -449,18 +449,10 @@ namespace Legion {
       assert(recording);
 #endif
       const std::pair<Operation*,GenerationID> key(op, op->get_generation());
-      const std::pair<Operation*,GenerationID> creator_key(
-          op->get_creator_op(), op->get_creator_gen());
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        finder = op_map.find(creator_key);
-#ifdef DEBUG_LEGION
-      assert(finder != op_map.end());
-#endif
-      // Record that they have the same entry so that we can detect that
-      // they are the same when recording dependences. We do this for all
-      // internal operations which won't be replayed and for which we will
-      // need to collapse their dependences back onto their creator
-      op_map[key] = finder->second;
+      // Note that we don't record the index of the operation here since
+      // it has no index, instead we record the index of the replay_info
+      // that is associated with this internal operation
+      op_map[key] = std::make_pair(-1, replay_info.size() - 1);
     }
 
     //--------------------------------------------------------------------------
@@ -544,6 +536,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(recording);
+      assert(!target->is_internal_op());
+      assert(!source->is_internal_op());
 #endif
       const std::pair<Operation*,GenerationID> target_key(target, target_gen);
       std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
@@ -551,64 +545,16 @@ namespace Legion {
       // The target is not part of the trace so there's no need to record it
       if (target_finder == op_map.end())
         return false;
-      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
-      assert(source_finder != op_map.end());
 #endif
-      // In the case of operations recording dependences on internal operations
-      // such as refinement operations then we don't need to record those as
-      // the refinement operations won't be in the replay
-      //if (source_finder->second == target_finder->second)
-      if (source_finder->second.first == target_finder->second.first)
-      {
-#ifdef DEBUG_LEGION
-        assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
-#endif
-        return true;
-      }
       OperationInfo &info = replay_info.back();
       DependenceRecord record(target_finder->second.first);
-      if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
-      {
-#ifdef DEBUG_LEGION
-        bool found = false;
-        assert(!info.closes.empty());
-#endif
-        // Find the right close info and record the dependence 
-        for (unsigned idx = 0; idx < info.closes.size(); idx++)
-        {
-          CloseInfo &close = info.closes[idx];
-          if (close.close_op != source)
-            continue;
-#ifdef DEBUG_LEGION
-          found = true;
-#endif
-          for (LegionVector<DependenceRecord>::iterator it =
-                close.dependences.begin(); it != close.dependences.end(); it++)
-            if (it->merge(record))
-              return true;
-          close.dependences.emplace_back(std::move(record));
-          break;
-        }
-#ifdef DEBUG_LEGION
-        assert(found);
-#endif
-      }
-      else
-      {
-        // Note that if the source is a non-close internal operation then
-        // we also come through this pathway so that we record dependences
-        // on anything that the operation records any transitive dependences
-        // on things that its internal operations dependended on
-        for (LegionVector<DependenceRecord>::iterator it =
-              info.dependences.begin(); it != info.dependences.end(); it++)
-          if (it->merge(record))
-            return true;
-        info.dependences.emplace_back(std::move(record));
-      }
+      for (LegionVector<DependenceRecord>::iterator it =
+            info.dependences.begin(); it != info.dependences.end(); it++)
+        if (it->merge(record))
+          return true;
+      info.dependences.emplace_back(std::move(record));
       return true;
     }
 
@@ -772,27 +718,10 @@ namespace Legion {
         }
         return false;
       }
-      const std::pair<Operation*,GenerationID> source_key(source, source_gen);
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        source_finder = op_map.find(source_key);
 #ifdef DEBUG_LEGION
       assert(!replay_info.empty());
-      assert(source_finder != op_map.end());
 #endif
-      // In the case of operations recording dependences on internal operations
-      // such as refinement operations then we don't need to record those as
-      // the refinement operations won't be in the replay
-      //if (source_finder->second == target_finder->second)
-      if (source_finder->second.first == target_finder->second.first)
-      {
-#ifdef DEBUG_LEGION
-        assert(target->get_operation_kind() == Operation::REFINEMENT_OP_KIND);
-#endif
-        return true;
-      }
       OperationInfo &info = replay_info.back();
-      DependenceRecord record(target_finder->second.first, target_idx, source_idx,
-                              dtype, dep_mask);
       if (source->get_operation_kind() == Operation::MERGE_CLOSE_OP_KIND)
       {
 #ifdef DEBUG_LEGION
@@ -809,23 +738,150 @@ namespace Legion {
           found = true;
 #endif
           close.close_mask |= dep_mask;
-          for (LegionVector<DependenceRecord>::iterator it =
-                close.dependences.begin(); it != close.dependences.end(); it++)
-            if (it->merge(record))
-              return true;
-          close.dependences.emplace_back(std::move(record));
+          if (target->is_internal_op() &&
+              (target->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND))
+          {
+#ifdef DEBUG_LEGION
+            assert(target_finder->second.second < replay_info.size());
+#endif
+            const OperationInfo &target_info = 
+              replay_info[target_finder->second.second];
+            std::map<unsigned,LegionVector<DependenceRecord> >::const_iterator
+              finder = target_info.internal_dependences.find(target_idx);
+            if (finder != target_info.internal_dependences.end())
+            {
+              for (LegionVector<DependenceRecord>::const_iterator rit =
+                    finder->second.begin(); rit != finder->second.end(); rit++)
+              {
+                const FieldMask overlap = dep_mask & rit->dependent_mask;
+                if (!overlap)
+                  continue;
+                DependenceRecord record(rit->operation_idx, rit->prev_idx,
+                                        source_idx, dtype, overlap);
+                bool found2 = false;
+                for (LegionVector<DependenceRecord>::iterator it =
+                      close.dependences.begin(); it !=
+                      close.dependences.end(); it++)
+                {
+                  if (!it->merge(record))
+                    continue;
+                  found2 = true;
+                  break;
+                }
+                if (!found2)
+                  close.dependences.emplace_back(std::move(record));
+              }
+            }
+          }
+          else
+          {
+            DependenceRecord record(target_finder->second.first, target_idx, 
+                                    source_idx, dtype, dep_mask);
+            for (LegionVector<DependenceRecord>::iterator it =
+                  close.dependences.begin(); it !=
+                  close.dependences.end(); it++)
+              if (it->merge(record))
+                return true;
+            close.dependences.emplace_back(std::move(record));
+          }
           break;
         }
 #ifdef DEBUG_LEGION
         assert(found);
 #endif
       }
+      else if (source->is_internal_op())
+      {
+        // Record the dependence on the correct region requirement
+        // of the internal operations
+        LegionVector<DependenceRecord> &internal_dependences =
+          info.internal_dependences[source_idx];
+        if (target->is_internal_op() && 
+            (target->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND))
+        {
+#ifdef DEBUG_LEGION
+          assert(target_finder->second.second < replay_info.size());
+#endif
+          const OperationInfo &target_info = replay_info[target_finder->second.second];
+          std::map<unsigned,LegionVector<DependenceRecord> >::const_iterator
+            finder = target_info.internal_dependences.find(target_idx);
+          if (finder != target_info.internal_dependences.end())
+          {
+            for (LegionVector<DependenceRecord>::const_iterator rit =
+                  finder->second.begin(); rit != finder->second.end(); rit++)
+            {
+              const FieldMask overlap = dep_mask & rit->dependent_mask;
+              if (!overlap)
+                continue;
+              DependenceRecord record(rit->operation_idx, rit->prev_idx,
+                                      source_idx, dtype, overlap);
+              bool found = false;
+              for (LegionVector<DependenceRecord>::iterator it =
+                    internal_dependences.begin(); it !=
+                    internal_dependences.end(); it++)
+              {
+                if (!it->merge(record))
+                  continue;
+                found = true;
+                break;
+              }
+              if (!found)
+                internal_dependences.emplace_back(std::move(record));
+            }
+          }
+        }
+        else
+        {
+          DependenceRecord record(target_finder->second.first, target_idx, source_idx,
+                                  dtype, dep_mask);
+          for (LegionVector<DependenceRecord>::iterator it =
+                internal_dependences.begin(); it !=
+                internal_dependences.end(); it++)
+            if (it->merge(record))
+              return true;
+          internal_dependences.emplace_back(std::move(record));
+        }
+      }
+      else if (target->is_internal_op() &&
+          (target->get_operation_kind() != Operation::MERGE_CLOSE_OP_KIND))
+      {
+#ifdef DEBUG_LEGION
+        assert(target_finder->second.second < replay_info.size());
+#endif
+        // Figure out which region requirement it was for and look for 
+        // overlapping dependences on that region requirement and record
+        // any of those instead
+        const OperationInfo &target_info = replay_info[target_finder->second.second];
+        std::map<unsigned,LegionVector<DependenceRecord> >::const_iterator
+          finder = target_info.internal_dependences.find(target_idx);
+        if (finder != target_info.internal_dependences.end())
+        {
+          for (LegionVector<DependenceRecord>::const_iterator rit =
+                finder->second.begin(); rit != finder->second.end(); rit++)
+          {
+            const FieldMask overlap = dep_mask & rit->dependent_mask;
+            if (!overlap)
+              continue;
+            DependenceRecord record(rit->operation_idx, rit->prev_idx,
+                                    source_idx, dtype, overlap);
+            bool found = false;
+            for (LegionVector<DependenceRecord>::iterator it =
+                  info.dependences.begin(); it != info.dependences.end(); it++)
+            {
+              if (!it->merge(record))
+                continue;
+              found = true;
+              break;
+            }
+            if (!found)
+              info.dependences.emplace_back(std::move(record));
+          }
+        }
+      }
       else
       {
-        // Note that if the source is a non-close internal operation then
-        // we also come through this pathway so that we record dependences
-        // on anything that the operation records any transitive dependences
-        // on things that its internal operations dependended on
+        DependenceRecord record(target_finder->second.first, target_idx, source_idx,
+                                dtype, dep_mask);
         for (LegionVector<DependenceRecord>::iterator it =
               info.dependences.begin(); it != info.dependences.end(); it++)
           if (it->merge(record))
@@ -897,6 +953,8 @@ namespace Legion {
       {
         recording = false;
         op_map.clear();
+        for (unsigned idx = 0; idx < replay_info.size(); idx++)
+          replay_info[idx].internal_dependences.clear();
         if (static_translator != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -1001,6 +1059,14 @@ namespace Legion {
               it->dependence_type, mask);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::invalidate_equivalence_sets(void) const 
+    //--------------------------------------------------------------------------
+    {
+      if (physical_trace != NULL)
+        physical_trace->invalidate_equivalence_sets();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1934,6 +2000,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTrace::invalidate_equivalence_sets(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<PhysicalTemplate*>::const_iterator it =
+            templates.begin(); it != templates.end(); it++)
+        (*it)->invalidate_equivalence_sets();
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTrace::find_condition_sets(
                          std::map<EquivalenceSet*,unsigned> &current_sets) const
     //--------------------------------------------------------------------------
@@ -1997,7 +2072,7 @@ namespace Legion {
         {
           // Delete now because couldn't acquire some instances
           if (acquired)
-            current->release_instance_references();
+            current->release_instance_references(map_applied_events);
           // Now delete this template from the entry since at least one of its
           // instances have been deleted and therefore we'll never be able to
           // replay it
@@ -2039,7 +2114,7 @@ namespace Legion {
           return true;
         }
         else if (acquired)
-          current->release_instance_references();
+          current->release_instance_references(map_applied_events);
         if (idx > 0)
         {
           // If this is the first iteration then we start testing the
@@ -2106,8 +2181,9 @@ namespace Legion {
         if (!recurrent)
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
-        current_template->finish_replay(execution_preconditions);
-        current_template->release_instance_references();
+        current_template->finish_replay(
+            op->get_complete_operation(), execution_preconditions);
+        current_template->release_instance_references(map_applied_conditions);
       }
       current_template = NULL;
     }
@@ -2138,7 +2214,8 @@ namespace Legion {
             if (op->allreduce_template_status(valid, acquired))
             {
               if (acquired)
-                current_template->release_instance_references();
+                current_template->release_instance_references(
+                    map_applied_conditions);
               // Now delete this template from the entry since at least one 
               // of its instances have been deleted and therefore we'll never
               // be able to replay it
@@ -2188,7 +2265,8 @@ namespace Legion {
         if (!recurrent)
           current_template->apply_postconditions(
               op->get_complete_operation(), map_applied_conditions);
-        current_template->finish_replay(execution_preconditions);
+        current_template->finish_replay(
+            op->get_complete_operation(), execution_preconditions);
         begin_replay(op, true/*recurrent*/, has_intermediate_fence);
         return true;
       }
@@ -3231,67 +3309,132 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::subsumed_by(const TraceViewSet &set, 
-                    bool allow_independent, FailedPrecondition *condition) const
+    bool TraceViewSet::subsumed_by(TraceViewSet &set, 
+        const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+        FailedPrecondition *condition) const
     //--------------------------------------------------------------------------
     {
+      bool subsumed = true;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              vit->second.begin(); it != vit->second.end(); ++it)
+      {
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+              vit->second.begin(); eit != vit->second.end(); ++eit)
         {
-          if (allow_independent)
+          // First check to see what fields and expressions are not dominated
+          LegionMap<LogicalView*,
+                    FieldMaskSet<IndexSpaceExpression> > non_dominated;
+          set.dominates(vit->first, eit->first, eit->second, non_dominated);
+          if (non_dominated.empty())
+            continue;
+          // For all the non-dominated fields and expressions we need to
+          // check to see if they are dirty or not. If there are any dirty
+          // expression-fields that are not dominated then set is no longer
+          // subsumed. If the non-dominated fields are not dirty, then it's
+          // ok for them to not be subsumed as that means they are just
+          // read-only and any additional copies in the postconditions.
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator dit =
+                non_dominated.begin(); dit != non_dominated.end(); /*nothing*/)
           {
-            // If we're allowing independent views, that means the set
-            // does not need to dominate the view as long as there are no
-            // views in the set that overlap logically with the test view
-            // This allows us to handle the read-only precondition case
-            // where we have read-only views that show up in the preconditions
-            // but do not appear logically anywhere in the postconditions
-            LegionMap<LogicalView*,
-                      FieldMaskSet<IndexSpaceExpression> > non_dominated;
-            set.dominates(vit->first, it->first, it->second, non_dominated);
-            for (LegionMap<LogicalView*,
-                  FieldMaskSet<IndexSpaceExpression> >::const_iterator dit =
-                  non_dominated.begin(); dit != non_dominated.end(); dit++)
+            FieldMaskSet<IndexSpaceExpression> to_add;
+            std::vector<IndexSpaceExpression*> to_delete;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator nit =
+                  dit->second.begin(); nit != dit->second.end(); nit++)
             {
-              for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
-                    dit->second.begin(); nit != dit->second.end(); nit++)
+              // Check to see if it interferes with the dirty expressions
+              if (nit->second * unique_dirty_exprs.get_valid_mask())
+                continue;
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    unique_dirty_exprs.begin(); it != 
+                    unique_dirty_exprs.end(); it++)
               {
-                // If all the fields are independent from anything that was
-                // written in the postcondition then we know this is a
-                // read-only precondition that does not need to be subsumed
-                FieldMask mask = nit->second;
-                set.filter_independent_fields(nit->first, mask);
-                if (!mask)
+                const FieldMask overlap = nit->second & it->second;
+                if (!overlap)
                   continue;
+                IndexSpaceExpression *expr_overlap = 
+                  forest->intersect_index_spaces(nit->first, it->first);
+                if (expr_overlap->is_empty())
+                  continue;
+                // These are dirty expr-fields which are not subsumed
+                subsumed = false;
                 if (condition != NULL)
                 {
                   condition->view = vit->first;
-                  condition->expr = nit->first;
-                  condition->mask = mask;
+                  condition->expr = expr_overlap;
+                  condition->mask = overlap;
                 }
-                return false;
+                if (expr_overlap->get_volume() < nit->first->get_volume())
+                {
+                  // Not everything is dominated so we need to record it
+                  IndexSpaceExpression *non_dirty =
+                    forest->subtract_index_spaces(nit->first, it->first);
+                  to_add.insert(non_dirty, overlap);
+                }
+                nit.filter(overlap);
+                if (!nit->second)
+                {
+                  to_delete.push_back(nit->first);
+                  break;
+                }
               }
             }
-          }
-          else
-          {
-            FieldMask mask = it->second;
-            if (!set.dominates(vit->first, it->first, mask))
+            // Update the non-dominated expressions
+            for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
             {
-              if (condition != NULL)
+              if (to_add.find(*it) != to_add.end())
+                continue;
+              dit->second.erase(*it);
+            }
+            if (!to_add.empty())
+            {
+              if (!dit->second.empty())
               {
-                condition->view = vit->first;
-                condition->expr = it->first;
-                condition->mask = mask;
+                for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                      to_add.begin(); it != to_add.end(); it++)
+                  dit->second.insert(it->first, it->second);
               }
-              return false;
+              else
+                dit->second.swap(to_add);
+            }
+            if (dit->second.empty())
+            {
+              LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator 
+                  delete_it = dit++;
+              non_dominated.erase(delete_it);
+            }
+            else
+              dit++;
+          }
+          // If there are any remanining non-dominated fields then we
+          // add them to the postconditions because views that are both
+          // non-dirty and non-dominated need to be in the postconditions
+          // so we don't invalidate them when we do the overwriting
+          for (LegionMap<LogicalView*,
+                FieldMaskSet<IndexSpaceExpression> >::iterator dit =
+                non_dominated.begin(); dit != non_dominated.end(); dit++)
+          {
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator nit =
+                  dit->second.begin(); nit != dit->second.end(); nit++)
+            {
+              // This is a small optimization to see if there are any
+              // fields which are independent for this view against all
+              // the other views in the postcondition set. If there are
+              // then we don't need to record this view at all since 
+              // there won't be any postcondition to overwrite it.
+              FieldMask mask = nit->second;
+              set.filter_independent_fields(nit->first, mask);
+              if (!mask)
+                continue;
+              set.insert(dit->first, nit->first, mask);
             }
           }
         }
-
-      return true;
+      }
+      return subsumed;
     }
 
     //--------------------------------------------------------------------------
@@ -4625,6 +4768,21 @@ namespace Legion {
         postconditions[idx]->apply_postconditions(op, idx, applied_events);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::invalidate_equivalence_sets(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            preconditions.begin(); it != preconditions.end(); it++)
+        (*it)->invalidate_equivalence_sets();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            anticonditions.begin(); it != anticonditions.end(); it++)
+        (*it)->invalidate_equivalence_sets();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            postconditions.begin(); it != postconditions.end(); it++)
+        (*it)->invalidate_equivalence_sets();
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions(ReplTraceReplayOp *op,
@@ -5011,15 +5169,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::receive_trace_conditions(TraceViewSet *previews,
-                       TraceViewSet *antiviews, TraceViewSet *postviews,
-                       unsigned parent_req_index, RegionTreeID tree_id,
-                       std::atomic<unsigned> *result)
+                   TraceViewSet *antiviews, TraceViewSet *postviews,
+                   const FieldMaskSet<IndexSpaceExpression> &unique_dirty_exprs,
+                   unsigned parent_req_index, RegionTreeID tree_id,
+                   std::atomic<unsigned> *result)
     //--------------------------------------------------------------------------
     {
       // First check to see if these conditions are idempotent or not  
       TraceViewSet::FailedPrecondition fail;
       if ((previews != NULL) && (postviews != NULL) &&
-          !previews->subsumed_by(*postviews, true/*allow independent*/, &fail))
+          !previews->subsumed_by(*postviews, unique_dirty_exprs, &fail))
       {
         unsigned initial = IDEMPOTENT;
         if (result->compare_exchange_strong(initial,
@@ -5165,13 +5324,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::release_instance_references(void) const
+    void PhysicalTemplate::release_instance_references(
+                                std::set<RtEvent> &map_applied_conditions) const
     //--------------------------------------------------------------------------
     {
-      // No need to check for deletions, we stil hold gc references
       for (std::vector<PhysicalManager*>::const_iterator it =
             all_instances.begin(); it != all_instances.end(); it++)
+      {
+        // Record the last replay completion event as a user
+        // Note the map_applied_conditions are a formality here since we
+        // know that we're still holding a valid reference when we do this
+        // call so all the work of this operation should be local and no
+        // messages should end up being sent
+        (*it)->record_instance_user(replay_complete, map_applied_conditions);
+        // No need to check for deletions, we stil hold gc references
         (*it)->remove_base_valid_ref(TRACE_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8056,7 +8224,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finish_replay(std::set<ApEvent> &postconditions)
+    void PhysicalTemplate::finish_replay(FenceOp *fence,
+                                         std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
       if (remaining_replays.load() > 0)
@@ -8085,6 +8254,7 @@ namespace Legion {
       if (last_fence != NULL)
         postconditions.insert(events[last_fence->complete]);
       operations.clear();
+      replay_complete = fence->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
@@ -9712,11 +9882,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::finish_replay(
+    void ShardedPhysicalTemplate::finish_replay(FenceOp *fence,
                                               std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
-      PhysicalTemplate::finish_replay(postconditions);
+      PhysicalTemplate::finish_replay(fence, postconditions);
       // Also need to do any local frontiers that we have here as well
       for (std::map<unsigned,ApBarrier>::const_iterator it = 
             local_frontiers.begin(); it != local_frontiers.end(); it++)

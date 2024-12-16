@@ -819,15 +819,15 @@ namespace Legion {
           const RegionRequirement &req = regions[*it];
           if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
             continue;
-          if (IS_WRITE(req))
+          if (!IS_WRITE(req))
+            check_collective_regions.push_back(*it);
+          else if (!IS_COLLECTIVE(req))
             REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
                 "Ignoring request by mapper %s to check for collective usage "
                 "for region requirement %d of task %s (UID %lld) because "
                 "region requirement has writing privileges.",
                 mapper->get_mapper_name(), *it, 
                 get_task_name(), unique_op_id)
-          else
-            check_collective_regions.push_back(*it);
         }
         if (!check_collective_regions.empty())
         {
@@ -1599,7 +1599,8 @@ namespace Legion {
 #endif
             // Get the interference kind and report it if it is bad
             RegionUsage usage2(logical_regions[indexes[j]]);
-            DependenceType dtype = check_dependence_type<false>(usage1, usage2);
+            DependenceType dtype = 
+              check_dependence_type<false,false>(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
             // There is a special case here for concurrent tasks with both
@@ -3614,6 +3615,9 @@ namespace Legion {
     InnerContext* SingleTask::create_implicit_context(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(output_regions.empty());
+#endif
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), false/*is inner*/, regions, output_regions,
           parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
@@ -4600,10 +4604,11 @@ namespace Legion {
         Provenance *provenance = get_provenance();
         if (provenance != NULL)
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
-              "Task %s (UID %lld, provenance: %s) used a task "
+              "Task %s (UID %lld, provenance: %.*s) used a task "
               "variant with a maximum return size of %zd but "
               "returned a result of %zd bytes.",
-              get_task_name(), get_unique_id(), provenance->human_str(),
+              get_task_name(), get_unique_id(), int(provenance->human.length()),
+              provenance->human.data(),
               var_impl->return_type_size, instance->size)
         else
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
@@ -4626,9 +4631,9 @@ namespace Legion {
       // If we haven't computed our virtual mapping information
       // yet (e.g. because we origin mapped) then we have to
       // do that now
-      if (virtual_mapped.size() != regions.size())
+      if (virtual_mapped.empty())
       {
-        virtual_mapped.resize(regions.size());
+        virtual_mapped.resize(regions.size(), false);
         for (unsigned idx = 0; idx < regions.size(); idx++)
           virtual_mapped[idx] = physical_instances[idx].is_virtual_mapping();
       }
@@ -5006,7 +5011,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool SingleTask::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8287,6 +8292,12 @@ namespace Legion {
                              shard_id, get_unique_id());
       if (!leaf_task)
       {
+#ifdef DEBUG_LEGION
+        // Should have checked that we don't have any output regions here
+        assert(output_regions.empty());
+        assert(virtual_mapped.size() == regions.size());
+        assert(parent_req_indexes.size() == regions.size());
+#endif
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
@@ -10165,7 +10176,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool IndexTask::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
       const OpProfilingResponse *task_prof =

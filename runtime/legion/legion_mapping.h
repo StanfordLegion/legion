@@ -67,6 +67,7 @@ namespace Legion {
       FieldSpace get_field_space(void) const;
       RegionTreeID get_tree_id(void) const;
       LayoutConstraintID get_layout_id(void) const;
+      PointerConstraint get_pointer_constraint(void) const;
     public:
       // See if our instance still exists or if it has been
       // garbage collected, this is just a sample, using the
@@ -2020,6 +2021,13 @@ namespace Legion {
       bool is_reentrant(MapperContext ctx) const;
       void enable_reentrant(MapperContext ctx) const;
       void disable_reentrant(MapperContext ctx) const;
+    public:
+      //------------------------------------------------------------------------
+      // These two methods allow mappers to define their own profile ranges
+      // inside of the profiler. Each start call must be matched with a 
+      // corresponding stop call inside of the same mapper context.
+      void start_profiling_range(MapperContext ctx) const;
+      void stop_profiling_range(MapperContext ctx,const char *provenance) const;
     public:
       //------------------------------------------------------------------------
       // Methods for updating mappable data 
