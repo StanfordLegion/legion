@@ -57,6 +57,17 @@
 #include <sys/types.h>
 #endif
 
+// include leak sanitizer interface if necessary for __lsan_ignore_object
+#ifdef __SANITIZE_ADDRESS__
+#if __SANITIZE_ADDRESS__
+#include <sanitizer/lsan_interface.h>
+#endif
+#elif defined(__has_feature)
+#if __has_feature(leak_sanitizer)
+#include <sanitizer/lsan_interface.h>
+#endif
+#endif
+
 // for cpu resource discovery
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
 #include <sys/sysinfo.h>
@@ -1423,7 +1434,11 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
             local_argc = new_argc;
             local_argv = new_argv;
             // We intentionally leak this allocation so tell leak sanitizer
-#if defined(REALM_COMPILER_IS_GCC) || defined(REALM_COMPILER_IS_CLANG)
+#ifdef __SANITIZE_ADDRESS__
+#if __SANITIZE_ADDRESS__
+            __lsan_ignore_object(new_argv);
+#endif
+#elif defined(__has_feature)
 #if __has_feature(leak_sanitizer)
             __lsan_ignore_object(new_argv);
 #endif
