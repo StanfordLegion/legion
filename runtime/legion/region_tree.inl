@@ -3026,10 +3026,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(domain.exists());
 #endif
-      const DomainT<DIM,T> realm_space = domain;
+      DomainT<DIM,T> realm_space = domain;
       if (!take_ownership && !realm_space.dense())
       {
-        ApEvent added(realm_index_space.sparsity.add_reference());
+        ApEvent added(realm_space.sparsity.add_reference());
         if (added.exists())
         {
           if (ready.exists())
