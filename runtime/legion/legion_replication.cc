@@ -990,8 +990,11 @@ namespace Legion {
         const RegionRequirement &req = this->get_requirement(region_idx);
         std::vector<DomainPoint> previous_index_task_points;
 
+        Domain index_domain;
+        finder->second.launch_space->get_domain(index_domain);
+
         this->get_points(req, finder->second.projection,
-            lr, finder->second.index_domain,
+            lr, index_domain,
             previous_index_task_points);
 
         if (previous_index_task_points.size() > 1)
@@ -1003,7 +1006,7 @@ namespace Legion {
         // find shard of the point
         const ShardID prev_shard =
            finder->second.sharding->find_owner(previous_index_task_points[0],
-              finder->second.index_domain);
+              index_domain);
 
 #ifdef LEGION_SPY
         LegionSpy::log_mapping_point_wise_dependence(

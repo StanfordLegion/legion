@@ -4264,7 +4264,6 @@ namespace Legion {
         Domain index_domain, IndexSpaceNode *launch_space)
     //--------------------------------------------------------------------------
     {
-      //assert (index_domain != Domain::NO_DOMAIN);
       if ((this->trace != NULL) && this->trace->is_recording())
       {
         this->trace->set_prev_point_wise_user(prev_op, prev_gen,
