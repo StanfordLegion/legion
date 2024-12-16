@@ -1896,7 +1896,6 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   }
   profiler_lock.unlock();
   // First time seeing this backtrace so capture the symbols
-  bt.lookup_symbols();
   std::stringstream ss;
   ss << bt;
   const std::string str = ss.str();

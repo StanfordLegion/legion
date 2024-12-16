@@ -24,15 +24,17 @@
 #include <alloca.h>
 #endif
 #include <assert.h>
-#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #ifdef REALM_USE_CPPTRACE
 #include <cpptrace/cpptrace.hpp>
-#endif /* REALM_USE_CPPTRACE */
+#else
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#include <sstream>
 #include <execinfo.h>
 #endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD) */
 #ifdef REALM_HAVE_CXXABI_H
 #include <cxxabi.h>
 #endif
+#endif /* REALM_USE_CPPTRACE */
 #include <iomanip>
 
 #ifdef ERROR_CANCELLED
@@ -51,15 +53,15 @@ namespace Realm {
   Backtrace::~Backtrace(void)
   {}
 
-  Backtrace::Backtrace(const Backtrace& copy_from)
-    : pc_hash(copy_from.pc_hash), pcs(copy_from.pcs), symbols(copy_from.symbols)
+  Backtrace::Backtrace(const Backtrace &copy_from)
+    : pc_hash(copy_from.pc_hash)
+    , pcs(copy_from.pcs)
   {}
     
   Backtrace& Backtrace::operator=(const Backtrace& copy_from)
   {
     pc_hash = copy_from.pc_hash;
     pcs = copy_from.pcs;
-    symbols = copy_from.symbols;
     return *this;
   }
 
@@ -89,6 +91,12 @@ namespace Realm {
     return pcs.empty();
   }
 
+  size_t Backtrace::size(void) const { return pcs.size(); }
+
+  std::vector<uintptr_t> Backtrace::get_pcs(void) const { return pcs; }
+
+  const uintptr_t &Backtrace::operator[](size_t index) const { return pcs.at(index); }
+
   // attempts to prune this backtrace by removing the frames from the other one
   bool Backtrace::prune(const Backtrace &other)
   {
@@ -101,10 +109,8 @@ namespace Realm {
 	  break;
 	}
       if(match) {
-	pcs.resize(i);
-	if(!symbols.empty())
-	  symbols.resize(i);
-	// recompute the hash too
+        pcs.resize(i);
+        // recompute the hash too
         pc_hash = compute_hash();
 	return true;
       }
@@ -164,24 +170,19 @@ namespace Realm {
 
 #endif /* REALM_USE_CPPTRACE */
 
-    symbols.clear();
-
     // recompute the hash too
     pc_hash = compute_hash();
   }
 
-  // attempts to map the pointers in the back trace to symbol names - this can be
-  //   more expensive
-  void Backtrace::lookup_symbols(void)
+  // attempts to map the pointers in the back trace to symbol names and print them out
+  // this can be more expensive than capture and print the raw trace
+  void Backtrace::print_symbols(std::vector<std::string> &symbols) const
   {
-    // have we already done the lookup?
-    if(!symbols.empty()) return;
-
     symbols.reserve(pcs.size());
 
 #ifdef REALM_USE_CPPTRACE
     cpptrace::raw_trace raw_trace;
-    raw_trace.frames = std::move(pcs);
+    raw_trace.frames = pcs;
     for(const cpptrace::stacktrace_frame &frame : raw_trace.resolve().frames) {
       // the resolved trace has more frames than the raw trace,
       // so we have to use push_back
@@ -189,38 +190,18 @@ namespace Realm {
       // always returns something
       symbols.push_back(frame.to_string(true));
     }
-    pcs = std::move(raw_trace.frames);
 #else
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    for(size_t i = 0; i < pcs.size(); i++) {
-      // try backtrace_symbols() first
-      char **s = backtrace_symbols((void * const *)&(pcs[i]), 1);
-      if(s) {
-        symbols.emplace_back(s[0]);
-        free(s);
-      } else {
-        symbols.emplace_back("unknown symbol");
-      }
-    }
-#endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD) */
-#endif /* REALM_USE_CPPTRACE */
-  }
-
-  std::ostream& operator<<(std::ostream& os, const Backtrace& bt)
-  {
-    os << "stack trace: " << bt.symbols.size() << " frames" << std::endl;
-#ifdef REALM_USE_CPPTRACE
-    for(const std::string &sym : bt.symbols) {
-      os << sym << std::endl;
-    }
-#else
-    char *demangle_buffer = 0;
+    char *demangle_buffer = nullptr;
     size_t demangle_len = 0;
 
-    for(size_t i = 0; i < bt.pcs.size(); i++) {
-      os << "  [" << i << "] = ";
-      if(!bt.symbols.empty() && !bt.symbols[i].empty()) {
-	char *s = (char *)(bt.symbols[i].c_str());
+    for(size_t i = 0; i < pcs.size(); i++) {
+      std::stringstream ss;
+      ss << "  [" << i << "] = ";
+      // try backtrace_symbols() first
+      char **sym = backtrace_symbols((void *const *)&(pcs[i]), 1);
+      if(sym) {
+        char *s = sym[0];
         bool print_raw = true;
         char *lp = s;
 #ifdef REALM_HAVE_CXXABI_H
@@ -238,7 +219,7 @@ namespace Realm {
               demangle_buffer = result;
               char orig_lp = *lp;
               *lp = 0;
-              os << s << demangle_buffer << rp;
+              ss << s << demangle_buffer << rp;
               print_raw = false;
               *lp = orig_lp;
             }
@@ -246,22 +227,39 @@ namespace Realm {
         }
 #endif
         if(print_raw) {
-          os << bt.symbols[i];
+          ss << s;
         }
+        free(sym);
       } else {
-        os << std::hex << std::setfill('0') << std::setw(sizeof(uintptr_t)*2) << bt.pcs[i];
-        os << std::dec << std::setfill(' ');
+        ss << std::hex << std::setfill('0') << std::setw(sizeof(uintptr_t) * 2) << pcs[i];
+        ss << std::dec << " unknown symbol";
       }
-      os << std::endl;
+      symbols.push_back(ss.str());
     }
 
-    if(demangle_buffer)
+    if(demangle_buffer) {
       free(demangle_buffer);
+    }
+#endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) ||                          \
+          defined(REALM_ON_FREEBSD) */
 #endif /* REALM_USE_CPPTRACE */
-
-    return os;
   }
 
+  void Backtrace::print_symbols(std::ostream &os) const
+  {
+    std::vector<std::string> symbols;
+    print_symbols(symbols);
+    os << "stack trace: " << symbols.size() << " frames" << std::endl;
+    for(const std::string &sym : symbols) {
+      os << sym << std::endl;
+    }
+  }
+
+  std::ostream &operator<<(std::ostream &os, const Backtrace &bt)
+  {
+    bt.print_symbols(os);
+    return os;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -285,10 +283,10 @@ namespace Realm {
     if(!backtrace.empty() && 
        pmc.wants_measurement<ProfilingMeasurements::OperationBacktrace>()) {
       ProfilingMeasurements::OperationBacktrace b;
-      b.backtrace = backtrace;
+      b.pcs = backtrace.get_pcs();
       // there's a good chance the profiler is not on the same node, so look up symbols
       //  now
-      b.backtrace.lookup_symbols();
+      backtrace.print_symbols(b.symbols);
       pmc.add_measurement(b);
     }
   }

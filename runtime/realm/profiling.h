@@ -89,7 +89,8 @@ namespace Realm {
     struct OperationBacktrace {
       static const ProfilingMeasurementID ID = PMID_OP_BACKTRACE;
 
-      Backtrace backtrace;
+      std::vector<uintptr_t> pcs;
+      std::vector<std::string> symbols;
     };
 
     struct OperationTimeline {
