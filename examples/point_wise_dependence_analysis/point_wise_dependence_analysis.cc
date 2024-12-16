@@ -29,13 +29,13 @@ using namespace Legion::Mapping;
 
 enum {
   POINT_WISE_LOGICAL_ANALYSIS_MAPPER_ID = 1,
-	EVEN_SHARDING_FN,
-	ODD_SHARDING_FN,
+  EVEN_SHARDING_FN,
+  ODD_SHARDING_FN,
 };
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
-  INTRA_IS_ORDERING_TASK_ID,
+  POINTWISE_ANALYSABLE_TASK_ID,
 };
 
 enum FieldIDs {
@@ -43,92 +43,91 @@ enum FieldIDs {
 };
 
 //--------------------------------------------------------------------------
-template<int DIM>
+  template<int DIM>
 size_t linearize_point(
-			const Realm::IndexSpace<DIM,coord_t> &is,
-			const Realm::Point<DIM,coord_t> &point)
-//--------------------------------------------------------------------------
+    const Realm::IndexSpace<DIM,coord_t> &is,
+    const Realm::Point<DIM,coord_t> &point)
+  //--------------------------------------------------------------------------
 {
-	if (is.dense())
-	{
-		Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
-		return linearizer.linearize(point);
-	}
-	else
-	{
-		size_t offset = 0;
-		for (Realm::IndexSpaceIterator<DIM,coord_t> it(is); it.valid; it.step())
-		{
-			if (it.rect.contains(point))
-			{
-				Realm::AffineLinearizedIndexSpace<DIM,coord_t> 
-					linearizer(Realm::IndexSpace<DIM,coord_t>(it.rect));
-				return offset + linearizer.linearize(point);
-			}
-			else
-				offset += it.rect.volume();
-		}
-		return offset;
-	}
+  if (is.dense())
+  {
+    Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
+    return linearizer.linearize(point);
+  }
+  else
+  {
+    size_t offset = 0;
+    for (Realm::IndexSpaceIterator<DIM,coord_t> it(is); it.valid; it.step())
+    {
+      if (it.rect.contains(point))
+      {
+        Realm::AffineLinearizedIndexSpace<DIM,coord_t>
+          linearizer(Realm::IndexSpace<DIM,coord_t>(it.rect));
+        return offset + linearizer.linearize(point);
+      }
+      else
+        offset += it.rect.volume();
+    }
+    return offset;
+  }
 }
 
 
 class EvenShardingFunctor: public ShardingFunctor
 {
-public:
-  virtual ShardID shard(const DomainPoint &point,
-                        const Domain &full_space,
-                        const size_t total_shards)
-  {
+  public:
+    virtual ShardID shard(const DomainPoint &point,
+        const Domain &full_space,
+        const size_t total_shards)
+    {
 #ifdef DEBUG_LEGION
-		assert(point.get_dim() == full_space.get_dim());
+      assert(point.get_dim() == full_space.get_dim());
 #endif
-		switch (point.get_dim())
-		{
+      switch (point.get_dim())
+      {
 #define DIMFUNC(DIM) \
-			case DIM: \
-				{ \
-					const DomainT<DIM,coord_t> is = full_space; \
-					const Point<DIM,coord_t> p1 = point; \
-					return (linearize_point<DIM>(is, p1) % total_shards); \
-				}
-			LEGION_FOREACH_N(DIMFUNC)
+        case DIM: \
+                  { \
+                    const DomainT<DIM,coord_t> is = full_space; \
+                    const Point<DIM,coord_t> p1 = point; \
+                    return (linearize_point<DIM>(is, p1) % total_shards); \
+                  }
+        LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-			default:
-				assert(false);
-		}
-		return 0;
-  }
+        default:
+          assert(false);
+      }
+      return 0;
+    }
 };
 
 class OddShardingFunctor: public ShardingFunctor
 {
-public:
-  virtual ShardID shard(const DomainPoint &point,
-                        const Domain &full_space,
-                        const size_t total_shards)
-  {
+  public:
+    virtual ShardID shard(const DomainPoint &point,
+        const Domain &full_space,
+        const size_t total_shards)
+    {
 #ifdef DEBUG_LEGION
-		assert(point.get_dim() == full_space.get_dim());
+      assert(point.get_dim() == full_space.get_dim());
 #endif
-		switch (point.get_dim())
-		{
+      switch (point.get_dim())
+      {
 #define DIMFUNC(DIM) \
-			case DIM: \
-				{ \
-					const DomainT<DIM,coord_t> is = full_space; \
-					const Point<DIM,coord_t> p1 = point; \
-					return ((linearize_point<DIM>(is, p1) + 1) % total_shards); \
-				}
-			LEGION_FOREACH_N(DIMFUNC)
+        case DIM: \
+                  { \
+                    const DomainT<DIM,coord_t> is = full_space; \
+                    const Point<DIM,coord_t> p1 = point; \
+                    return ((linearize_point<DIM>(is, p1) + 1) % total_shards); \
+                  }
+        LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-			default:
-				assert(false);
-		}
-		return 0;
-  }
+        default:
+          assert(false);
+      }
+      return 0;
+    }
 };
-
 
 // Select Task to map
 class PointWiseLogicalAnalysisMapper: public DefaultMapper {
@@ -159,11 +158,11 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
     }
   public:
     using DefaultMapper::select_sharding_functor;
-		void select_sharding_functor(const Mapping::MapperContext       ctx,
-																 const Task&                        task,
-																 const SelectShardingFunctorInput&  input,
-																			 SelectShardingFunctorOutput& output)
-		{
+    void select_sharding_functor(const Mapping::MapperContext       ctx,
+        const Task&                        task,
+        const SelectShardingFunctorInput&  input,
+        SelectShardingFunctorOutput& output)
+    {
       if (task.get_context_index() % 2 == 0)
       {
         output.chosen_functor = EVEN_SHARDING_FN;
@@ -174,50 +173,20 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
         output.chosen_functor = ODD_SHARDING_FN;
         printf("Odd shard %d\n", node_id);
       }
-		}
+    }
 
     void select_tasks_to_map(const MapperContext          ctx,
-                             const SelectMappingInput&    input,
-                                   SelectMappingOutput&   output)
+        const SelectMappingInput&    input,
+        SelectMappingOutput&   output)
     {
       DefaultMapper::select_tasks_to_map(ctx, input, output);
       return;
-      /*unsigned count = 0;
-      for (std::list<const Task*>::const_iterator it =
-            input.ready_tasks.begin(); (count < max_schedule_count) &&
-            (it != input.ready_tasks.end()); it++)
-      {
-        if (!(*it)->is_index_space)
-        {
-          output.map_tasks.insert(*it);
-          count ++;
-        }
-        else
-        {
-          Domain slice_domain = (*it)->get_slice_domain();
-          if (slice_domain.rect_data[0] == current_point)
-          {
-            output.map_tasks.insert(*it);
-            count ++;
-            if (++current_point_count == total_point)
-            {
-              current_point_count = 0;
-              current_point++;
-            }
-          }
-        }
-      }
-      if (count == 0)
-      {
-        select_tasks_to_map_event = this->runtime->create_mapper_event(ctx);
-        output.deferral_event = select_tasks_to_map_event;
-      }*/
     }
 
     virtual void slice_task(const MapperContext ctx,
-                            const Task& task,
-                            const SliceTaskInput& input,
-                                  SliceTaskOutput& output)
+        const Task& task,
+        const SliceTaskInput& input,
+        SliceTaskOutput& output)
     {
       output.slices.resize(input.domain.get_volume());
       unsigned idx = 0;
@@ -235,8 +204,8 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
     }
 
     static void register_my_mapper(Machine m,
-                                   Runtime *rt,
-                                   const std::set<Processor> &local_procs)
+        Runtime *rt,
+        const std::set<Processor> &local_procs)
     {
       for (auto proc: local_procs) {
         rt->replace_default_mapper(new PointWiseLogicalAnalysisMapper(m, rt, proc), proc);
@@ -245,8 +214,8 @@ class PointWiseLogicalAnalysisMapper: public DefaultMapper {
 };
 
 void top_level_task(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx, Runtime *runtime)
+    const std::vector<PhysicalRegion> &regions,
+    Context ctx, Runtime *runtime)
 {
   int num_points = 4;
   int num_iterations = ITERATIONS;
@@ -285,33 +254,29 @@ void top_level_task(const Task *task,
 
   ArgumentMap arg_map;
 
-  IndexLauncher intra_is_ordering_task_launcher(INTRA_IS_ORDERING_TASK_ID, launch_is,
-                                TaskArgument(NULL, 0), arg_map);
-  intra_is_ordering_task_launcher.add_region_requirement(
+  IndexLauncher point_wise_analysable_task_launcher(POINTWISE_ANALYSABLE_TASK_ID,
+      launch_is, TaskArgument(NULL, 0), arg_map);
+  point_wise_analysable_task_launcher.add_region_requirement(
       RegionRequirement(lp, 0/*projection ID*/,
-                        LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
-  intra_is_ordering_task_launcher.add_field(0, FID_DATA);
+        LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
+  point_wise_analysable_task_launcher.add_field(0, FID_DATA);
 
   for (int idx = 0; idx < num_iterations; idx++)
   {
-    runtime->execute_index_space(ctx, intra_is_ordering_task_launcher);
-    if(idx == 0) usleep(100000);
+    runtime->execute_index_space(ctx, point_wise_analysable_task_launcher);
   }
-
   runtime->destroy_index_space(ctx, launch_is);
 }
 
-void intra_is_ordering_task(const Task *task,
-                       const std::vector<PhysicalRegion> &regions,
-                       Context ctx, Runtime *runtime)
+void point_wise_analysable_task(const Task *task,
+    const std::vector<PhysicalRegion> &regions,
+    Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
   const Point<1> point = task->index_point;
-  if(point.x() == 0) usleep(1000);
-  //printf("Executing task %lld %d\n", point.x(), ctx->runtime->address_space);
 }
 
 int main(int argc, char **argv)
@@ -326,18 +291,18 @@ int main(int argc, char **argv)
   }
 
   {
-    TaskVariantRegistrar registrar(INTRA_IS_ORDERING_TASK_ID, "intra_is_ordering_task");
+    TaskVariantRegistrar registrar(POINTWISE_ANALYSABLE_TASK_ID, "point_wise_analysable_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<intra_is_ordering_task>(registrar, "intra_is_ordering_task");
+    Runtime::preregister_task_variant<point_wise_analysable_task>(registrar, "point_wise_analysable_task");
   }
 
-	Runtime::preregister_sharding_functor(EVEN_SHARDING_FN,
-                                        new EvenShardingFunctor());
-	Runtime::preregister_sharding_functor(ODD_SHARDING_FN,
-                                        new OddShardingFunctor());
+  Runtime::preregister_sharding_functor(EVEN_SHARDING_FN,
+      new EvenShardingFunctor());
+  Runtime::preregister_sharding_functor(ODD_SHARDING_FN,
+      new OddShardingFunctor());
 
-	Runtime::add_registration_callback(PointWiseLogicalAnalysisMapper::register_my_mapper);
+  Runtime::add_registration_callback(PointWiseLogicalAnalysisMapper::register_my_mapper);
 
   return Runtime::start(argc, argv);
 }
