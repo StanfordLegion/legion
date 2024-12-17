@@ -522,9 +522,7 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
     //  limit
     bool required = (N == 1);
     std::vector<Rect<N,T> > covering;
-    if(!test_case("test 4",
-		  is, vol, input_rects, target, -1,
-		  required, &covering)) {
+    if(!test_case("test 4", is, vol, input_rects, target, -1, required, &covering)) {
       is.destroy();
       return false;
     }
@@ -546,9 +544,7 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
     int max_overhead = ((target >= num_clumps) ? clump_overhead : -1);
     if(N > 1) max_overhead *= 2;
     std::vector<Rect<N,T> > covering;
-    if(!test_case("test 5",
-		  is, vol, input_rects, target, max_overhead,
-		  required, &covering)) {
+    if(!test_case("test 5", is, vol, input_rects, target, max_overhead, required, &covering)) {
       is.destroy();
       return false;
     }
@@ -567,9 +563,10 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
 
     // if we've got enough input rects, aim for something in between 2 and
     //  all
-    if(input_rects.size() > 5)
+    if(input_rects.size() > 5) {
       is.compute_covering((input_rects.size() + 2) >> 1, -1, covering2);
-    
+    }
+
     if(!test_copies(m, is, input_rects, covering1, covering2)) {
       is.destroy();
       return false;

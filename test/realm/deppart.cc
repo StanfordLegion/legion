@@ -1361,7 +1361,7 @@ public:
     for(unsigned idx = 0; idx < p_ghost.size(); idx++) {
       p_ghost[idx].destroy();
     }
-    for (unsigned idx = 0; idx < p_edges.size(); idx++) {
+    for(unsigned idx = 0; idx < p_edges.size(); idx++) {
       p_edges[idx].destroy();
     }
 
@@ -1949,7 +1949,7 @@ public:
     for(unsigned idx = 0; idx < p_points.size(); idx++) {
       p_points[idx].destroy();
     }
-    
+
     return errors;
   }
 };
@@ -2409,9 +2409,7 @@ RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::RandomAffineTest(
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
 RandomAffineTest<N1,T1,N2,T2,FT,TRANSFORM>::~RandomAffineTest(void)
-{
-  
-}
+{}
 
 template <int N1, typename T1, int N2, typename T2, typename FT,
           typename TRANSFORM>
@@ -2655,7 +2653,7 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
     }
   }
   for(unsigned i = 0; i < sparse_images.size(); i++) {
-    for (unsigned j = 0; j < sparse_images[i].size(); j++) {
+    for(unsigned j = 0; j < sparse_images[i].size(); j++) {
       sparse_images[i][j].destroy();
     }
   }
@@ -2665,7 +2663,7 @@ int RandomAffineTest<N1, T1, N2, T2, FT, TRANSFORM>::check_partitioning(void) {
     }
   }
   for(unsigned i = 0; i < sparse_preimages.size(); i++) {
-    for (unsigned j = 0; j < sparse_preimages[i].size(); j++) {
+    for(unsigned j = 0; j < sparse_preimages[i].size(); j++) {
       sparse_preimages[i][j].destroy();
     }
   }
