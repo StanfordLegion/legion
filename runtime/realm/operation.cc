@@ -202,8 +202,9 @@ namespace Realm {
 
   void Operation::mark_gpu_work_start()
   {
-    if(wants_gpu_timeline)
-      timeline_gpu.record_start_time();
+    if(wants_gpu_timeline) {
+      add_gpu_work_start(Clock::current_time_in_nanoseconds());
+    }
   }
 
   void Operation::add_gpu_work_start(uint64_t timestamp)

@@ -2454,7 +2454,6 @@ namespace Legion {
           return finder->second;
       }
       // First time seeing this backtrace so capture the symbols
-      bt.lookup_symbols();
       std::stringstream ss;
       ss << bt;
       const std::string str = ss.str();
