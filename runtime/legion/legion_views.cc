@@ -4517,10 +4517,16 @@ namespace Legion {
               runtime->send_collective_view_make_valid(*it, rez);
           }
         }
-        for (std::vector<IndividualView*>::const_iterator it =
-              local_views.begin(); it != local_views.end(); it++)
-          (*it)->add_nested_valid_ref(did);
-        add_base_gc_ref(INTERNAL_VALID_REF);
+        // Only need to add the references if we're in the not-valid state
+        // as if we are in the pending invalid state then we haven't actually
+        // remove the reference yet
+        if (valid_state == NOT_VALID_STATE)
+        {
+          for (std::vector<IndividualView*>::const_iterator it =
+                local_views.begin(); it != local_views.end(); it++)
+            (*it)->add_nested_valid_ref(did);
+          add_base_gc_ref(INTERNAL_VALID_REF);
+        }
         valid_state = FULL_VALID_STATE;
       }
     }
