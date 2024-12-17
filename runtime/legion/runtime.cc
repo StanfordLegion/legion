@@ -34912,7 +34912,6 @@ namespace Legion {
       {
         Realm::Backtrace bt;
         bt.capture_backtrace();
-        bt.lookup_symbols();
         log_run.warning() << bt;
       }
 #ifndef LEGION_WARNINGS_FATAL

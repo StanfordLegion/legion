@@ -53,7 +53,6 @@ list(APPEND REALM_SRC
   realm/barrier_impl.h        realm/barrier_impl.cc
   realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
-  realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
