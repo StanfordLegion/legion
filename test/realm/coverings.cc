@@ -544,7 +544,8 @@ bool test_input(Memory m, const std::vector<Rect<N,T> >& input_rects,
     int max_overhead = ((target >= num_clumps) ? clump_overhead : -1);
     if(N > 1) max_overhead *= 2;
     std::vector<Rect<N,T> > covering;
-    if(!test_case("test 5", is, vol, input_rects, target, max_overhead, required, &covering)) {
+    if(!test_case("test 5", is, vol, input_rects, target, max_overhead, required,
+                  &covering)) {
       is.destroy();
       return false;
     }
