@@ -1598,12 +1598,11 @@ namespace Legion {
       virtual void finalize_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
-      PhysicalInstance find_local_freed_hole(
-          size_t size, size_t &prev_size, RtEvent &ready);
+      PhysicalInstance find_local_freed_hole(size_t size, size_t &prev_size);
     private:
       TaskTreeCoordinates coordinates;
       std::map<size_t,
-        std::vector<std::pair<PhysicalInstance,RtEvent> > > freed_instances;
+        std::list<std::pair<PhysicalInstance,RtEvent> > > freed_instances;
       MemoryManager *const manager;
       const size_t max_freed_bytes;
       size_t freed_bytes;

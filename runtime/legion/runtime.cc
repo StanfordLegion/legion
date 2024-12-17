@@ -9776,11 +9776,9 @@ namespace Legion {
       // to use for this instance
       if (!freed_instances.empty())
       {
-        RtEvent ready;
         size_t previous_size = 0;
         Realm::InstanceLayoutGeneric *layout = NULL;
-        PhysicalInstance previous =
-          find_local_freed_hole(size, previous_size, ready);
+        PhysicalInstance previous = find_local_freed_hole(size, previous_size);
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a future instance
@@ -9820,8 +9818,7 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests, creator_uid,
                                                          unique_event);
           PhysicalInstance instance;
-          RtEvent use_event(
-              previous.redistrict(instance, layout, requests, ready));
+          RtEvent use_event(previous.redistrict(instance, layout, requests));
           if (allocator.succeeded())
           {
             size_t bytes_used = instance.get_layout()->bytes_used;
@@ -9837,7 +9834,7 @@ namespace Legion {
           }
           else
             manager->update_remaining_capacity(previous_size);
-          previous = find_local_freed_hole(size, previous_size, ready);
+          previous = find_local_freed_hole(size, previous_size);
         }
         if (layout != NULL)
           delete layout;
@@ -9850,9 +9847,9 @@ namespace Legion {
         // smaller than the size or we would have found a hole to use) and
         // then try again
         for (std::map<size_t,
-             std::vector<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
+             std::list<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
              fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::vector<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
                 it = fit->second.begin(); it != fit->second.end(); it++)
             manager->free_task_local_instance(it->first, it->second);
         freed_instances.clear();
@@ -9884,10 +9881,9 @@ namespace Legion {
       }
       if (!freed_instances.empty())
       {
-        RtEvent ready;
         size_t previous_size = 0;
         PhysicalInstance previous =
-          find_local_freed_hole(layout->bytes_used, previous_size, ready);
+          find_local_freed_hole(layout->bytes_used, previous_size);
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a new instance
@@ -9903,8 +9899,7 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests, creator_uid,
                                                          unique_event);
           PhysicalInstance instance;
-          use_event = RtEvent(
-              previous.redistrict(instance, layout, requests, ready));
+          use_event = RtEvent(previous.redistrict(instance, layout, requests));
           if (allocator.succeeded())
           {
             size_t bytes_used = instance.get_layout()->bytes_used;
@@ -9917,8 +9912,7 @@ namespace Legion {
           }
           else
             manager->update_remaining_capacity(previous_size);
-          previous =
-            find_local_freed_hole(layout->bytes_used, previous_size, ready);
+          previous = find_local_freed_hole(layout->bytes_used, previous_size);
         }
         // Try to do the allocation the normal way
         PhysicalInstance instance = manager->create_task_local_instance(
@@ -9930,9 +9924,9 @@ namespace Legion {
         // smaller than the size or we would have found a hole to use) and
         // then try again
         for (std::map<size_t,
-             std::vector<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
+             std::list<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
              fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::vector<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
                 it = fit->second.begin(); it != fit->second.end(); it++)
             manager->free_task_local_instance(it->first, it->second);
         freed_instances.clear();
@@ -9945,26 +9939,33 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance UnboundPool::find_local_freed_hole(size_t size,
-                                          size_t &previous_size, RtEvent &ready)
+                                                        size_t &previous_size)
     //--------------------------------------------------------------------------
     {
-      std::map<size_t,
-        std::vector<std::pair<PhysicalInstance,RtEvent> > >::iterator finder =
-          freed_instances.lower_bound(size);
-      if (finder == freed_instances.end())
-        return PhysicalInstance::NO_INST;
+      for (std::map<size_t,std::list<std::pair<PhysicalInstance,RtEvent> > >
+            ::iterator sit = freed_instances.lower_bound(size);
+            sit != freed_instances.end(); sit++)
+      {
 #ifdef DEBUG_LEGION
-      assert(!finder->second.empty());
-      assert(finder->first <= freed_bytes);
+        assert(!sit->second.empty());
+        assert(sit->first <= freed_bytes);
 #endif
-      PhysicalInstance result = finder->second.back().first;
-      ready = finder->second.back().second;
-      finder->second.pop_back();
-      freed_bytes -= finder->first;
-      previous_size = finder->first;
-      if (finder->second.empty())
-        freed_instances.erase(finder);
-      return result;
+        for (std::list<std::pair<PhysicalInstance,RtEvent> >::iterator it =
+              sit->second.begin(); it != sit->second.end(); it++)
+        {
+          // If the event hasn't triggered then skip it
+          if (!it->second.has_triggered())
+            continue;
+          PhysicalInstance result = it->first;
+          freed_bytes -= sit->first;
+          previous_size = sit->first;
+          sit->second.erase(it);
+          if (sit->second.empty())
+            freed_instances.erase(sit);
+          return result;
+        }
+      }
+      return PhysicalInstance::NO_INST;
     }
 
     //--------------------------------------------------------------------------
@@ -10011,7 +10012,7 @@ namespace Legion {
           // until we're back under the limit of bytes we can buffer
           while (!freed_instances.empty())
           {
-            std::map<size_t,std::vector<
+            std::map<size_t,std::list<
               std::pair<PhysicalInstance,RtEvent> > >::iterator it =
                 freed_instances.begin();
             while (!it->second.empty())
@@ -10048,10 +10049,10 @@ namespace Legion {
     {
       if (!released)
       {
-        for (std::map<size_t,std::vector<
+        for (std::map<size_t,std::list<
               std::pair<PhysicalInstance,RtEvent> > >::const_iterator fit =
               freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::vector<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
                 it = fit->second.begin(); it != fit->second.end(); it++)
             manager->free_task_local_instance(it->first, it->second);
         manager->release_unbound_pool();
