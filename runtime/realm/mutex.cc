@@ -89,7 +89,6 @@ namespace Realm {
         msg << " on scope(" << (cs->name ? cs->name : "") << "," << cs->object << ")";
       Backtrace bt;
       bt.capture_backtrace();
-      bt.lookup_symbols();
       msg << " at " << bt;
     }
     // wait a couple seconds so that threads in the guarded section hopefully
@@ -113,7 +112,6 @@ namespace Realm {
         msg << " on scope(" << (cs->name ? cs->name : "") << "," << cs->object << ")";
       Backtrace bt;
       bt.capture_backtrace();
-      bt.lookup_symbols();
       msg << " at " << bt;
     }
     // wait a couple seconds so that threads in the guarded section hopefully

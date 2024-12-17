@@ -231,7 +231,10 @@ void response_task(const void *args, size_t arglen,
 
   if(0&&pr.has_measurement<OperationBacktrace>()) {
     OperationBacktrace *op_backtrace = pr.get_measurement<OperationBacktrace>();
-    std::cout << "op backtrace = " << op_backtrace->backtrace;
+    std::cout << "op backtrace = ";
+    for(const std::string &sym : op_backtrace->symbols) {
+      std::cout << sym;
+    }
     delete op_backtrace;
   }
 
