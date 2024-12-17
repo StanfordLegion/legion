@@ -1281,8 +1281,10 @@ legion_index_partition_create_multi_domain_point_coloring(
                 subspaces, summary, no_reqs));                      \
           if (wait_on.exists())                                     \
             wait_on.wait();                                         \
-          summary = summary.tighten();                              \
-          domains[cit->first] = DomainT<DIM,coord_t>(summary);      \
+          DomainT<DIM,coord_t> tight = summary.tighten();           \
+          if (!summary.dense() && tight.dense())                    \
+            summary.destroy();                                      \
+          domains[cit->first] = DomainT<DIM,coord_t>(tight);        \
         }                                                           \
         break;                                                      \
       }
