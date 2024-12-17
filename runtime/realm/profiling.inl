@@ -87,7 +87,8 @@ namespace Realm {
     template <typename S>
     bool serdez(S& serdez, const OperationBacktrace& b)
     {
-      return (serdez & b.backtrace);
+      return ((serdez & b.pcs) &&
+              (serdez & b.symbols));
     }
 
 

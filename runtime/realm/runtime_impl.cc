@@ -3429,19 +3429,20 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       Backtrace bt;
       bt.capture_backtrace(1 /* skip this handler */);
-      bt.lookup_symbols();
       fflush(stdout);
       fflush(stderr);
       std::cout << std::flush;
       std::cerr << "Signal " << signal
 #ifdef REALM_ON_WINDOWS
-                << " received by process " << GetCurrentProcessId()
-                << " (thread " << GetCurrentThreadId()
+                << " received by process " << GetCurrentProcessId() << " (thread "
+                << GetCurrentThreadId()
 #else
-                << " received by process " << getpid()
-                << " (thread " << std::hex << uintptr_t(pthread_self())
+                << " received by process " << getpid() << " (thread " << std::hex
+                << uintptr_t(pthread_self())
 #endif
-                << std::dec << ") at: " << bt << std::flush;
+                << std::dec << ") at:" << std::endl;
+      std::cerr << bt;
+      std::cerr << std::flush;
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle
       //  their own deaths, and then exit
