@@ -14,7 +14,7 @@ variables:
   CCACHE_BASEDIR: $CI_PROJECT_DIR
   CCACHE_DIR: $CI_PROJECT_DIR/ccache
   USE_CCACHE: "1"
-  REALM_DEFAULT_ARGS: "-ll:enable_sparsity_refcount" # Check no sparsity maps are leaked
+  REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
 
 cache: &global_cache
   key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
@@ -433,7 +433,7 @@ before_script:
 
       # enable WAR for: https://github.com/kokkos/kokkos-kernels/issues/757
       # Keep the sparsity refcounting flag around when overwriting REALM_DEFAULT_ARGS
-      export REALM_DEFAULT_ARGS="-cuda:nongpusync 0 -ll:enable_sparsity_refcount"
+      export REALM_DEFAULT_ARGS="-cuda:nongpusync 0 -ll:report_sparsity_leaks"
 
       if [[ "$USE_CUDA" -eq 1 ]]; then
         # There are warnings when compiling kokkos_interop.cc, so disable WARN_AS_ERROR
