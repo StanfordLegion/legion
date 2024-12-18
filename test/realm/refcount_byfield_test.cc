@@ -134,7 +134,7 @@ int main(int argc, char **argv)
       .wait();
 
   ModuleConfig *core = Runtime::get_runtime().get_module_config("core");
-  assert(core->set_property("enable_sparsity_refcount", 1));
+  assert(core->set_property("report_sparsity_leaks", 1));
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
                     .only_kind(Processor::LOC_PROC)
