@@ -215,8 +215,7 @@ namespace Realm {
     , type_tag(0)
     , map_impl(0)
     , references(0)
-  {
-  }
+  {}
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
