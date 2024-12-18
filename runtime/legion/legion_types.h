@@ -2888,6 +2888,7 @@ namespace Legion {
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
+      void begin_mapper_call_wait(MappingCallInfo *call) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
       void record_event_trigger(LgEvent precondition) const;
@@ -3282,6 +3283,8 @@ namespace Legion {
         local_lock_list_copy->advise_sleep_entry(done);
         if (local_ctx != NULL)
           begin_context_wait(local_ctx, false/*from application*/); 
+        if (local_call != NULL)
+          begin_mapper_call_wait(local_call);
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();

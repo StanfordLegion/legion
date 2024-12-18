@@ -36,7 +36,7 @@ namespace Legion {
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), profiling_ranges(NULL),
-        start_time(0), reentrant(manager->initially_reentrant)
+        start_time(0), reentrant(manager->initially_reentrant), paused(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1083,15 +1083,6 @@ namespace Legion {
     void SerializingManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
-      if (executing_call != info)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
-                      "Invalid mapper context passed to mapper runtime "
-                      "call by mapper %s. Mapper contexts are only valid "
-                      "for the mapper call to which they are passed. They "
-                      "cannot be stored beyond the lifetime of the "
-                      "mapper call.", mapper->get_mapper_name())
 #ifdef DEBUG_LEGION
       assert(!pending_pause_call.load());
 #endif
@@ -1114,13 +1105,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SerializingManager::resume_mapper_call(MappingCallInfo *info,
-                                                RuntimeCallKind kind)
+    void SerializingManager::resume_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        implicit_profiler->record_runtime_call(kind, info->pause_time,
-            Realm::Clock::current_time_in_nanoseconds());
       // See if we are ready to be woken up
       RtEvent wait_on;
       {
@@ -1429,25 +1416,12 @@ namespace Legion {
     void ConcurrentManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (implicit_mapper_call != info)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
-                      "Invalid mapper context passed to mapper_rt "
-                      "call by mapper %s. Mapper contexts are only valid "
-                      "for the mapper call to which they are passed. They "
-                      "cannot be stored beyond the lifetime of the "
-                      "mapper call.", mapper->get_mapper_name())
-      if (profile_mapper)
-        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info,
-                                               RuntimeCallKind kind)
+    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        implicit_profiler->record_runtime_call(kind, info->pause_time,
-            Realm::Clock::current_time_in_nanoseconds());
     }
 
     //--------------------------------------------------------------------------
