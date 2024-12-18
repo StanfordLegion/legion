@@ -216,14 +216,15 @@ namespace Realm {
     , map_impl(0)
     , references(0)
   {
-    assert(get_runtime()->get_module_config("core")->get_property(
-        "enable_sparsity_refcount", need_refcount));
   }
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     if(map_impl.load() != 0) {
-      if(need_refcount) {
+      bool report_leaks = false;
+      get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
+                                                             report_leaks);
+      if(report_leaks) {
         log_part.fatal() << "leaking sparsity map me:" << me
                          << " refs:" << references.load()
                          << " node:" << Network::my_node_id;
@@ -258,9 +259,7 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count, Event wait_on)
   {
-    if(need_refcount) {
-      references.fetch_add_acqrel(count);
-    }
+    references.fetch_add_acqrel(count);
     if(wait_on != Event::NO_EVENT) {
       GenEventImpl::trigger(wait_on, false);
     }
@@ -282,8 +281,6 @@ namespace Realm {
 
   void SparsityMapImplWrapper::remove_references(unsigned count, Event wait_on)
   {
-    if(!need_refcount)
-      return;
     // Should be on the owner node when we get these messages
     assert(Network::my_node_id == NodeID(me.sparsity_creator_node()));
     if(wait_on.has_triggered()) {

@@ -197,8 +197,6 @@ namespace Realm {
     atomic<unsigned> references;
     NodeSet subscribers;
 
-    bool need_refcount;
-
     // need a type-erased deleter
     typedef void(*Deleter)(void *);
     Deleter map_deleter;
