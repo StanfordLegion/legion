@@ -4052,7 +4052,7 @@ namespace Legion {
                           TaskContext *ctx, uint64_t coord, IndexSpace domain,
                           Provenance *provenance);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
-                                    TypeTag type_tag, Provenance *provenance);
+          bool take_ownership, TypeTag type_tag, Provenance *provenance);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
@@ -4535,7 +4535,8 @@ namespace Legion {
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
       mutable LocalLock is_slice_lock;
-      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_slice_spaces;
+      std::map<std::pair<Domain,TypeTag>,
+        std::pair<IndexSpace,RtUserEvent> > index_slice_spaces;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely

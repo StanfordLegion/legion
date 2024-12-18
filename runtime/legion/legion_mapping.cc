@@ -164,8 +164,7 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Domain::NO_DOMAIN;
-      Domain domain;
-      impl->instance_domain->get_domain(domain);
+      Domain domain = impl->instance_domain->get_tight_domain();
       return domain;
     }
 
@@ -1817,7 +1816,8 @@ namespace Legion {
     IndexSpace MapperRuntime::create_index_space(MapperContext ctx,
                                                  const Domain &domain,
                                                  TypeTag type_tag,
-                                                 const char *prov) const
+                                                 const char *prov,
+                                                 bool take_ownership) const
     //--------------------------------------------------------------------------
     {
       if (type_tag == 0)
@@ -1844,7 +1844,8 @@ namespace Legion {
       const IndexSpace result(runtime->get_unique_index_space_id(),
                     runtime->get_unique_index_tree_id(), type_tag);
       const DistributedID did = runtime->get_available_distributed_id();
-      runtime->forest->create_index_space(result, &domain, did, provenance);
+      runtime->forest->create_index_space(
+          result, domain, take_ownership, did, provenance);
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
       return result; 
@@ -1867,7 +1868,8 @@ namespace Legion {
               (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
           const Domain domain(realm_is); \
           return create_index_space(ctx, domain, \
-           Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>(),provenance); \
+           Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+           provenance, true/*take ownership*/); \
         }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -1895,7 +1897,7 @@ namespace Legion {
             const Domain domain(realm_is); \
             return create_index_space(ctx, domain, \
                       Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
-                      provenance); \
+                      provenance, true/*take ownership*/); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC

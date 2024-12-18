@@ -2850,7 +2850,8 @@ namespace Legion {
       static void handle_map_task(const void *args);
     protected:
       void distribute_tasks(void);
-      void compute_launch_space(const MustEpochLauncher &launcher);
+      IndexSpace compute_launch_space(const MustEpochLauncher &launcher,
+          Provenance *provenance);
     public:
       static void handle_distribute_task(const void *args);
       static void handle_launch_task(const void *args);

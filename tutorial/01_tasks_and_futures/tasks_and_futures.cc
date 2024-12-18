@@ -45,16 +45,10 @@ void top_level_task(const Task *task,
   // use this to get the number of Fibonacci numbers to compute.
   const InputArgs &command_args = Runtime::get_input_args();
   for (int i = 1; i < command_args.argc; i++) {
-    // Skip any legion runtime configuration parameters
-    if (command_args.argv[i][0] == '-') {
-      i++;
-      continue;
-    }
-
-    num_fibonacci = atoi(command_args.argv[i]);
-    assert(num_fibonacci >= 0);
-    break;
+    if (!strcmp(command_args.argv[i],"-n"))
+      num_fibonacci = atoi(command_args.argv[++i]);
   }
+  assert(num_fibonacci >= 0);
   printf("Computing the first %d Fibonacci numbers...\n", num_fibonacci);
 
   // This is a vector which we'll use to store the future

@@ -498,19 +498,21 @@ namespace Legion {
       public:
         TaskSlice(void) : domain_is(IndexSpace::NO_SPACE), 
           domain(Domain::NO_DOMAIN), proc(Processor::NO_PROC), 
-          recurse(false), stealable(false) { }
-        TaskSlice(const Domain &d, Processor p, bool r, bool s)
+          recurse(false), stealable(false), take_ownership(false) { }
+        TaskSlice(const Domain &d, Processor p, bool r, bool s, 
+                  bool own = false)
           : domain_is(IndexSpace::NO_SPACE), domain(d), 
-            proc(p), recurse(r), stealable(s) { }
+            proc(p), recurse(r), stealable(s), take_ownership(own) { }
         TaskSlice(IndexSpace is, Processor p, bool r, bool s)
           : domain_is(is), domain(Domain::NO_DOMAIN),
-            proc(p), recurse(r), stealable(s) { }
+            proc(p), recurse(r), stealable(s), take_ownership(false) { }
       public:
         IndexSpace                              domain_is;
         Domain                                  domain;
         Processor                               proc;
         bool                                    recurse;
         bool                                    stealable;
+        bool                                    take_ownership;
       };
       struct SliceTaskInput {
         IndexSpace                             domain_is;
@@ -2304,7 +2306,8 @@ namespace Legion {
       IndexSpace create_index_space(MapperContext ctx, 
                                     const Domain &bounds,
                                     TypeTag type_tag = 0,
-                                    const char *provenance = NULL) const;
+                                    const char *provenance = NULL,
+                                    bool take_ownership = false) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,

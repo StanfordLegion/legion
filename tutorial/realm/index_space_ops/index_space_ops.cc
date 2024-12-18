@@ -51,6 +51,9 @@ void run_set_operations() {
   if (diffs_it.valid || isect_it.valid) {
     log_app.error() << "At least one iterator is invalid";
   }
+  union_is.destroy(event1);
+  diffs_is.destroy(event2);
+  isect_is.destroy(event3);
 }
 
 int main(int argc, char **argv)

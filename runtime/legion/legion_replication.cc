@@ -1251,8 +1251,7 @@ namespace Legion {
 #endif
         if ((redop == 0) && !elide_future_return)
         {
-          Domain shard_domain;
-          node->get_domain(shard_domain);
+          Domain shard_domain = node->get_tight_domain();
           enumerate_futures(shard_domain);
         }
         if (concurrent_task)
@@ -1261,8 +1260,8 @@ namespace Legion {
           {
             // See if we're the shard that owns the first point in the
             // launch, if we are then we're the one to make the barrier
-            Domain launch_domain, sharding_domain;
-            launch_space->get_domain(launch_domain);
+            Domain launch_domain = launch_space->get_tight_domain();
+            Domain sharding_domain;
             if (sharding_space.exists())
               runtime->forest->find_domain(sharding_space, sharding_domain);
             else
@@ -1823,8 +1822,8 @@ namespace Legion {
 #endif
           // Check to see if we're the shard for the first point in the index
           // space, if we are, then we are the shard that will make the barrier
-          Domain launch_domain, sharding_domain;
-          launch_space->get_domain(launch_domain);
+          Domain launch_domain = launch_space->get_tight_domain();
+          Domain sharding_domain;
           if (sharding_space.exists())
             runtime->forest->find_domain(sharding_space, sharding_domain);
           else
@@ -1870,7 +1869,7 @@ namespace Legion {
       if (sharding_space.exists())
         runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_domain(launch_domain);
+        launch_domain = launch_space->get_tight_domain();
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -1909,7 +1908,7 @@ namespace Legion {
       if (sharding_space.exists())
         runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_domain(launch_domain);
+        launch_domain = launch_space->get_tight_domain();
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -2026,7 +2025,8 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain))
+          if (parent->set_domain(root_domain, ApEvent::NO_AP_EVENT,
+                false/*take ownership*/))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
@@ -3570,8 +3570,8 @@ namespace Legion {
         assert(index < copies.size());
         assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        copies[index].src_indirect_records.emplace_back(
-            IndirectRecord(runtime->forest, req, insts));
+        copies[index].src_indirect_records.emplace_back(IndirectRecord(
+              runtime->forest, req, insts, launch_space->get_volume()));
         exchange.src_records.push_back(&records);
         if (copies[index].src_indirect_records.size() == points.size())
           return finalize_exchange(index, true/*sources*/);
@@ -3622,8 +3622,8 @@ namespace Legion {
         assert(index < copies.size());
         assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        copies[index].dst_indirect_records.emplace_back(
-            IndirectRecord(runtime->forest, req, insts));
+        copies[index].dst_indirect_records.emplace_back(IndirectRecord(
+              runtime->forest, req, insts, launch_space->get_volume()));
         exchange.dst_records.push_back(&records);
         if (copies[index].dst_indirect_records.size() == points.size())
           return finalize_exchange(index, false/*sources*/);
@@ -3738,7 +3738,7 @@ namespace Legion {
       if (sharding_space.exists())
         runtime->forest->find_domain(sharding_space,launch_domain);
       else
-        launch_space->get_domain(launch_domain);
+        launch_domain = launch_space->get_tight_domain();
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain); 
       if (point_shard != repl_ctx->owner_shard->shard_id)
@@ -3777,7 +3777,7 @@ namespace Legion {
       if (sharding_space.exists())
         runtime->forest->find_domain(sharding_space, launch_domain);
       else
-        launch_space->get_domain(launch_domain);
+        launch_domain = launch_space->get_tight_domain();
       const ShardID next_shard = 
         sharding_function->find_owner(next, launch_domain); 
       if (next_shard != repl_ctx->owner_shard->shard_id)
@@ -4582,7 +4582,13 @@ namespace Legion {
 #endif
             std::vector<ApEvent> preconditions;
             if (thunk->is_preimage())
-              find_remote_targets(preconditions);
+            {
+              ApUserEvent to_trigger;
+              find_remote_targets(preconditions, to_trigger);
+              if (to_trigger.exists())
+                Runtime::trigger_event(NULL, to_trigger,
+                    scatter->get_done_event());
+            }
             if (preconditions.empty())
               gather->contribute_instances(ApEvent::NO_AP_EVENT);
             else
@@ -4663,7 +4669,8 @@ namespace Legion {
       {
         IndexSpaceNode *node = runtime->forest->get_node(handle);
         Domain domain;
-        ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
+        ApUserEvent to_trigger;
+        ApEvent domain_ready = node->get_loose_domain(domain, to_trigger);
         bool ready = false;
         {
           AutoLock o_lock(op_lock);
@@ -4713,7 +4720,7 @@ namespace Legion {
             // perform non-trivial optimizations for partition-by-field and
             // partition-by-preimage for those cases when it sees a single call
             if (thunk->is_preimage())
-              find_remote_targets(index_preconditions);
+              find_remote_targets(index_preconditions, to_trigger);
             if (index_preconditions.empty())
               gather->contribute_instances(ApEvent::NO_AP_EVENT);
             else
@@ -4740,9 +4747,18 @@ namespace Legion {
           }
         }
         if (thunk->is_image())
+        {
+          if (to_trigger.exists())
+            Runtime::trigger_event(NULL, to_trigger, collective_done);
           return collective_done;
+        }
         else
-          return scatter->get_done_event();
+        {
+          const ApEvent result = scatter->get_done_event();
+          if (to_trigger.exists())
+            Runtime::trigger_event(NULL, to_trigger, result);
+          return result;
+        }
       }
       else
       {
@@ -4839,7 +4855,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::find_remote_targets(
-                                            std::vector<ApEvent> &preconditions)
+                   std::vector<ApEvent> &preconditions, ApUserEvent &to_trigger)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *node = runtime->forest->get_node(thunk->get_projection());
@@ -4852,7 +4868,7 @@ namespace Legion {
             node->color_space->delinearize_color_to_point(*itr);
           IndexSpaceNode *child = node->get_child(*itr);
           ApEvent ready = 
-            child->get_domain(remote_targets[color], false/*need tight*/);
+            child->get_loose_domain(remote_targets[color], to_trigger);
           if (ready.exists())
             preconditions.push_back(ready);
         }

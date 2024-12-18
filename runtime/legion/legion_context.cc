@@ -3502,12 +3502,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space(const Domain &bounds, 
-                                       TypeTag type_tag, Provenance *provenance)
+    IndexSpace InnerContext::create_index_space(const Domain &bounds,
+        bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      return create_index_space_internal(&bounds, type_tag, provenance);
+      return create_index_space_internal(
+          bounds, type_tag, provenance, take_ownership);
     }
 
     //--------------------------------------------------------------------------
@@ -3528,8 +3529,9 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
-            return create_index_space_internal(&bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+            return create_index_space_internal(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+                provenance, true); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3556,8 +3558,9 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
-            return create_index_space_internal(&bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+            return create_index_space_internal(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+                provenance, true); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -3568,8 +3571,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space_internal(const Domain *bounds,
-                                       TypeTag type_tag, Provenance *provenance)
+    IndexSpace InnerContext::create_index_space_internal(const Domain &bounds,
+                  TypeTag type_tag, Provenance *provenance, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle(runtime->get_unique_index_space_id(),
@@ -3583,28 +3586,37 @@ namespace Legion {
         LegionSpy::log_top_index_space(handle.id, runtime->address_space,
             (provenance == NULL) ? std::string_view() : provenance->human);
       // Will take ownership of provenance if not NULL
-      runtime->forest->create_index_space(handle, bounds, did, provenance); 
+      runtime->forest->create_index_space(handle, bounds, take_ownership,
+          did, provenance); 
       register_index_space_creation(handle);
       return handle;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::find_index_launch_space(const Domain &domain,
-                                                     Provenance *provenance)
+                              Provenance *provenance, const bool take_ownership)
     //--------------------------------------------------------------------------
     {
       std::map<Domain,IndexSpace>::const_iterator finder =
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())
+      {
+        if (take_ownership && !domain.dense())
+        {
+          Domain copy = domain;
+          copy.destroy();
+        }
         return finder->second;
+      }
       IndexSpace result;
       switch (domain.get_dim())
       {
 #define DIMFUNC(DIM) \
         case DIM: \
           { \
-            result = create_index_space_internal(&domain, \
-              NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+            result = create_index_space_internal(domain, \
+              NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+              provenance, take_ownership); \
             break; \
           }
         LEGION_FOREACH_N(DIMFUNC)
@@ -3622,7 +3634,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      return create_index_space_internal(NULL, type_tag, provenance);
+      return create_index_space_internal(
+          Domain::NO_DOMAIN, type_tag, provenance, true);
     }
 
     //--------------------------------------------------------------------------
@@ -3761,8 +3774,8 @@ namespace Legion {
       CreationOp *creator_op = runtime->get_available_creation_op();
       const ApEvent ready = creator_op->get_completion_event();
       IndexSpaceNode *node = runtime->forest->create_index_space(handle,
-          NULL/*domain*/, did, provenance, NULL/*collective map*/,
-          0/*expr id*/, ready);
+          Domain::NO_DOMAIN, true/*take ownership*/, did, provenance,
+          NULL/*collective map*/, 0/*expr id*/, ready);
       creator_op->initialize_index_space(this, node, future, provenance);
       register_index_space_creation(handle);
       add_to_dependence_queue(creator_op);
@@ -13803,8 +13816,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::create_index_space(const Domain &domain, 
-                                       TypeTag type_tag, Provenance *provenance)
+    IndexSpace ReplicateContext::create_index_space(const Domain &domain,
+        bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -13815,16 +13828,19 @@ namespace Legion {
                              (i > 0), provenance);
         hasher.hash(REPLICATE_CREATE_INDEX_SPACE, __func__);
         hasher.hash(domain, "domain");
+        hasher.hash(take_ownership, "take ownership");
         hasher.hash(type_tag, "type_tag");
         if (hasher.verify(__func__))
           break;
       }
-      return create_index_space_replicated(&domain, type_tag, provenance); 
+      return create_index_space_replicated(
+          domain, type_tag, provenance, take_ownership);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space_replicated(
-                 const Domain *domain, TypeTag type_tag, Provenance *provenance)
+        const Domain &domain, TypeTag type_tag, Provenance *provenance,
+        bool take_ownership)
     //--------------------------------------------------------------------------
     {
       // Seed this with the first index space broadcast
@@ -13846,8 +13862,8 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
-        runtime->forest->create_index_space(handle, domain, value.did, 
-            provenance, &collective_mapping, value.expr_id,
+        runtime->forest->create_index_space(handle, domain, take_ownership,
+            value.did, provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
         runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
@@ -13873,8 +13889,8 @@ namespace Legion {
         assert(handle.exists());
 #endif
         double_buffer = value.double_buffer;
-        runtime->forest->create_index_space(handle, domain, value.did,
-            provenance, &collective_mapping, value.expr_id,
+        runtime->forest->create_index_space(handle, domain, take_ownership,
+            value.did, provenance, &collective_mapping, value.expr_id,
             ApEvent::NO_AP_EVENT, creation_bar);
         // Arrive on the creation barrier
         runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
@@ -13911,7 +13927,8 @@ namespace Legion {
         if (hasher.verify(__func__))
           break;
       }
-      return create_index_space_replicated(NULL, type_tag, provenance); 
+      return create_index_space_replicated(
+          Domain::NO_DOMAIN, type_tag, provenance, true);
     }
 
     //--------------------------------------------------------------------------
@@ -13992,9 +14009,9 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
-        node = runtime->forest->create_index_space(handle, NULL, value.did, 
-                                provenance, &collective_mapping, value.expr_id,
-                                ready, creation_bar);
+        node = runtime->forest->create_index_space(handle, Domain::NO_DOMAIN,
+            true/*take ownership*/, value.did, provenance, &collective_mapping,
+            value.expr_id, ready, creation_bar);
         // Arrive on the creation barrier
         runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
@@ -14020,9 +14037,9 @@ namespace Legion {
         assert(handle.exists());
 #endif
         double_buffer = value.double_buffer;
-        node = runtime->forest->create_index_space(handle, NULL, value.did,
-                                provenance, &collective_mapping, value.expr_id,
-                                ready, creation_bar);
+        node = runtime->forest->create_index_space(handle, Domain::NO_DOMAIN,
+            true/*take ownership*/, value.did, provenance, &collective_mapping,
+            value.expr_id, ready, creation_bar);
         // Arrive on the creation barrier
         runtime->phase_barrier_arrive(creation_bar, 1/*count*/);
       }
@@ -14075,8 +14092,9 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
             const Domain bounds(realm_is); \
-            return create_index_space_replicated(&bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+            return create_index_space_replicated(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+                provenance, true); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -14114,8 +14132,9 @@ namespace Legion {
             const DomainT<DIM,coord_t> realm_is( \
                 (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
             const Domain bounds(realm_is); \
-            return create_index_space_replicated(&bounds, \
-                NT_TemplateHelper::encode_tag<DIM,coord_t>(), provenance); \
+            return create_index_space_replicated(bounds, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>(), \
+                provenance, true); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -18391,8 +18410,7 @@ namespace Legion {
             sid, implicit, true/*internal*/, check_space);
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
-      Domain domain;
-      domain_node->get_domain(domain);
+      Domain domain = domain_node->get_tight_domain();
       FutureMap result;
       if (collective)
       {
@@ -18530,8 +18548,7 @@ namespace Legion {
           map->set_sharding_function(function, false/*own*/);
         }
         // Check that all the points abide by the sharding function
-        Domain domain;
-        domain_node->get_domain(domain);
+        Domain domain = domain_node->get_tight_domain();
         for (std::map<DomainPoint,Future>::const_iterator it =
               futures.begin(); it != futures.end(); it++)
           if (function->find_owner(it->first, domain) != owner_shard->shard_id)
@@ -20132,10 +20149,10 @@ namespace Legion {
         // For the identity projection function we know how to compute this
         // without performing any communication between the shards
         IndexSpaceNode *launch_space = proj_info.projection_space;
-        Domain launch_domain, shard_domain;
-        launch_space->get_domain(launch_domain);
+        Domain launch_domain = launch_space->get_tight_domain();
+        Domain shard_domain;
         if (proj_info.sharding_space != NULL)
-          proj_info.sharding_space->get_domain(shard_domain);
+          shard_domain = proj_info.sharding_space->get_tight_domain();
         else
           shard_domain = launch_domain;
         if (state->owner->is_region())
@@ -22490,7 +22507,7 @@ namespace Legion {
       {
         const Domain domain =
           Rect<2>(Point<2>(0,0),Point<2>(shard_sizes.size()-1,upper_bound-1));
-        handle = InnerContext::create_index_space(domain,
+        handle = InnerContext::create_index_space(domain,true/*take ownership*/,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
       }
       else
@@ -22506,7 +22523,7 @@ namespace Legion {
           offset += shard_sizes[idx];
         }
         const Domain domain = Realm::IndexSpace<2,coord_t>(rects);
-        handle = InnerContext::create_index_space(domain,
+        handle = InnerContext::create_index_space(domain,true/*take ownership*/,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
       }
       IndexSpaceNode *node = runtime->forest->get_node(handle);
@@ -23745,7 +23762,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space(const Domain &bounds, 
-                                       TypeTag type_tag, Provenance *provenance)
+        bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
