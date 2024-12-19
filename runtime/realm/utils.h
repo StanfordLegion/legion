@@ -52,7 +52,17 @@
 #define REALM_SPIN_YIELD()
 #endif
 
+#define REALM_HASH_TOKEN(x) Realm::hash_fnv1a(#x, sizeof(#x) - 1)
+
 namespace Realm {
+
+  // While this is recurisve, this is a compile-time
+  constexpr uint64_t hash_fnv1a(const char *s, size_t n,
+                                const uint64_t value = 0xcbf29ce484222325ULL) noexcept
+  {
+    return n == 0 ? value
+                  : hash_fnv1a(s + 1, n - 1, ((value ^ uint64_t(*s)) * 0x100000001b3ULL));
+  }
 
   // TODO: actually use C++20 version if available
   const size_t dynamic_extent = size_t(-1);

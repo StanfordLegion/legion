@@ -64,6 +64,7 @@ if(Legion_USE_CUDA)
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
   set(CUDASRC_multiaffine multiaffine_gpu.cu)
+  set(CUDASRC_test_profiling test_profiling_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1635
   # list(APPEND REALM_TESTS cuda_arrays)
@@ -83,6 +84,7 @@ if(Legion_USE_HIP)
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
   set(HIPSRC_multiaffine multiaffine_gpu.cu)
+  set(HIPSRC_test_profiling test_profiling_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)
@@ -149,6 +151,7 @@ set(TESTARGS_cuda_scatter_test   -ll:gpu 1)
 
 if(Legion_USE_CUDA)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
+  list(APPEND TESTARGS_test_profiling -ll:gpu 1)
 endif()
 if(Legion_USE_HIP)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)

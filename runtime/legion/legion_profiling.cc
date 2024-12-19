@@ -2454,7 +2454,6 @@ namespace Legion {
           return finder->second;
       }
       // First time seeing this backtrace so capture the symbols
-      bt.lookup_symbols();
       std::stringstream ss;
       ss << bt;
       const std::string str = ss.str();
@@ -3069,7 +3068,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool LegionProfiler::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
       long long start = 0;

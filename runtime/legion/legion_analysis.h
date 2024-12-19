@@ -818,18 +818,15 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, bool copy, bool covers);
-      PhysicalUser(const PhysicalUser &rhs);
+          ApEvent term, UniqueID op_id, unsigned index, bool copy, bool covers);
+      PhysicalUser(const PhysicalUser &rhs) = delete;
       ~PhysicalUser(void);
     public:
-      PhysicalUser& operator=(const PhysicalUser &rhs);
-    public:
-      void pack_user(Serializer &rez, const AddressSpaceID target) const;
-      static PhysicalUser* unpack_user(Deserializer &derez, 
-              RegionTreeForest *forest, const AddressSpaceID source);
+      PhysicalUser& operator=(const PhysicalUser &rhs) = delete;
     public:
       const RegionUsage usage;
       IndexSpaceExpression *const expr;
+      const ApEvent term_event;
       const UniqueID op_id;
       const unsigned index; // region requirement index
       const bool copy_user; // is this from a copy or an operation
@@ -3415,8 +3412,7 @@ namespace Legion {
                       const FieldMask &clone_mask,
                       IndexSpaceExpression *clone_expr,
                       const bool record_invalidate,
-                      std::vector<RtEvent> &applied_events, 
-                      const bool invalidate_overlap);
+                      std::vector<RtEvent> &applied_events); 
       bool filter_partial_invalidations(const FieldMask &mask, 
                                         RtUserEvent &filtered);
       void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
@@ -3667,14 +3663,12 @@ namespace Legion {
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           IndexSpaceExpression *clone_expr,
                           std::vector<RtEvent> &applied_events,
-                          const bool invalidate_overlap,
                           const bool record_invalidate,
                           const bool need_dst_lock = true);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
                     IndexSpaceExpression *target_expr, 
                     IndexSpaceExpression *overlap, FieldMask mask,
                     std::vector<RtEvent> &applied_events,
-                    const bool invalidate_overlap,
                     const bool record_invalidate);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
             const bool overlap_covers, const FieldMask &mask,
@@ -3713,7 +3707,7 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             std::vector<RtEvent> &applied_events,
             const bool needs_lock, const bool forward_to_owner,
-            const bool unpack_references);
+            const bool unpack_tracing_references);
       static void pack_updates(Serializer &rez, const AddressSpaceID target,
             const LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
@@ -3731,7 +3725,7 @@ namespace Legion {
             const TraceViewSet *anticondition_updates,
             const TraceViewSet *postcondition_updates,
             const FieldMaskSet<IndexSpaceExpression> *dirty_updates,
-            const bool pack_references);
+            const bool pack_references, const bool pack_tracing_references);
     public:
       static void handle_make_owner(const void *args);
       static void handle_apply_state(const void *args);

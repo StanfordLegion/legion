@@ -30,6 +30,25 @@
 
 namespace Realm {
 
+  struct BarrierTriggerMessageArgsInternal {
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
+    int broadcast_index;
+    bool is_complete_list;
+    int sequence_number;
+  };
+
+  class RemoteNotification;
+
+  struct BarrierTriggerMessageArgs {
+    BarrierTriggerMessageArgsInternal internal;
+    std::vector<RemoteNotification> remote_notifications;
+  };
+
   class BarrierCommunicator {
   public:
     virtual ~BarrierCommunicator() = default;
@@ -38,14 +57,20 @@ namespace Realm {
                         NodeID sender, bool forwarded, const void *data, size_t datalen);
 
     virtual void trigger(NodeID target, ID::IDType barrier_id,
-                         EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-                         EventImpl::gen_t first_gen, ReductionOpID redop_id,
-                         NodeID migration_target, int base_arrival_count,
-                         const void *data, size_t datalen);
+                         BarrierTriggerMessageArgs &trigger_args, const void *data,
+                         size_t datalen);
 
     virtual void subscribe(NodeID target, ID::IDType barrier_id,
                            EventImpl::gen_t subscribe_gen, NodeID subscriber,
                            bool forwarded);
+
+    virtual size_t recommend_max_payload(NodeID node, size_t size,
+                                         bool with_congestion = true);
+  };
+
+  struct RemoteNotification {
+    NodeID node;
+    EventImpl::gen_t trigger_gen, previous_gen;
   };
 
   class BarrierImpl : public EventImpl {
@@ -88,8 +113,18 @@ namespace Realm {
                                EventImpl::gen_t trigger_gen,
                                EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
                                ReductionOpID redop_id, NodeID migration_target,
+                               int broadcast_index,
+                               const std::vector<RemoteNotification> remote_notifications,
+                               int sequence_number, bool is_complete_list,
                                unsigned base_count, const void *data, size_t datalen,
                                TimeLimit work_until);
+
+    void broadcast_trigger(
+        Barrier barrier, const std::vector<RemoteNotification> &ordered_notifications,
+        const std::vector<NodeID> &broadcast_targets, EventImpl::gen_t oldest_previous,
+        EventImpl::gen_t broadcast_previous, EventImpl::gen_t first_generation,
+        NodeID migration_target, unsigned base_arrival_count, ReductionOpID redop_id,
+        const void *data, size_t datalen, bool include_notifications = true);
 
     virtual void external_wait(gen_t needed_gen, bool &poisoned);
     virtual bool external_timedwait(gen_t needed_gen, bool &poisoned, long long max_ns);
@@ -155,11 +190,14 @@ namespace Realm {
     std::map<gen_t, gen_t> held_triggers;
 
     unsigned base_arrival_count = 0;
-    ReductionOpID redop_id;
+    ReductionOpID redop_id = 0;
     const ReductionOpUntyped *redop = nullptr;
     std::unique_ptr<char[]> initial_value{};
     unsigned value_capacity = 0;
     std::vector<char> final_values;
+    bool needs_ordering;
+    std::vector<std::pair<int, std::vector<RemoteNotification>>> ordered_buffer;
+    int broadcast_radix = 4;
   };
 }; // namespace Realm
 
