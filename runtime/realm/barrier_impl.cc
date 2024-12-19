@@ -387,8 +387,8 @@ namespace Realm {
 
   BarrierImpl::BarrierImpl(void)
     : barrier_comm(std::make_unique<BarrierCommunicator>())
-    , broadcast_radix(4)
     , external_waiter_condvar(external_waiter_mutex)
+    , broadcast_radix(4)
   {
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
@@ -1249,7 +1249,6 @@ namespace Realm {
   {
     ID id(barrier_id);
     id.barrier_generation() = trigger_gen;
-    Barrier b = id.convert<Barrier>();
 
     if(!remote_notifications.empty()) {
       AutoLock<> a(mutex);

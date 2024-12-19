@@ -42,7 +42,7 @@ namespace Realm {
     int sequence_number;
   };
 
-  class RemoteNotification;
+  struct RemoteNotification;
 
   struct BarrierTriggerMessageArgs {
     BarrierTriggerMessageArgsInternal internal;
