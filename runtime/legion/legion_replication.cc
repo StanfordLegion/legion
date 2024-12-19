@@ -1522,8 +1522,11 @@ namespace Legion {
         // No need to do anything with the output local precondition
         // We already added it to the complete_effects when we made
         // the collective at the beginning
-        if (collective_done.exists())
+        if (collective_done.exists() && !collective_done.has_triggered())
+        {
+          AutoLock o_lock(op_lock);
           commit_preconditions.insert(collective_done);
+        }
       }
       // Now call the base version of this to finish making
       // the instances for the future results
@@ -4537,7 +4540,13 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(sharding_function != NULL);
+        assert(points_completed.load() == 0);
 #endif
+        // This is a bit tricky, but set the points_completed to be -1 as
+        // a guard so that we don't call complete_execution until we've see
+        // all our completed points and had a chance to run trigger_execution
+        // for ourselves as they both need to be done before finishing execution
+        points_completed.store(-1);
         // Compute the local index space of points for this shard
         IndexSpace local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
@@ -4756,6 +4765,7 @@ namespace Legion {
       assert(requirement.privilege_fields.size() == 1);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(-1 <= points_completed.load());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -4794,9 +4804,12 @@ namespace Legion {
                          instances, &remote_targets, &deppart_results);
         }
       }
-      // If we don't have any points then we need to complete our execution
-      // now since we're not going to get any calls for it later
-      if (points.empty())
+      // Remove our guard that we added in trigger_ready and see if we're done
+      const unsigned received = ++points_completed;
+#ifdef DEBUG_LEGION
+      assert(received <= points.size());
+#endif
+      if (received == points.size())
         complete_execution();
     }
 
@@ -6716,9 +6729,9 @@ namespace Legion {
         if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
             making_instance)
         {
-          const RtUserEvent unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(unique);
-          unique_event = unique;
+          const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
           if (runtime->profiler != NULL)
             runtime->profiler->add_inst_request(requests, this, unique_event);
         }

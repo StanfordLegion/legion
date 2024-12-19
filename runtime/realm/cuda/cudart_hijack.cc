@@ -889,7 +889,6 @@ extern "C" {
     {
       Backtrace bt;
       bt.capture_backtrace();
-      bt.lookup_symbols();
       log_cudart.warning() << "cudaDeviceSynchronize() called outside CUDA task at "
                            << bt;
       break;

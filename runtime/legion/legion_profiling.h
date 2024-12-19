@@ -95,7 +95,7 @@ namespace Legion {
       // Return true if we should profile this profiling response
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent) = 0;
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc) = 0;
     };
 
     struct ProfilingResponseBase {
@@ -639,7 +639,7 @@ namespace Legion {
       void record_event_trigger(LgEvent result, LgEvent precondition);
       void record_event_poison(LgEvent result);
       void record_barrier_arrival(LgEvent barrier, LgEvent precondition);
-      void record_barrier_arrival(LgEvent barrier, UniqueID uid);
+      void record_barrier_use(LgEvent barrier, UniqueID uid);
       void record_reservation_acquire(Reservation r, LgEvent result,
           LgEvent precondition);
       void record_instance_ready(LgEvent result, LgEvent unique_event,
@@ -860,7 +860,7 @@ namespace Legion {
       // Process low-level runtime profiling results
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
     public:
       // Dump all the results
       void finalize(void);

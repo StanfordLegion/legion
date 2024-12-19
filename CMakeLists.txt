@@ -413,7 +413,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(GASNet_GITREPO ${Legion_EMBED_GASNet_GITREPO})
 
     set(Legion_EMBED_GASNet_GITREF
-      "d7cc06907cc66e2a3f968e19ea17a80650b16a3b" # master as of 2024-07-19
+      "f356a41a43a67c63eb230a74931196434ba1212e" # master as of 2024-11-11
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(GASNet_GITREF ${Legion_EMBED_GASNet_GITREF})
 
@@ -725,15 +725,22 @@ endif()
 #------------------------------------------------------------------------------#
 # Backtrace configuration
 #------------------------------------------------------------------------------#
-option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
-if(Legion_BACKTRACE_USE_UNWIND)
-  set(REALM_USE_UNWIND ON)
-endif()
-
-option(Legion_BACKTRACE_USE_LIBDW "Use libdw to analyze backtrace" OFF)
-if(Legion_BACKTRACE_USE_LIBDW)
-  find_package(LIBDW)
-  set(REALM_USE_LIBDW ON)
+option(Legion_BACKTRACE_USE_CPPTRACE "Use cpptrace to capture backtrace" OFF)
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  set(REALM_USE_CPPTRACE ON)
+  # TODO: move CPM outside when we download other packages through CPM
+  set(CPM_URL https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.40.2/CPM.cmake)
+  file(
+    DOWNLOAD
+    ${CPM_URL}
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake
+  )
+  include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
+  CPMFindPackage(
+    NAME cpptrace
+    GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+    GIT_TAG v0.7.3
+  )
 endif()
 
 #------------------------------------------------------------------------------#

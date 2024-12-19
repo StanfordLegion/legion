@@ -188,8 +188,7 @@ namespace Realm {
     static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
 
     GenEventImpl(void);
-    GenEventImpl(EventTriggerNotifier *_event_triggerer,
-                 EventCommunicator *_event_comm);
+    GenEventImpl(EventTriggerNotifier *_event_triggerer, EventCommunicator *_event_comm);
     ~GenEventImpl(void);
 
     void init(ID _me, unsigned _init_owner);

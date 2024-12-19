@@ -31,11 +31,13 @@ Logger log_bishop("bishop");
 BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,
                            const std::vector<bishop_transition_fn_t>& trans,
                            bishop_mapper_state_init_fn_t init_fn,
+                           bishop_mapper_state_destroy_fn_t destroy_fn,
                            MapperRuntime* rt, Machine machine,
                            Processor local_proc)
   : DefaultMapper(rt, machine, local_proc, "bishop"),
     mapper_impls(impls), transitions(trans),
-    mapper_init(init_fn), runtime_(CObjectWrapper::wrap(rt))
+    mapper_init(init_fn), mapper_destroy(destroy_fn),
+    runtime_(CObjectWrapper::wrap(rt))
 //------------------------------------------------------------------------------
 {
   mapper_init(&mapper_state);
@@ -45,6 +47,7 @@ BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,
 BishopMapper::~BishopMapper()
 //------------------------------------------------------------------------------
 {
+  mapper_destroy(&mapper_state);
 }
 
 //------------------------------------------------------------------------------

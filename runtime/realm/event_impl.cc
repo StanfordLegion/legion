@@ -1862,6 +1862,7 @@ namespace Realm {
 
     // finally, trigger any local waiters
     if(!to_wake.empty()) {
+      assert(event_triggerer != nullptr);
       event_triggerer->trigger_event_waiters(to_wake, poisoned, work_until);
     }
 

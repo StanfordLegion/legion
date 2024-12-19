@@ -87,7 +87,8 @@ namespace Realm {
     template <typename S>
     bool serdez(S& serdez, const OperationBacktrace& b)
     {
-      return (serdez & b.backtrace);
+      return ((serdez & b.pcs) &&
+              (serdez & b.symbols));
     }
 
 
@@ -95,14 +96,6 @@ namespace Realm {
     //
     // struct OperationTimeLineGPU
     //
-    inline void OperationTimelineGPU::record_start_time(void)
-    {
-      start_time = Clock::current_time_in_nanoseconds();
-    }
-    inline void OperationTimelineGPU::record_end_time(void)
-    {
-      end_time = Clock::current_time_in_nanoseconds();
-    }
     inline bool OperationTimelineGPU::is_valid(void) const
     {
       return ((start_time != INVALID_TIMESTAMP) &&

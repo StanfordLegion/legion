@@ -39,7 +39,7 @@ namespace Realm {
   class TransferIterator {
   public:
     template <typename S>
-    static TransferIterator *deserialize_new(S& deserializer);
+    static TransferIterator *deserialize_new(S &deserializer);
 
     virtual ~TransferIterator(void);
 
@@ -48,7 +48,7 @@ namespace Realm {
 
     // specify the xd port used for indirect address flow control, if any
     virtual void set_indirect_input_port(XferDes *xd, int port_idx,
-					 TransferIterator *inner_iter);
+                                         TransferIterator *inner_iter);
 
     virtual void reset(void) = 0;
     virtual bool done(void) = 0;
@@ -56,28 +56,29 @@ namespace Realm {
     virtual size_t get_address_size(void) const;
 
     // flag bits to control iterators
-    enum {
-      SRC_PARTIAL_OK   = (1 << 0),
-      SRC_LINES_OK     = (1 << 1),
-      SRC_PLANES_OK    = (1 << 2),
-      SRC_FLAGMASK     = 0xff,
+    enum
+    {
+      SRC_PARTIAL_OK = (1 << 0),
+      SRC_LINES_OK = (1 << 1),
+      SRC_PLANES_OK = (1 << 2),
+      SRC_FLAGMASK = 0xff,
 
-      DST_PARTIAL_OK   = (1 << 8),
-      DST_LINES_OK     = (1 << 9),
-      DST_PLANES_OK    = (1 << 10),
-      DST_FLAGMASK     = 0xff00,
+      DST_PARTIAL_OK = (1 << 8),
+      DST_LINES_OK = (1 << 9),
+      DST_PLANES_OK = (1 << 10),
+      DST_FLAGMASK = 0xff00,
 
-      PARTIAL_OK       = SRC_PARTIAL_OK | DST_PARTIAL_OK,
-      LINES_OK         = SRC_LINES_OK   | DST_LINES_OK,
-      PLANES_OK        = SRC_PLANES_OK  | DST_PLANES_OK,
+      PARTIAL_OK = SRC_PARTIAL_OK | DST_PARTIAL_OK,
+      LINES_OK = SRC_LINES_OK | DST_LINES_OK,
+      PLANES_OK = SRC_PLANES_OK | DST_PLANES_OK,
     };
 
     struct AddressInfo {
       size_t base_offset;
       size_t bytes_per_chunk; // multiple of sizeof(T) unless PARTIAL_OK
-      size_t num_lines;   // guaranteed to be 1 unless LINES_OK (i.e. 2D)
+      size_t num_lines;       // guaranteed to be 1 unless LINES_OK (i.e. 2D)
       size_t line_stride;
-      size_t num_planes;  // guaranteed to be 1 unless PLANES_OK (i.e. 3D)
+      size_t num_planes; // guaranteed to be 1 unless PLANES_OK (i.e. 3D)
       size_t plane_stride;
     };
 
@@ -94,19 +95,16 @@ namespace Realm {
       //  point), which can be less than the input if the target has
       //  strict ordering rules
       virtual int set_rect(const RegionInstanceImpl *inst,
-                           const InstanceLayoutPieceBase *piece,
-                           size_t field_size, size_t field_offset,
-                           int ndims,
-                           const int64_t lo[/*ndims*/],
-                           const int64_t hi[/*ndims*/],
-                           const int order[/*ndims*/]) = 0;
+                           const InstanceLayoutPieceBase *piece, size_t field_size,
+                           size_t field_offset, int ndims, const int64_t lo[/*ndims*/],
+                           const int64_t hi[/*ndims*/], const int order[/*ndims*/]) = 0;
     };
 
     // if a step is tentative, it must either be confirmed or cancelled before
     //  another one is possible
-    virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
-			bool tentative = false) = 0;
-    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom& info,
+    virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
+                        bool tentative = false) = 0;
+    virtual size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
                                bool tentative = false) = 0;
 
     virtual void confirm_step(void) = 0;
@@ -215,10 +213,10 @@ namespace Realm {
 
   public:
     template <typename S>
-    static TransferDomain *deserialize_new(S& deserializer);
-    
+    static TransferDomain *deserialize_new(S &deserializer);
+
     template <int N, typename T>
-    static TransferDomain *construct(const IndexSpace<N,T>& is);
+    static TransferDomain *construct(const IndexSpace<N, T> &is);
 
     virtual TransferDomain *clone(void) const = 0;
 
@@ -229,32 +227,30 @@ namespace Realm {
     virtual bool empty(void) const = 0;
     virtual size_t volume(void) const = 0;
 
-    virtual void choose_dim_order(std::vector<int>& dim_order,
-				  const std::vector<CopySrcDstField>& srcs,
-				  const std::vector<CopySrcDstField>& dsts,
-				  const std::vector<IndirectionInfo *>& indirects,
-				  bool force_fortran_order,
-				  size_t max_stride) const = 0;
+    virtual void choose_dim_order(std::vector<int> &dim_order,
+                                  const std::vector<CopySrcDstField> &srcs,
+                                  const std::vector<CopySrcDstField> &dsts,
+                                  const std::vector<IndirectionInfo *> &indirects,
+                                  bool force_fortran_order, size_t max_stride) const = 0;
 
-    virtual void count_fragments(RegionInstance inst,
-                                 const std::vector<int>& dim_order,
-                                 const std::vector<FieldID>& fields,
-                                 const std::vector<size_t>& fld_sizes,
-                                 std::vector<size_t>& fragments) const = 0;
+    virtual void count_fragments(RegionInstance inst, const std::vector<int> &dim_order,
+                                 const std::vector<FieldID> &fields,
+                                 const std::vector<size_t> &fld_sizes,
+                                 std::vector<size_t> &fragments) const = 0;
 
-    virtual TransferIterator *create_iterator(RegionInstance inst,
-					      const std::vector<int>& dim_order,
-					      const std::vector<FieldID>& fields,
-					      const std::vector<size_t>& fld_offsets,
-					      const std::vector<size_t>& fld_sizes) const = 0;
+    virtual TransferIterator *
+    create_iterator(RegionInstance inst, const std::vector<int> &dim_order,
+                    const std::vector<FieldID> &fields,
+                    const std::vector<size_t> &fld_offsets,
+                    const std::vector<size_t> &fld_sizes) const = 0;
 
-    virtual TransferIterator *create_iterator(RegionInstance inst,
-					      RegionInstance peer,
-					      const std::vector<FieldID>& fields,
-					      const std::vector<size_t>& fld_offsets,
-					      const std::vector<size_t>& fld_sizes) const = 0;
+    virtual TransferIterator *
+    create_iterator(RegionInstance inst, RegionInstance peer,
+                    const std::vector<FieldID> &fields,
+                    const std::vector<size_t> &fld_offsets,
+                    const std::vector<size_t> &fld_sizes) const = 0;
 
-    virtual void print(std::ostream& os) const = 0;
+    virtual void print(std::ostream &os) const = 0;
   };
 
   class TransferOperation;
@@ -266,57 +262,54 @@ namespace Realm {
     struct XDTemplate {
       // TODO(apryakhin@): Remove target_node
       NodeID target_node;
-      //XferDesKind kind;
+      // XferDesKind kind;
       XferDesFactory *factory;
       int gather_control_input;
       int scatter_control_input;
       XferDesRedopInfo redop;
       Channel *channel = nullptr;
 
-      enum IOType {
-	IO_INST,
-	IO_INDIRECT_INST,
-	IO_EDGE,
-	IO_FILL_DATA
+      enum IOType
+      {
+        IO_INST,
+        IO_INDIRECT_INST,
+        IO_EDGE,
+        IO_FILL_DATA
       };
       struct IO {
-	IOType iotype;
-	union {
-	  struct {
-	    RegionInstance inst;
-	    unsigned fld_start;
-	    unsigned fld_count;
-	  } inst;
-	  struct {
-	    unsigned ind_idx;
-	    unsigned port;
-	    RegionInstance inst;
-	    unsigned fld_start;
-	    unsigned fld_count;
-	  } indirect;
-	  unsigned edge;
-	  struct {
-	    unsigned fill_start;
-	    unsigned fill_size;
+        IOType iotype;
+        union {
+          struct {
+            RegionInstance inst;
+            unsigned fld_start;
+            unsigned fld_count;
+          } inst;
+          struct {
+            unsigned ind_idx;
+            unsigned port;
+            RegionInstance inst;
+            unsigned fld_start;
+            unsigned fld_count;
+          } indirect;
+          unsigned edge;
+          struct {
+            unsigned fill_start;
+            unsigned fill_size;
             size_t fill_total;
-	  } fill;
-	};
+          } fill;
+        };
       };
-      static IO mk_inst(RegionInstance _inst,
-			unsigned _fld_start, unsigned _fld_count);
-      static IO mk_indirect(unsigned _ind_idx, unsigned _port,
-			    RegionInstance _inst,
-			    unsigned _fld_start, unsigned _fld_count);
+      static IO mk_inst(RegionInstance _inst, unsigned _fld_start, unsigned _fld_count);
+      static IO mk_indirect(unsigned _ind_idx, unsigned _port, RegionInstance _inst,
+                            unsigned _fld_start, unsigned _fld_count);
       static IO mk_edge(unsigned _edge);
-      static IO mk_fill(unsigned _fill_start, unsigned _fill_size,
-                        size_t _fill_total);
+      static IO mk_fill(unsigned _fill_start, unsigned _fill_size, size_t _fill_total);
 
-      std::vector<IO> inputs;  // TODO: short vectors
+      std::vector<IO> inputs; // TODO: short vectors
       std::vector<IO> outputs;
 
       // helper functions for initializing these things
-      void set_simple(Channel *channel,
-		      int in_edge, int out_edge);
+      void set_simple(Channel *channel, int in_edge, int out_edge);
     };
     struct IBInfo {
       Memory memory;
@@ -330,11 +323,11 @@ namespace Realm {
   class TransferDesc {
   public:
     template <int N, typename T>
-    TransferDesc(IndexSpace<N,T> _is,
-		 const std::vector<CopySrcDstField> &_srcs,
-		 const std::vector<CopySrcDstField> &_dsts,
-		 const std::vector<const typename CopyIndirection<N,T>::Base *> &_indirects,
-		 const ProfilingRequestSet &requests);
+    TransferDesc(
+        IndexSpace<N, T> _is, const std::vector<CopySrcDstField> &_srcs,
+        const std::vector<CopySrcDstField> &_dsts,
+        const std::vector<const typename CopyIndirection<N, T>::Base *> &_indirects,
+        const ProfilingRequestSet &requests);
 
   protected:
     // reference-counted - do not delete directly
@@ -366,7 +359,7 @@ namespace Realm {
     public:
       DeferredAnalysis(TransferDesc *_desc);
       virtual void event_triggered(bool poisoned, TimeLimit work_until);
-      virtual void print(std::ostream& os) const;
+      virtual void print(std::ostream &os) const;
       virtual Event get_finish_event(void) const;
 
       TransferDesc *desc;
@@ -393,7 +386,7 @@ namespace Realm {
     ProfilingMeasurements::OperationMemoryUsage prof_usage;
     ProfilingMeasurements::OperationCopyInfo prof_cpinfo;
   };
-               
+
   class IndirectionInfo {
   public:
     virtual ~IndirectionInfo(void) {}
@@ -408,20 +401,16 @@ namespace Realm {
                           std::vector<TransferGraph::IBInfo> &ib_edges,
                           std::vector<TransferDesc::FieldInfo> &src_fields) = 0;
 
-    virtual void generate_scatter_paths(Memory src_mem,
-					TransferGraph::XDTemplate::IO src_edge,
-					unsigned indirect_idx,
-					unsigned dst_fld_start,
-					unsigned dst_fld_count,
-					size_t bytes_per_element,
-					CustomSerdezID serdez_id,
-					std::vector<TransferGraph::XDTemplate>& xd_nodes,
-					std::vector<TransferGraph::IBInfo>& ib_edges,
-					std::vector<TransferDesc::FieldInfo>& src_fields) = 0;
+    virtual void generate_scatter_paths(
+        Memory src_mem, TransferGraph::XDTemplate::IO src_edge, unsigned indirect_idx,
+        unsigned dst_fld_start, unsigned dst_fld_count, size_t bytes_per_element,
+        CustomSerdezID serdez_id, std::vector<TransferGraph::XDTemplate> &xd_nodes,
+        std::vector<TransferGraph::IBInfo> &ib_edges,
+        std::vector<TransferDesc::FieldInfo> &src_fields) = 0;
 
     virtual RegionInstance get_pointer_instance(void) const = 0;
 
-    virtual const std::vector<RegionInstance>* get_instances(void) const = 0;
+    virtual const std::vector<RegionInstance> *get_instances(void) const = 0;
 
     virtual FieldID get_field(void) const = 0;
 
@@ -432,10 +421,10 @@ namespace Realm {
         const std::vector<size_t> &fld_offsets, const std::vector<size_t> &fld_sizes,
         Channel *channel = nullptr) const = 0;
 
-    virtual void print(std::ostream& os) const = 0;
+    virtual void print(std::ostream &os) const = 0;
   };
 
-  std::ostream& operator<<(std::ostream& os, const IndirectionInfo& ii);
+  std::ostream &operator<<(std::ostream &os, const IndirectionInfo &ii);
 
   class IndirectionInfoBase : public IndirectionInfo {
   public:
@@ -531,15 +520,13 @@ namespace Realm {
   // a TransferOperation is an application-requested copy/fill/reduce
   class TransferOperation : public Operation {
   public:
-    TransferOperation(TransferDesc& _desc,
-		      Event _precondition,
-		      GenEventImpl *_finish_event,
-		      EventImpl::gen_t _finish_gen,
-		      int priority);
+    TransferOperation(TransferDesc &_desc, Event _precondition,
+                      GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+                      int priority);
 
     ~TransferOperation();
 
-    virtual void print(std::ostream& os) const;
+    virtual void print(std::ostream &os) const;
 
     void start_or_defer(void);
 
@@ -556,10 +543,9 @@ namespace Realm {
 
     class XDLifetimeTracker : public Operation::AsyncWorkItem {
     public:
-      XDLifetimeTracker(TransferOperation *_op,
-			XferDesID _xd_id);
+      XDLifetimeTracker(TransferOperation *_op, XferDesID _xd_id);
       virtual void request_cancellation(void);
-      virtual void print(std::ostream& os) const;
+      virtual void print(std::ostream &os) const;
 
     protected:
       XferDesID xd_id;
@@ -572,7 +558,7 @@ namespace Realm {
     public:
       DeferredStart(TransferOperation *_op);
       virtual void event_triggered(bool poisoned, TimeLimit work_until);
-      virtual void print(std::ostream& os) const;
+      virtual void print(std::ostream &os) const;
       virtual Event get_finish_event(void) const;
 
       TransferOperation *op;
@@ -580,7 +566,7 @@ namespace Realm {
     };
     DeferredStart deferred_start;
 
-    TransferDesc& desc;
+    TransferDesc &desc;
     Event precondition;
     std::vector<XferDesID> xd_ids;
     std::vector<XDLifetimeTracker *> xd_trackers;

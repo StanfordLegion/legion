@@ -41,6 +41,12 @@ list(APPEND REALM_TESTS
   gather_scatter_test.cc
  )
 
+if(NOT WIN32)
+list(APPEND REALM_TESTS
+  backtrace_test.cc
+)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
   googletest

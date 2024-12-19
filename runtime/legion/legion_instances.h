@@ -355,6 +355,8 @@ namespace Legion {
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
     public:
+      inline bool is_unbound(void) const 
+        { return (kind.load() == UNBOUND_INSTANCE_KIND); }
       inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
       inline bool acquire_instance(ReferenceSource source);
@@ -628,7 +630,7 @@ namespace Legion {
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
           redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-          piece_list_size(0), valid(false) { }
+          piece_list_size(0), valid(false), allocated(false) { }
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       IndexSpaceExpression *expr, FieldSpaceNode *node,
                       RegionTreeID tree_id, const LayoutConstraintSet &cons, 
@@ -644,7 +646,7 @@ namespace Legion {
     public:
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig, 
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
     protected:
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:
@@ -675,6 +677,7 @@ namespace Legion {
     public:
       LgEvent current_unique_event;
       bool valid;
+      bool allocated;
     };
 
     //--------------------------------------------------------------------------

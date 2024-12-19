@@ -168,6 +168,9 @@ namespace Realm {
 
       // sparstiy maps
       bool enable_sparsity_refcount = false;
+
+      // barriers
+      int barrier_broadcast_radix = 4;
     };
 
     class CoreModule : public Module {
@@ -259,7 +262,9 @@ namespace Realm {
       void start(void);
 
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
-      bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+      Event notify_register_reduction(ReductionOpID redop_id);
+      bool register_reduction(Event &event, ReductionOpID redop_id,
+                              const ReductionOpUntyped *redop);
       bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
 
       Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 

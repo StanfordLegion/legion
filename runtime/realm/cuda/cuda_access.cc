@@ -91,7 +91,8 @@ namespace Realm {
   //
 
   ExternalCudaMemoryResource::ExternalCudaMemoryResource()
-    : cuda_device_id(-1)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaMemoryResource))
+    , cuda_device_id(-1)
     , base(0)
     , size_in_bytes(0)
     , read_only(false)
@@ -101,16 +102,17 @@ namespace Realm {
                                                          uintptr_t _base,
                                                          size_t _size_in_bytes,
                                                          bool _read_only)
-    : cuda_device_id(_cuda_device_id)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaMemoryResource))
+    , cuda_device_id(_cuda_device_id)
     , base(_base)
     , size_in_bytes(_size_in_bytes)
     , read_only(_read_only)
   {}
 
-  ExternalCudaMemoryResource::ExternalCudaMemoryResource(int _cuda_device_id,
-                                                         void *_base,
+  ExternalCudaMemoryResource::ExternalCudaMemoryResource(int _cuda_device_id, void *_base,
                                                          size_t _size_in_bytes)
-    : cuda_device_id(_cuda_device_id)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaMemoryResource))
+    , cuda_device_id(_cuda_device_id)
     , base(reinterpret_cast<uintptr_t>(_base))
     , size_in_bytes(_size_in_bytes)
     , read_only(false)
@@ -119,7 +121,8 @@ namespace Realm {
   ExternalCudaMemoryResource::ExternalCudaMemoryResource(int _cuda_device_id,
                                                          const void *_base,
                                                          size_t _size_in_bytes)
-    : cuda_device_id(_cuda_device_id)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaMemoryResource))
+    , cuda_device_id(_cuda_device_id)
     , base(reinterpret_cast<uintptr_t>(_base))
     , size_in_bytes(_size_in_bytes)
     , read_only(true)
@@ -156,20 +159,23 @@ namespace Realm {
   //
 
   ExternalCudaArrayResource::ExternalCudaArrayResource()
-    : cuda_device_id(-1)
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaArrayResource))
+    , cuda_device_id(-1)
     , array(0)
   {}
 
   ExternalCudaArrayResource::ExternalCudaArrayResource(int _cuda_device_id,
                                                        CUarray_st *_array)
-    : cuda_device_id(_cuda_device_id)
-    , array(reinterpret_cast<uintptr_t>(_array))
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaArrayResource))
+    , cuda_device_id(_cuda_device_id)
+    , array(_array)
   {}
 
   ExternalCudaArrayResource::ExternalCudaArrayResource(int _cuda_device_id,
                                                        cudaArray *_array)
-    : cuda_device_id(_cuda_device_id)
-    , array(reinterpret_cast<uintptr_t>(_array))
+    : ExternalInstanceResource(REALM_HASH_TOKEN(ExternalCudaArrayResource))
+    , cuda_device_id(_cuda_device_id)
+    , array(reinterpret_cast<CUarray_st *>(_array))
   {}
 
   // returns the suggested memory in which this resource should be created
@@ -199,23 +205,31 @@ namespace Realm {
   //
 
   ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource()
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalMemoryResource);
+  }
 
   ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource(uintptr_t _base,
                                                                  size_t _size_in_bytes,
                                                                  bool _read_only)
     : ExternalMemoryResource(_base, _size_in_bytes, _read_only)
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalMemoryResource);
+  }
 
   ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource(void *_base,
                                                                  size_t _size_in_bytes)
     : ExternalMemoryResource(_base, _size_in_bytes)
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalMemoryResource);
+  }
 
   ExternalCudaPinnedHostResource::ExternalCudaPinnedHostResource(const void *_base,
                                                                  size_t _size_in_bytes)
     : ExternalMemoryResource(_base, _size_in_bytes)
-  {}
+  {
+    type_id = REALM_HASH_TOKEN(ExternalMemoryResource);
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalCudaPinnedHostResource::suggested_memory() const

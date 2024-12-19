@@ -84,12 +84,13 @@ ifeq ($(strip $(USE_CUDA)),1)
 TESTS += task_stream
 TESTS += test_cuhook
 TESTS += cuda_memcpy_test
-TESTS += cuda_transpose_test
+TESTS += transpose_test_gpu
 TESTS += cuda_scatter_test
 endif
 
 ifeq ($(strip $(USE_HIP)),1)
 TESTS += task_stream
+TESTS += transpose_test_gpu
 endif
 
 # can set arguments to be passed to a test when running
@@ -202,12 +203,14 @@ ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
 EXTRAOBJS_multiaffine := multiaffine_gpu.o
+EXTRAOBJS_test_profiling := test_profiling_gpu.o
 EXTRAOBJS_task_stream := task_stream_gpu.o
 EXTRAOBJS_test_cuhook := test_cuhook_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream) $(EXTRAOBJS_test_cuhook)
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_test_profiling) $(EXTRAOBJS_task_stream) $(EXTRAOBJS_test_cuhook)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 multiaffine : multiaffine_gpu.o
+test_profiling : test_profiling_gpu.o
 task_stream : task_stream_gpu.o
 test_cuhook : test_cuhook_gpu.o
 
@@ -237,11 +240,13 @@ ifeq ($(strip $(USE_HIP)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
 EXTRAOBJS_multiaffine := multiaffine_gpu.o
+EXTRAOBJS_test_profiling := test_profiling_gpu.o
 EXTRAOBJS_task_stream := task_stream_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_task_stream)
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine) $(EXTRAOBJS_test_profiling) $(EXTRAOBJS_task_stream)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
 multiaffine : multiaffine_gpu.o
+test_profiling : test_profiling_gpu.o
 task_stream : task_stream_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
