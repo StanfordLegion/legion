@@ -358,7 +358,7 @@ namespace Realm {
   CompQueueImpl::~CompQueueImpl(void)
   {
     AutoLock<> al(mutex);
-    // assert(pending_events.load() == 0);
+    assert(pending_events.load() == 0);
     while(batches) {
       CompQueueWaiterBatch *next_batch = batches->next_batch;
       delete batches;

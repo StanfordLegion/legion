@@ -79,6 +79,8 @@ TEST_F(CompQueueTest, AddEvent)
   size_t num_pending_events = compqueue.get_pending_events();
 
   EXPECT_EQ(num_pending_events, 2);
+  EXPECT_TRUE(event_a.trigger(1, 0, /*poisoned=*/false, TimeLimit::responsive()));
+  EXPECT_TRUE(event_b.trigger(1, 0, /*poisoned=*/false, TimeLimit::responsive()));
 }
 
 // TODO: probably don't need this test
@@ -111,6 +113,8 @@ TEST_F(CompQueueTest, AddAndCompleteEvent)
   EXPECT_TRUE(ok_b);
   EXPECT_FALSE(poisoned_a);
   EXPECT_FALSE(poisoned_b);
+  EXPECT_TRUE(
+      event_a.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive()));
 }
 
 TEST_F(CompQueueTest, AddAndCompleteEventRemote)
@@ -142,6 +146,8 @@ TEST_F(CompQueueTest, AddAndCompleteEventRemote)
   EXPECT_TRUE(ok_b);
   EXPECT_FALSE(poisoned_a);
   EXPECT_FALSE(poisoned_b);
+  EXPECT_TRUE(
+      event_a.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive()));
 }
 
 TEST_F(CompQueueTest, PopEventsEmpty)
