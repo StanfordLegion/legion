@@ -1140,6 +1140,8 @@ namespace Realm {
     do {
       AutoLock<> a(mutex);
 
+      EventImpl::gen_t active_generation = generation.load();
+
       // first check - are we even the current owner?
       if(owner != Network::my_node_id) {
         forward_to_node = owner;
@@ -1165,7 +1167,7 @@ namespace Realm {
         if(it != remote_subscribe_gens.end()) {
           // a valid subscription should always be for a generation that hasn't
           //  triggered yet
-          assert(it->second > generation.load());
+          assert(it->second > active_generation);
           if(it->second >= subscribe_gen) {
             already_subscribed = true;
           } else {
@@ -1178,7 +1180,7 @@ namespace Realm {
           // NOTE: remote_subscribe_gens should only hold subscriptions for
           //  generations that haven't triggered, so if we're subscribing to
           //  an old generation, don't add it
-          if(subscribe_gen > generation.load()) {
+          if(subscribe_gen > active_generation) {
             remote_subscribe_gens[subscriber] = subscribe_gen;
           }
         }
@@ -1186,14 +1188,14 @@ namespace Realm {
 
       // as long as we're not already subscribed to this generation, check to see if
       //  any trigger notifications are needed
-      if(!already_subscribed && (generation.load() > first_generation)) {
+      if(!already_subscribed && (active_generation > first_generation)) {
         std::map<unsigned, EventImpl::gen_t>::iterator it =
             remote_trigger_gens.find(subscriber);
         if((it == remote_trigger_gens.end()) || (it->second < generation.load())) {
           previous_gen =
               ((it == remote_trigger_gens.end()) ? first_generation : it->second);
           trigger_gen = generation.load();
-          remote_trigger_gens[subscriber] = generation.load();
+          remote_trigger_gens[subscriber] = active_generation;
 
           if(redop) {
             int rel_gen = previous_gen + 1 - first_generation;
@@ -1247,9 +1249,6 @@ namespace Realm {
       bool is_complete_list, unsigned base_count, const void *data, size_t datalen,
       TimeLimit work_until)
   {
-    ID id(barrier_id);
-    id.barrier_generation() = trigger_gen;
-
     if(!remote_notifications.empty()) {
       AutoLock<> a(mutex);
 
