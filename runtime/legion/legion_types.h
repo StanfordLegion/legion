@@ -3245,6 +3245,17 @@ namespace Legion {
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
 #endif
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      // If we're in a mapper call, notify the mapper that we're waiting
+      // Do this first in case we get a re-entrant wait (e.g. because
+      // SerializingManager::pause_mapper_call takes and lock and we might
+      // end up coming back around here to wait on that event too)
+      if (local_call != NULL)
+      {
+        Internal::implicit_mapper_call = NULL;
+        begin_mapper_call_wait(local_call);
+      }
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
       // Save the reference tracker that we have
@@ -3261,10 +3272,7 @@ namespace Legion {
       }
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      Internal::implicit_context = NULL;
-      // Save the mapper call locally
-      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
-      Internal::implicit_mapper_call = NULL;
+      Internal::implicit_context = NULL; 
       // Save the implicit fevent
       LgEvent local_fevent = Internal::implicit_fevent;
       Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
@@ -3283,8 +3291,6 @@ namespace Legion {
         local_lock_list_copy->advise_sleep_entry(done);
         if (local_ctx != NULL)
           begin_context_wait(local_ctx, false/*from application*/); 
-        if (local_call != NULL)
-          begin_mapper_call_wait(local_call);
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
@@ -3356,6 +3362,17 @@ namespace Legion {
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
 #endif
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      // If we're in a mapper call, notify the mapper that we're waiting
+      // Do this first in case we get a re-entrant wait (e.g. because
+      // SerializingManager::pause_mapper_call takes and lock and we might
+      // end up coming back around here to wait on that event too)
+      if (local_call != NULL)
+      {
+        Internal::implicit_mapper_call = NULL;
+        begin_mapper_call_wait(local_call);
+      }
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
       // Save the reference tracker that we have
@@ -3373,9 +3390,6 @@ namespace Legion {
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       Internal::implicit_context = NULL;
-      // Save the mapper call locally
-      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
-      Internal::implicit_mapper_call = NULL;
       // Save the fevent
       LgEvent local_fevent = Internal::implicit_fevent;
       Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
