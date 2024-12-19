@@ -81,7 +81,7 @@ namespace Realm {
     static atomic<Barrier::timestamp_t> barrier_adjustment_timestamp;
 
     BarrierImpl(void);
-    BarrierImpl(BarrierCommunicator *_barrier_comm);
+    BarrierImpl(BarrierCommunicator *_barrier_comm, int _broadcast_radix = 4);
     ~BarrierImpl(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -106,26 +106,6 @@ namespace Realm {
 
     virtual void subscribe(gen_t subscribe_gen);
 
-    void handle_remote_subscription(NodeID subscriber, EventImpl::gen_t subscribe_gen,
-                                    bool forwarded, const void *data, size_t datalen);
-
-    void handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
-                               EventImpl::gen_t trigger_gen,
-                               EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
-                               ReductionOpID redop_id, NodeID migration_target,
-                               int broadcast_index,
-                               const std::vector<RemoteNotification> remote_notifications,
-                               int sequence_number, bool is_complete_list,
-                               unsigned base_count, const void *data, size_t datalen,
-                               TimeLimit work_until);
-
-    void broadcast_trigger(
-        Barrier barrier, const std::vector<RemoteNotification> &ordered_notifications,
-        const std::vector<NodeID> &broadcast_targets, EventImpl::gen_t oldest_previous,
-        EventImpl::gen_t broadcast_previous, EventImpl::gen_t first_generation,
-        NodeID migration_target, unsigned base_arrival_count, ReductionOpID redop_id,
-        const void *data, size_t datalen, bool include_notifications = true);
-
     virtual void external_wait(gen_t needed_gen, bool &poisoned);
     virtual bool external_timedwait(gen_t needed_gen, bool &poisoned, long long max_ns);
 
@@ -144,7 +124,29 @@ namespace Realm {
                         const void *reduce_value, size_t reduce_value_size,
                         TimeLimit work_until);
 
+    void handle_remote_subscription(NodeID subscriber, EventImpl::gen_t subscribe_gen,
+                                    bool forwarded, const void *data, size_t datalen);
+
+    void handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
+                               EventImpl::gen_t trigger_gen,
+                               EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
+                               ReductionOpID redop_id, NodeID migration_target,
+                               int broadcast_index,
+                               const std::vector<RemoteNotification> remote_notifications,
+                               int sequence_number, bool is_complete_list,
+                               unsigned base_count, const void *data, size_t datalen,
+                               TimeLimit work_until);
+
     bool get_result(gen_t result_gen, void *value, size_t value_size);
+protected:
+    void broadcast_trigger(const std::vector<RemoteNotification> &ordered_notifications,
+                           const std::vector<NodeID> &broadcast_targets,
+                           EventImpl::gen_t oldest_previous,
+                           EventImpl::gen_t broadcast_previous,
+                           EventImpl::gen_t first_generation, NodeID migration_target,
+                           unsigned base_arrival_count, ReductionOpID redop_id,
+                           const void *data, size_t datalen,
+                           bool include_notifications = true);
 
   public:
     atomic<gen_t> generation = atomic<gen_t>(0);
@@ -197,7 +199,7 @@ namespace Realm {
     std::vector<char> final_values;
     bool needs_ordering;
     std::vector<std::pair<int, std::vector<RemoteNotification>>> ordered_buffer;
-    int broadcast_radix = 4;
+    int broadcast_radix;
   };
 }; // namespace Realm
 

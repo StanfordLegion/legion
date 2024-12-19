@@ -17,6 +17,10 @@ public:
 
 class MockBarrierCommunicator : public BarrierCommunicator {
 public:
+  MockBarrierCommunicator(size_t _max_rec_size = 1024)
+    : max_rec_size(_max_rec_size)
+  {}
+
   virtual void adjust(NodeID target, Barrier barrier, int delta, Event wait_on,
                       NodeID sender, bool forwarded, const void *data, size_t datalen)
   {
@@ -39,13 +43,14 @@ public:
 
   virtual size_t recommend_max_payload(NodeID node, size_t size, bool with_congestion)
   {
-    return size * 16;
+    return max_rec_size;
   }
 
   int sent_adjust_arrivals = 0;
   int sent_trigger_count = 0;
   int sent_subscription_count = 0;
   int sent_notification_count = 0;
+  size_t max_rec_size;
 };
 
 class BarrierTest : public ::testing::Test {
@@ -224,12 +229,45 @@ TEST_F(BarrierTest, LocalOutOfOrderArrive)
   EXPECT_EQ(barrier.generation.load(), arrival_gen);
 }
 
-TEST_F(BarrierTest, LocalArriveWithRemoteSubscribers)
+TEST_F(BarrierTest, LocalArriveWithRemoteSubscribersRadix4SplitPayload)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t subscribe_gen = 1;
   const EventImpl::gen_t arrival_gen = 1;
-  BarrierImpl barrier(barrier_comm);
+  const int radix = 4;
+  const int num_subscribers = 3;
+  const int message_split = 2;
+  int num_active_messages = 0;
+
+  MockBarrierCommunicator *barrier_communicator = new MockBarrierCommunicator(
+      sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t) +
+      sizeof(RemoteNotification) * message_split);
+
+  BarrierImpl barrier(barrier_communicator, radix);
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  for(int i = 1; i <= num_subscribers; i++) {
+    barrier.handle_remote_subscription(/*subscriber=*/i, subscribe_gen, 0, 0, 0);
+    num_active_messages += message_split;
+  }
+
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_communicator->sent_trigger_count, num_active_messages);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+}
+
+TEST_F(BarrierTest, LocalArriveWithRemoteSubscribersRadix4)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t subscribe_gen = 1;
+  const EventImpl::gen_t arrival_gen = 1;
+  const int radix = 4;
+  BarrierImpl barrier(barrier_comm, radix);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.handle_remote_subscription(/*subscriber=*/1, subscribe_gen, 0, 0, 0);
@@ -243,6 +281,29 @@ TEST_F(BarrierTest, LocalArriveWithRemoteSubscribers)
                          TimeLimit::responsive());
 
   EXPECT_EQ(barrier_comm->sent_trigger_count, 3);
+  EXPECT_EQ(barrier.generation.load(), arrival_gen);
+}
+
+TEST_F(BarrierTest, LocalArriveWithRemoteSubscribersRadix2)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t subscribe_gen = 1;
+  const EventImpl::gen_t arrival_gen = 1;
+  const int radix = 2;
+  BarrierImpl barrier(barrier_comm, radix);
+
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.handle_remote_subscription(/*subscriber=*/1, subscribe_gen, 0, 0, 0);
+  barrier.handle_remote_subscription(/*subscriber=*/2, subscribe_gen, 0, 0, 0);
+  barrier.handle_remote_subscription(/*subscriber=*/3, subscribe_gen, 0, 0, 0);
+
+  barrier.base_arrival_count = 2;
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0, 0, 0,
+                         TimeLimit::responsive());
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0, 0, 0,
+                         TimeLimit::responsive());
+
+  EXPECT_EQ(barrier_comm->sent_trigger_count, 2);
   EXPECT_EQ(barrier.generation.load(), arrival_gen);
 }
 

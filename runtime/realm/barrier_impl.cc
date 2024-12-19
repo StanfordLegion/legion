@@ -387,18 +387,17 @@ namespace Realm {
 
   BarrierImpl::BarrierImpl(void)
     : barrier_comm(std::make_unique<BarrierCommunicator>())
+    , broadcast_radix(4)
     , external_waiter_condvar(external_waiter_mutex)
   {
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    // TOOD(apryakhin@): Move it out
-    // assert(get_runtime()->get_module_config("core")->get_property(
-    //"barrier_broadcast_radix", broadcast_radix));
   }
 
-  BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm)
+  BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm, int _broadcast_radix)
     : barrier_comm(_barrier_comm)
     , external_waiter_condvar(external_waiter_mutex)
+    , broadcast_radix(_broadcast_radix)
   {
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
@@ -551,12 +550,13 @@ namespace Realm {
   }
 
   void BarrierImpl::broadcast_trigger(
-      Barrier barrier, const std::vector<RemoteNotification> &ordered_notifications,
+      const std::vector<RemoteNotification> &ordered_notifications,
       const std::vector<NodeID> &broadcast_targets, EventImpl::gen_t oldest_previous,
       EventImpl::gen_t broadcast_previous, EventImpl::gen_t first_generation,
       NodeID migration_target, unsigned base_arrival_count, ReductionOpID redopid,
       const void *data, size_t datalen, bool include_notifications)
   {
+    std::cout << "TARGETS:" << broadcast_targets.size() << std::endl;
     for(const NodeID target : broadcast_targets) {
       EventImpl::gen_t trigger_gen = ordered_notifications[target].trigger_gen;
 
@@ -604,8 +604,8 @@ namespace Realm {
           trigger_args.internal.is_complete_list = (end == ordered_notifications.size());
           trigger_args.remote_notifications = chunk_remote_notifications;
         }
-        barrier_comm->trigger(ordered_notifications[target].node, barrier.id,
-                              trigger_args, reduce_data, reduce_data_size);
+        barrier_comm->trigger(ordered_notifications[target].node, me.id, trigger_args,
+                              reduce_data, reduce_data_size);
       }
     }
   }
@@ -894,10 +894,9 @@ namespace Realm {
 
       if(!remote_notifications.empty()) {
         AutoLock<> al(mutex);
-        broadcast_trigger(b, remote_notifications, remote_broadcast_targets,
-                          oldest_previous, broadcast_previous, first_generation,
-                          migration_target, base_arrival_count, redop_id,
-                          final_values_copy, /*datalen=*/0);
+        broadcast_trigger(remote_notifications, remote_broadcast_targets, oldest_previous,
+                          broadcast_previous, first_generation, migration_target,
+                          base_arrival_count, redop_id, final_values_copy, /*datalen=*/0);
       }
     }
 
@@ -1275,7 +1274,7 @@ namespace Realm {
       get_broadcast_targets(broadcast_index, ordered_notifications.size(),
                             broadcast_radix, broadcast_targets);
 
-      broadcast_trigger(b, ordered_notifications, broadcast_targets,
+      broadcast_trigger(ordered_notifications, broadcast_targets,
                         /*oldest_previous=*/0, /*broadcast_previous=*/0, first_gen,
                         migration_target, base_arrival_count, redop_id, data, datalen);
 
