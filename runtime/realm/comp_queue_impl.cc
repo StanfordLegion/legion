@@ -529,7 +529,6 @@ namespace Realm {
       immediate_trigger = true;
     } else {
       AutoLock<> al(mutex);
-
       // now that we hold the lock, check emptiness consistent with progress
       //  event information
       if(resizable) {

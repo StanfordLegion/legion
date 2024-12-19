@@ -233,16 +233,21 @@ TEST_F(CompQueueTest, DISABLED_GetLocalProgressEvent)
   EXPECT_EQ(e, Event::NO_EVENT);
 }
 
-TEST_F(CompQueueTest, DISABLED_AddRemoveProgressEvent)
+TEST_F(CompQueueTest, DISABLED_AddRemoteProgressEvent)
 {
   const NodeID owner = 0;
   const int index = 0;
   const size_t max_size = 1;
   CompQueueImpl compqueue;
-  GenEventImpl event_a(nullptr, event_comm);
+  GenEventImpl event_a(event_triggerer, event_comm);
+  GenEventImpl event_b(event_triggerer, new MockEventCommunicator());
 
   event_a.init(ID::make_event(owner, index, 0), 0);
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
   compqueue.set_capacity(max_size, /*!resizable=*/false);
+  compqueue.add_event(event_b.current_event(), &event_b, /*faultaware=*/false);
   compqueue.add_remote_progress_event(event_a.current_event());
+
+  EXPECT_EQ(compqueue.get_pending_events(), 1);
+  event_b.trigger(1, 0, /*poisoned=*/false, TimeLimit::responsive());
 }
