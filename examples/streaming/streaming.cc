@@ -41,10 +41,14 @@ enum FieldIDs {
 class StreamingMapper: public DefaultMapper {
   private:
     int current_point;
-    int current_point_count;
+    int points_executed;
     int point_types;
     bool disable_point_wise_analysis = false;
-    MapperEvent select_tasks_to_map_event;
+    struct InFlightTask {
+      // An event that we will trigger when the task completes.
+      MapperEvent event;
+    };
+    std::deque<InFlightTask> queue;
 
   public:
     StreamingMapper(Machine m,
@@ -52,7 +56,7 @@ class StreamingMapper: public DefaultMapper {
       : DefaultMapper(rt->get_mapper_runtime(), m, p)
     {
       current_point = 0;
-      current_point_count = 0;
+      points_executed = 0;
       point_types = 3; // type_of_task
 
       int argc = Legion::HighLevelRuntime::get_input_args().argc;
@@ -74,37 +78,94 @@ class StreamingMapper: public DefaultMapper {
         DefaultMapper::select_tasks_to_map(ctx, input, output);
       else
       {
-        unsigned count = 0;
+        MapperEvent return_event;
+
         for (std::list<const Task*>::const_iterator it =
-            input.ready_tasks.begin(); (count < max_schedule_count) &&
+            input.ready_tasks.begin();
             (it != input.ready_tasks.end()); it++)
         {
-          if (!(*it)->is_index_space)
+          if ((*it)->task_id == POINTWISE_ANALYSABLE_FILL_ID ||
+              (*it)->task_id == POINTWISE_ANALYSABLE_INC_ID  ||
+              (*it)->task_id == POINTWISE_ANALYSABLE_SUM_ID)
           {
-            output.map_tasks.insert(*it);
-            count ++;
-          }
-          else
-          {
+            if (this->queue.size() > 0)
+              return_event = this->queue.front().event;
+
             Domain slice_domain = (*it)->get_slice_domain();
             if (slice_domain.rect_data[0] == current_point)
             {
               output.map_tasks.insert(*it);
-              count ++;
-              if (++current_point_count == point_types)
-              {
-                current_point_count = 0;
-                current_point++;
-              }
+              // Otherwise, we can schedule the task. Create a new event
+              // and queue it up on the processor.
+              this->queue.push_back({
+                .event = this->runtime->create_mapper_event(ctx),
+              });
+
+              printf("Seleted a task to map: %lld ctx_idx: %lu current_point %d \n", (*it)->get_unique_id(), (*it)->get_context_index(), current_point);
             }
           }
+          else
+          {
+            output.map_tasks.insert(*it);
+          }
         }
-        if (count == 0)
+        // If we don't schedule any tasks for mapping, the runtime needs to know
+        // when to ask us again to schedule more things. Return the MapperEvent we
+        // selected earlier.
+        if (output.map_tasks.size() == 0)
         {
-          select_tasks_to_map_event = this->runtime->create_mapper_event(ctx);
-          output.deferral_event = select_tasks_to_map_event;
+          assert(return_event.exists());
+          output.deferral_event = return_event;
         }
       }
+    }
+
+    void map_task(const MapperContext ctx,
+                  const Task& task,
+                  const MapTaskInput& input,
+                  MapTaskOutput& output) override {
+      DefaultMapper::map_task(ctx, task, input, output);
+      if (!this->disable_point_wise_analysis)
+      {
+        printf("Mapping Task: %lld ctx_idx: %lu\n", task.get_unique_id(), task.get_context_index());
+        if (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
+            task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
+            task.task_id == POINTWISE_ANALYSABLE_SUM_ID)
+        {
+          output.task_prof_requests.add_measurement<ProfilingMeasurements::OperationStatus>();
+        }
+      }
+    }
+
+    void report_profiling(const MapperContext ctx,
+                          const Task& task,
+                          const TaskProfilingInfo& input) override {
+      // Only specific tasks should have profiling information.
+      assert (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
+          task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
+          task.task_id == POINTWISE_ANALYSABLE_SUM_ID);
+
+      // We expect all of our tasks to complete successfully.
+      auto prof = input.profiling_responses.get_measurement<ProfilingMeasurements::OperationStatus>();
+      assert(prof->result == Realm::ProfilingMeasurements::OperationStatus::COMPLETED_SUCCESSFULLY);
+      // Clean up after ourselves.
+      delete prof;
+      printf("Completed task: %lld ctx_idx: %lu\n", task.get_unique_id(), task.get_context_index());
+
+      MapperEvent event;
+      this->points_executed++;
+      if (this->points_executed == point_types)
+      {
+        event = this->queue.front().event;
+        this->queue.clear();
+        points_executed = 0;
+        current_point++;
+      }
+
+      // Trigger the event so that the runtime knows it's time to schedule
+      // some more tasks to map.
+      if (event.exists())
+        this->runtime->trigger_mapper_event(ctx, event);
     }
 
     virtual void slice_task(const MapperContext ctx,
@@ -143,9 +204,9 @@ void top_level_task(const Task *task,
   int num_points = TOTAL_POINTS;
   printf("Running with ...\n");
   printf("Number of Point tasks for each IndexSpace Launch: %d\n", num_points);
-  printf("Number of data point for each point task: %d\n", DATA_MULTIPLIER);
+  printf("Number of data points for each point task: %d\n", DATA_MULTIPLIER);
   double data_size = (num_points * DATA_MULTIPLIER * sizeof(uint64_t)) / (1024 * 1024);
-  printf("Size of allocated data (Number of points * data point for each point task * sizeof(uint64_t): %lf MB\n", data_size);
+  printf("Size of allocated data (Number of points * data points for each point task * sizeof(uint64_t): %lf MB\n", data_size);
 
   Rect<1> launch_bounds(0, num_points - 1);
   IndexSpaceT<1> launch_is = runtime->create_index_space(ctx, launch_bounds);
@@ -169,12 +230,6 @@ void top_level_task(const Task *task,
 
   ArgumentMap arg_map;
 
-  /*
-  IndexFillLauncher fill_launcher(launch_is, lp, lr, TaskArgument(&zero, sizeof(zero)));
-  fill_launcher.add_field(FID_DATA);
-  runtime->fill_fields(ctx, fill_launcher);
-  */
-
   IndexLauncher point_wise_analysable_fill_launcher(POINTWISE_ANALYSABLE_FILL_ID,
       launch_is, TaskArgument(NULL, 0), arg_map);
   point_wise_analysable_fill_launcher.add_region_requirement(
@@ -194,7 +249,7 @@ void top_level_task(const Task *task,
       launch_is, TaskArgument(NULL, 0), arg_map);
   point_wise_analysable_sum_launcher.add_region_requirement(
       RegionRequirement(lp, 0/*projection ID*/,
-        LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
+        LEGION_READ_ONLY | LEGION_DISCARD_OUTPUT_MASK, LEGION_EXCLUSIVE, lr));
   point_wise_analysable_sum_launcher.add_field(0, FID_DATA);
 
   {
@@ -206,7 +261,6 @@ void top_level_task(const Task *task,
   }
 
   runtime->destroy_index_space(ctx, launch_is);
-  // -ll:fbmem
   // -ll:fsize 512 - in MB
   // -ll:csize 512 - in MB
 }
@@ -262,7 +316,7 @@ uint64_t point_wise_analysable_sum(const Task *task,
 
   const Point<1> point = task->index_point;
 
-  const FieldAccessor<LEGION_READ_WRITE,uint64_t,1,coord_t,
+  const FieldAccessor<LEGION_READ_ONLY, uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
 
