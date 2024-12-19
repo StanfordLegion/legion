@@ -42,8 +42,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(implicit_mapper_call == NULL);
 #endif
-      implicit_mapper_call = this;
       manager->begin_mapper_call(this, prioritize);
+      implicit_mapper_call = this;
     }
 
     //--------------------------------------------------------------------------
@@ -53,8 +53,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(implicit_mapper_call == this);
 #endif
-      manager->finish_mapper_call(this);
       implicit_mapper_call = NULL;
+      manager->finish_mapper_call(this);
       if (profiling_ranges != NULL)
       {
         if (!profiling_ranges->empty())
@@ -1098,7 +1098,11 @@ namespace Legion {
         AutoLock m_lock(mapper_lock);
         // See if we lost the race
         if (pending_pause_call.load())
-          to_trigger = complete_pending_pause_mapper_call(); 
+          to_trigger = complete_pending_pause_mapper_call();
+        // Can happen if we lose the race and the later mapper call that
+        // started is already finishing
+        else if (pending_finish_call.load())
+          to_trigger = complete_pending_finish_mapper_call();
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -1164,6 +1168,10 @@ namespace Legion {
         // We've got the lock, see if we won the race to the flag
         if (pending_finish_call.load())
           to_trigger = complete_pending_finish_mapper_call();  
+        // Can happen if we lost the race and the other mapper call started
+        // running and is now trying to pause while we are holding the lock
+        else if (pending_pause_call.load())
+          to_trigger = complete_pending_pause_mapper_call();
       }
       // Wake up the next task if necessary
       if (to_trigger.exists())
