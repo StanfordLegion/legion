@@ -178,9 +178,10 @@ TEST_F(CompQueueTest, PopLessEvents)
 {
   const NodeID owner = 0;
   int index = 0;
-  const size_t max_size = 3;
+  const size_t max_size = 4;
+  const size_t untriggered = 2;
   const GenEventImpl::gen_t trigger_gen = 1;
-  std::vector<Event> pop_events(max_size - 1);
+  std::vector<Event> pop_events(max_size);
   CompQueueImpl compqueue;
   std::vector<GenEventImpl *> events;
   std::vector<Event> completed_events;
@@ -191,26 +192,28 @@ TEST_F(CompQueueTest, PopLessEvents)
     completed_events.push_back(events[i]->current_event());
   }
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
-  compqueue.set_capacity(max_size, /*!resizable=*/false);
+  compqueue.set_capacity(max_size, /*!resizable=*/true);
   for(size_t i = 0; i < max_size; i++) {
     compqueue.add_event(events[i]->current_event(), events[i], /*faultaware=*/false);
   }
-  for(size_t i = 0; i < max_size; i++) {
+  for(size_t i = 0; i < max_size - untriggered; i++) {
     events[i]->trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   }
   size_t num_pending_events = compqueue.get_pending_events();
-  size_t pop_size = compqueue.pop_events(pop_events.data(), max_size - 1);
+  size_t pop_size = compqueue.pop_events(pop_events.data(), max_size);
 
-  EXPECT_EQ(num_pending_events, 0);
-  EXPECT_EQ(pop_size, max_size - 1);
-  EXPECT_EQ(pop_events.size(), pop_size);
-  for(size_t i = 0; i < max_size; i++) {
+  EXPECT_EQ(num_pending_events, untriggered);
+  EXPECT_EQ(pop_size, max_size - untriggered);
+  for(size_t i = 0; i < max_size - untriggered; i++) {
     bool poisoned = false;
     EXPECT_TRUE(events[i]->has_triggered(trigger_gen, poisoned));
     EXPECT_FALSE(poisoned);
   }
   for(size_t i = 0; i < pop_size; i++) {
     EXPECT_EQ(pop_events[i].id, completed_events[i].id);
+  }
+  for(size_t i = max_size - untriggered; i < max_size; i++) {
+    events[i]->trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   }
   for(size_t i = 0; i < max_size; i++) {
     delete events[i];
