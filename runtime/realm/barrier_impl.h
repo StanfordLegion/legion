@@ -138,7 +138,8 @@ namespace Realm {
                                TimeLimit work_until);
 
     bool get_result(gen_t result_gen, void *value, size_t value_size);
-protected:
+
+  protected:
     void broadcast_trigger(const std::vector<RemoteNotification> &ordered_notifications,
                            const std::vector<NodeID> &broadcast_targets,
                            EventImpl::gen_t oldest_previous,
