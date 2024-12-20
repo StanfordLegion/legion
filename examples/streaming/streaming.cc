@@ -100,8 +100,6 @@ class StreamingMapper: public DefaultMapper {
               this->queue.push_back({
                 .event = this->runtime->create_mapper_event(ctx),
               });
-
-              printf("Seleted a task to map: %lld ctx_idx: %lu current_point %d \n", (*it)->get_unique_id(), (*it)->get_context_index(), current_point);
             }
           }
           else
@@ -123,11 +121,11 @@ class StreamingMapper: public DefaultMapper {
     void map_task(const MapperContext ctx,
                   const Task& task,
                   const MapTaskInput& input,
-                  MapTaskOutput& output) override {
+                  MapTaskOutput& output)
+    {
       DefaultMapper::map_task(ctx, task, input, output);
       if (!this->disable_point_wise_analysis)
       {
-        printf("Mapping Task: %lld ctx_idx: %lu\n", task.get_unique_id(), task.get_context_index());
         if (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
             task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
             task.task_id == POINTWISE_ANALYSABLE_SUM_ID)
@@ -139,7 +137,8 @@ class StreamingMapper: public DefaultMapper {
 
     void report_profiling(const MapperContext ctx,
                           const Task& task,
-                          const TaskProfilingInfo& input) override {
+                          const TaskProfilingInfo& input)
+    {
       // Only specific tasks should have profiling information.
       assert (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
           task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
@@ -150,7 +149,6 @@ class StreamingMapper: public DefaultMapper {
       assert(prof->result == Realm::ProfilingMeasurements::OperationStatus::COMPLETED_SUCCESSFULLY);
       // Clean up after ourselves.
       delete prof;
-      printf("Completed task: %lld ctx_idx: %lu\n", task.get_unique_id(), task.get_context_index());
 
       MapperEvent event;
       this->points_executed++;
