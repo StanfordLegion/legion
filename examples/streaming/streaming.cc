@@ -257,7 +257,8 @@ void top_level_task(const Task *task,
     runtime->execute_index_space(ctx, point_wise_analysable_inc_launcher);
     Future f = runtime->execute_index_space(ctx, point_wise_analysable_sum_launcher, LEGION_REDOP_SUM_UINT64);
     uint64_t result = f.get_result<uint64_t>();
-    assert (result == num_points * DATA_MULTIPLIER);
+    uint64_t expected = num_points * DATA_MULTIPLIER;
+    assert (result == expected);
   }
 
   runtime->destroy_index_space(ctx, launch_is);
@@ -313,8 +314,6 @@ uint64_t point_wise_analysable_sum(const Task *task,
   assert(regions.size() == 1);
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
-
-  const Point<1> point = task->index_point;
 
   const FieldAccessor<LEGION_READ_ONLY, uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
