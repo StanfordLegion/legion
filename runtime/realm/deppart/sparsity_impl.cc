@@ -222,7 +222,7 @@ namespace Realm {
     if(map_impl.load() != 0) {
       // Only do this if we're single node for now since it is not safe with
       // Realm's quiescence code in multi-node at the moment
-      if (Network::max_node_id == 0) {
+      if(Network::max_node_id == 0) {
         bool report_leaks = false;
         get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
                                                                report_leaks);
@@ -264,7 +264,7 @@ namespace Realm {
   {
     // Only do this if we're single node for now since it is not safe with
     // Realm's quiescence code in multi-node at the moment
-    if (Network::max_node_id == 0) {
+    if(Network::max_node_id == 0) {
       references.fetch_add_acqrel(count);
     }
     if(wait_on != Event::NO_EVENT) {
@@ -292,7 +292,7 @@ namespace Realm {
     assert(Network::my_node_id == NodeID(me.sparsity_creator_node()));
     // Only do this if we're single node for now since it is not safe with
     // Realm's quiescence code in multi-node at the moment
-    if (Network::max_node_id > 0) {
+    if(Network::max_node_id > 0) {
       return;
     }
     if(wait_on.has_triggered()) {
