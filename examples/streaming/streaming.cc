@@ -135,6 +135,7 @@ class StreamingMapper: public DefaultMapper {
       }
     }
 
+    using DefaultMapper::report_profiling;
     void report_profiling(const MapperContext ctx,
                           const Task& task,
                           const TaskProfilingInfo& input)
