@@ -57,6 +57,17 @@
 #include <sys/types.h>
 #endif
 
+// include leak sanitizer interface if necessary for __lsan_ignore_object
+#ifdef __SANITIZE_ADDRESS__
+#if __SANITIZE_ADDRESS__
+#include <sanitizer/lsan_interface.h>
+#endif
+#elif defined(__has_feature)
+#if __has_feature(leak_sanitizer)
+#include <sanitizer/lsan_interface.h>
+#endif
+#endif
+
 // for cpu resource discovery
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
 #include <sys/sysinfo.h>
@@ -1405,25 +1416,35 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  if(!starts.empty()) {
 	    int new_argc = local_argc + starts.size();
 	    const char **new_argv = (const char **)(malloc((new_argc + 1) * sizeof(char *)));
-	    // new args go after argv[0] and anything that looks like a
-	    //  positional argument (i.e. doesn't start with -)
-	    int before_new = 0;
-	    while(before_new < local_argc) {
-	      if((before_new > 0) && (local_argv[before_new][0] == '-'))
-		break;
-	      new_argv[before_new] = local_argv[before_new];
-	      before_new++;
-	    }
-	    for(size_t i = 0; i < starts.size(); i++)
-	      new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
-	    for(int i = before_new; i < local_argc; i++)
-	      new_argv[i + starts.size()] = local_argv[i];
-	    new_argv[new_argc] = 0;
+            // new args go after argv[0] and anything that looks like a
+            //  positional argument (i.e. doesn't start with -)
+            int before_new = 0;
+            while(before_new < local_argc) {
+              if((before_new > 0) && (local_argv[before_new][0] == '-'))
+                break;
+              new_argv[before_new] = local_argv[before_new];
+              before_new++;
+            }
+            for(size_t i = 0; i < starts.size(); i++)
+              new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
+            for(int i = before_new; i < local_argc; i++)
+              new_argv[i + starts.size()] = local_argv[i];
+            new_argv[new_argc] = 0;
 
-	    local_argc = new_argc;
-	    local_argv = new_argv;
-	  }
-	}
+            local_argc = new_argc;
+            local_argv = new_argv;
+            // We intentionally leak this allocation so tell leak sanitizer
+#ifdef __SANITIZE_ADDRESS__
+#if __SANITIZE_ADDRESS__
+            __lsan_ignore_object(new_argv);
+#endif
+#elif defined(__has_feature)
+#if __has_feature(leak_sanitizer)
+            __lsan_ignore_object(new_argv);
+#endif
+#endif
+          }
+        }
       }
 
       module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
@@ -3406,19 +3427,20 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       Backtrace bt;
       bt.capture_backtrace(1 /* skip this handler */);
-      bt.lookup_symbols();
       fflush(stdout);
       fflush(stderr);
       std::cout << std::flush;
       std::cerr << "Signal " << signal
 #ifdef REALM_ON_WINDOWS
-                << " received by process " << GetCurrentProcessId()
-                << " (thread " << GetCurrentThreadId()
+                << " received by process " << GetCurrentProcessId() << " (thread "
+                << GetCurrentThreadId()
 #else
-                << " received by process " << getpid()
-                << " (thread " << std::hex << uintptr_t(pthread_self())
+                << " received by process " << getpid() << " (thread " << std::hex
+                << uintptr_t(pthread_self())
 #endif
-                << std::dec << ") at: " << bt << std::flush;
+                << std::dec << ") at:" << std::endl;
+      std::cerr << bt;
+      std::cerr << std::flush;
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle
       //  their own deaths, and then exit

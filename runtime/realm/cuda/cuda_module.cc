@@ -107,6 +107,7 @@ namespace Realm {
     bool nvml_api_fnptrs_loaded = false;
     bool nvml_initialized = false;
     bool cupti_api_fnptrs_loaded = false;
+    bool cupti_api_initialized = false;
     CUresult cuda_init_code = CUDA_ERROR_UNKNOWN;
 
     bool cuda_api_fnptrs_loaded = false;
@@ -411,7 +412,7 @@ namespace Realm {
       : Realm::Operation::AsyncWorkItem(op)
       , gpu(_gpu)
     {
-      if(op->wants_gpu_work_start() && cupti_api_fnptrs_loaded &&
+      if(op->wants_gpu_work_start() && cupti_api_initialized &&
          CUPTI_HAS_FNPTR(cuptiActivityEnableContext)) {
         {
           AutoLock<> al(gpu->alloc_mutex); // TODO(cperry): more fine grained lock
@@ -436,7 +437,7 @@ namespace Realm {
 
     GPUWorkFence::~GPUWorkFence()
     {
-      if(op->wants_gpu_work_start() && cupti_api_fnptrs_loaded &&
+      if(op->wants_gpu_work_start() && cupti_api_initialized &&
          CUPTI_HAS_FNPTR(cuptiActivityDisableContext)) {
         {
           AutoLock<> al(gpu->alloc_mutex); // TODO(cperry): more fine grained lock
@@ -463,7 +464,7 @@ namespace Realm {
     void GPUWorkFence::mark_finished(bool successful)
     {
       if(op->wants_gpu_work_start()) {
-        if(cupti_api_fnptrs_loaded && CUPTI_HAS_FNPTR(cuptiActivityFlushAll)) {
+        if(cupti_api_initialized && CUPTI_HAS_FNPTR(cuptiActivityFlushAll)) {
           // Flush all the activities for this so we can retrieve them now
           CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityFlushAll)(0));
         } else {
@@ -836,7 +837,7 @@ namespace Realm {
       task->add_async_work_item(fence);
 
       // Push the finish event as the unique ID for this task for correlation later.
-      if(cupti_api_fnptrs_loaded &&
+      if(cupti_api_initialized &&
          CUPTI_HAS_FNPTR(cuptiActivityPushExternalCorrelationId) &&
          finish_event != Event::NO_EVENT) {
         CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityPushExternalCorrelationId)(
@@ -930,7 +931,7 @@ namespace Realm {
 
       // Pop the finish event as the unique ID for this task for correlation later.
       Event finish_event = task->get_finish_event();
-      if(cupti_api_fnptrs_loaded && (finish_event != Event::NO_EVENT)) {
+      if(cupti_api_initialized && (finish_event != Event::NO_EVENT)) {
         uint64_t id = 0;
         CHECK_CUPTI(CUPTI_FNPTR(cuptiActivityPopExternalCorrelationId)(
             CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM2, &id));
@@ -3908,6 +3909,7 @@ namespace Realm {
             cupti_request_buffer_cb, cupti_buffer_complete_cb));
         CHECK_CUPTI(
             CUPTI_FNPTR(cuptiActivityEnable)(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION));
+        cupti_api_initialized = true;
       }
     }
 

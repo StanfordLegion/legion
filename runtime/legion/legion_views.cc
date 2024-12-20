@@ -497,8 +497,8 @@ namespace Legion {
       // otherwise we can get into issues of soundness
       if (!current_to_filter.empty())
         verify_current_to_filter(dominated, current_to_filter);
-      if (!trace_recording && (!dead_users.empty() || 
-           !previous_to_filter.empty() || !current_to_filter.empty()))
+      if (!dead_users.empty() || 
+          !previous_to_filter.empty() || !current_to_filter.empty())
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -650,8 +650,8 @@ namespace Legion {
       // otherwise we can get into issues of soundness
       if (!current_to_filter.empty())
         verify_current_to_filter(dominated, current_to_filter);
-      if (!trace_recording && (!dead_users.empty() || 
-           !previous_to_filter.empty() || !current_to_filter.empty()))
+      if (!dead_users.empty() || 
+          !previous_to_filter.empty() || !current_to_filter.empty())
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -4517,10 +4517,16 @@ namespace Legion {
               runtime->send_collective_view_make_valid(*it, rez);
           }
         }
-        for (std::vector<IndividualView*>::const_iterator it =
-              local_views.begin(); it != local_views.end(); it++)
-          (*it)->add_nested_valid_ref(did);
-        add_base_gc_ref(INTERNAL_VALID_REF);
+        // Only need to add the references if we're in the not-valid state
+        // as if we are in the pending invalid state then we haven't actually
+        // remove the reference yet
+        if (valid_state == NOT_VALID_STATE)
+        {
+          for (std::vector<IndividualView*>::const_iterator it =
+                local_views.begin(); it != local_views.end(); it++)
+            (*it)->add_nested_valid_ref(did);
+          add_base_gc_ref(INTERNAL_VALID_REF);
+        }
         valid_state = FULL_VALID_STATE;
       }
     }

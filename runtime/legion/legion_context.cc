@@ -585,9 +585,9 @@ namespace Legion {
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
 #ifdef LEGION_MALLOC_INSTANCES
       const Realm::ProfilingRequestSet no_requests;
@@ -10811,6 +10811,11 @@ namespace Legion {
         if (!applied_events.empty())
           applied.insert(applied_events.begin(), applied_events.end());
       }
+      // Also tell any traces to invalidate their references to the 
+      // equivalence set tree data structures
+      for (std::map<TraceID,LogicalTrace*>::const_iterator it =
+            traces.begin(); it != traces.end(); it++)
+        it->second->invalidate_equivalence_sets();
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied,
                                                 mapping, source_shard);

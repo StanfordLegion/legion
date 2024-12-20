@@ -133,6 +133,11 @@ legion_cxx_prof_tests = [
     ['test/gather_perf/gather_perf', ['-m', '7']],
 ]
 
+prealm_cxx_prof_tests = [
+    ['test/prealm/saxpy/prealm_saxpy', []],
+    ['test/prealm/stencil/prealm_stencil', ['-ll:cpu', '4']],
+]
+
 legion_fortran_tests = [
     ['tutorial/fortran/00_hello_world/hello_world_fortran', []],
     ['tutorial/fortran/01_tasks_and_futures/tasks_and_futures_fortran', []],
@@ -426,6 +431,17 @@ def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_c
     flags.extend(get_default_args(env))
     from tools.test_prof import run_prof_test
     for test_file, test_flags in legion_cxx_prof_tests:
+        prof_test = [[test_file, test_flags],]
+        run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+        test_file_path = Path(os.path.join(root_dir, test_file))
+        test_dir = test_file_path.parent.absolute()
+        run_prof_test(root_dir, test_dir, tmp_dir)
+
+def run_test_prealm_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+    flags = ['-pr:logfile', 'prof_%.gz']
+    flags.extend(get_default_args(env))
+    from tools.test_prof import run_prof_test
+    for test_file, test_flags in prealm_cxx_prof_tests:
         prof_test = [[test_file, test_flags],]
         run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
         test_file_path = Path(os.path.join(root_dir, test_file))
@@ -845,7 +861,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmake_cmd.append('-DLegion_BOUNDS_CHECKS=%s' % ('ON' if env['BOUNDS_CHECKS'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_PRIVILEGE_CHECKS=%s' % ('ON' if env['PRIVILEGE_CHECKS'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_REDOP_COMPLEX=%s' % ('ON' if env['USE_COMPLEX'] == '1' else 'OFF'))
-    cmake_cmd.append('-DLegion_BACKTRACE_USE_LIBDW=%s' % ('ON' if env['REALM_BACKTRACE_USE_LIBDW'] == '1' else 'OFF'))
+    cmake_cmd.append('-DLegion_BACKTRACE_USE_CPPTRACE=%s' % ('ON' if env['REALM_BACKTRACE_USE_CPPTRACE'] == '1' else 'OFF'))
     if 'LEGION_WARNINGS_FATAL' in env:
         cmake_cmd.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
@@ -1010,7 +1026,7 @@ def report_mode(debug, max_dim, launcher,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_nvtx, use_libdw, cxx_standard):
+                use_gcov, use_cmake, use_nvtx, use_cpptrace, cxx_standard):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -1054,7 +1070,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * NVTX:       %s' % use_nvtx)
-    print('###   * LIBDW:      %s' % use_libdw)
+    print('###   * CPPTRACE:   %s' % use_cpptrace)
     print('###   * Max DIM:    %s' % max_dim)
     print('###   * C++ STD:    %s' % cxx_standard)
     print('#'*60)
@@ -1128,7 +1144,7 @@ def run_tests(test_modules=None,
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_nvtx = feature_enabled('nvtx', False)
-    use_libdw = feature_enabled('libdw', False, prefix='REALM_BACKTRACE_USE_')
+    use_cpptrace = feature_enabled('cpptrace', False, prefix='REALM_BACKTRACE_USE_')
     use_shared_objects = feature_enabled('shared', False,
                                          envname='SHARED_OBJECTS')
 
@@ -1183,7 +1199,7 @@ def run_tests(test_modules=None,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_nvtx, use_libdw, cxx_standard)
+                use_gcov, use_cmake, use_nvtx, use_cpptrace, cxx_standard)
 
     if not tmp_dir:
         tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -1226,7 +1242,7 @@ def run_tests(test_modules=None,
         ('SHARED_OBJECTS', '1' if use_shared_objects else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_NVTX', '1' if use_nvtx else '0'),
-        ('REALM_BACKTRACE_USE_LIBDW', '1' if use_libdw else '0'),
+        ('REALM_BACKTRACE_USE_CPPTRACE', '1' if use_cpptrace else '0'),
         ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
         ('DEFINE_HEADERS_DIR', os.path.join(root_dir, 'runtime')),
@@ -1285,6 +1301,7 @@ def run_tests(test_modules=None,
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_prof:
                     run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                    run_test_prealm_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if networks:
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:

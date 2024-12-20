@@ -635,31 +635,6 @@ namespace Legion {
         return val + (step - rem);
     }
 
-    template <typename T>
-    inline T max(T a, T b)
-    {
-      return((a > b) ? a : b);
-    }
-
-    template <typename T>
-    inline T gcd(T a, T b)
-    {
-      while(a != b) {
-        if(a > b)
-          a -= b;
-        else
-          b -= a;
-      }
-      return a;
-    }
-
-    template <typename T>
-    inline T lcm(T a, T b)
-    {
-      // TODO: more efficient way?
-      return(a * b / gcd(a, b));
-    }
-
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
@@ -973,10 +948,10 @@ namespace Legion {
         {
           offset = round_up(offset, field_alignment);
           if ((falign % field_alignment) != 0)
-            falign = lcm(falign, field_alignment);
+            falign = std::lcm(falign, field_alignment);
         }
         // increase size and alignment if needed
-        fsize = max(fsize, offset + it->first * elements_between_fields);
+        fsize = std::max(fsize, offset + it->first * elements_between_fields);
         field_offsets[it->second] = offset;
       }
       if (falign > 1)
@@ -984,7 +959,7 @@ namespace Legion {
         // group size needs to be rounded up to match group alignment
         fsize = round_up(fsize, falign);
         // overall instance alignment layout must be compatible with group
-        layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
+        layout->alignment_reqd = std::lcm(layout->alignment_reqd, falign);
       } 
       // compute the starting offsets for each piece
       std::vector<size_t> piece_offsets(piece_bounds.size());

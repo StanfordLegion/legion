@@ -13,24 +13,24 @@
  * limitations under the License.
  */
 
-// helper defines/data structures for fault reporting/handling in Realm
+#ifndef __REALM_SAXPY__
+#define __REALM_SAXPY__
 
-// nop, but helps IDEs
-#include "realm/faults.h"
+#include "prealm.h"
 
-namespace Realm {
+using namespace PRealm;
 
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class Backtrace
-    //
+enum {
+  FID_X = 101,
+  FID_Y = 102,
+  FID_Z = 103,
+};
 
-    template <typename S>
-    bool serdez(S& serdez, const Backtrace& b)
-    {
-      return ((serdez & b.pc_hash) &&
-              (serdez & b.pcs) &&
-              (serdez & b.symbols));
-    }
+struct SaxpyArgs {
+public:
+  RegionInstance x_inst, y_inst, z_inst;
+  float alpha;
+  Rect<1> bounds;
+};
 
-}; // namespace Realm
+#endif

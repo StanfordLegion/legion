@@ -944,6 +944,14 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void LogicalTrace::invalidate_equivalence_sets(void) const 
+    //--------------------------------------------------------------------------
+    {
+      if (physical_trace != NULL)
+        physical_trace->invalidate_equivalence_sets();
+    }
+
     /////////////////////////////////////////////////////////////
     // TraceOp 
     /////////////////////////////////////////////////////////////
@@ -1896,6 +1904,15 @@ namespace Legion {
         parent_req_fields[index] = mask;
       else
         finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::invalidate_equivalence_sets(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<PhysicalTemplate*>::const_iterator it =
+            templates.begin(); it != templates.end(); it++)
+        (*it)->invalidate_equivalence_sets();
     }
 
     //--------------------------------------------------------------------------
@@ -4656,6 +4673,21 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < postconditions.size(); idx++)
         postconditions[idx]->apply_postconditions(op, idx, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::invalidate_equivalence_sets(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            preconditions.begin(); it != preconditions.end(); it++)
+        (*it)->invalidate_equivalence_sets();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            anticonditions.begin(); it != anticonditions.end(); it++)
+        (*it)->invalidate_equivalence_sets();
+      for (std::vector<TraceConditionSet*>::const_iterator it =
+            postconditions.begin(); it != postconditions.end(); it++)
+        (*it)->invalidate_equivalence_sets();
     }
 
 #if 0

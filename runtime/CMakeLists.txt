@@ -53,7 +53,6 @@ list(APPEND REALM_SRC
   realm/barrier_impl.h        realm/barrier_impl.cc
   realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
-  realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
@@ -728,6 +727,11 @@ endif()
 
 if(REALM_USE_NVTX)
   target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
+endif()
+
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  target_link_libraries(RealmRuntime PRIVATE cpptrace::cpptrace)
+  target_link_libraries(RealmStatic PRIVATE cpptrace::cpptrace)
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")

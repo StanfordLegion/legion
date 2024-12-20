@@ -35,15 +35,15 @@ namespace Legion {
                                      Operation *op, bool prioritize)
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
-            operation->get_acquired_instances_ref()), 
-        start_time(0), reentrant(manager->initially_reentrant)
+            operation->get_acquired_instances_ref()), profiling_ranges(NULL),
+        start_time(0), reentrant(manager->initially_reentrant), paused(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(implicit_mapper_call == NULL);
 #endif
-      implicit_mapper_call = this;
       manager->begin_mapper_call(this, prioritize);
+      implicit_mapper_call = this;
     }
 
     //--------------------------------------------------------------------------
@@ -53,8 +53,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(implicit_mapper_call == this);
 #endif
-      manager->finish_mapper_call(this);
       implicit_mapper_call = NULL;
+      manager->finish_mapper_call(this);
+      if (profiling_ranges != NULL)
+      {
+        if (!profiling_ranges->empty())
+          REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
+            "Detected mismatched profiling range calls, missing %zd stop calls "
+            "at the end of mapper call %s by mapper %s for %s (UID %lld)",
+            profiling_ranges->size(), get_mapper_call_name(),
+            get_mapper_name(), operation->get_logging_name(),
+            operation->get_unique_op_id())
+        delete profiling_ranges;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -143,6 +154,50 @@ namespace Legion {
         }
       }
       return all_acquired;
+    }
+
+    //--------------------------------------------------------------------------
+    void MappingCallInfo::start_profiling_range(void)
+    //--------------------------------------------------------------------------
+    {
+      if (implicit_profiler != NULL)
+      {
+        const long long start = Realm::Clock::current_time_in_nanoseconds();
+        if (profiling_ranges == NULL)
+          profiling_ranges = new std::vector<long long>();
+        profiling_ranges->push_back(start);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MappingCallInfo::stop_profiling_range(const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      if (prov == NULL)
+        REPORT_LEGION_ERROR(ERROR_MISSING_PROFILING_PROVENANCE,
+            "Missing provenance string for mapper profiling range "
+            "in mapper call %s by mapper %s for %s (UID %lld)", 
+            get_mapper_call_name(), get_mapper_name(),
+            operation->get_logging_name(), operation->get_unique_op_id())
+      if (implicit_profiler != NULL)
+      {
+        Provenance *provenance = 
+          implicit_runtime->find_or_create_provenance(prov, strlen(prov));
+        if ((profiling_ranges == NULL) || profiling_ranges->empty())
+          REPORT_LEGION_ERROR(ERROR_MISMATCHED_PROFILING_RANGE,
+            "Detected mismatched profiling range calls, received a stop call "
+            "without a corresponding start call in mapper call %s by mapper %s "
+            "for %s (UID %lld) at %.*s", get_mapper_call_name(),
+            get_mapper_name(), operation->get_logging_name(),
+            operation->get_unique_op_id(), int(provenance->human.length()),
+            provenance->human.data())
+        const long long stop = Realm::Clock::current_time_in_nanoseconds();
+        implicit_profiler->record_application_range(provenance->pid,
+            profiling_ranges->back(), stop);
+        profiling_ranges->pop_back();
+        if (provenance->remove_reference())
+          delete provenance;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -1028,15 +1083,6 @@ namespace Legion {
     void SerializingManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
-      if (executing_call != info)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
-                      "Invalid mapper context passed to mapper runtime "
-                      "call by mapper %s. Mapper contexts are only valid "
-                      "for the mapper call to which they are passed. They "
-                      "cannot be stored beyond the lifetime of the "
-                      "mapper call.", mapper->get_mapper_name())
 #ifdef DEBUG_LEGION
       assert(!pending_pause_call.load());
 #endif
@@ -1052,20 +1098,20 @@ namespace Legion {
         AutoLock m_lock(mapper_lock);
         // See if we lost the race
         if (pending_pause_call.load())
-          to_trigger = complete_pending_pause_mapper_call(); 
+          to_trigger = complete_pending_pause_mapper_call();
+        // Can happen if we lose the race and the later mapper call that
+        // started is already finishing
+        else if (pending_finish_call.load())
+          to_trigger = complete_pending_finish_mapper_call();
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
-    void SerializingManager::resume_mapper_call(MappingCallInfo *info,
-                                                RuntimeCallKind kind)
+    void SerializingManager::resume_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        implicit_profiler->record_runtime_call(kind, info->pause_time,
-            Realm::Clock::current_time_in_nanoseconds());
       // See if we are ready to be woken up
       RtEvent wait_on;
       {
@@ -1122,6 +1168,10 @@ namespace Legion {
         // We've got the lock, see if we won the race to the flag
         if (pending_finish_call.load())
           to_trigger = complete_pending_finish_mapper_call();  
+        // Can happen if we lost the race and the other mapper call started
+        // running and is now trying to pause while we are holding the lock
+        else if (pending_pause_call.load())
+          to_trigger = complete_pending_pause_mapper_call();
       }
       // Wake up the next task if necessary
       if (to_trigger.exists())
@@ -1374,25 +1424,12 @@ namespace Legion {
     void ConcurrentManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (implicit_mapper_call != info)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
-                      "Invalid mapper context passed to mapper_rt "
-                      "call by mapper %s. Mapper contexts are only valid "
-                      "for the mapper call to which they are passed. They "
-                      "cannot be stored beyond the lifetime of the "
-                      "mapper call.", mapper->get_mapper_name())
-      if (profile_mapper)
-        info->pause_time = Realm::Clock::current_time_in_nanoseconds();
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info,
-                                               RuntimeCallKind kind)
+    void ConcurrentManager::resume_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      if (profile_mapper)
-        implicit_profiler->record_runtime_call(kind, info->pause_time,
-            Realm::Clock::current_time_in_nanoseconds());
     }
 
     //--------------------------------------------------------------------------

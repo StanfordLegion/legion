@@ -11272,36 +11272,42 @@ namespace Legion {
             (partition->total_children == partition->max_linearized_color);
       if (local_only && (partition->collective_mapping != NULL))
       {
-#ifdef DEBUG_LEGION
-        assert(partition->collective_mapping->contains(
-              partition->local_space));
-#endif
-        const unsigned index = 
-          partition->collective_mapping->find_index(partition->local_space);
-        const LegionColor total_spaces = partition->collective_mapping->size();
-        if (partition->total_children < total_spaces)
+        if (partition->collective_mapping->contains(partition->local_space))
         {
-          // Just a single color to handle here
-          current = 0;
-          end = partition->max_linearized_color;
-          const unsigned offset = index % partition->total_children;
-          for (unsigned idx = 0; idx < offset; idx++)
-            step();
+          const unsigned index =
+            partition->collective_mapping->find_index(partition->local_space);
+          const LegionColor total_spaces =
+            partition->collective_mapping->size();
+          if (partition->total_children < total_spaces)
+          {
+            // Just a single color to handle here
+            current = 0;
+            end = partition->max_linearized_color;
+            const unsigned offset = index % partition->total_children;
+            for (unsigned idx = 0; idx < offset; idx++)
+              step();
 #ifdef DEBUG_LEGION
-          assert(current < end);
+            assert(current < end);
 #endif
-          end = current+1;
+            end = current+1;
+          }
+          else
+          {
+            const LegionColor chunk =
+              compute_chunk(partition->max_linearized_color, total_spaces);
+            current = index * chunk;
+            end = ((current + chunk) < partition->max_linearized_color) ?
+              (current + chunk) : partition->max_linearized_color;
+            if (!simple_step && (current < end) &&
+                !color_space->contains_color(current))
+              step();
+          }
         }
         else
         {
-          const LegionColor chunk = 
-            compute_chunk(partition->max_linearized_color, total_spaces);
-          current = index * chunk;
-          end = ((current + chunk) < partition->max_linearized_color) ?
-            (current + chunk) : partition->max_linearized_color;
-          if (!simple_step && (current < end) &&
-              !color_space->contains_color(current))
-            step();       
+          // There are no local points
+          end = partition->max_linearized_color;
+          current = end;
         }
       }
       else
