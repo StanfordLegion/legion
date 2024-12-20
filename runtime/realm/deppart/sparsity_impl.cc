@@ -220,6 +220,7 @@ namespace Realm {
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     if(map_impl.load() != 0) {
+#ifdef REALM_ENABLE_SPARSITY_REFCOUNT
       bool report_leaks = false;
       get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
                                                              report_leaks);
@@ -229,6 +230,7 @@ namespace Realm {
                          << " node:" << Network::my_node_id;
         assert(0);
       }
+#endif
       (*map_deleter)(map_impl.load());
     }
   }
@@ -258,7 +260,9 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count, Event wait_on)
   {
+#ifdef REALM_ENABLE_SPARSITY_REFCOUNT
     references.fetch_add_acqrel(count);
+#endif
     if(wait_on != Event::NO_EVENT) {
       GenEventImpl::trigger(wait_on, false);
     }
@@ -282,6 +286,7 @@ namespace Realm {
   {
     // Should be on the owner node when we get these messages
     assert(Network::my_node_id == NodeID(me.sparsity_creator_node()));
+#ifdef REALM_ENABLE_SPARSITY_REFCOUNT
     if(wait_on.has_triggered()) {
       const unsigned remaining = references.fetch_sub_acqrel(count);
       assert(remaining >= count);
@@ -309,6 +314,7 @@ namespace Realm {
     } else {
       EventImpl::add_waiter(wait_on, new DeferredDestroy(this, count));
     }
+#endif
   }
 
   template <int N, typename T>
