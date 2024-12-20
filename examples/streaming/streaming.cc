@@ -234,7 +234,7 @@ void top_level_task(const Task *task,
       launch_is, TaskArgument(NULL, 0), arg_map);
   point_wise_analysable_fill_launcher.add_region_requirement(
       RegionRequirement(lp, 0/*projection ID*/,
-        LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
+        LEGION_WRITE_ONLY, LEGION_EXCLUSIVE, lr));
   point_wise_analysable_fill_launcher.add_field(0, FID_DATA);
   point_wise_analysable_fill_launcher.global_arg = TaskArgument(&zero, sizeof(zero));
 
@@ -274,7 +274,7 @@ void point_wise_analysable_fill(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
-  const FieldAccessor<LEGION_READ_WRITE,uint64_t,1,coord_t,
+  const FieldAccessor<LEGION_WRITE_ONLY,uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
 
@@ -335,7 +335,6 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    registrar.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
   {
