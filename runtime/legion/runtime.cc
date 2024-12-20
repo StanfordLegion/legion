@@ -118,6 +118,13 @@ namespace Legion {
     {
       ctx->end_wait(*this, from_application);
     }
+    
+    //--------------------------------------------------------------------------
+    void LgEvent::begin_mapper_call_wait(MappingCallInfo *call) const
+    //--------------------------------------------------------------------------
+    {
+      call->begin_wait();
+    }
 
     //--------------------------------------------------------------------------
     void LgEvent::record_event_wait(LegionProfInstance *profiler,
