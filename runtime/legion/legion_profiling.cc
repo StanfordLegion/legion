@@ -52,6 +52,9 @@ namespace Legion {
         fevent(implicit_fevent)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(fevent.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -685,6 +688,9 @@ namespace Legion {
       info.precondition = pre;
       if (pre.is_barrier())
         record_barrier_use(pre, implicit_provenance);
+#ifdef DEBUG_LEGION
+      assert(implicit_fevent.exists());
+#endif
       info.fevent = implicit_fevent;
       owner->update_footprint(sizeof(info), this);
     }
@@ -725,6 +731,7 @@ namespace Legion {
               barrier.get_result(&arrival_info, sizeof(arrival_info));
 #ifdef DEBUG_LEGION
             assert(found);
+            assert(arrival_info.fevent.exists());
 #endif
             BarrierArrivalInfo &info = barrier_arrival_infos.emplace_back(
                 BarrierArrivalInfo());
