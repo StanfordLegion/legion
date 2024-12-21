@@ -6717,7 +6717,12 @@ namespace Legion {
         // the external to the legion side will be the first ones to 
         // exhaust their generations and we know we need to generate
         // new barriers for both sides.
+        // Same trick as below for the profiler to tell it this is an 
+        // external handshake
+        const LgEvent previous_fevent = implicit_fevent;
+        implicit_fevent = LgEvent(ext_arrive_barrier.get_barrier());
         runtime->phase_barrier_arrive(ext_arrive_barrier, 1);
+        implicit_fevent = previous_fevent;
         Runtime::advance_barrier(ext_arrive_barrier);
       }
     }
