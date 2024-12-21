@@ -50,10 +50,16 @@ variables:
   TEST_CTEST: "1"
 
 .nodes1: &nodes1
-  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:40:00 -N 1 -n 1 -c 56 -p batch --exclusive"
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 1 -n 1 -c 56 -p batch --exclusive"
 
 .nodes2: &nodes2
-  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:40:00 -N 2 -n 2 -c 56 -p batch --exclusive"
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 2 -n 2 -c 56 -p batch --exclusive"
+
+.nodes1: &nodes1_1hr
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 1:00:00 -N 1 -n 1 -c 56 -p batch --exclusive"
+
+.nodes2: &nodes2_1hr
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 1:00:00 -N 2 -n 2 -c 56 -p batch --exclusive"
 
 .tokens: &tokens
   id_tokens:
@@ -108,7 +114,7 @@ legion_rocm613:
     - slurm
     - frontier
   variables:
-    <<: [*legion, *rocm613, *nodes1]
+    <<: [*legion, *rocm613, *nodes1_1hr]
 
 legion_rocm624:
   <<: [*tokens, *tests]
@@ -117,7 +123,7 @@ legion_rocm624:
     - slurm
     - frontier
   variables:
-    <<: [*legion, *rocm624, *nodes2]
+    <<: [*legion, *rocm624, *nodes2_1hr]
 
 legion_cmake_rocm571:
   <<: [*tokens, *tests]
@@ -144,7 +150,7 @@ legion_cmake_rocm613:
     - slurm
     - frontier
   variables:
-    <<: [*legion, *cmake, *ctest, *rocm613, *nodes1]
+    <<: [*legion, *cmake, *ctest, *rocm613, *nodes1_1hr]
 
 legion_cmake_rocm624:
   <<: [*tokens, *tests]
@@ -153,7 +159,7 @@ legion_cmake_rocm624:
     - slurm
     - frontier
   variables:
-    <<: [*legion, *cmake, *ctest, *rocm624, *nodes2]
+    <<: [*legion, *cmake, *ctest, *rocm624, *nodes2_1hr]
 
 regent_rocm600:
   <<: [*tokens, *tests]
@@ -180,7 +186,7 @@ regent_rocm624:
     - slurm
     - frontier
   variables:
-    <<: [*regent, *rocm624, *nodes1]
+    <<: [*regent, *rocm624, *nodes1_1hr]
 
 regent_cmake_rocm624:
   <<: [*tokens, *tests]
@@ -189,7 +195,7 @@ regent_cmake_rocm624:
     - slurm
     - frontier
   variables:
-    <<: [*regent, *cmake, *rocm624, *nodes2]
+    <<: [*regent, *cmake, *rocm624, *nodes2_1hr]
 
 clean:
   <<: [*tokens]

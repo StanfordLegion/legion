@@ -238,8 +238,7 @@ namespace Legion {
       virtual void begin_mapper_call(MappingCallInfo *info,
                                      bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
-      virtual void resume_mapper_call(MappingCallInfo *info,
-                                      RuntimeCallKind kind) = 0;
+      virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
       virtual bool is_safe_for_unbounded_pools(void) = 0;
@@ -304,8 +303,7 @@ namespace Legion {
       virtual void begin_mapper_call(MappingCallInfo *info,
                                      bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
-      virtual void resume_mapper_call(MappingCallInfo *info,
-                                      RuntimeCallKind kind);
+      virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
     public:
       virtual bool is_safe_for_unbounded_pools(void);
@@ -367,8 +365,7 @@ namespace Legion {
       virtual void begin_mapper_call(MappingCallInfo *info,
                                      bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
-      virtual void resume_mapper_call(MappingCallInfo *info,
-                                      RuntimeCallKind kind);
+      virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
     public:
       virtual bool is_safe_for_unbounded_pools(void);
@@ -390,10 +387,30 @@ namespace Legion {
                       Operation *op, bool prioritize = false);
       ~MappingCallInfo(void);
     public:
+      inline void begin_wait(void)
+        {
+          if (!paused)
+          {
+            manager->pause_mapper_call(this);
+            paused = true;
+          }
+        }
       inline void pause_mapper_call(void)
-        { manager->pause_mapper_call(this); }
-      inline void resume_mapper_call(RuntimeCallKind kind)
-        { manager->resume_mapper_call(this, kind); }
+        {
+#ifdef DEBUG_LEGION
+          assert(!paused);
+#endif
+          manager->pause_mapper_call(this);
+          paused = true;
+        }
+      inline void resume_mapper_call(void)
+        { 
+          if (paused)
+          {
+            manager->resume_mapper_call(this);
+            paused = false;
+          }
+        }
       inline const char* get_mapper_name(void) const
         { return manager->get_mapper_name(); }
       inline const char* get_mapper_call_name(void) const
@@ -429,8 +446,8 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       std::vector<long long>*           profiling_ranges;
       long long                         start_time;
-      long long                         pause_time;
       bool                              reentrant;
+      bool                              paused;
     };
 
   };
