@@ -1155,12 +1155,11 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      LegionHandshakeImpl(bool init_in_ext, int ext_participants, 
-                          int legion_participants);
-      LegionHandshakeImpl(const LegionHandshakeImpl &rhs);
+      LegionHandshakeImpl(bool init_in_ext);
+      LegionHandshakeImpl(const LegionHandshakeImpl &rhs) = delete;
       ~LegionHandshakeImpl(void);
     public:
-      LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs);
+      LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs) = delete;
     public:
       void initialize(Runtime *runtime);
     public:
@@ -1175,14 +1174,15 @@ namespace Legion {
       void advance_legion_handshake(void);
     private:
       const bool init_in_ext;
-      const int ext_participants;
-      const int legion_participants;
     private:
+      // Whether the legion side is in split mode execution or not
+      bool split;
       Runtime *runtime;
       PhaseBarrier ext_wait_barrier;
       PhaseBarrier ext_arrive_barrier;
-      PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
-      PhaseBarrier legion_arrive_barrier; // copy of mpi_wait_barrier
+      PhaseBarrier legion_wait_barrier;
+      PhaseBarrier legion_next_barrier; // one gen ahead of wait
+      PhaseBarrier legion_arrive_barrier;
     };
 
     class MPIRankTable {
