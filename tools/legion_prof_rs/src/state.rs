@@ -5111,7 +5111,8 @@ fn process_record(
             assert!(result.is_barrier());
             // If the fevent is the same as the result then that is the signal
             // that this is an external handshake
-            if fevent == result { // This is a handshake
+            if fevent == result {
+                // This is a handshake
                 // See when we got the last one
                 if let Some(index) = state.event_lookup.get(&result) {
                     let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
@@ -5143,7 +5144,8 @@ fn process_record(
                         state.event_graph.add_edge(previous_index, index, ());
                     }
                 }
-            } else { // This is a normal barrier arrival
+            } else {
+                // This is a normal barrier arrival
                 let creator_uid = state.create_fevent_reference(*fevent);
                 // Barrier arrivals are strange in that we might ultimately have multiple
                 // arrivals on the barrier and we need to deduplicate those and find the
