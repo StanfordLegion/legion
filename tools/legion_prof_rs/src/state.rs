@@ -3161,6 +3161,7 @@ pub enum EventEntryKind {
     TriggerEvent,
     PoisonEvent,
     ArriveBarrier,
+    ExternalHandshake,
     ReservationAcquire,
     InstanceReady,
     InstanceDeletion,
@@ -5108,40 +5109,76 @@ fn process_record(
             performed,
         } => {
             assert!(result.is_barrier());
-            let creator_uid = state.create_fevent_reference(*fevent);
-            // Barrier arrivals are strange in that we might ultimately have multiple
-            // arrivals on the barrier and we need to deduplicate those and find the
-            // last arrival which we can't do with record_event_node
-            if let Some(index) = state.event_lookup.get(&result) {
-                let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
-                match node_weight.kind {
-                    EventEntryKind::UnknownEvent => {
-                        node_weight.kind = EventEntryKind::ArriveBarrier;
-                        node_weight.creator = Some(creator_uid);
-                        node_weight.trigger_time = Some(*performed);
+            // If the fevent is the same as the result then that is the signal
+            // that this is an external handshake
+            if fevent == result { // This is a handshake
+                // See when we got the last one
+                if let Some(index) = state.event_lookup.get(&result) {
+                    let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
+                    match node_weight.kind {
+                        EventEntryKind::UnknownEvent => {
+                            node_weight.kind = EventEntryKind::ExternalHandshake;
+                            node_weight.trigger_time = Some(*performed);
+                        }
+                        EventEntryKind::ExternalHandshake => {
+                            // Check to see if this arrive came after the previous latest arrive
+                            if node_weight.trigger_time.unwrap() < *performed {
+                                node_weight.trigger_time = Some(*performed);
+                            }
+                        }
+                        _ => unreachable!(),
                     }
-                    EventEntryKind::ArriveBarrier => {
-                        // Check to see if this arrive came after the previous latest arrive
-                        if node_weight.trigger_time.unwrap() < *performed {
+                } else {
+                    let index = state.event_graph.add_node(EventEntry::new(
+                        EventEntryKind::ExternalHandshake,
+                        None,
+                        Some(*performed),
+                    ));
+                    state.event_lookup.insert(*result, index);
+                    // This is an important detail: Realm barriers have to trigger
+                    // in order so add a dependence between this generation and the
+                    // previous generation of the barrier to capture this property
+                    if let Some(previous) = result.get_previous_phase() {
+                        let previous_index = state.find_event_node(previous);
+                        state.event_graph.add_edge(previous_index, index, ());
+                    }
+                }
+            } else { // This is a normal barrier arrival
+                let creator_uid = state.create_fevent_reference(*fevent);
+                // Barrier arrivals are strange in that we might ultimately have multiple
+                // arrivals on the barrier and we need to deduplicate those and find the
+                // last arrival which we can't do with record_event_node
+                if let Some(index) = state.event_lookup.get(&result) {
+                    let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
+                    match node_weight.kind {
+                        EventEntryKind::UnknownEvent => {
+                            node_weight.kind = EventEntryKind::ArriveBarrier;
                             node_weight.creator = Some(creator_uid);
                             node_weight.trigger_time = Some(*performed);
                         }
+                        EventEntryKind::ArriveBarrier => {
+                            // Check to see if this arrive came after the previous latest arrive
+                            if node_weight.trigger_time.unwrap() < *performed {
+                                node_weight.creator = Some(creator_uid);
+                                node_weight.trigger_time = Some(*performed);
+                            }
+                        }
+                        _ => unreachable!(),
                     }
-                    _ => unreachable!(),
-                }
-            } else {
-                let index = state.event_graph.add_node(EventEntry::new(
-                    EventEntryKind::ArriveBarrier,
-                    Some(creator_uid),
-                    Some(*performed),
-                ));
-                state.event_lookup.insert(*result, index);
-                // This is an important detail: Realm barriers have to trigger
-                // in order so add a dependence between this generation and the
-                // previous generation of the barrier to capture this property
-                if let Some(previous) = result.get_previous_phase() {
-                    let previous_index = state.find_event_node(previous);
-                    state.event_graph.add_edge(previous_index, index, ());
+                } else {
+                    let index = state.event_graph.add_node(EventEntry::new(
+                        EventEntryKind::ArriveBarrier,
+                        Some(creator_uid),
+                        Some(*performed),
+                    ));
+                    state.event_lookup.insert(*result, index);
+                    // This is an important detail: Realm barriers have to trigger
+                    // in order so add a dependence between this generation and the
+                    // previous generation of the barrier to capture this property
+                    if let Some(previous) = result.get_previous_phase() {
+                        let previous_index = state.find_event_node(previous);
+                        state.event_graph.add_edge(previous_index, index, ());
+                    }
                 }
             }
             if let Some(precondition) = *precondition {
