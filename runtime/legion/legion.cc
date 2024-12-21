@@ -7142,7 +7142,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance)
+    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance,
+                                              Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
@@ -7150,8 +7151,13 @@ namespace Legion {
             "It is illegal to request the destruction of DeferredBuffer, "
             "Deferred Value, or DeferredReduction objects outside of "
             "Legion tasks.")
-      return
-         Internal::implicit_context->destroy_task_local_instance(instance);
+      // Don't trust events passed in by users to be safe from poison
+      if (precondition.exists())
+        return Internal::implicit_context->destroy_task_local_instance(instance,
+            Internal::RtEvent(Realm::Event::ignorefaults(precondition)));
+      else
+        return Internal::implicit_context->destroy_task_local_instance(
+            instance, Internal::RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -7268,13 +7274,15 @@ namespace Legion {
                 bool init_in_ext, int ext_participants, int legion_participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(ext_participants > 0);
-      assert(legion_participants > 0);
-#endif
-      LegionHandshake result(
-          new Internal::LegionHandshakeImpl(init_in_ext,
-                                       ext_participants, legion_participants));
+      if (ext_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'external_participants' different than '1'.")
+      if (legion_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'legion_participants' different than '1'.")
+      LegionHandshake result(new Internal::LegionHandshakeImpl(init_in_ext));
       Internal::Runtime::register_handshake(result);
       return result;
     }
@@ -7285,13 +7293,16 @@ namespace Legion {
                                                         int legion_participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(mpi_participants > 0);
-      assert(legion_participants > 0);
-#endif
+      if (mpi_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'mpi_participants' different than '1'.")
+      if (legion_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'legion_participants' different than '1'.")
       MPILegionHandshake result(
-          new Internal::LegionHandshakeImpl(init_in_MPI,
-                                       mpi_participants, legion_participants));
+          new Internal::LegionHandshakeImpl(init_in_MPI));
       Internal::Runtime::register_handshake(result);
       return result;
     }

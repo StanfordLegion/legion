@@ -663,7 +663,6 @@ namespace Realm {
 
     Backtrace bt;
     bt.capture_backtrace();
-    bt.lookup_symbols();
     log_thread.error() << "received unexpected signal " << signal << " backtrace=" << bt;
 
     // reset signal set now that we are exiting signal handler

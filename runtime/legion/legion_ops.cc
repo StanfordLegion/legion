@@ -1911,7 +1911,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool Operation::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -5450,7 +5450,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MapOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig, 
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8035,7 +8035,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool CopyOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11359,7 +11359,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool PostCloseOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11521,7 +11521,7 @@ namespace Legion {
         if (refinement_node->is_region())
         {
           RegionNode *root = refinement_node->as_region_node();
-          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+          LegionSpy::log_logical_requirement(unique_op_id, creator_req_idx,
                                         true/*region*/,
                                         root->handle.index_space.id,
                                         root->handle.field_space.id,
@@ -11532,7 +11532,7 @@ namespace Legion {
         else
         {
           PartitionNode *root = refinement_node->as_partition_node();
-          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+          LegionSpy::log_logical_requirement(unique_op_id, creator_req_idx,
                                         false/*region*/,
                                         root->handle.index_partition.id,
                                         root->handle.field_space.id,
@@ -11560,7 +11560,7 @@ namespace Legion {
       {
         std::set<FieldID> fields;
         refinement_node->column_source->get_field_set(mask, parent_ctx, fields);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
+        LegionSpy::log_requirement_fields(unique_op_id, creator_req_idx,fields);
       }
     }
 
@@ -12488,7 +12488,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool AcquireOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13309,7 +13309,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ReleaseOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -15081,7 +15081,7 @@ namespace Legion {
                 continue;
               // Update the dependence type
               DependenceType internal_dtype = 
-                check_dependence_type<true/*reductions interfere*/>(
+                check_dependence_type<true,true/*reductions interfere*/>(
                                 RegionUsage(src_req), RegionUsage(dst_req));
               record_intra_must_epoch_dependence(src_index, src_idx, it->first,
                                                  it->second, internal_dtype);
@@ -15131,7 +15131,7 @@ namespace Legion {
         if (runtime->forest->are_disjoint_tree_only(src_node, dst_node, dummy))
           return false;
         // Update the dependence type
-        dtype = check_dependence_type<true/*reductions interfere*/>(
+        dtype = check_dependence_type<true,true/*reductions interfere*/>(
                           RegionUsage(src_req), RegionUsage(dst_req));
       }
       else
@@ -17311,7 +17311,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool DependentPartitionOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18645,17 +18645,9 @@ namespace Legion {
       // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
         check_point_requirements(); 
-      // Launch the points
-      std::vector<RtEvent> mapped_preconditions(points.size());
-      for (unsigned idx = 0; idx < points.size(); idx++)
-      {
-        mapped_preconditions[idx] = points[idx]->get_mapped_event();
-        points[idx]->launch(view_ready);
-      }
-      // Include any map applied conditions as well
-      if (!map_applied_conditions.empty())
-        mapped_preconditions.insert(mapped_preconditions.end(),
-            map_applied_conditions.begin(), map_applied_conditions.end());
+      // Make sure to request the future value if needed in advance
+      // of launching the points so that the buffer is ready in case
+      // the point fills all come back complete quickly
       if (future.impl != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -18665,11 +18657,17 @@ namespace Legion {
         const RtEvent buffer_ready = 
           future.impl->request_runtime_instance(this, false/*eager*/);
         if (buffer_ready.exists())
-          mapped_preconditions.push_back(buffer_ready);
+          map_applied_conditions.insert(buffer_ready);
+      }
+      // Launch the points
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        map_applied_conditions.insert(points[idx]->get_mapped_event());
+        points[idx]->launch(view_ready);
       }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
-      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_mapping(Runtime::merge_events(map_applied_conditions));
     }
 
     //--------------------------------------------------------------------------
@@ -19877,9 +19875,9 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
       {
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
         if (runtime->profiler != NULL)
           runtime->profiler->add_inst_request(requests, this, unique_event);
       }

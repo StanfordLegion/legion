@@ -547,17 +547,19 @@ namespace Legion {
 
     class AutoMapperCall {
     public:
-      inline AutoMapperCall(MapperContext ctx, Internal::RuntimeCallKind kind);
+      inline AutoMapperCall(MapperContext ctx, Internal::RuntimeCallKind kind,
+                            bool eager_pause = false);
       inline ~AutoMapperCall(void);
     public:
       const MapperContext ctx;
       const Internal::RuntimeCallKind kind;
+      long long start_time;
     };
 
     //--------------------------------------------------------------------------
     inline AutoMapperCall::AutoMapperCall(MapperContext c,
-                                          Internal::RuntimeCallKind k)
-      : ctx(c), kind(k)
+        Internal::RuntimeCallKind k, bool eager_pause)
+      : ctx(c), kind(k), start_time(0)
     //--------------------------------------------------------------------------
     {
       if (ctx != Internal::implicit_mapper_call)
@@ -571,14 +573,20 @@ namespace Legion {
                       "lifetime of the mapper call.", runtime_call_names[kind],
                       ctx->get_mapper_name(), ctx->get_mapper_call_name())
       }
-      ctx->pause_mapper_call();
+      if (ctx->manager->profile_mapper)
+        start_time = Realm::Clock::current_time_in_nanoseconds();
+      if (eager_pause)
+        ctx->pause_mapper_call();
     }
 
     //--------------------------------------------------------------------------
     inline AutoMapperCall::~AutoMapperCall(void)
     //--------------------------------------------------------------------------
     {
-      ctx->resume_mapper_call(kind);
+      ctx->resume_mapper_call();
+      if (ctx->manager->profile_mapper)
+        Internal::implicit_profiler->record_runtime_call(kind, start_time,
+            Realm::Clock::current_time_in_nanoseconds());
     }
 
     /////////////////////////////////////////////////////////////
@@ -641,6 +649,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperRuntime::start_profiling_range(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->start_profiling_range();
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::stop_profiling_range(MapperContext ctx,
+                                             const char *prov) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->stop_profiling_range(prov);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::update_mappable_tag(MapperContext ctx,
                            const Mappable &mappable, MappingTagID new_tag) const
     //--------------------------------------------------------------------------
@@ -673,7 +696,7 @@ namespace Legion {
           const void *message, size_t message_size, unsigned message_kind) const
     //--------------------------------------------------------------------------
     {
-      AutoMapperCall call(ctx, Internal::MAPPER_SEND_MESSAGE_CALL);
+      AutoMapperCall call(ctx, Internal::MAPPER_SEND_MESSAGE_CALL, true);
       runtime->process_mapper_message(target, ctx->manager->mapper_id,
           ctx->manager->processor, message, message_size, message_kind);
     }
@@ -683,7 +706,7 @@ namespace Legion {
                     size_t message_size, unsigned message_kind, int radix) const
     //--------------------------------------------------------------------------
     {
-      AutoMapperCall call(ctx, Internal::MAPPER_BROADCAST_CALL);
+      AutoMapperCall call(ctx, Internal::MAPPER_BROADCAST_CALL, true);
       runtime->process_mapper_broadcast(ctx->manager->mapper_id,
           ctx->manager->processor, message, message_size, message_kind,
           radix, 0/*index*/);
@@ -877,7 +900,7 @@ namespace Legion {
                                          Processor::Kind kind) const
     //--------------------------------------------------------------------------
     {
-      AutoMapperCall call(ctx, Internal::MAPPER_FIND_VALID_VARIANTS_CALL);
+      AutoMapperCall call(ctx, Internal::MAPPER_FIND_VALID_VARIANTS_CALL, true);
       Internal::TaskImpl *task_impl = 
         runtime->find_or_create_task_impl(task_id);
       task_impl->find_valid_variants(valid_variants, kind);
@@ -1274,7 +1297,7 @@ namespace Legion {
         acquire = false;
       }
       AutoMapperCall call(ctx,
-          Internal::MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
+          Internal::MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL, true);
       bool success = runtime->find_or_create_physical_instance(target_memory,
                 constraints, regions, result, created, ctx->manager->processor,
                 acquire, priority, tight_region_bounds, unsat, footprint,
@@ -1311,7 +1334,7 @@ namespace Legion {
         acquire = false;
       }
       AutoMapperCall call(ctx,
-          Internal::MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL);
+          Internal::MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL, true);
       Internal::LayoutConstraints *cons =
         runtime->find_layout_constraints(layout_id);
       bool success = runtime->find_or_create_physical_instance(target_memory,
@@ -1344,7 +1367,8 @@ namespace Legion {
                         ctx->get_mapper_call_name(), ctx->get_mapper_name());
         acquire = false;
       }
-      AutoMapperCall call(ctx, Internal::MAPPER_FIND_PHYSICAL_INSTANCE_CALL);
+      AutoMapperCall call(ctx,
+          Internal::MAPPER_FIND_PHYSICAL_INSTANCE_CALL, true);
       bool success = runtime->find_physical_instance(target_memory, constraints,
                                  regions, result, acquire, tight_region_bounds);
       if (success && acquire)
@@ -1372,7 +1396,8 @@ namespace Legion {
                         ctx->get_mapper_call_name(), ctx->get_mapper_name());
         acquire = false;
       }
-      AutoMapperCall call(ctx, Internal::MAPPER_FIND_PHYSICAL_INSTANCE_CALL);
+      AutoMapperCall call(ctx,
+          Internal::MAPPER_FIND_PHYSICAL_INSTANCE_CALL, true);
       Internal::LayoutConstraints *cons =
         runtime->find_layout_constraints(layout_id);
       bool success = runtime->find_physical_instance(target_memory, cons,
@@ -1402,7 +1427,8 @@ namespace Legion {
                         ctx->get_mapper_call_name(), ctx->get_mapper_name());
         acquire = false;
       }
-      AutoMapperCall call(ctx, Internal::MAPPER_FIND_PHYSICAL_INSTANCES_CALL);
+      AutoMapperCall call(ctx,
+          Internal::MAPPER_FIND_PHYSICAL_INSTANCES_CALL, true);
       const size_t initial_size = results.size();
       runtime->find_physical_instances(target_memory, constraints, regions, 
                                     results, acquire, tight_region_bounds);
@@ -1433,7 +1459,8 @@ namespace Legion {
                         ctx->get_mapper_call_name(), ctx->get_mapper_name());
         acquire = false;
       }
-      AutoMapperCall call(ctx, Internal::MAPPER_FIND_PHYSICAL_INSTANCES_CALL);
+      AutoMapperCall call(ctx,
+          Internal::MAPPER_FIND_PHYSICAL_INSTANCES_CALL, true);
       Internal::LayoutConstraints *cons =
         runtime->find_layout_constraints(layout_id);
       const size_t initial_size = results.size();
@@ -2667,17 +2694,12 @@ namespace Legion {
       : Internal::AutoLock(mode, excl, r), ctx(c)
     //--------------------------------------------------------------------------
     {
-      bool paused = false;
+      AutoMapperCall call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
       if (exclusive)
       {
         Internal::RtEvent ready = local_lock.wrlock();
         while (ready.exists())
         {
-          if (!paused)
-          {
-            ctx->manager->pause_mapper_call(ctx);
-            paused = true;
-          }
           ready.wait();
           ready = local_lock.wrlock();
         }
@@ -2687,19 +2709,12 @@ namespace Legion {
         Internal::RtEvent ready = local_lock.rdlock();
         while (ready.exists())
         {
-          if (!paused)
-          {
-            ctx->manager->pause_mapper_call(ctx);
-            paused = true;
-          }
           ready.wait();
           ready = local_lock.rdlock();
         }
       }
       held = true;
       Internal::local_lock_list = this;
-      if (paused)
-        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
     //--------------------------------------------------------------------------
@@ -2714,17 +2729,12 @@ namespace Legion {
       if (previous != NULL)
         previous->check_for_reentrant_locks(&local_lock);
 #endif
-      bool paused = false;
+      AutoMapperCall call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
       if (exclusive)
       {
         Internal::RtEvent ready = local_lock.wrlock();
         while (ready.exists())
         {
-          if (!paused)
-          {
-            ctx->manager->pause_mapper_call(ctx);
-            paused = true;
-          }
           ready.wait();
           ready = local_lock.wrlock();
         }
@@ -2734,19 +2744,12 @@ namespace Legion {
         Internal::RtEvent ready = local_lock.rdlock();
         while (ready.exists())
         {
-          if (!paused)
-          {
-            ctx->manager->pause_mapper_call(ctx);
-            paused = true;
-          }
           ready.wait();
           ready = local_lock.rdlock();
         }
       }
       Internal::local_lock_list = this;
       held = true;
-      if (paused)
-        ctx->manager->resume_mapper_call(ctx, Internal::MAPPER_AUTO_LOCK_CALL);
     }
 
   }; // namespace Mapping

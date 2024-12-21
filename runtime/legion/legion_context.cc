@@ -524,7 +524,7 @@ namespace Legion {
       // Finally if everything has overlapped, do a dependence analysis
       // on the privileges and coherence
       RegionUsage usage(req);
-      switch (check_dependence_type<true>(our_usage,usage))
+      switch (check_dependence_type<false,true>(our_usage,usage))
       {
         // Only allow no-dependence, or simultaneous dependence through
         case LEGION_NO_DEPENDENCE:
@@ -592,9 +592,9 @@ namespace Legion {
       if (runtime->profiler != NULL)
       {
         // If we're profiling then each of these needs a unique event
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
 #ifdef LEGION_MALLOC_INSTANCES
       const Realm::ProfilingRequestSet no_requests;
@@ -632,7 +632,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
+    void TaskContext::destroy_task_local_instance(PhysicalInstance instance,
+                                                  RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       std::map<PhysicalInstance,LgEvent>::iterator finder =
@@ -646,9 +647,9 @@ namespace Legion {
       MemoryManager *manager = 
         runtime->find_memory_manager(instance.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
-      manager->free_legion_instance(RtEvent::NO_RT_EVENT, instance);
+      manager->free_legion_instance(precondition, instance);
 #else
-      manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+      manager->free_eager_instance(instance, precondition);
 #endif
     }
 
@@ -2255,7 +2256,7 @@ namespace Legion {
                                 creation_target_space));
 #endif
       // If this is virtual mapped, then continue up to the parent
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
         return find_parent_context()->compute_equivalence_sets(
             parent_req_indexes[req_index], targets, target_spaces,
             creation_target_space, expr, mask);
@@ -2679,7 +2680,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(virtual_mapped.size() <= req_index);
+      assert(regions.size() <= req_index);
 #endif
       // Be very careful, you can't use find_equivalence_set_kd_tree here
       // because the tree will not be marked ready until after all the 
@@ -3102,7 +3103,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!sharded);
 #endif
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
       {
         find_parent_context()->refine_equivalence_sets(
             parent_req_indexes[req_index], node, refinement_mask,
@@ -3126,7 +3127,7 @@ namespace Legion {
         LogicalRegion region = find_logical_region(req_index);
         node = runtime->forest->get_node(region.get_index_space());
       }
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
       {
         find_parent_context()->find_trace_local_sets(
             parent_req_indexes[req_index], mask, current_sets, node, mapping);
@@ -3363,10 +3364,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == parent_req_indexes.size());
+      assert(regions.size() <= virtual_mapped.size());
+      assert(regions.size() <= parent_req_indexes.size());
 #endif     
-      if (index < virtual_mapped.size())
+      if (index < regions.size())
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
@@ -3418,7 +3419,7 @@ namespace Legion {
       // See if we need to pack up base task information
       owner_task->pack_external_task(rez, target);
 #ifdef DEBUG_LEGION
-      assert(regions.size() == parent_req_indexes.size());
+      assert(regions.size() <= parent_req_indexes.size());
 #endif
       for (unsigned idx = 0; idx < regions.size(); idx++)
         rez.serialize(parent_req_indexes[idx]);
@@ -6820,21 +6821,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InnerContext::add_physical_region(const RegionRequirement &req,
           bool mapped, MapperID mid, MappingTagID tag, ApUserEvent &unmap_event,
-          bool virtual_mapped, const InstanceSet &physical_instances)
+          bool is_virtual_mapped, const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!unmap_event.exists());
 #endif
-      if (!virtual_mapped)
+      if (!is_virtual_mapped)
         unmap_event = Runtime::create_ap_user_event(NULL);
       PhysicalRegionImpl *impl = new PhysicalRegionImpl(req,
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT,
           mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
-          mid, tag, false/*leaf region*/, virtual_mapped, 
+          mid, tag, false/*leaf region*/, is_virtual_mapped, 
           false/*never collective*/, NO_BLOCKING_INDEX, runtime);
       physical_regions.emplace_back(PhysicalRegion(impl));
-      if (!virtual_mapped)
+      if (!is_virtual_mapped)
       {
 #ifdef DEBUG_LEGION
         if (owner_task->is_remote())
@@ -10858,6 +10859,11 @@ namespace Legion {
         if (!applied_events.empty())
           applied.insert(applied_events.begin(), applied_events.end());
       }
+      // Also tell any traces to invalidate their references to the 
+      // equivalence set tree data structures
+      for (std::map<TraceID,LogicalTrace*>::const_iterator it =
+            traces.begin(); it != traces.end(); it++)
+        it->second->invalidate_equivalence_sets();
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied,
                                                 mapping, source_shard);
@@ -10935,7 +10941,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapping == NULL);
       assert(created_nodes.size() == created_trees.size());
 #endif
       AutoLock priv_lock(privilege_lock);
@@ -21838,7 +21843,7 @@ namespace Legion {
                                 creation_target_space));
 #endif
       // If this is virtual mapped, then continue up to the parent
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
         return find_parent_context()->compute_equivalence_sets(
             parent_req_indexes[req_index], targets, target_spaces,
             creation_target_space, expr, mask);
@@ -21906,7 +21911,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(virtual_mapped.size() <= req_index);
+      assert(regions.size() <= req_index);
 #endif
       LocalLock *tree_lock = NULL;
       EqKDTree *tree = find_or_create_output_set_kd_tree(req_index, tree_lock); 
@@ -21970,7 +21975,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!sharded || first);
 #endif
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
       {
         if (!first)
           find_parent_context()->refine_equivalence_sets(
@@ -22045,7 +22050,7 @@ namespace Legion {
         LogicalRegion region = find_logical_region(req_index);
         node = runtime->forest->get_node(region.get_index_space());
       }
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
       {
         if (!first)
           find_parent_context()->find_trace_local_sets(
@@ -22826,7 +22831,7 @@ namespace Legion {
       assert(targets.size() == target_spaces.size());
 #endif
       // If this is virtual mapped, then continue up to the parent
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
         return find_parent_context()->compute_equivalence_sets(
             parent_req_indexes[req_index], targets, target_spaces,
             creation_target_space, expr, mask);
@@ -22860,7 +22865,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(virtual_mapped.size() <= req_index);
+      assert(regions.size() <= req_index);
 #endif
       const RtUserEvent recorded = Runtime::create_rt_user_event();
       Serializer rez;
@@ -22884,10 +22889,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == parent_req_indexes.size());
+      assert(regions.size() <= virtual_mapped.size());
+      assert(regions.size() <= parent_req_indexes.size());
 #endif     
-      if (index < virtual_mapped.size())
+      if (index < regions.size())
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
@@ -22992,7 +22997,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!sharded);
 #endif
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
       {
         find_parent_context()->refine_equivalence_sets(
             parent_req_indexes[req_index], node, refinement_mask,
@@ -23023,7 +23028,7 @@ namespace Legion {
         IndexSpaceNode *node, const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      if ((req_index < virtual_mapped.size()) && virtual_mapped[req_index])
+      if ((req_index < regions.size()) && virtual_mapped[req_index])
       {
         if (node == NULL)
           node = runtime->forest->get_node(

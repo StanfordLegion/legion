@@ -87,6 +87,13 @@ namespace Legion {
       public:
         LegionVector<DependenceRecord> dependences;
         LegionVector<CloseInfo> closes;
+        // Only need this during trace capture
+        // It records dependences for internal operations (that are not merge
+        // close ops, mainly refinement ops) based on the region
+        // requirement the internal operations were made for so we can forward
+        // them on when later things depende on them. This data structure is
+        // cleared after we're done with the trace recording
+        std::map<unsigned,LegionVector<DependenceRecord> > internal_dependences;
       };
       struct VerificationInfo {
       public:
@@ -183,6 +190,7 @@ namespace Legion {
     public:
       bool has_physical_trace(void) const { return (physical_trace != NULL); }
       PhysicalTrace* get_physical_trace(void) { return physical_trace; }
+      void invalidate_equivalence_sets(void) const;
     public:
       // A little bit of help for recording the set of colors for
       // control replicated concurrent index space task launches
@@ -516,7 +524,6 @@ namespace Legion {
       inline bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_recurrent(void) const { return recurrent; }
-      size_t get_expected_operation_count(void) const;
     public:
       void record_parent_req_fields(unsigned index, const FieldMask &mask);
       void find_condition_sets(std::map<EquivalenceSet*,unsigned> &sets) const;
@@ -533,6 +540,7 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events,
           std::set<ApEvent> &execution_preconditions,
           bool has_blocking_call, bool has_intermediate_fence);
+      void invalidate_equivalence_sets(void) const;
     protected:
       bool find_replay_template(BeginOp *op,
             std::set<RtEvent> &map_applied_conditions,
@@ -913,6 +921,7 @@ namespace Legion {
       bool check_preconditions(void);
       void apply_postconditions(FenceOp *op,
                                 std::set<RtEvent> &applied_events);
+      void invalidate_equivalence_sets(void) const;
     public:
       bool can_start_replay(void);
       void register_operation(MemoizableOp *op);

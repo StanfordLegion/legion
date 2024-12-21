@@ -23,6 +23,14 @@ variables:
   ROCM_VERSION: "6.0.0"
   WARN_AS_ERROR: "0"
 
+.rocm613: &rocm613
+  ROCM_VERSION: "6.1.3"
+  WARN_AS_ERROR: "0"
+
+.rocm624: &rocm624
+  ROCM_VERSION: "6.2.4"
+  WARN_AS_ERROR: "0"
+
 .legion: &legion
   TEST_REGENT: "0"
   LEGION_WARNINGS_FATAL: "1"
@@ -46,6 +54,12 @@ variables:
 
 .nodes2: &nodes2
   SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 2 -n 2 -c 56 -p batch --exclusive"
+
+.nodes1: &nodes1_1hr
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 1:00:00 -N 1 -n 1 -c 56 -p batch --exclusive"
+
+.nodes2: &nodes2_1hr
+  SCHEDULER_PARAMETERS: "-A UMS036 -t 1:00:00 -N 2 -n 2 -c 56 -p batch --exclusive"
 
 .tokens: &tokens
   id_tokens:
@@ -93,6 +107,24 @@ legion_rocm600:
   variables:
     <<: [*legion, *rocm600, *nodes2]
 
+legion_rocm613:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *rocm613, *nodes1_1hr]
+
+legion_rocm624:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *rocm624, *nodes2_1hr]
+
 legion_cmake_rocm571:
   <<: [*tokens, *tests]
   stage: test
@@ -109,7 +141,25 @@ legion_cmake_rocm600:
     - slurm
     - frontier
   variables:
-    <<: [*legion, *cmake, *ctest, *rocm600, *nodes1]
+    <<: [*legion, *cmake, *ctest, *rocm600, *nodes2]
+
+legion_cmake_rocm613:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm613, *nodes1_1hr]
+
+legion_cmake_rocm624:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm624, *nodes2_1hr]
 
 regent_rocm600:
   <<: [*tokens, *tests]
@@ -128,6 +178,24 @@ regent_cmake_rocm600:
     - frontier
   variables:
     <<: [*regent, *cmake, *rocm600, *nodes2]
+
+regent_rocm624:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*regent, *rocm624, *nodes1_1hr]
+
+regent_cmake_rocm624:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+  variables:
+    <<: [*regent, *cmake, *rocm624, *nodes2_1hr]
 
 clean:
   <<: [*tokens]

@@ -358,6 +358,11 @@ namespace Realm {
   {
     return header;
   }
+  template <typename T, size_t INLINE_STORAGE>
+  T &ActiveMessage<T, INLINE_STORAGE>::operator*(void)
+  {
+    return *header;
+  }
 
   // variable payload can be written to in three ways:
   //  (a) Realm-style serialization (currently eager)
