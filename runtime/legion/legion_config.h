@@ -336,10 +336,6 @@
 #define LEGION_DEFAULT_META_TASK_VECTOR_WIDTH  (DEFAULT_META_TASK_VECTOR_WIDTH)
 #endif
 #endif
-// Percentage of memory to reserve for eager allocations
-#ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
-#define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 1
-#endif
 // Maximum number of templates to keep around in traces
 #ifndef LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE
 #define LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE  16
@@ -1319,6 +1315,7 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_CONCURRENT_EXECUTION = 626,
   ERROR_MISSING_FILL_VALUE = 627,
   ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER = 628,
+  ERROR_POOL_USE_AFTER_FREE = 629,
 
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,
@@ -1395,6 +1392,9 @@ typedef enum legion_error_t {
   LEGION_WARNING_UNSUPPORTED_REPLICATION = 1117,
   LEGION_WARNING_UNUSED_CONCURRENCY = 1118,
   LEGION_WARNING_IGNORED_REPLICATION = 1119,
+  LEGION_WARNING_MISSING_ALLOCATION_BOUNDS = 1120,
+  LEGION_WARNING_UNBOUND_MEMORY_POOL = 1121,
+  LEGION_WARNING_TRACING_UNBOUND_MEMORY_POOL = 1122,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
@@ -1416,6 +1416,7 @@ typedef enum legion_error_t {
   LEGION_FATAL_MORTON_TILING_FAILURE = 2019,
   LEGION_FATAL_NO_CRITICAL_PATH_DYNAMIC_COLLECTIVES = 2020,
   LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS = 2021,
+  LEGION_FATAL_UNSAFE_ALLOCATION_WITH_UNBOUNDED_POOLS = 2022,
   
 }  legion_error_t;
 
@@ -2131,7 +2132,7 @@ typedef enum legion_domain_max_rect_dim_t {
 typedef enum legion_unbound_pool_scope_t {
   // Bounded pool so other allocations always permitted in parallel
   LEGION_BOUNDED_POOL,
-  // Nothing else is allowed to allocate in parallel
+  // Only allocations for the same task are permitted in parallel
   LEGION_STRICT_UNBOUNDED_POOL,
   // Only tasks in the same index space task launch
   // are allowed to allocate in parallel
