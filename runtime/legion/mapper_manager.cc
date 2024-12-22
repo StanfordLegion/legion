@@ -69,8 +69,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MappingCallInfo::record_acquired_instance(InstanceManager *man,
-                                                   bool created)
+    void MappingCallInfo::record_acquired_instance(InstanceManager *man)
     //--------------------------------------------------------------------------
     {
       if (man->is_virtual_manager())
@@ -1249,6 +1248,48 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    bool SerializingManager::is_safe_for_unbounded_pools(void)
+    //--------------------------------------------------------------------------
+    {
+      return (allow_reentrant && permit_reentrant);
+    }
+
+    //--------------------------------------------------------------------------
+    void SerializingManager::report_unsafe_allocation_in_unbounded_pool(
+        const MappingCallInfo *info, Memory memory, RuntimeCallKind kind)
+    //--------------------------------------------------------------------------
+    {
+      RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      if (permit_reentrant)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSAFE_ALLOCATION_WITH_UNBOUNDED_POOLS,
+            "Encountered a non-permissive unbouned memory pool in memory %s "
+            "while invoking %s in mapper call %s by mapper %s with reentrant "
+            "mapper calls disabled. This situation can and most likely will "
+            "lead to a deadlock as mapper calls needed to ensure forward "
+            "progress will not be able to run while this mapper is blocked "
+            "waiting for the unbounded pool allocation to finish. To work "
+            "around this currently, all serializing reentrant mappers need "
+            "to ensure that reentrant mapper calls are allowed while "
+            "attempting to allocated in a memory containing non-permissive "
+            "unbounded pools.", manager->get_name(), lg_runtime_calls[kind],
+            get_mapper_call_name(info->kind), get_mapper_name()) 
+      else
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSAFE_ALLOCATION_WITH_UNBOUNDED_POOLS,
+            "Encountered a non-permissive unbounded memory pool in memory %s "
+            "while invoking %s in mapper call %s by serializing non-reentrant "
+            "mapper %s. This situation can and most likely will lead to a "
+            "deadlock as mapper calls needed to ensure forward progress will "
+            "not be able to run while this mapper is blocked waiting for the "
+            "unbounded pool allocation to finish. To work around this "
+            "currently, all mappers attempting to allocate in a memory "
+            "continaing non-permissive unbounded pools must use either "
+            "the serializing reentrant or concurrent mapper synchronization "
+            "model.", manager->get_name(), lg_runtime_calls[kind],
+            get_mapper_call_name(info->kind), get_mapper_name())
+    }
+
     /////////////////////////////////////////////////////////////
     // Concurrent Manager 
     /////////////////////////////////////////////////////////////
@@ -1459,6 +1500,35 @@ namespace Legion {
               to_trigger.begin(); it != to_trigger.end(); it++)
           Runtime::trigger_event(*it);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ConcurrentManager::is_safe_for_unbounded_pools(void)
+    //--------------------------------------------------------------------------
+    {
+      return (lock_state == UNLOCKED_STATE);
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentManager::report_unsafe_allocation_in_unbounded_pool(
+        const MappingCallInfo *info, Memory memory, RuntimeCallKind kind)
+    //--------------------------------------------------------------------------
+    {
+      RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      REPORT_LEGION_FATAL(LEGION_FATAL_UNSAFE_ALLOCATION_WITH_UNBOUNDED_POOLS,
+            "Encountered a non-permissive unbouned memory pool in memory %s "
+            "while invoking %s in mapper call %s by mapper %s while holding "
+            "the concurrent mapper lock. This situation can and most likely "
+            "will lead to a deadlock as mapper calls needed to ensure forward "
+            "progress will not be able to run while this mapper is holding "
+            "the lock and waiting for the unbounded pool allocation to "
+            "finish. To work around this currently, concurrent mappers need "
+            "to ensure that they are not holding the concurrent mapper lock "
+            "while attempting to allocated in a memory containing "
+            "non-permissive unbounded pools.", manager->get_name(), 
+            lg_runtime_calls[kind], get_mapper_call_name(info->kind),
+            get_mapper_name())
     }
 
     //--------------------------------------------------------------------------

@@ -808,29 +808,37 @@ namespace Legion {
                                 parent_ctx->get_unique_id(), 
                                 get_task_name(), get_unique_id())
       }
-      if (!options.check_collective_regions.empty() && is_index_space)
+      if (is_index_space)
       {
-        for (std::set<unsigned>::const_iterator it =
-              options.check_collective_regions.begin(); it !=
-              options.check_collective_regions.end(); it++)
+        if (!options.check_collective_regions.empty())
         {
-          if ((*it) >= regions.size())
-            continue;
-          const RegionRequirement &req = regions[*it];
-          if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
-            continue;
-          if (!IS_WRITE(req))
-            check_collective_regions.push_back(*it);
-          else if (!IS_COLLECTIVE(req))
-            REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
-                "Ignoring request by mapper %s to check for collective usage "
-                "for region requirement %d of task %s (UID %lld) because "
-                "region requirement has writing privileges.",
-                mapper->get_mapper_name(), *it, 
-                get_task_name(), unique_op_id)
+          for (std::set<unsigned>::const_iterator it =
+                options.check_collective_regions.begin(); it !=
+                options.check_collective_regions.end(); it++)
+          {
+            if ((*it) >= regions.size())
+              continue;
+            const RegionRequirement &req = regions[*it];
+            if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+              continue;
+            if (!IS_WRITE(req))
+              check_collective_regions.push_back(*it);
+            else if (!IS_COLLECTIVE(req))
+              REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
+                  "Ignoring request by mapper %s to check for collective usage "
+                  "for region requirement %d of task %s (UID %lld) because "
+                  "region requirement has writing privileges.",
+                  mapper->get_mapper_name(), *it, 
+                  get_task_name(), unique_op_id)
+          }
         }
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          if (IS_COLLECTIVE(regions[idx]))
+            check_collective_regions.push_back(idx);
         if (!check_collective_regions.empty())
         {
+          std::sort(check_collective_regions.begin(),
+                    check_collective_regions.end());
           // Check to make sure that there are no invertible projection functors
           // in this index space launch on writing requirements which might
           // cause point tasks to be interfering. If there are then we can't
@@ -2289,6 +2297,10 @@ namespace Legion {
       if ((shard_manager != NULL) && 
           shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
         delete shard_manager;
+      for (std::map<Memory,MemoryPool*>::const_iterator it =
+            leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+        delete it->second;
+      leaf_memory_pools.clear();
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
       assert(remote_trace_recorder == NULL);
@@ -2398,6 +2410,13 @@ namespace Legion {
         rez.serialize<size_t>(untracked_valid_regions.size());
         for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
           rez.serialize(untracked_valid_regions[idx]); 
+        rez.serialize<size_t>(leaf_memory_pools.size());
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+        {
+          rez.serialize(it->first);
+          it->second->serialize(rez);
+        }
       }
     }
 
@@ -2447,12 +2466,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_future_memories; idx++)
         {
           derez.deserialize(future_memories[idx]);
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-                future_memories[idx], this, unique_op_id,
-                future_memories[idx].address_space());
-          if (future_mapped.exists())
-            ready_events.insert(future_mapped);
+          // Safe to block indefinitely here for unbounded pools
+          futures[idx].impl->request_application_instance(
+              future_memories[idx], this, NULL/*safe_for_unbounded_pools*/);
         }
         size_t num_task_requests;
         derez.deserialize(num_task_requests);
@@ -2478,6 +2494,14 @@ namespace Legion {
         untracked_valid_regions.resize(num_untracked_valid_regions);
         for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
           derez.deserialize(untracked_valid_regions[idx]); 
+        size_t num_pools;
+        derez.deserialize(num_pools);
+        for (unsigned idx = 0; idx < num_pools; idx++)
+        {
+          Memory memory;
+          derez.deserialize(memory);
+          leaf_memory_pools[memory] = MemoryPool::deserialize(derez, runtime);
+        }
       }
       update_no_access_regions();
     } 
@@ -2824,11 +2848,9 @@ namespace Legion {
                 future_memories[idx].address_space(), target_space,
                 this->target_proc.id)
           // Request the future memories be created
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-              future_memories[idx], this, unique_op_id, target_space);
-          if (future_mapped.exists())
-            map_applied_conditions.insert(future_mapped); 
+          // Safe to block here indefinitely waiting for unbounded pools
+          futures[idx].impl->request_application_instance(
+              future_memories[idx], this, NULL/*safe_for_unbounded_pools*/);
         }
         // Handle any unmapped futures too
         Memory target_memory = Memory::NO_MEMORY;
@@ -2843,11 +2865,9 @@ namespace Legion {
               target_memory = runtime->runtime_system_memory;
           }
           future_memories.push_back(target_memory);
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(
-              target_memory, this, unique_op_id, target_space);
-          if (future_mapped.exists())
-            map_applied_conditions.insert(future_mapped);
+          // Safe to block here indefinitely waiting for unbounded pools
+          futures[idx].impl->request_application_instance(target_memory,
+              this, NULL/*safe_for_unbounded_pools*/);
         }
       }
       // Sort out any profiling requests that we need to perform
@@ -2964,6 +2984,20 @@ namespace Legion {
             mapper->get_mapper_name(), output.chosen_variant, get_task_name(),
             get_unique_id(), trace->tid, parent_ctx->get_task_name(),
             parent_ctx->get_unique_id())
+      // Create ny memory pools if this is a leaf task variant
+      // Note this has to come AFTER we create the future instances or we
+      // could accidentally end up blocking ourselves from doing memory 
+      // allocations if we have an unbounded pool
+      if (variant_impl->is_leaf())
+        create_leaf_memory_pools(variant_impl, output.leaf_pool_bounds); 
+      else if (!leaf_memory_pools.empty())
+      {
+        // Free up any leaf memory pools that we have since we don't need them
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+          delete it->second;
+        leaf_memory_pools.clear();
+      }
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
       // Check to see if any premapped region mappings changed
@@ -3345,6 +3379,17 @@ namespace Legion {
       {
         // TODO: For now we only allow SOA layout with either the C order
         // or the Fotran order for output instances.
+        // We've actually added support for this in the OutputRegionImpl
+        // but it's unclear what the right way to expose it is since we 
+        // need to know how to make managers for which groups of fields. 
+        // Right now the OutputRegionImpl just keys off the grouped_fields
+        // parameter which assumes that AOS and hybrid have to be grouped
+        // whereas SOA can do whatever it wants and the right thing will happen
+        // We assume that if you have grouped fields then there is exactly
+        // one PhysicalManager for all the fields, but if not then we will
+        // break things up so there is one PhysicalManager per field, it's
+        // unclear if we also want to handle the case where there are subsets
+        // of fields that share a manager.
         if (ordering.back() != LEGION_DIM_F)
         {
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
@@ -3435,21 +3480,43 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
+      std::map<Memory,PoolBounds> pool_bounds;
       tpl->get_mapper_output(this, selected_variant, task_priority,
           perform_postmap, target_processors, future_memories,
-          physical_instances);
+          pool_bounds, physical_instances);
       // Then request any future mappings in advance
       if (!futures.empty())
       {
         for (unsigned idx = 0; idx < futures.size(); idx++)
         {
           const Memory memory = future_memories[idx];
-          const RtEvent future_mapped =
-            futures[idx].impl->request_application_instance(memory, this,
-               unique_op_id, memory.address_space());
-          if (future_mapped.exists())
-            map_applied_conditions.insert(future_mapped);
+          // Safe to block here indefinitely waiting for unbounded pools
+          futures[idx].impl->request_application_instance(memory, this,
+              NULL/*safe_for_unbounded_pools*/);
         }
+      }
+      // Make any memory pools required to replay this task
+      for (std::map<Memory,PoolBounds>::const_iterator it =
+            pool_bounds.begin(); it != pool_bounds.end(); it++)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(it->first);
+        // Recompute these each time as they might be consumed each time
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
+        // Safe to block here indefinitely for unbounded pools since any
+        // unbounded pools have to come from before the trace
+        MemoryPool *pool = manager->create_memory_pool(get_unique_id(),
+            coordinates, it->second, NULL/*safe_for_unbounded_pools*/);
+        if (pool == NULL)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to reserve a dynamic memory pool of %zd bytes for "
+              "leaf task %s (UID %lld) in %s memory during trace replay. "
+              "You are actually out of memory here so you'll need to "
+              "either allocate more memory for this kind of memory when "
+              "you configure Realm which may necessitate finding a bigger "
+              "machine.", it->second.size, get_task_name(), get_unique_id(),
+              manager->get_name())
+        leaf_memory_pools.emplace(std::make_pair(it->first, pool));
       }
       // Make sure to propagate any future sizes that we know about here
       if (!elide_future_return)
@@ -3666,6 +3733,30 @@ namespace Legion {
         // here if we're going to record it
         if (!futures.empty())
           output.future_locations = future_memories;
+        // Make sure we save all the future pool bounds sizes including
+        // the ones that come statically from the task variant
+        for (std::map<Memory,MemoryPool*>::const_iterator it =
+              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+        {
+          std::map<Memory,PoolBounds>::const_iterator finder =
+            output.leaf_pool_bounds.find(it->first);
+          if (finder == output.leaf_pool_bounds.end())
+            finder = output.leaf_pool_bounds.insert(
+                std::make_pair(it->first, it->second->get_bounds())).first;
+          // Issue a warning to the user if the pool is unbounded that
+          // this is going to invalidate the trace capture
+          if (!finder->second.is_bounded())
+          {
+            MemoryManager *manager = runtime->find_memory_manager(it->first);
+            REPORT_LEGION_WARNING(LEGION_WARNING_TRACING_UNBOUND_MEMORY_POOL,
+                "Detected unbounded pool in trace. Mapper %s requested to "
+                "trace task %s (UID %lld) with an unbounded memory pool in "
+                "%s memory. Unbounded pools are not permitted in traces and "
+                "will prevent this recording of the trace from being replayed.",
+                mapper->get_mapper_name(), get_task_name(), get_unique_id(),
+                manager->get_name())
+          }
+        }
         const TraceLocalID tlid = get_trace_local_id();
         if (remote_trace_recorder != NULL)
           remote_trace_recorder->record_mapper_output(tlid, output,
@@ -4542,6 +4633,473 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::create_leaf_memory_pools(VariantImpl *variant,
+                               std::map<Memory,PoolBounds> &dynamic_pool_bounds)
+    //--------------------------------------------------------------------------
+    {
+      if (dynamic_pool_bounds.empty() && variant->leaf_pool_bounds.empty())
+      {
+        // If we're a concurrent task or a collectively mapped task then we
+        // still need to participate in the max-allreduce for allocating
+        // unbounded pools
+        if (concurrent_task || !check_collective_regions.empty())
+          order_collectively_mapped_unbounded_pools(0, false/*need result*/);
+        return;
+      }
+      // Fill in the dynamic pool bounds with the static versions
+      for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
+            variant->leaf_pool_bounds.begin(); it !=
+            variant->leaf_pool_bounds.end(); it++)
+      {
+        // This might occur if we're doing origin mapping on a remote node
+        // from where the task is going to ultimately run
+        Machine::MemoryQuery query(runtime->machine);
+        query.only_kind(it->first);
+        query.best_affinity_to(target_proc);
+        if (query.count() == 0)
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Unable to find a visible %s memory from processor " IDFMT 
+              "for task %s (UID %lld) for creating dynamic memory pool "
+              "from static constraint.", mem_names[it->first],
+              target_proc.id, get_task_name(), get_unique_id());
+        }
+        const Memory target = query.first();
+        // Check to see if we also got a dynamic memory pool bound, if we 
+        // did then it needs to tighten what already existed
+        std::map<Memory,PoolBounds>::const_iterator finder =
+          dynamic_pool_bounds.find(target);
+        if (finder != dynamic_pool_bounds.end())
+        {
+          if (it->second.is_bounded())
+          {
+            MemoryManager *manager = runtime->find_memory_manager(target);
+            if (finder->second.is_bounded())
+            {
+              const PoolBounds &static_bounds = it->second;
+              const PoolBounds &dynamic_bounds = finder->second;
+              if (static_bounds.size < dynamic_bounds.size)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Mapper %s dynamically requested %zd bytes for pool"
+                    " in %s memory for task %s (UID %lld), but the selected "
+                    "variant %d specified a static bound of %zd bytes. "
+                    "Dynamically requested memory allocations must be further "
+                    "refinements of the upper bounds provided by the chosen "
+                    "task variant.", mapper->get_mapper_name(),
+                    dynamic_bounds.size, manager->get_name(), get_task_name(),
+                    get_unique_id(), variant->vid, static_bounds.size)
+              else if (static_bounds.alignment < dynamic_bounds.alignment)
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Mapper %s dynamically requested a minimum alignment of %d "
+                    "bytes for pool in %s memory for task %s (UID %lld), but "
+                    "the selected variant %d specified a static minimum "
+                    "alignment of %d bytes. Dynamically requested memory "
+                    "allocations must be further refinements of the "
+                    "alignments provided by the chosen task variant.",
+                    mapper->get_mapper_name(), dynamic_bounds.alignment, 
+                    manager->get_name(), get_task_name(), get_unique_id(),
+                    variant->vid, static_bounds.alignment)
+            }
+            else
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s dynamically requested an unbounded pool "
+                  "in %s memory for task %s (UID %lld), but the selected "
+                  "variant %d specified a static bound of %zdd bytes. "
+                  "Dynamically requested memory allocations must be further "
+                  "refinements of the upper bounds provided by the chosen "
+                  "task variant.", mapper->get_mapper_name(),
+                  manager->get_name(), get_task_name(), get_unique_id(),
+                  variant->vid, it->second.size);
+          }
+          else if (!finder->second.is_bounded())
+          {
+            // Else if the static variant had no bounds we know that the
+            // dynamic one is at least as tight as the static one
+            if (runtime->runtime_warnings)
+            {
+              const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+                REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+              };
+              REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+                  "Selected variant %s of task %s (UID %lld) was registered "
+                  "with an unbound memory pool for %s memory and mapper %s "
+                  "failed to tighten the bound. Unbound memory pools are "
+                  "very bad for performance and we strongly encourage all "
+                  "users to avoid using them except for extenuating "
+                  "circumstances when the amount of dynamic memory required "
+                  "by a task is truly unbounded.", variant->get_name(),
+                  get_task_name(), get_unique_id(), mem_names[it->first],
+                  mapper->get_mapper_name())
+            }
+          }
+        }
+        else
+        {
+          // We don't allow strict unbounded memory pools to be used
+          // along with concurrent index space tasks or tasks that are
+          // going to perform collective mapping of region requirements
+          if (it->second.scope == LEGION_STRICT_UNBOUNDED_POOL)
+          {
+            if (concurrent_task)
+            {
+              const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+                REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+              };
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s selected variant %s which statically mandates a "
+                  "strict unbounded memory pool in %s memory for "
+                  "concurrent task %s (UID %lld). Strict unbounded "
+                  "memory pools are not permitted to be used when "
+                  "mapping concurrent index space tasks because they "
+                  "can lead to deadlocks. Instead you should use either "
+                  "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
+                  "LEGION_PERMISSIVE_UNBOUNDED_POOL scope or pick a "
+                  "different task variant for mapping this task.",
+                  mapper->get_mapper_name(), variant->get_name(),
+                  mem_names[it->first], get_task_name(), get_unique_id())
+            }
+            else if (!check_collective_regions.empty())
+            {
+              const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+                REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+              };
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s selected variant %s which statically mandates a "
+                  "strict unbounded memory pool in %s memory for "
+                  "task %s (UID %lld) while the mapper also requested "
+                  "collective mapping of %zd region requirements. "
+                  "Strict unbounded memory pools are not permitted to be "
+                  "used in conjunction with collective mapping because they "
+                  "can lead to deadlocks. Instead you should use "
+                  "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
+                  "LEGION_PERMISSIVE_UNBOUNDED_POOL scope or pick a "
+                  "different task variant for mapping this task or "
+                  "opt not to perform collective mapping of any regions.",
+                  mapper->get_mapper_name(), variant->get_name(),
+                  mem_names[it->first], get_task_name(), get_unique_id(),
+                  check_collective_regions.size())
+            }
+          }
+          if (!it->second.is_bounded() && runtime->runtime_warnings)
+          {
+            const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+              REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+            };
+            REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+                "Selected variant %s of task %s (UID %lld) was registered "
+                "with an unbound memory pool for %s memory and mapper %s "
+                "failed to tighten the bound. Unbound memory pools are "
+                "very bad for performance and we strongly encourage all "
+                "users to avoid using them except for extenuating "
+                "circumstances when the amount of dynamic memory required "
+                "by a task is truly unbounded.", variant->get_name(),
+                get_task_name(), get_unique_id(), mem_names[it->first],
+                mapper->get_mapper_name())
+          }
+          dynamic_pool_bounds.emplace(std::make_pair(target, it->second));
+        }
+      }
+      // If we're a concurrent task or a collectively mapped task then we
+      // need to go through and get lamport clocks for all the memories in
+      // which we're planning to allocate unbounded pools to make sure that
+      // our concurrent/collective mapped task is ordered with respect to
+      // any other that are also trying to map in parallel with us
+      RtEvent wait_for_unbounded_allocations;
+      std::vector<MemoryManager*> unbounded_pools;
+      if (concurrent_task || !check_collective_regions.empty())
+      {
+        uint64_t max_lamport_clock = 0;
+        for (std::map<Memory,PoolBounds>::const_iterator it =
+              dynamic_pool_bounds.begin(); it != 
+              dynamic_pool_bounds.end(); it++)
+        {
+          if (it->second.is_bounded())
+            continue;
+          MemoryManager *manager = runtime->find_memory_manager(it->first);
+          // We might want to relax this restriction in the future to allow 
+          // tasks to make deferred buffers on memories that are "remote" 
+          // from where they are executing
+          if (it->first.address_space() != target_proc.address_space())
+            REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                  "%s memory " IDFMT " is not visible from the target processor"
+                  " of task %s (UID %lld) for creating dynamic memory pool.", 
+                  manager->get_name(), it->first.id, get_task_name(),
+                  get_unique_id());
+          unbounded_pools.push_back(manager);
+          uint64_t lamport_clock = 
+            manager->order_collective_unbounded_pools(this);
+          if (max_lamport_clock < lamport_clock)
+            max_lamport_clock = lamport_clock;
+        }
+        // Perform the max-allreduce of this lamport clock across all the
+        // point tasks in the index space launch
+        if (!unbounded_pools.empty())
+        {
+          max_lamport_clock = order_collectively_mapped_unbounded_pools(
+              max_lamport_clock, true/*need result*/);
+          // Tell the memory manager about the max lamport clock and get
+          // back any events that we need to wait on to know that it is
+          // safe to start allocating unbounded pools
+          std::vector<RtEvent> wait_for;
+          for (std::vector<MemoryManager*>::const_iterator it =
+                unbounded_pools.begin(); it != unbounded_pools.end(); it++)
+          {
+            RtEvent ready = (*it)->finalize_collective_unbounded_pools_order(
+                this, max_lamport_clock);
+            if (ready.exists())
+              wait_for.push_back(ready);
+          }
+          unbounded_pools.clear();
+          // Just record the event to wait on for now, we might be able
+          // to do some bounded allocations in the meantime before we
+          // actually need to block waiting
+          if (!wait_for.empty())
+            wait_for_unbounded_allocations = Runtime::merge_events(wait_for);
+        }
+        else 
+          // we don't have any unbounded pools so we still participate
+          // but we don't need to block waiting for the result
+          order_collectively_mapped_unbounded_pools(
+              max_lamport_clock, false/*need result*/);
+      }
+      std::map<Memory,MemoryPool*> acquired_pools;
+      acquired_pools.swap(leaf_memory_pools);
+      // Now we can go through and create the pools for use by this task
+      for (std::map<Memory,PoolBounds>::const_iterator it =
+            dynamic_pool_bounds.begin(); it != dynamic_pool_bounds.end(); it++)
+      {
+        MemoryManager *manager = runtime->find_memory_manager(it->first);
+        // We might want to relax this restriction in the future to allow tasks
+        // to make deferred buffers on memories that are "remote" from where
+        // they are executing
+        if (it->first.address_space() != target_proc.address_space())
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+                "%s memory " IDFMT " is not visible from the target processor "
+                "of task %s (UID %lld) for creating dynamic memory pool.", 
+                manager->get_name(), it->first.id, get_task_name(),
+                get_unique_id());
+        if (it->second.is_bounded())
+        {
+          // Check to see if acquired a memory pool for this already
+          std::map<Memory,MemoryPool*>::iterator finder =
+            acquired_pools.find(it->first);
+          if (finder != acquired_pools.end())
+          {
+#ifdef DEBUG_LEGION
+            // These should all be bounded pools
+            assert(finder->second->get_bounds().scope == LEGION_BOUNDED_POOL);
+#endif
+            leaf_memory_pools.insert(acquired_pools.extract(finder));
+            continue;
+          }
+        }
+        else 
+        {
+          // We don't allow strict unbounded memory pools to be used
+          // along with concurrent index space tasks or tasks that are
+          // going to perform collective mapping of region requirements
+          if (it->second.scope == LEGION_STRICT_UNBOUNDED_POOL)
+          {
+            if (concurrent_task)
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s dynamically requested a "  
+                  "strict unbounded memory pool in %s memory for "
+                  "concurrent task %s (UID %lld). Strict unbounded "
+                  "memory pools are not permitted to be used when "
+                  "mapping concurrent index space tasks because they "
+                  "can lead to deadlocks. Instead you should use either "
+                  "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
+                  "LEGION_PERMISSIVE_UNBOUNDED_POOL scope when specifying "
+                  "the kind of unbound memory pool for this task.",
+                  mapper->get_mapper_name(), manager->get_name(),
+                  get_task_name(), get_unique_id())
+            else if (!check_collective_regions.empty())
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                  "Mapper %s dynamically requested a " 
+                  "strict unbounded memory pool in %s memory for "
+                  "task %s (UID %lld) while also requesting a "
+                  "collective mapping of %zd region requirements. "
+                  "Strict unbounded memory pools are not permitted to be "
+                  "used in conjunction with collective mapping because they "
+                  "can lead to deadlocks. Instead you should use "
+                  "LEGION_INDEX_TASK_UNBOUNDED_POOL or "
+                  "LEGION_PERMISSIVE_UNBOUNDED_POOL scope for any unbounded "
+                  "memory pools for this task or alternatively choosen not "
+                  "to perform collective mapping of any region requirements.",
+                  mapper->get_mapper_name(), manager->get_name(),
+                  get_task_name(), get_unique_id(),
+                  check_collective_regions.size())
+            if (runtime->runtime_warnings &&
+                (variant->leaf_pool_bounds.find(it->first.kind()) ==
+                 variant->leaf_pool_bounds.end()))
+              REPORT_LEGION_WARNING(LEGION_WARNING_UNBOUND_MEMORY_POOL,
+                  "Mapper %s requested an unbound memory pool in %s memory for "
+                  "leaf task %s (UID %lld). Unbound memory pools are very bad "
+                  "for performance and we strongly encourage all users to avoid"
+                  " using them except for extenuating circumstances when the "
+                  "amount of dynamic memory required by a task is truly "
+                  "unbounded.", mapper->get_mapper_name(), manager->get_name(),
+                  get_task_name(), get_unique_id())
+          }
+          // If this is our first unbounded allocation then we need to 
+          // wait for it to safe for us to do it 
+          if (wait_for_unbounded_allocations.exists())
+          {
+            wait_for_unbounded_allocations.wait();
+            wait_for_unbounded_allocations = RtEvent::NO_RT_EVENT;
+          }
+        }
+        // It's not safe to hold onto unbounded pools if we're going to
+        // block on trying to allocate something else as this can lead to
+        // hangs associated with things like concurrent index space task
+        // launches that need to be able to acquire all their pools without
+        // us interleaving in between them.
+        RtEvent try_again;
+        MemoryPool *pool = NULL;
+        unsigned unbound_acquired_index = unbounded_pools.size(); 
+        do {
+          if (try_again.exists())
+          {
+            // Release all unbounded pools
+            for (unsigned idx = 0; idx < unbound_acquired_index; idx++)
+            {
+              std::map<Memory,MemoryPool*>::iterator finder =
+                leaf_memory_pools.find(unbounded_pools[idx]->memory);
+#ifdef DEBUG_LEGION
+              assert(finder != leaf_memory_pools.end());
+#endif
+              finder->second->release_pool(get_unique_id());
+              delete finder->second;
+              leaf_memory_pools.erase(finder);
+            }
+            // Wait to try again
+            try_again.wait();
+            try_again = RtEvent::NO_RT_EVENT;
+            // Try to reacquire all unbounded pools
+            for (unbound_acquired_index = 0; unbound_acquired_index < 
+                  unbounded_pools.size(); unbound_acquired_index++)
+            {
+              MemoryManager *target = unbounded_pools[unbound_acquired_index];
+              std::map<Memory,PoolBounds>::const_iterator finder = 
+                dynamic_pool_bounds.find(target->memory);
+#ifdef DEBUG_LEGION
+              assert(finder != dynamic_pool_bounds.end());
+              assert(!finder->second.is_bounded());
+#endif
+              // Recompute these each time as they might be consumed each time
+              TaskTreeCoordinates coordinates;
+              compute_task_tree_coordinates(coordinates);
+              MemoryPool *unbound_pool = target->create_memory_pool(
+                  get_unique_id(), coordinates, finder->second, &try_again); 
+              if (try_again.exists())
+                break;
+              leaf_memory_pools.emplace(
+                  std::make_pair(target->memory, unbound_pool));
+            }
+#ifdef DEBUG_LEGION
+            assert(try_again.exists() == 
+                (unbound_acquired_index < unbounded_pools.size()));
+#endif
+            if (try_again.exists())
+              continue;
+          }
+          // Try to do the most recent allocation
+          // Recompute these each time as they might be consumed each time
+          TaskTreeCoordinates coordinates;
+          compute_task_tree_coordinates(coordinates);
+          // Not safe to block here indefinitely holding unbounded pools
+          pool = manager->create_memory_pool(get_unique_id(),
+              coordinates, it->second, &try_again);
+        } while (try_again.exists());
+        if (pool == NULL)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to reserve a dynamic memory pool of %zd bytes for "
+              "leaf task %s (UID %lld) in %s memory. You are actually out "
+              "of memory here so you'll need to either allocate more memory "
+              "for this kind of memory when you configure Realm which may "
+              "necessitate finding a bigger machine. If you want to avoid "
+              "finding out that you're out of memory this way you should "
+              "instead use the 'MapperRuntime::acquire_pool' call to make "
+              "sure that memory can be reserved for all pools in advance.",
+              it->second.size, get_task_name(), get_unique_id(),
+              manager->get_name())
+        leaf_memory_pools.emplace(std::make_pair(it->first, pool));
+        // Keep track of all our unbounded pools
+        if (!it->second.is_bounded())
+          unbounded_pools.push_back(manager);
+      }
+      if (concurrent_task || !check_collective_regions.empty())
+      {
+        // Tell our unbounded pools that we're done allocating
+        for (unsigned idx = 0; idx < unbounded_pools.size(); idx++)
+          unbounded_pools[idx]->end_collective_unbounded_pools_task();
+      }
+      // If we have any pools left in the acquired set we can delete them
+      // since we're not going to need them
+      for (std::map<Memory,MemoryPool*>::const_iterator it =
+            acquired_pools.begin(); it != acquired_pools.end(); it++)
+        delete it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::acquire_leaf_memory_pool(Memory memory,
+        const PoolBounds &bounds, RtEvent *safe_for_unbounded_pools)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bounds.is_bounded());
+#endif
+      // Check to see if we already have a memory pool for this memory of
+      // the given size, if we do then we're already good
+      std::map<Memory,MemoryPool*>::iterator finder =
+        leaf_memory_pools.find(memory);
+      if (finder != leaf_memory_pools.end())
+      {
+        if ((bounds.size <= finder->second->query_available_memory()) &&
+            (bounds.alignment <= finder->second->max_alignment))
+          return true;
+        // Otherwise release this pool since we're going to make a new one
+        delete finder->second;
+        leaf_memory_pools.erase(finder);
+      }
+      TaskTreeCoordinates coordinates;
+      compute_task_tree_coordinates(coordinates);
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      MemoryPool *pool = manager->create_memory_pool(get_unique_id(), 
+          coordinates, bounds, safe_for_unbounded_pools);
+      if (pool == NULL)
+        return false;
+      leaf_memory_pools[memory] = pool;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::release_leaf_memory_pool(Memory memory)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryPool*>::iterator finder =
+        leaf_memory_pools.find(memory);
+      if (finder != leaf_memory_pools.end())
+      {
+        delete finder->second;
+        leaf_memory_pools.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
@@ -4679,8 +5237,8 @@ namespace Legion {
         // Initialize output regions
         for (unsigned idx = 0; idx < output_regions.size(); ++idx)
           execution_context->add_output_region(output_regions[idx],
-              physical_instances[regions.size() + idx],
-              is_output_global(idx), is_output_valid(idx));
+              physical_instances[regions.size() + idx], is_output_global(idx),
+              is_output_valid(idx), is_output_grouped(idx));
 
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
@@ -5105,7 +5663,9 @@ namespace Legion {
       }
       else
       {
-        LeafContext *leaf_ctx = new LeafContext(runtime, this, inline_task);
+        LeafContext *leaf_ctx = new LeafContext(runtime, this, 
+            std::move(leaf_memory_pools), inline_task);
+        leaf_memory_pools.clear();
         leaf_ctx->add_base_gc_ref(SINGLE_TASK_REF);
         return leaf_ctx;
       }
@@ -5169,6 +5729,9 @@ namespace Legion {
       reduction_metasize = 0;
       reduction_instance = NULL;
       first_mapping = true;
+      collective_lamport_clock = 0;
+      collective_unbounded_points = 0;
+      collective_lamport_clock_ready = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_precondition.interpreted = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_task_barrier = RtBarrier::NO_RT_BARRIER;
       children_commit_invoked = false;
@@ -5858,7 +6421,7 @@ namespace Legion {
       // Remove our reference on the future
       result = Future();
       predicate_false_future = Future();
-      valid_output_regions.clear();
+      output_region_options.clear();
       if (freeop)
         runtime->free_individual_task(this);
     }
@@ -6020,12 +6583,13 @@ namespace Legion {
                                         std::vector<OutputRequirement> &outputs)
     //--------------------------------------------------------------------------
     {
-      valid_output_regions.resize(outputs.size());
+      output_region_options.resize(outputs.size());
       Provenance *provenance = get_provenance();
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
-        valid_output_regions[idx] = req.valid_requirement;
+        output_region_options[idx] = OutputOptions(false,
+            req.valid_requirement, false/*grouped*/);
 
         if (!req.valid_requirement)
         {
@@ -6157,7 +6721,6 @@ namespace Legion {
     void IndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      complete_mapping();
       if (!elide_future_return)
       {
         // Set the future to the false result
@@ -6170,8 +6733,13 @@ namespace Legion {
             result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
         else
-          result.impl->set_result(predicate_false_future.impl, this);
+        {
+          // Safe to block here indefinitely waiting for unbounded pools
+          result.impl->set_result(this, predicate_false_future.impl,
+                                  NULL/*safe_for_unbounded_pools*/);
+        }
       }
+      complete_mapping();
       complete_execution();
       trigger_children_committed();
     }
@@ -6340,7 +6908,14 @@ namespace Legion {
     bool IndividualTask::is_output_valid(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      return valid_output_regions[idx];
+      return output_region_options[idx].valid_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::is_output_grouped(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return output_region_options[idx].grouped_fields();
     }
 
     //--------------------------------------------------------------------------
@@ -6506,8 +7081,9 @@ namespace Legion {
             result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
         else
-          result.impl->set_result(predicate_false_future.impl, this);
-      }
+          result.impl->set_result(execution_context,
+              predicate_false_future.impl);
+       }
       // Pretend like we executed the task
       execution_context->handle_mispredication();
     }
@@ -6554,14 +7130,13 @@ namespace Legion {
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       RezCheck z(rez);
+      parent_ctx->pack_inner_context(rez);
       pack_single_task(rez, target);
-      size_t valid_output_regions_size = valid_output_regions.size();
-      rez.serialize(valid_output_regions_size);
-      for (unsigned idx = 0; idx < valid_output_regions.size(); idx++)
-        rez.serialize<bool>(valid_output_regions[idx]);
+      rez.serialize<size_t>(output_region_options.size());
+      for (unsigned idx = 0; idx < output_region_options.size(); idx++)
+        rez.serialize(output_region_options[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
-      parent_ctx->pack_inner_context(rez);
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
@@ -6594,21 +7169,17 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
       DerezCheck z(derez);
+      // Figure out what our parent context is
+      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       unpack_single_task(derez, ready_events);
-      size_t valid_output_regions_size = 0;
-      derez.deserialize(valid_output_regions_size);
-      valid_output_regions.resize(valid_output_regions_size);
-      for (unsigned idx = 0; idx < valid_output_regions_size; idx++)
-      {
-        bool valid_output_region = false;
-        derez.deserialize<bool>(valid_output_region);
-        valid_output_regions[idx] = valid_output_region;
-      }
+      size_t output_regions_size = 0;
+      derez.deserialize(output_regions_size);
+      output_region_options.resize(output_regions_size);
+      for (unsigned idx = 0; idx < output_regions_size; idx++)
+        derez.deserialize(output_region_options[idx]);
       derez.deserialize(orig_task);
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
-      // Figure out what our parent context is
-      parent_ctx = InnerContext::unpack_inner_context(derez, runtime);
       derez.deserialize(top_level_task);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -7227,6 +7798,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PointTask::is_output_grouped(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->is_output_grouped(idx);
+    }
+
+    //--------------------------------------------------------------------------
     TaskOp::TaskKind PointTask::get_task_kind(void) const
     //--------------------------------------------------------------------------
     {
@@ -7315,6 +7893,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, POINT_UNPACK_TASK_CALL);
       DerezCheck z(derez);
+      // Get the context information from our slice owner
+      parent_ctx = slice_owner->get_context();
+      parent_task = parent_ctx->get_task();
       unpack_single_task(derez, ready_events);
       derez.deserialize(orig_task);
       if (concurrent_task)
@@ -7326,9 +7907,6 @@ namespace Legion {
         derez.deserialize(concurrent_postcondition);
       }
       set_current_proc(current);
-      // Get the context information from our slice owner
-      parent_ctx = slice_owner->get_context();
-      parent_task = parent_ctx->get_task();
       set_provenance(slice_owner->get_provenance());
       if (is_origin_mapped())
       {
@@ -7380,9 +7958,18 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       runtime->outstanding_counts[MispredicationTaskArgs::TASK_ID].fetch_add(1);
 #endif
-      slice_owner->set_predicate_false_result(index_point);
+      slice_owner->set_predicate_false_result(index_point, execution_context);
       // Pretend like we executed the task
       execution_context->handle_mispredication();
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t PointTask::order_collectively_mapped_unbounded_pools(
+                                       uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->collective_lamport_allreduce(
+          lamport_clock, need_result);
     }
 
     //--------------------------------------------------------------------------
@@ -7521,8 +8108,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
-                                    const FutureMap &point_arguments,bool eager,
-                                    const std::vector<FutureMap> &point_futures)
+                             const FutureMap &point_arguments, bool inline_task,
+                             const std::vector<FutureMap> &point_futures)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
@@ -7534,19 +8121,33 @@ namespace Legion {
         Future f = point_arguments.impl->get_future(point, true/*internal*/);
         if (f.impl != NULL)
         {
-          // Request the local buffer
-          f.impl->request_runtime_instance(this, eager);
-          // Make sure that it is ready
-          const RtEvent ready = f.impl->subscribe();
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
-          const void *buffer =
-            f.impl->find_runtime_buffer(parent_ctx, local_arglen);
-          // Have to make a local copy since the point takes ownership
-          if (local_arglen > 0)
+          if (inline_task)
           {
-            local_args = malloc(local_arglen);
-            memcpy(local_args, buffer, local_arglen); 
+            const void *buffer = f.impl->get_buffer(
+                runtime->runtime_system_memory, &local_arglen);
+            // Have to make a local copy since the point takes ownership
+            if (local_arglen > 0)
+            {
+              local_args = malloc(local_arglen);
+              memcpy(local_args, buffer, local_arglen); 
+            }
+          }
+          else
+          {
+            // Request the local buffer
+            f.impl->request_runtime_instance(this);
+            // Make sure that it is ready
+            const RtEvent ready = f.impl->subscribe();
+            if (ready.exists() && !ready.has_triggered())
+              ready.wait();
+            const void *buffer =
+              f.impl->find_runtime_buffer(parent_ctx, local_arglen);
+            // Have to make a local copy since the point takes ownership
+            if (local_arglen > 0)
+            {
+              local_args = malloc(local_arglen);
+              memcpy(local_args, buffer, local_arglen); 
+            }
           }
         }
       }
@@ -7797,14 +8398,14 @@ namespace Legion {
 #endif
       SingleTask::activate();
       set_current_proc(proc);
-      std::set<RtEvent> ready_events;
-      unpack_single_task(derez, ready_events);
       stealable = false;
       replicate = false;
       parent_ctx = parent;
       shard_manager = manager;
       shard_manager->add_base_resource_ref(SINGLE_TASK_REF);
       selected_variant = variant;
+      std::set<RtEvent> ready_events;
+      unpack_single_task(derez, ready_events);
       // If we have any region requirements then they are all collective
       check_collective_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -8216,7 +8817,8 @@ namespace Legion {
       }
       else
       {
-        execution_context = new LeafContext(runtime, this, inline_task);
+        execution_context = new LeafContext(runtime, this, 
+            std::move(leaf_memory_pools), inline_task);
         execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       }
       return execution_context;
@@ -9182,8 +9784,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement &req = outputs[idx];
-        output_region_options[idx] = 
-          OutputOptions(req.global_indexing, req.valid_requirement);
+        output_region_options[idx] = OutputOptions(req.global_indexing,
+            req.valid_requirement, false/*grouped*/);
 
         IndexSpace color_space = launch_space;
         if (req.projection != 0) {
@@ -9540,6 +10142,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t IndexTask::collective_lamport_allreduce(uint64_t lamport_clock,
+                                                size_t points, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (collective_lamport_clock < lamport_clock)
+        collective_lamport_clock = lamport_clock;
+      collective_unbounded_points += points;
+#ifdef DEBUG_LEGION
+      assert(collective_unbounded_points <= total_points);
+#endif
+      if (collective_unbounded_points < total_points)
+      {
+        if (need_result)
+        {
+          if (!collective_lamport_clock_ready.exists())
+            collective_lamport_clock_ready = Runtime::create_rt_user_event();
+          o_lock.release();
+          collective_lamport_clock_ready.wait();
+        }
+      }
+      else if (collective_lamport_clock_ready.exists())
+        Runtime::trigger_event(collective_lamport_clock_ready);
+      return collective_lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
@@ -9564,7 +10193,9 @@ namespace Legion {
               {
                 Future f = future_map.impl->get_future(itr.p,
                                             true/*internal*/);
-                f.impl->set_result(predicate_false_future.impl, this);
+                // Safe to block indefinitely waiting for unbounded pools
+                f.impl->set_result(this, predicate_false_future.impl,
+                                   NULL/*safe_for_unbounded_pools*/);
               }
             }
             else
@@ -9584,11 +10215,15 @@ namespace Legion {
         else
         {
           // Handling a reduction case
-          if (redop_initial_value.impl == NULL)
+          if (redop_initial_value.impl != NULL)
+          {
+            // Safe to block here indefinitely waiting for unbounded pools
+            reduction_future.impl->set_result(this, redop_initial_value.impl,
+                                              NULL/*safe_for_unbounded_pools*/);
+          }
+          else
             reduction_future.impl->set_local(&reduction_op->identity,
                                              reduction_op->sizeof_rhs);
-          else
-            reduction_future.impl->set_result(redop_initial_value.impl, this);
         }
       }
       // Then clean up this task execution
@@ -9676,6 +10311,8 @@ namespace Legion {
       if (serdez_redop_fns == NULL) 
       {
         reduction_instances.reserve(target_mems.size());
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
         int runtime_visible_index = -1;
         for (std::vector<Memory>::const_iterator it =
               target_mems.begin(); it != target_mems.end(); it++)
@@ -9684,9 +10321,10 @@ namespace Legion {
               FutureInstance::check_meta_visible(*it))
             runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = runtime->find_memory_manager(*it);
-          reduction_instances.push_back(
-              manager->create_future_instance(this, unique_op_id,
-                reduction_op->sizeof_rhs, false/*eager*/));
+          // Safe to block here indefinitely waiting for unbounded pools
+          reduction_instances.push_back(manager->create_future_instance(
+                unique_op_id, coordinates, reduction_op->sizeof_rhs,
+                NULL/*safe_for_unbounded_pools*/));
         }
         // This is an important optimization: if we're doing a small
         // reduction value we always want the reduction instance to
@@ -9698,9 +10336,10 @@ namespace Legion {
           runtime_visible_index = reduction_instances.size();
           MemoryManager *manager = 
             runtime->find_memory_manager(runtime->runtime_system_memory);
-          reduction_instances.push_back(
-              manager->create_future_instance(this, unique_op_id,
-                reduction_op->sizeof_rhs, false/*eager*/));
+          // Safe to block here indefinitely waiting for unbounded pools
+          reduction_instances.push_back(manager->create_future_instance(
+                unique_op_id, coordinates, reduction_op->sizeof_rhs,
+                NULL/*safe_for_unbounded_pools*/));
         }
         if (runtime_visible_index > 0)
           std::swap(reduction_instances.front(), 
@@ -9725,10 +10364,7 @@ namespace Legion {
         if ((redop_initial_value.impl != NULL) &&
             (parent_ctx->get_task()->get_shard_id() == 0))
         {
-          const RtEvent ready = 
-            redop_initial_value.impl->request_runtime_instance(this, false);
-          if (ready.exists() && !ready.has_triggered())
-            ready.wait();
+          redop_initial_value.impl->request_runtime_instance(this);
           const void *value = redop_initial_value.impl->find_runtime_buffer(
               parent_ctx, serdez_redop_state_size); 
           serdez_redop_state = malloc(serdez_redop_state_size);
@@ -10298,6 +10934,7 @@ namespace Legion {
 #endif
         reduction_instances.reserve(serdez_redop_targets.size());
         int runtime_visible_index = -1;
+        TaskTreeCoordinates coordinates;
         for (std::vector<Memory>::const_iterator it =
               serdez_redop_targets.begin(); it !=
               serdez_redop_targets.end(); it++)
@@ -10312,10 +10949,13 @@ namespace Legion {
           }
           else
           {
+            if (coordinates.empty())
+              compute_task_tree_coordinates(coordinates);
             MemoryManager *manager = runtime->find_memory_manager(*it);
-            reduction_instances.push_back(
-                manager->create_future_instance(this, unique_op_id,
-                  serdez_redop_state_size, false/*eager*/));
+            // Safe to block here indefinitely waiting for unbounded pools
+            reduction_instances.push_back(manager->create_future_instance(
+                  unique_op_id, coordinates, serdez_redop_state_size,
+                  NULL/*safe_for_unbounded_pools*/));
           }
         }
         if (runtime_visible_index < 0)
@@ -10467,7 +11107,7 @@ namespace Legion {
             if (reduc_size > 0)
             {
               const void *reduc_ptr = derez.get_current_pointer();
-              FutureInstance instance(reduc_ptr, reduc_size, false/*eager*/,
+              FutureInstance instance(reduc_ptr, reduc_size,
                   true/*external*/, false/*own allocation*/);
               fold_reduction_future(&instance, ApEvent::NO_AP_EVENT);
               // Advance the pointer on the deserializer
@@ -11221,6 +11861,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool SliceTask::is_output_grouped(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < output_region_options.size());
+#endif
+      return output_region_options[idx].grouped_fields();
+    }
+
+    //--------------------------------------------------------------------------
     bool SliceTask::is_output_valid(unsigned idx) const
     //--------------------------------------------------------------------------
     {
@@ -11789,7 +12439,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SliceTask::set_predicate_false_result(const DomainPoint &point)
+    void SliceTask::set_predicate_false_result(const DomainPoint &point,
+                                               TaskContext *execution_context)
     //--------------------------------------------------------------------------
     {
       if (elide_future_return || (redop > 0))
@@ -11814,7 +12465,7 @@ namespace Legion {
           impl->set_result(ApEvent::NO_AP_EVENT, NULL);
       }
       else
-        impl->set_result(predicate_false_future.impl, this);
+        impl->set_result(execution_context, predicate_false_future.impl);
     }
 
     //--------------------------------------------------------------------------
@@ -12175,6 +12826,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t SliceTask::collective_lamport_allreduce(
+                                       uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        AutoLock o_lock(op_lock);
+        if (collective_lamport_clock < lamport_clock)
+          collective_lamport_clock = lamport_clock;
+#ifdef DEBUG_LEGION
+        assert(collective_unbounded_points < points.size());
+#endif
+        if (!collective_lamport_clock_ready.exists() && need_result)
+          collective_lamport_clock_ready = Runtime::create_rt_user_event();
+        if (++collective_unbounded_points < points.size())
+        {
+          if (need_result)
+          {
+            o_lock.release();
+            collective_lamport_clock_ready.wait();
+            o_lock.reacquire();
+          }
+          return collective_lamport_clock;
+        }
+        // Otherwise fall through and send the message to the index owner
+      }
+      else
+        return index_owner->collective_lamport_allreduce(
+            lamport_clock, 1/*points*/, need_result);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        rez.serialize(collective_unbounded_points);
+        rez.serialize(collective_lamport_clock);
+        if (!collective_lamport_clock_ready.exists())
+        {
+          // Still need to make one to know when results are applied
+          collective_lamport_clock_ready = Runtime::create_rt_user_event();
+          rez.serialize(collective_lamport_clock_ready);
+          rez.serialize<bool>(false); // need result;
+          // Put this in the map applied data structure since it we need
+          // to capture it as part of the effects of this task in case
+          // nothing ends up needing it
+          AutoLock o_lock(op_lock);
+          map_applied_conditions.insert(collective_lamport_clock_ready);
+        }
+        else
+        {
+          rez.serialize(collective_lamport_clock_ready);
+          rez.serialize<bool>(true); // need result;
+          rez.serialize(&collective_lamport_clock);
+        }
+      }
+      runtime->send_slice_collective_allreduce_request(orig_proc, rez);
+      if (need_result)
+        collective_lamport_clock_ready.wait();
+      return collective_lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::concurrent_allreduce(PointTask *task, 
                             ProcessorManager *manager, uint64_t lamport_clock,
                             VariantID vid, bool poisoned)
@@ -12253,6 +12965,56 @@ namespace Legion {
       RtEvent precondition;
       derez.deserialize(precondition);
       owner->rendezvous_concurrent_mapped(precondition, points); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_allreduce_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *owner;
+      derez.deserialize(owner);
+      size_t total_points;
+      derez.deserialize(total_points);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      RtUserEvent done;
+      derez.deserialize(done);
+      bool need_result;
+      derez.deserialize<bool>(need_result);
+
+      const uint64_t result = owner->collective_lamport_allreduce(
+          lamport_clock, total_points, need_result);
+      if (need_result)
+      {
+        uint64_t *target;
+        derez.deserialize(target);
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize(result);
+          rez.serialize(done);
+        }
+        owner->runtime->send_slice_collective_allreduce_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_allreduce_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      uint64_t *target;
+      derez.deserialize(target);
+      derez.deserialize(*target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
