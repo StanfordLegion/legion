@@ -103,18 +103,15 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
       public:
-        DeferMappingArgs(TaskOp *op, MustEpochOp *owner,
-                         RtUserEvent done, unsigned cnt,
+        DeferMappingArgs(TaskOp *op, MustEpochOp *owner, unsigned cnt,
                          std::vector<unsigned> *performed,
                          std::vector<ApEvent> *eff)
           : LgTaskArgs<DeferMappingArgs>(op->get_unique_op_id()),
-            proxy_this(op), must_op(owner), done_event(done),
-            invocation_count(cnt), performed_regions(performed),
-            effects(eff) { }
+            proxy_this(op), must_op(owner), invocation_count(cnt),
+            performed_regions(performed), effects(eff) { }
       public:
         TaskOp *const proxy_this;
         MustEpochOp *const must_op;
-        const RtUserEvent done_event;
         const unsigned invocation_count;
         std::vector<unsigned> *const performed_regions;
         std::vector<ApEvent> *const effects;
@@ -215,8 +212,8 @@ namespace Legion {
                                             get_acquired_instances_ref(void);
     public:
       virtual bool distribute_task(void) = 0;
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL) = 0;
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL) = 0;
       virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
@@ -231,15 +228,11 @@ namespace Legion {
       virtual void perform_inlining(VariantImpl *variant,
                     const std::deque<InstanceSet> &parent_regions) = 0;
     public:
-      void defer_distribute_task(RtEvent precondition);
-      RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
+      bool defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
                                     const DeferMappingArgs *args,
                                     unsigned invocation_count,
                                     std::vector<unsigned> *performed = NULL,
                                     std::vector<ApEvent> *effects = NULL);
-      void defer_launch_task(RtEvent precondition);
-      void enqueue_ready_task(bool use_target_processor,
-                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -428,12 +421,14 @@ namespace Legion {
       inline RtEvent get_profiling_reported(void) const
         { return profiling_reported; }
     public:
+      void enqueue_ready_task(bool use_target_processor,
+                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
       RtEvent perform_versioning_analysis(const bool post_mapper);
       virtual bool replicate_task(void);
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
                                              Mapper::MapTaskOutput &output,
                                              MustEpochOp *must_epoch_owner);
-      virtual void finalize_map_task_output(Mapper::MapTaskInput &input,
+      virtual bool finalize_map_task_output(Mapper::MapTaskInput &input,
                                             Mapper::MapTaskOutput &output,
                                             MustEpochOp *must_epoch_owner);
       void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
@@ -450,8 +445,8 @@ namespace Legion {
     protected: // mapper helper call
       void validate_target_processors(const std::vector<Processor> &prcs) const;
     protected:
-      void invoke_mapper(MustEpochOp *must_epoch_owner);
-      RtEvent map_all_regions(MustEpochOp *must_epoch_owner,
+      bool invoke_mapper(MustEpochOp *must_epoch_owner);
+      bool map_all_regions(MustEpochOp *must_epoch_owner,
                               const DeferMappingArgs *defer_args);
       void perform_post_mapping(const TraceInfo &trace_info);
       void check_future_return_bounds(FutureInstance *instance) const;
@@ -480,8 +475,8 @@ namespace Legion {
       virtual void predicate_false(void) = 0;
       virtual void launch_task(bool inline_task = false);
       virtual bool distribute_task(void) = 0;
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL) = 0;
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL) = 0;
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events) = 0;
@@ -506,6 +501,8 @@ namespace Legion {
       friend class ShardManager;
       virtual void trigger_task_commit(void) = 0;
     public:
+      virtual bool send_task(Processor target,
+          std::vector<SingleTask*> &others) = 0;
       virtual bool pack_task(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0; 
@@ -563,7 +560,6 @@ namespace Legion {
     protected:
       // origin-mapped cases need to know if they've been mapped or not yet
       bool                                  first_mapping;
-      std::vector<RtEvent>                  intra_space_mapping_dependences;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
       // The single task termination event encapsulates the exeuction of the
@@ -645,11 +641,10 @@ namespace Legion {
       virtual void predicate_false(void) = 0;
       virtual void premap_task(void) = 0;
       virtual bool distribute_task(void) = 0;
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL) = 0;
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL) = 0;
       virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
-      virtual void map_and_launch(void) = 0;
     public:
       virtual TaskKind get_task_kind(void) const = 0;
     public:
@@ -795,8 +790,8 @@ namespace Legion {
     public:
       virtual void predicate_false(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL);
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
@@ -822,6 +817,8 @@ namespace Legion {
       virtual void handle_mispredication(void);
       virtual void prepare_map_must_epoch(void);
     public:
+      virtual bool send_task(Processor target,
+          std::vector<SingleTask*> &others);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
@@ -903,8 +900,8 @@ namespace Legion {
     public:
       virtual void predicate_false(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL);
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
@@ -919,12 +916,17 @@ namespace Legion {
           const DomainPoint &color, const DomainPoint &extents);
       virtual void record_output_registered(RtEvent registered,
                                             std::set<RtEvent> &applied_events);
+      virtual bool finalize_map_task_output(Mapper::MapTaskInput &input,
+                                            Mapper::MapTaskOutput &output,
+                                            MustEpochOp *must_epoch_owner);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void trigger_complete(ApEvent effects);
       virtual void trigger_task_commit(void);
     public:
+      virtual bool send_task(Processor target,
+          std::vector<SingleTask*> &others);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
@@ -952,6 +954,7 @@ namespace Legion {
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments, bool eager,
                             const std::vector<FutureMap> &point_futures);
+      RtEvent perform_pointwise_analysis(void);
     public:
       // From MemoizableOp
       virtual void complete_replay(ApEvent pre);
@@ -987,7 +990,7 @@ namespace Legion {
       PointTask                   *orig_task;
       SliceTask                   *slice_owner;
     protected:
-      std::map<AddressSpaceID,RemoteTask*> remote_instances;
+      std::vector<RtEvent> intra_space_mapping_dependences;
     protected:
       RtBarrier concurrent_task_barrier;
       // This is the concurrent precondition event that we need to signal
@@ -1051,8 +1054,8 @@ namespace Legion {
       virtual void predicate_false(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL);
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
@@ -1060,7 +1063,7 @@ namespace Legion {
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
                                              Mapper::MapTaskOutput &output,
                                              MustEpochOp *must_epoch_owner);
-      virtual void finalize_map_task_output(Mapper::MapTaskInput &input,
+      virtual bool finalize_map_task_output(Mapper::MapTaskInput &input,
                                             Mapper::MapTaskOutput &output,
                                             MustEpochOp *must_epoch_owner);
     public:
@@ -1072,6 +1075,8 @@ namespace Legion {
     protected:
       virtual void trigger_task_commit(void);
     public:
+      virtual bool send_task(Processor target,
+          std::vector<SingleTask*> &others);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events); 
@@ -1225,11 +1230,10 @@ namespace Legion {
       virtual void predicate_false(void);
       virtual void premap_task(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL);
       virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
-      virtual void map_and_launch(void);
       virtual void trigger_complete(ApEvent effects);
     public:
       virtual TaskKind get_task_kind(void) const;
@@ -1379,17 +1383,20 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      const DeferMappingArgs *args = NULL);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL,
+                                   const DeferMappingArgs *args = NULL);
       virtual void launch_task(bool inline_task = false);
       virtual bool is_stealable(void) const;
-      virtual void map_and_launch(void);
       virtual bool is_output_global(unsigned idx) const;
       virtual bool is_output_valid(unsigned idx) const;
       virtual void trigger_complete(ApEvent effects);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
+      bool send_task(Processor target, PointTask *point,
+                          std::vector<SingleTask*> &others);
+      void pack_slice_task(Serializer &rez, AddressSpaceID target,
+                           const std::vector<PointTask*> &to_send);
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);

@@ -1349,7 +1349,7 @@ namespace Legion {
                                  const std::vector<MapperID> &thieves);
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
-      void add_to_ready_queue(TaskOp *op);
+      void add_to_ready_queue(SingleTask *task);
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
@@ -1430,7 +1430,7 @@ namespace Legion {
         MapperState(void)
           : queue_guard(false) { }
       public:
-        std::list<TaskOp*> ready_queue;
+        std::list<SingleTask*> ready_queue;
         RtEvent deferral_event;
         RtUserEvent queue_waiter;
         bool queue_guard;
@@ -1929,7 +1929,7 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager &rhs) = delete;
     public:
-      inline void send_message(MessageKind message, Serializer &rez, bool flush,
+      void send_message(MessageKind message, Serializer &rez, bool flush,
                         bool response = false,
                         RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
@@ -3105,8 +3105,9 @@ namespace Legion {
       void send_message(MessageKind message, AddressSpaceID space,
           Serializer &rez, bool flush = true, bool response = false);
       void send_startup_barrier(AddressSpaceID target, Serializer &rez);
-      void send_task(TaskOp *task);
-      void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
+      void send_task(IndividualTask *task);
+      void send_task(SliceTask *task);
+      void send_tasks(Processor target, std::vector<SingleTask*> &tasks);
       void send_steal_request(const std::multimap<Processor,MapperID> &targets,
                               Processor thief);
       void send_advertisements(const std::set<Processor> &targets,
@@ -3987,7 +3988,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_ready_queue(Processor p, TaskOp *task_op);
+      void add_to_ready_queue(Processor p, SingleTask *task);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);

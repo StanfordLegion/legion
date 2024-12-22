@@ -595,6 +595,11 @@ namespace Legion {
        * performed to make additional copies of any output regions of the
        * task for resilience purposes by setting the 'postmap_task' flag
        * to true.
+       *
+       * If the mapper decides that it wants to abort the mapping of the
+       * task it can do that by setting the 'abort_mapping' flag. This
+       * will return the task back to the ready queue presented to the
+       * mapper by select_tasks_to_map mapper call.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> > valid_instances;
@@ -622,6 +627,7 @@ namespace Legion {
         ProfilingRequest                            task_prof_requests;
         ProfilingRequest                            copy_prof_requests;
         bool                                        postmap_task; // = false
+        bool                                        abort_mapping; // = false
       };
       //------------------------------------------------------------------------
       virtual void map_task(MapperContext            ctx,

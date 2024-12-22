@@ -7807,7 +7807,7 @@ namespace Legion {
                          "from processor " IDFMT "", local_proc.id,thief.id);
       // Iterate over the task descriptions, asking the appropriate mapper
       // whether we can steal the task
-      std::set<TaskOp*> stolen;
+      std::vector<SingleTask*> stolen;
       std::vector<MapperID> successful_thiefs;
       for (std::vector<MapperID>::const_iterator steal_it = thieves.begin();
             steal_it != thieves.end(); steal_it++)
@@ -7842,7 +7842,7 @@ namespace Legion {
               // this will also prevent them from being stolen
               if (!map_state.ready_queue.empty())
               {
-                for (std::list<TaskOp*>::const_iterator it =
+                for (std::list<SingleTask*>::const_iterator it =
                       map_state.ready_queue.begin(); it !=
                       map_state.ready_queue.end(); it++)
                   if ((*it)->is_stealable() && !(*it)->is_origin_mapped())
@@ -7871,7 +7871,7 @@ namespace Legion {
         if (!input.stealable_tasks.empty())
           mapper->invoke_permit_steal_request(input, output);
         // See which tasks we can succesfully steal
-        std::vector<TaskOp*> local_stolen;
+        std::vector<SingleTask*> local_stolen;
         {
           // Retake the lock, put any tasks still in the ready queue
           // back into the queue and remove the queue guard
@@ -7880,8 +7880,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(map_state.queue_guard);
 #endif
-          std::list<TaskOp*> &rqueue = map_state.ready_queue;
-          for (std::list<TaskOp*>::iterator it =
+          std::list<SingleTask*> &rqueue = map_state.ready_queue;
+          for (std::list<SingleTask*>::iterator it =
                 rqueue.begin(); it != rqueue.end(); /*nothing*/)
           {
             if (output.stolen_tasks.find(*it) != output.stolen_tasks.end())
@@ -7922,12 +7922,13 @@ namespace Legion {
         if (!local_stolen.empty())
         {
           successful_thiefs.push_back(stealer);
-          for (std::vector<TaskOp*>::const_iterator it = 
+          for (std::vector<SingleTask*>::const_iterator it = 
                 local_stolen.begin(); it != local_stolen.end(); it++)
-          {
             (*it)->deactivate_outstanding_task();
-            stolen.insert(*it);
-          }
+          if (stolen.empty())
+            stolen.swap(local_stolen);
+          else
+            stolen.insert(stolen.end(),local_stolen.begin(),local_stolen.end());
         }
         else
           mapper->process_failed_steal(thief);
@@ -7935,7 +7936,7 @@ namespace Legion {
       if (!stolen.empty())
       {
 #ifdef DEBUG_LEGION
-        for (std::set<TaskOp*>::const_iterator it = stolen.begin();
+        for (std::vector<SingleTask*>::const_iterator it = stolen.begin();
               it != stolen.end(); it++)
         {
           log_task.debug("task %s (ID %lld) stolen from processor " IDFMT
@@ -7969,7 +7970,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_ready_queue(TaskOp *task)
+    void ProcessorManager::add_to_ready_queue(SingleTask *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8261,7 +8262,7 @@ namespace Legion {
               {
                 // Only ask the mapper about ready tasks that have
                 // active contexts that we should keep mapping
-                for (std::list<TaskOp*>::const_iterator it =
+                for (std::list<SingleTask*>::const_iterator it =
                       map_state.ready_queue.begin(); it != 
                       map_state.ready_queue.end(); it++)
                 {
@@ -8365,7 +8366,7 @@ namespace Legion {
                   it->first->get_unique_id())
         }
         // Figure out which tasks are to be triggered
-        std::vector<TaskOp*> to_trigger;
+        std::vector<SingleTask*> to_trigger;
         {
           // Retake the lock, put any tasks that the mapper didn't select
           // back on the queue and update the context states for any
@@ -8375,9 +8376,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(map_state.queue_guard);
 #endif
-          std::list<TaskOp*> &rqueue = map_state.ready_queue;
+          std::list<SingleTask*> &rqueue = map_state.ready_queue;
           // Iterate over the list and find any items to remove
-          for (std::list<TaskOp*>::iterator it =
+          for (std::list<SingleTask*>::iterator it =
                 rqueue.begin(); it != rqueue.end(); /*nothing*/)
           {
             if ((output.map_tasks.find(*it) != output.map_tasks.end()) ||
@@ -8411,7 +8412,7 @@ namespace Legion {
           }
           else if (!stealing_disabled)
           {
-            for (std::list<TaskOp*>::const_iterator it =
+            for (std::list<SingleTask*>::const_iterator it =
                   rqueue.begin(); it != rqueue.end(); it++)
             {
               if ((*it)->is_stealable())
@@ -8430,20 +8431,42 @@ namespace Legion {
           }
         }
         // Now we can trigger our tasks that the mapper selected
-        for (std::vector<TaskOp*>::const_iterator it = 
+        std::map<Processor,std::vector<SingleTask*> > to_send;
+        for (std::vector<SingleTask*>::const_iterator it = 
               to_trigger.begin(); it != to_trigger.end(); it++)
         {
+          // Mark that this task is no longer outstanding
+          (*it)->deactivate_outstanding_task();
           // Update the target processor for this task if necessary
           std::map<const Task*,Processor>::const_iterator finder = 
             output.relocate_tasks.find(*it);
-          const bool send_remotely = (finder != output.relocate_tasks.end());
-          if (send_remotely)
+          if (finder != output.relocate_tasks.end())
+          {
             (*it)->set_target_proc(finder->second);
-          // Mark that this task is no longer outstanding
-          (*it)->deactivate_outstanding_task();
-          TaskOp::TriggerTaskArgs trigger_args(*it);
-          runtime->issue_runtime_meta_task(trigger_args,
-                                           LG_THROUGHPUT_WORK_PRIORITY);
+            // See if the target processor is local
+            if (!runtime->is_local(finder->second))
+            {
+              // This is the tricky case, we need to actually send this
+              // remotely, which is hard if it is a point task that is
+              // owned by a slice task, if it is just a normal indvidual
+              // task then we can just ship it remotely immediately
+              to_send[finder->second].push_back(*it);
+            }
+            else
+              (*it)->enqueue_ready_task(true/*use target processor*/);
+          }
+          else
+          {
+            TaskOp::TriggerTaskArgs trigger_args(*it);
+            runtime->issue_runtime_meta_task(trigger_args,
+                                             LG_THROUGHPUT_WORK_PRIORITY);
+          }
+        }
+        if (!to_send.empty())
+        {
+          for (std::map<Processor,std::vector<SingleTask*> >::iterator
+                it = to_send.begin(); it != to_send.end(); it++)
+            runtime->send_tasks(it->first, it->second);
         }
       }
 
@@ -21497,7 +21520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_task(TaskOp *task)
+    void Runtime::send_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
       Processor target = task->target_proc;
@@ -21532,19 +21555,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_tasks(Processor target, const std::set<TaskOp*> &tasks)
+    void Runtime::send_task(SliceTask *task)
     //--------------------------------------------------------------------------
     {
-      if (!target.exists())
-        REPORT_LEGION_ERROR(ERROR_INVALID_TARGET_PROC, 
-                      "Mapper requested invalid NO_PROC as target proc!");
+      const Processor target = task->target_proc;
+#ifdef DEBUG_LEGION
+      assert(!is_local(target));
+#endif
+      MessageManager *manager = find_messenger(target);
+      Serializer rez;
+      bool deactivate_task;
+      const AddressSpaceID target_addr = find_address_space(target);
+      {
+        RezCheck z(rez);
+        rez.serialize(target);
+        rez.serialize(task->get_task_kind());
+        deactivate_task = task->pack_task(rez, target_addr);
+      }
+      manager->send_message(TASK_MESSAGE, rez, true/*flush*/);
+      if (deactivate_task)
+        task->deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_tasks(Processor target, std::vector<SingleTask*> &tasks)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!tasks.empty());
+      assert(target.exists());
+#endif
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
         proc_managers.find(target);
       if (finder != proc_managers.end())
       {
         // Still local
-        for (std::set<TaskOp*>::const_iterator it = tasks.begin();
+        for (std::vector<SingleTask*>::const_iterator it = tasks.begin();
               it != tasks.end(); it++)
         {
           // Update the current processor
@@ -21554,27 +21601,58 @@ namespace Legion {
       }
       else
       {
-        // Otherwise we need to send it remotely
+        std::sort(tasks.begin(), tasks.end());
+        // Send each of these tasks, if some of the tasks share the same
+        // slice they might end up getting sent together
+        while (!tasks.empty())
+        {
+          SingleTask *task = tasks.back();
+          tasks.pop_back();
+          if (task->send_task(target, tasks))
+            task->deactivate();
+        }
+#if 0
         MessageManager *manager = find_messenger(target);
-        unsigned idx = 1;
         const AddressSpaceID target_addr = find_address_space(target);
-        for (std::set<TaskOp*>::const_iterator it = tasks.begin();
-              it != tasks.end(); it++,idx++)
+        size_t remaining = individual_tasks.size() + slice_tasks.size();
+        for (unsigned idx = 0; idx < individual_tasks.size(); idx++)
         {
           Serializer rez;
           bool deactivate_task;
           {
             RezCheck z(rez);
             rez.serialize(target);
-            rez.serialize((*it)->get_task_kind());
-            deactivate_task = (*it)->pack_task(rez, target_addr);
+            rez.serialize(TaskOp::INDIVIDUAL_TASK_KIND);
+            deactivate_task = individual_tasks[idx]->pack_task(rez,target_addr);
           }
-          // Put it in the queue, flush the last task
-          manager->send_message(TASK_MESSAGE, rez, (idx == tasks.size()));
-          // Deactivate the task if it is remote
+#ifdef DEBUG_LEGION
+          assert(remaining > 0);
+#endif
+          manager->send_message(TASK_MESSAGE, rez, (--remaining == 0));
           if (deactivate_task)
-            (*it)->deactivate();
+            individual_tasks[idx]->deactivate();
         }
+        for (unsigned idx = 0; idx < slice_tasks.size(); idx++)
+        {
+          Serializer rez;
+          bool deactivate_task;
+          {
+            RezCheck z(rez);
+            rez.serialize(target);
+            rez.serialize(TaskOp::SLICE_TASK_KIND);
+            deactivate_task = slice_tasks[idx]->pack_task(rez,target_addr);
+          }
+#ifdef DEBUG_LEGION
+          assert(remaining > 0);
+#endif
+          manager->send_message(TASK_MESSAGE, rez, (--remaining == 0));
+          if (deactivate_task)
+            slice_tasks[idx]->deactivate();
+        }
+#ifdef DEBUG_LEGION
+        assert(remaining == 0);
+#endif
+#endif
       }
     }
 
@@ -26939,7 +27017,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_ready_queue(Processor p, TaskOp *task)
+    void Runtime::add_to_ready_queue(Processor p, SingleTask *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -32647,21 +32725,21 @@ namespace Legion {
             PhysicalManager::handle_top_view_creation(args, runtime);
             break;
           }
-        case LG_DEFERRED_DISTRIBUTE_TASK_ID:
-          {
-            InnerContext::handle_distribute_task_queue(args);
-            break;
-          }
         case LG_DEFER_PERFORM_MAPPING_TASK_ID:
           {
             const TaskOp::DeferMappingArgs *margs = 
               (const TaskOp::DeferMappingArgs*)args;
-            const RtEvent deferred = 
-              margs->proxy_this->perform_mapping(margs->must_op, margs);
-            // Once we've no longer been deferred then we can trigger
-            // the done event to signal we are done
-            if (!deferred.exists())
-              Runtime::trigger_event(margs->done_event);
+            if (margs->proxy_this->is_origin_mapped())
+            {
+              if (margs->proxy_this->perform_mapping(margs->must_op, margs) &&
+                  margs->proxy_this->distribute_task())
+                margs->proxy_this->launch_task();
+            }
+            else
+            {
+              if (margs->proxy_this->perform_mapping(margs->must_op, margs))
+                margs->proxy_this->launch_task();
+            }
             break;
           }
         case LG_FINALIZE_OUTPUT_TREE_TASK_ID:
@@ -32669,11 +32747,6 @@ namespace Legion {
             const TaskOp::FinalizeOutputEqKDTreeArgs *fargs =
               (const TaskOp::FinalizeOutputEqKDTreeArgs*)args;
             fargs->proxy_this->finalize_output_region_trees();
-            break;
-          }
-        case LG_DEFERRED_LAUNCH_TASK_ID:
-          {
-            InnerContext::handle_launch_task_queue(args);
             break;
           }
         case LG_MISPREDICATION_TASK_ID:

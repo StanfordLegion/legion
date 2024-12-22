@@ -412,10 +412,8 @@ namespace Legion {
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
       LG_DEFER_MAPPER_COLLECTION_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
-      LG_DEFERRED_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_FINALIZE_OUTPUT_TREE_TASK_ID,
-      LG_DEFERRED_LAUNCH_TASK_ID,
       LG_MISPREDICATION_TASK_ID,
       LG_DEFER_TRIGGER_CHILDREN_COMMIT_TASK_ID,
       LG_ORDER_CONCURRENT_LAUNCH_TASK_ID,
@@ -522,10 +520,8 @@ namespace Legion {
         "Deferred Mapper Message",                                \
         "Deferred Mapper Instance Collective",                    \
         "Remote View Creation",                                   \
-        "Deferred Distribute Task",                               \
         "Defer Task Perform Mapping",                             \
         "Finalize Output Regions Eq KD Tree",                     \
-        "Deferred Task Launch",                                   \
         "Handle Mapping Mispredication",                          \
         "Defer Trigger Children Commit",                          \
         "Order Concurrent Launch",                                \
