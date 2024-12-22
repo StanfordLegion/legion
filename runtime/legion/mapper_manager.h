@@ -241,6 +241,10 @@ namespace Legion {
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
+      virtual bool is_safe_for_unbounded_pools(void) = 0;
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind) = 0;
+    public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
       static void handle_deferred_message(const void *args);
@@ -301,6 +305,10 @@ namespace Legion {
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    public:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the mapper reservation
       RtUserEvent complete_pending_pause_mapper_call(void);
@@ -359,6 +367,10 @@ namespace Legion {
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    public:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the lock
       void release_lock(std::vector<RtUserEvent> &to_trigger); 
@@ -414,8 +426,11 @@ namespace Legion {
       inline void enable_reentrant(void)
         { manager->enable_reentrant(this); }
       inline void disable_reentrant(void)
-        { manager->disable_reentrant(this); } 
-      void record_acquired_instance(InstanceManager *manager, bool created);
+        { manager->disable_reentrant(this); }
+      inline void report_unsafe_allocation_in_unbounded_pool(
+          Memory m, RuntimeCallKind k)
+        { manager->report_unsafe_allocation_in_unbounded_pool(this, m, k); }
+      void record_acquired_instance(InstanceManager *manager);
       void release_acquired_instance(InstanceManager *manager);
       bool perform_acquires(
           const std::vector<MappingInstance> &instances,
