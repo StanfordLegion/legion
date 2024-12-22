@@ -641,17 +641,18 @@ namespace Legion {
                                    const std::vector<size_t> &field_sizes,
                                    bool compact, void **piece_list,
                                    size_t *piece_list_size,
-                                   size_t *num_pieces) const
+                                   size_t *num_pieces,
+                                   size_t base_alignment) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(base_alignment > 0); // should be at least 1
       assert(field_ids.size() == field_sizes.size());
       assert(int(constraints.ordering_constraint.ordering.size()) == (DIM+1));
 #endif
       Realm::InstanceLayout<DIM,T> *layout = new Realm::InstanceLayout<DIM,T>();
       layout->bytes_used = 0;
-      // Start with 32-byte alignment for AVX instructions
-      layout->alignment_reqd = 32;
+      layout->alignment_reqd = base_alignment;
       layout->space = space;
       std::vector<Rect<DIM,T> > piece_bounds;
       const SpecializedConstraint &spec = constraints.specialized_constraint;
@@ -953,11 +954,13 @@ namespace Legion {
       }
       if (falign > 1)
       {
-        // group size needs to be rounded up to match group alignment
-        fsize = round_up(fsize, falign);
+        // round up the size of the field dimension if it is not the
+        // last dimension in the layout to ensure alignment
+        if (order.ordering.back() != LEGION_DIM_F)
+          fsize = round_up(fsize, falign);
         // overall instance alignment layout must be compatible with group
         layout->alignment_reqd = std::lcm(layout->alignment_reqd, falign);
-      } 
+      }
       // compute the starting offsets for each piece
       std::vector<size_t> piece_offsets(piece_bounds.size());
       if (safe_reuse)
@@ -1893,12 +1896,13 @@ namespace Legion {
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     bool compact, void **piece_list, 
-                                    size_t *piece_list_size, size_t *num_pieces)
+                                    size_t *piece_list_size, size_t *num_pieces,
+                                    size_t base_alignment)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_is = get_tight_index_space();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
-                              compact, piece_list, piece_list_size, num_pieces);
+              compact, piece_list, piece_list_size, num_pieces, base_alignment);
     }
 
     //--------------------------------------------------------------------------
@@ -5690,12 +5694,13 @@ namespace Legion {
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     bool compact, void **piece_list,
-                                    size_t *piece_list_size, size_t *num_pieces)
+                                    size_t *piece_list_size, size_t *num_pieces,
+                                    size_t base_alignment)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_is = get_tight_index_space();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
-                              compact, piece_list, piece_list_size, num_pieces);
+              compact, piece_list, piece_list_size, num_pieces, base_alignment);
     }
 
     //--------------------------------------------------------------------------

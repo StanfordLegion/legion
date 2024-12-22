@@ -638,6 +638,7 @@ namespace Legion {
     public:
       // Support for operations that compute futures
       void compute_task_tree_coordinates(TaskTreeCoordinates &coordinates);
+      virtual ContextCoordinate get_task_tree_coordinate(void) const;
     public: // Support for mapping operations
       static void prepare_for_mapping(PhysicalManager *manager,
                                       MappingInstance &instance);
@@ -1713,6 +1714,8 @@ namespace Legion {
           std::vector<IndirectRecord> &records, const bool sources);
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3566,6 +3569,8 @@ namespace Legion {
       virtual PartitionKind get_partition_kind(void) const;
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3759,6 +3764,8 @@ namespace Legion {
       virtual FillView* get_fill_view(void) const;
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3986,6 +3993,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_attach(void) const { return true; }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     protected:
       IndexAttachOp *owner;
       DomainPoint index_point;
@@ -4147,6 +4156,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_detach(void) const { return true; }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     protected:
       IndexDetachOp *owner;
       DomainPoint index_point;
@@ -4429,6 +4440,8 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const std::string_view& get_provenance_string(
           bool human = true) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4557,6 +4570,8 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const std::string_view& get_provenance_string(
           bool human = true) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4613,6 +4628,8 @@ namespace Legion {
       virtual const std::string_view& get_provenance_string(
           bool human = true) const;
       virtual PartitionKind get_partition_kind(void) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4645,12 +4662,16 @@ namespace Legion {
       virtual uint64_t get_context_index(void) const;
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez);
+    protected:
+      DomainPoint index_point;
     };
 
     /**
@@ -4671,6 +4692,8 @@ namespace Legion {
       virtual uint64_t get_context_index(void) const;
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4681,6 +4704,8 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez);
+    protected:
+      DomainPoint index_point;
     };
 
     /**
