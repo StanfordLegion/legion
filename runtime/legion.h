@@ -2497,15 +2497,22 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(UnboundPoolScope s) 
-        : size(0), alignment(0), scope(s) { }
+      PoolBounds(UnboundPoolScope u, size_t s = 0)
+        : size(s), alignment(0), scope(u) { }
       PoolBounds(size_t s = 0, uint32_t a = 16)
         : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
       PoolBounds& operator=(PoolBounds&&) = default;
+      inline bool is_bounded(void) const
+        { return (scope == LEGION_BOUNDED_POOL); }
     public:
+      // If this is a bounded pool then size is the number of bytes in the pool 
+      // If it is an unbounded pool then size is how many free bytes the pool 
+      // is allowed to keep locally from freed instances without returning
+      // them back to the Realm allocator, zero means that all freed instances
+      // are immediately sent back to the Realm allocator
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
       UnboundPoolScope scope; // scope for unbound pools
@@ -8494,8 +8501,22 @@ namespace Legion {
        * that you can create an instance of this size as the memory 
        * may be fragmented and the largest hole might be much smaller
        * than the size returned by this function.
+       * @param ctx enclosing task context
+       * @param target the memory being queried
+       * @return the instantaneous remaining size in the target memory
        */
       size_t query_available_memory(Context ctx, Memory target);
+
+      /**
+       * Inform the runtime that a task is done performing memory
+       * allocations in a given memory ahead of the completion of
+       * the task. This will allow the runtime to free up the memory
+       * pool for additional allocations earlier than waiting for
+       * the completion of the task. 
+       * @param ctx enclosing task context
+       * @param memory the memory in which allocations are finished
+       */
+      void release_memory_pool(Context ctx, Memory target);
 
       /**
        * Indicate that data in a particular physical region
