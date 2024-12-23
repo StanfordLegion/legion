@@ -2466,7 +2466,8 @@ namespace Legion {
                        const FieldMask &mask, unsigned parent_req_index);
     protected:
       void select_sharding_function(void);
-      void find_remote_targets(std::vector<ApEvent> &preconditions);
+      void find_remote_targets(std::vector<ApEvent> &preconditions,
+          ApUserEvent &to_trigger);
     protected:
       ShardingFunction *sharding_function;
       IndexSpaceNode *shard_points;

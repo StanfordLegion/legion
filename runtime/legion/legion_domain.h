@@ -333,6 +333,9 @@ namespace Legion {
 
     bool empty(void) const;
 
+    // Will destroy the underlying Realm index space
+    void destroy(Realm::Event wait_on = Realm::Event::NO_EVENT);
+
     size_t get_volume(void) const;
 
     __CUDA_HD__
@@ -429,6 +432,19 @@ namespace Legion {
       const Domain &domain;
       size_t &result;
     };
+    struct DestroyFunctor {
+    public:
+      DestroyFunctor(const Domain &d, Realm::Event e) : domain(d), event(e) { }
+      template<typename N, typename T>
+      static inline void demux(DestroyFunctor *functor)
+      {
+        DomainT<N::N,T> is = functor->domain;
+        is.destroy(functor->event);
+      }
+    public:
+      const Domain &domain;
+      const Realm::Event event;
+    };
     struct IntersectionFunctor {
     public:
       IntersectionFunctor(const Domain &l, const Domain &r, Domain &res)
@@ -439,15 +455,22 @@ namespace Legion {
       {
         DomainT<N::N,T> is1 = functor->lhs;
         DomainT<N::N,T> is2 = functor->rhs;
-        Realm::ProfilingRequestSet dummy_requests;
-        DomainT<N::N,T> temp;
-        Internal::LgEvent wait_on(
-            DomainT<N::N,T>::compute_intersection(is1, is2,
-              temp, dummy_requests));
-        if (wait_on.exists())
-          wait_on.wait();
-        functor->result = Domain(temp.tighten());
-        temp.destroy();
+        assert(is1.dense() || is2.dense());
+        // Intersect the index spaces
+        DomainT<N::N,T> result;
+        result.bounds = is1.bounds.intersection(is2.bounds);
+        if (!result.bounds.empty())
+        {
+          if (!is1.dense())
+            result.sparsity = is1.sparsity;
+          else if (!is2.dense())
+            result.sparsity = is2.sparsity;
+          else
+            result.sparsity.id = 0;
+        }
+        else
+          result.sparsity.id = 0;
+        functor->result = Domain(result);
       }
     public:
       const Domain &lhs;

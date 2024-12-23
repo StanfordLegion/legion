@@ -432,6 +432,10 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_
                     << " time=" << (1e-9 * (*it)->nanoseconds) << " bw=" << bw;
     delete *it;
   }
+
+  is.destroy();
+  src_is.destroy();
+  dst_is.destroy();
 }
 
 template <int N, typename T>
