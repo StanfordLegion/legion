@@ -63,7 +63,8 @@ READ_WRITE    = 0x00000007
 WRITE_ONLY    = 0x10000002
 WRITE_DISCARD = 0x10000007
 REDUCE        = 0x00000004
-DISCARD_MASK  = 0x10000000
+INPUT_DISCARD_MASK  = 0x10000000
+OUTPUT_DISCARD_MASK = 0x20000000
 
 EXCLUSIVE = 0
 ATOMIC = 1
@@ -179,11 +180,14 @@ def check_for_anti_dependence(req1, req2, actual):
         else:
             return actual
 
-def compute_dependence_type(req1, req2):
+def compute_dependence_type(req1, req2, exclusive_discard=True):
     if req1.is_no_access() or req2.is_no_access():
         return NO_DEPENDENCE
     elif req1.is_read_only() and req2.is_read_only():
-        return NO_DEPENDENCE
+        if exclusive_discard and req2.is_output_discard():
+            return TRUE_DEPENDENCE
+        else:
+            return NO_DEPENDENCE
     elif req1.is_reduce() and req2.is_reduce():
         if req1.redop == req2.redop:
             return NO_DEPENDENCE
@@ -4937,15 +4941,15 @@ class DataflowTraverser(object):
                 # See a multi-node run of region_reduce_aliased.rg for example
                 self.dataflow_traversal.append(False)
             else:
-                if src in self.state.valid_instances:
+                if src in self.state.previous_instances:
+                    # Still need to traverse to find pending reductions
+                    self.found_previous_dataflow_path = True
+                elif src in self.state.valid_instances:
                     # We found the dataflow path
                     self.found_dataflow_path = True
                     # No need to continue traverse after we found the dataflow path
                     self.perform_copy_analysis(copy, src, dst)
                     return False
-                elif src in self.state.previous_instances:
-                    # Still need to traverse to find pending reductions
-                    self.found_previous_dataflow_path = True
                 self.dataflow_stack.append(src)
                 self.dataflow_traversal.append(True)
                 # Once we traverse through an across copy we don't do it again
@@ -6098,7 +6102,7 @@ class Requirement(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY) and not self.is_discard()
+        return bool(self.priv & READ_ONLY) and not self.is_input_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -6115,8 +6119,11 @@ class Requirement(object):
     def is_reduce(self):
         return self.priv == REDUCE_PRIV
 
-    def is_discard(self):
-        return bool(self.priv & DISCARD_MASK)
+    def is_input_discard(self):
+        return bool(self.priv & INPUT_DISCARD_MASK)
+
+    def is_output_discard(self):
+        return bool(self.priv & OUTPUT_DISCARD_MASK)
 
     def is_collective(self):
         return bool(self.coher & COLLECTIVE_MASK)
@@ -6152,14 +6159,17 @@ class Requirement(object):
             return "NO-ACCESS"
         elif bool(self.priv & WRITE_PRIV):
             if bool(self.priv & READ_PRIV):
-                if bool(self.priv & DISCARD_MASK):
+                if bool(self.priv & INPUT_DISCARD_MASK):
                     return "WRITE-DISCARD"
                 else:
                     return "READ-WRITE"
             else:
                 return "WRITE-ONLY"
         elif bool(self.priv & READ_PRIV):
-            return "READ-ONLY"
+            if bool(self.priv & OUTPUT_DISCARD_MASK):
+                return "READ-ONLY-DISCARD"
+            else:
+                return "READ-ONLY"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
@@ -6812,7 +6822,8 @@ class Operation(object):
             traverser = EventGraphTraverser(forwards=False, use_gen=True,
                 generation=self.state.get_next_traversal_generation(),
                 op_fn=traverse_node, copy_fn=traverse_node, 
-                fill_fn=traverse_node, deppart_fn=traverse_node)
+                fill_fn=traverse_node, deppart_fn=traverse_node,
+                delete_fn=traverse_node)
             traverser.reachable = self.physical_incoming
             traverser.run(self.start_event)
             # Keep everything symmetric
@@ -6822,7 +6833,8 @@ class Operation(object):
             traverser = EventGraphTraverser(forwards=True, use_gen=True,
                 generation=self.state.get_next_traversal_generation(),
                 op_fn=traverse_node, copy_fn=traverse_node, 
-                fill_fn=traverse_node, deppart_fn=traverse_node)
+                fill_fn=traverse_node, deppart_fn=traverse_node,
+                delete_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
             traverser.run(self.finish_event)
             # Keep everything symmetric
@@ -7450,7 +7462,7 @@ class Operation(object):
             # This is a single operation
             assert self.launch_shape is None
             assert len(self.reqs) >= len(logical_op.reqs)
-            for idx in xrange(0,len(logical_op.reqs)):
+            for idx in iterkeys(logical_op.reqs):
                 if not self.verify_logical_requirement(idx, logical_op, previous_deps):
                     return False
         return True
@@ -8449,7 +8461,11 @@ class Operation(object):
         # have copy-out operations for restricted coherence
         return True
 
-    def perform_op_registration_verification(self, perform_checks, collective = None):
+    def perform_op_registration_verification(self, tree_fields, perform_checks, collective = None):
+        if self.reqs:
+            for req in itervalues(self.reqs):
+                for field in req.fields:
+                    tree_fields.add((req.tid,field))
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
@@ -8462,15 +8478,15 @@ class Operation(object):
                     collective = set()
                 if self.kind == INDEX_TASK_KIND:
                     for point in itervalues(self.points):
-                        if not point.op.perform_op_registration_verification(perform_checks, collective):
+                        if not point.op.perform_op_registration_verification(tree_fields, perform_checks, collective):
                             return False
                 else:
                     for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                        if not point.perform_op_registration_verification(perform_checks, collective):
+                        if not point.perform_op_registration_verification(tree_fields, perform_checks, collective):
                             return False
             else: # Better be in a control replicated context to not have any points
                 assert self.launch_shape.empty() or self.context.shard is not None
-            return True
+            return True 
         # Some kinds of operations don't need to perform registration
         if self.kind == COPY_OP_KIND or self.kind == DELETION_OP_KIND \
                 or self.kind == POST_CLOSE_OP_KIND or self.kind == INTER_CLOSE_OP_KIND:
@@ -8711,7 +8727,7 @@ class Operation(object):
     def print_event_node(self, printer):
         self.print_base_node(printer, False)
 
-    def print_event_graph(self, printer, elevate, all_nodes, top):
+    def print_event_graph(self, printer, elevate, all_nodes, tree_fields, top):
         # If we were predicated false then we don't get printed
         if not self.predicate_result:
             return
@@ -8723,7 +8739,7 @@ class Operation(object):
         # Do any of our close operations too
         if self.internal_ops:
             for internal in self.internal_ops:
-                internal.print_event_graph(printer, elevate, all_nodes, False)
+                internal.print_event_graph(printer, elevate, all_nodes, tree_fields, False)
         # Handle index space operations specially, everything
         # else is the same
         if self.kind is INDEX_TASK_KIND or self.points:
@@ -8731,10 +8747,10 @@ class Operation(object):
             if self.points:
                 if self.kind is INDEX_TASK_KIND:
                     for point in itervalues(self.points):
-                        point.op.print_event_graph(printer, elevate, all_nodes, False)
+                        point.op.print_event_graph(printer, elevate, all_nodes, tree_fields, False)
                 else:
                     for point in itervalues(self.points):
-                        point.print_event_graph(printer, elevate, all_nodes, False)
+                        point.print_event_graph(printer, elevate, all_nodes, tree_fields, False)
             # Put any operations we generated in the elevate set
             if self.realm_copies:
                 for copy in self.realm_copies:
@@ -8769,6 +8785,10 @@ class Operation(object):
             # Finally put ourselves in the set if we are a physical operation
             assert self.context is not None
             elevate[self] = self.context
+        if self.reqs:
+            for req in itervalues(self.reqs):
+                for field in req.fields:
+                    tree_fields.add((req.tid,field))
 
     def is_realm_operation(self):
         return False
@@ -9288,6 +9308,8 @@ class Task(object):
         if self.op.reqs:
             # Find which region requirement privileges were derived from
             for idx,our_req in iteritems(self.op.reqs):
+                if our_req.is_no_access():
+                    continue
                 if child_req.parent is not our_req.logical_node:
                     continue
                 fields_good = True
@@ -9381,6 +9403,7 @@ class Task(object):
                 for idx,req in iteritems(self.op.reqs):
                     initialize_requirement(self, idx, req) 
         success = True
+        tree_fields = set()
         if self.replicants:
             # Control-replicated path
             # Should only have non-leaf control replicated replicants
@@ -9426,7 +9449,7 @@ class Task(object):
                     # If the operation is sharded, only perform it on the owner shard
                     if op.owner_shard is not None and op.owner_shard != op.context.shard:
                         continue
-                    if not op.perform_op_registration_verification(perform_checks, collective):
+                    if not op.perform_op_registration_verification(tree_fields, perform_checks, collective):
                         success = False
                         break
                 if not success:
@@ -9445,7 +9468,7 @@ class Task(object):
                 if not op.perform_op_physical_verification(perform_checks):
                     success = False
                     break
-                if not op.perform_op_registration_verification(perform_checks):
+                if not op.perform_op_registration_verification(tree_fields, perform_checks):
                     success = False
                     break
         if self.op.reqs:
@@ -9462,6 +9485,7 @@ class Task(object):
                     if inst.is_virtual():
                         continue
                     req.logical_node.finalize_verification_state(depth, field, inst)
+                    tree_fields.discard((req.tid,field))
             if self.replicants:
                 # Control replicated path
                 for shard in itervalues(self.replicants.shards):
@@ -9471,6 +9495,36 @@ class Task(object):
                 # Normal path for non-control replicated
                 for idx,req in iteritems(self.op.reqs):
                     finalize_requirement(self, idx, req)
+        if tree_fields:
+            # If we still have tree fields for children that we don't have for
+            # ourself then we need to do the deletion checking for all the instances
+            # associated with these tree fields here
+            for inst in itervalues(self.state.instances):
+                if inst.deletion is None:
+                    continue
+                deleted = False
+                for field in inst.fields:
+                    if (inst.tree_id,field) in tree_fields:
+                        deleted = True
+                        break
+                if deleted:
+                    for point in inst.index_expr.get_point_set().iterator():
+                        for field in inst.fields:
+                            # Treat a deletion like a "writing" copy since that
+                            # needs to depend on all the prior users, use -1 as
+                            # a version number so we depend on everything
+                            preconditions = inst.find_verification_copy_dependences(
+                                    field, point, inst.deletion, 0, False, 0, -1)
+                            bad = check_preconditions(preconditions, inst.deletion)
+                            if bad is not None:
+                                print("ERROR: Missing deletion precondition for deletion of "+
+                                      str(inst)+" for field "+str(field)+" on "+str(bad))
+                                if self.state.eq_graph_on_error:
+                                    key = (point, field, inst.tree_id)
+                                    self.state.dump_eq_graph(key, key)
+                                if self.state.assert_on_error:
+                                    assert False
+                                return False
         return success
 
     def perform_task_collective_checks(self):
@@ -9672,6 +9726,7 @@ class Task(object):
         return 1   
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
+        tree_fields = set()
         if not self.operations:
             if not self.replicants:
                 return
@@ -9697,7 +9752,7 @@ class Task(object):
                     num_ops = min(shard_ops,num_ops)
             if num_ops <= 0:
                 for shard in itervalues(self.replicants.shards):
-                    shard.op.print_event_graph(printer, elevate, all_nodes, top)
+                    shard.op.print_event_graph(printer, elevate, all_nodes, tree_fields, top)
                 return
         if not top:
             # Start the cluster 
@@ -9735,7 +9790,7 @@ class Task(object):
                             op.node_name = owner_op.node_name
             # Now we can do the normal event graph print routine
             for shard in itervalues(self.replicants.shards):
-                shard.op.print_event_graph(printer, elevate, all_nodes, top)
+                shard.op.print_event_graph(printer, elevate, all_nodes, tree_fields, top)
                 local_nodes = list()
                 for node,context in iteritems(elevate):
                     if context is shard:
@@ -9755,7 +9810,7 @@ class Task(object):
                     if op.state.assert_on_warning:
                         assert False
                     continue
-                op.print_event_graph(printer, elevate, all_nodes, False)
+                op.print_event_graph(printer, elevate, all_nodes, tree_fields, False)
             # Find our local nodes
             local_nodes = list()
             for node,context in iteritems(elevate):
@@ -9767,6 +9822,30 @@ class Task(object):
             # Remove our nodes from elevate
             for node in local_nodes:
                 del elevate[node] 
+        # In order to figure out where to print out instance deletions we find
+        # the context which has child ops for particulr tree fields but which 
+        # does not actually have such privileges itself, that will be the context
+        # where the instances were last deleted so report any instance deletions
+        if tree_fields:
+            if self.op.reqs:
+                for req in itervalues(self.op.reqs):
+                    for field in req.fields:
+                        tree_fields.discard((req.tid,field))
+            # If we still have tree fields from children but not at this level
+            # then find all the instances that have such fields and do the
+            # deletion printing for them
+            if tree_fields:
+                for inst in itervalues(self.state.instances):
+                    if inst.deletion is None:
+                        continue
+                    has_field = False
+                    for field in inst.fields:
+                        if (inst.tree_id,field) in tree_fields:
+                            has_field = True
+                            break
+                    if has_field:
+                        inst.deletion.print_event_node(printer)
+                        all_nodes.add(inst.deletion)
         if not top:
             # End the cluster
             printer.end_this_cluster()
@@ -9967,7 +10046,7 @@ class PointUser(object):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return bool(self.priv & READ_ONLY) and not self.is_discard()
+        return bool(self.priv & READ_ONLY) and not self.is_input_discard()
 
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
@@ -9984,8 +10063,11 @@ class PointUser(object):
     def is_reduce(self):
         return self.priv == REDUCE
 
-    def is_discard(self):
-        return bool(self.priv & DISCARD_MASK)
+    def is_input_discard(self):
+        return bool(self.priv & INPUT_DISCARD_MASK)
+
+    def is_output_discard(self):
+        return bool(self.priv & OUTPUT_DISCARD_MASK)
 
     def is_collective(self):
         return bool(self.coher & COLLECTIVE_MASK)
@@ -10131,7 +10213,7 @@ class Instance(object):
                  'creator', 'uses', 'creator_regions', 'specialized_constraint',
                  'memory_constraint', 'field_constraint', 'ordering_constraint',
                  'splitting_constraints', 'dimension_constraints',
-                 'alignment_constraints', 'offset_constraints']
+                 'alignment_constraints', 'offset_constraints', 'deletion']
     def __init__(self, state, use_event):
         self.state = state
         # Instances are uniquely identified by their use event since Realm
@@ -10160,6 +10242,7 @@ class Instance(object):
         self.dimension_constraints = None
         self.alignment_constraints = None
         self.offset_constraints = None
+        self.deletion = None
 
     def __str__(self):
         #return "Instance %s in %s" % (hex(self.handle), str(self.memory))
@@ -10250,6 +10333,10 @@ class Instance(object):
             self.offset_constraints = list()
         self.offset_constraints.append(OffsetConstraint(fid, offset))
 
+    def set_deletion(self, deletion):
+        assert self.deletion is None
+        self.deletion = deletion
+
     def increment_use_count(self):
         self.uses += 1
 
@@ -10301,7 +10388,7 @@ class Instance(object):
                 if logical_user.index_owner is not None and \
                         logical_user.index_owner is logical_op.index_owner:
                     continue
-            dep = compute_dependence_type(user, req)
+            dep = compute_dependence_type(user, req, exclusive_discard=False)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 result.add(user.op)
                 # If the previous was an exclusive user there is no
@@ -10331,7 +10418,7 @@ class Instance(object):
             if logical_op is user.logical_op and index != user.index:
                 if not user.is_realm_op() or not reading or user.is_read_only():
                     continue
-            dep = compute_dependence_type(user, inst)
+            dep = compute_dependence_type(user, inst, exclusive_discard=False)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 # We can safely write the same version number on top of a reader
                 if dep == ANTI_DEPENDENCE and redop == 0 and version == user.version:
@@ -10439,7 +10526,7 @@ class Event(object):
     __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
                  'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
                  'incoming_copies', 'outgoing_copies', 'incoming_depparts',
-                 'outgoing_depparts', 'generation', 'ap_user_event',
+                 'outgoing_depparts', 'outgoing_deletions', 'generation', 'ap_user_event',
                  'rt_user_event', 'pred_event', 'user_event_triggered', 
                  'barrier_contributors', 'barrier_waiters']
     def __init__(self, state, handle):
@@ -10456,6 +10543,7 @@ class Event(object):
         self.outgoing_copies = None
         self.incoming_depparts = None
         self.outgoing_depparts = None
+        self.outgoing_deletions = None
         self.ap_user_event = False
         self.rt_user_event = False
         self.pred_event = False
@@ -10615,6 +10703,11 @@ class Event(object):
         if self.outgoing_depparts is None:
             self.outgoing_depparts = set()
         self.outgoing_depparts.add(deppart)
+
+    def add_outgoing_deletion(self, deletion):
+        if self.outgoing_deletions is None:
+            self.outgoing_deletions = set()
+        self.outgoing_deletions.add(deletion)
 
     def add_phase_barrier_contributor(self, op):
         if not self.barrier_contributors:
@@ -10779,7 +10872,8 @@ class RealmBase(object):
             traverser = EventGraphTraverser(forwards=False, use_gen=True,
                 generation=self.state.get_next_traversal_generation(),
                 op_fn=traverse_node, copy_fn=traverse_node, 
-                fill_fn=traverse_node, deppart_fn=traverse_node)
+                fill_fn=traverse_node, deppart_fn=traverse_node,
+                delete_fn=traverse_node)
             traverser.reachable = self.physical_incoming
             traverser.run(self.start_event)
             # Keep everything symmetric
@@ -10789,7 +10883,8 @@ class RealmBase(object):
             traverser = EventGraphTraverser(forwards=True, use_gen=True,
                 generation=self.state.get_next_traversal_generation(),
                 op_fn=traverse_node, copy_fn=traverse_node, 
-                fill_fn=traverse_node, deppart_fn=traverse_node)
+                fill_fn=traverse_node, deppart_fn=traverse_node,
+                delete_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
             traverser.run(self.finish_event)
             # Keep everything symmetric
@@ -11511,14 +11606,53 @@ class RealmDeppart(RealmBase):
             self.eq_privileges = self.creator.get_equivalence_privileges()
         return self.eq_privileges
 
+
+class InstanceDeletion(RealmBase):
+    __slots__ = ['node_name', 'inst']
+    def __init__(self, state, realm_num, inst, start):
+        RealmBase.__init__(self, state, realm_num)
+        self.inst = inst
+        self.start_event = start
+        self.node_name = 'realm_deletion_'+str(realm_num)
+        if start.exists():
+            start.add_outgoing_deletion(self)
+
+    def __str__(self):
+        return "Realm Deletion "+str(self.realm_num)+" of "+str(self.inst)
+
+    def get_logical_op(self):
+        assert self.creator is None
+        return self.creator
+
+    def print_event_node(self, printer):
+        label = str(self)
+        lines = [[{ "label" : label, "colspan" : 3 }]]
+        color = 'teal'
+        size = 14
+        label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
+                "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
+                ',fontcolor=black,shape=box,penwidth=0];')
+
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            for point in self.inst.index_expr.get_point_set().iterator():
+                for field in self.inst.fields:
+                    key = (point,field,self.inst.tree_id)
+                    assert key not in self.eq_privileges
+                    self.eq_privileges[key] = READ_WRITE
+        return self.eq_privileges
+
+
 class EventGraphTraverser(object):
     def __init__(self, forwards, use_gen, generation,
                  event_fn = None, op_fn = None,
                  copy_fn = None, fill_fn = None,
-                 deppart_fn = None,
+                 deppart_fn = None, delete_fn = None,
                  post_event_fn = None, post_op_fn = None,
                  post_copy_fn = None, post_fill_fn = None,
-                 post_deppart_fn = None):
+                 post_deppart_fn = None, post_delete_fn = None):
         self.forwards = forwards
         self.use_gen = use_gen
         self.generation = generation
@@ -11528,12 +11662,14 @@ class EventGraphTraverser(object):
         self.functions.append(copy_fn)
         self.functions.append(fill_fn)
         self.functions.append(deppart_fn)
+        self.functions.append(delete_fn)
         self.post_functions = list()
         self.post_functions.append(post_event_fn)
         self.post_functions.append(post_op_fn)
         self.post_functions.append(post_copy_fn)
         self.post_functions.append(post_fill_fn)
         self.post_functions.append(post_deppart_fn)
+        self.post_functions.append(post_delete_fn)
 
     def run(self, event):
         nodes = list()
@@ -11574,6 +11710,9 @@ class EventGraphTraverser(object):
                         if node.outgoing_depparts is not None:
                             for deppart in node.outgoing_depparts:
                                 nodes.append((deppart,4,True))
+                        if node.outgoing_deletions is not None:
+                            for deletion in node.outgoing_deletions:
+                                nodes.append((deletion,5,True))
                     else:
                         if node.incoming is not None:
                             for event in node.incoming:
@@ -12086,6 +12225,8 @@ alignment_constraint_pat = re.compile(
 offset_constraint_pat = re.compile(
     prefix+"Instance Offset Constraint (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+) "
            "(?P<offset>[0-9]+)")
+instance_deletion_pat = re.compile(
+    prefix+"Instance Deletion (?P<iid>[0-9a-f]+) (?P<pre>[0-9a-f]+)")
 variant_decision_pat    = re.compile(
     prefix+"Variant Decision (?P<uid>[0-9]+) (?P<vid>[0-9]+)")
 mapping_decision_pat    = re.compile(
@@ -12514,6 +12655,12 @@ def parse_legion_spy_line(line, state):
         inst.add_offset_constraint(int(m.group('fid')),
             int(m.group('offset')))
         return True
+    m = instance_deletion_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        pre = state.get_event(int(m.group('pre'),16))
+        state.create_deletion(inst, pre)
+        return True
     m = variant_decision_pat.match(line)
     if m is not None:
         task = state.get_task(int(m.group('uid')))
@@ -12831,10 +12978,14 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         p1 = state.get_task(int(m.group('point1')))
         p2 = state.get_task(int(m.group('point2')))
-        assert p1 not in state.point_point
-        assert p2 not in state.point_point
         # Holdoff on doing the merge until after parsing
-        state.point_point[p1] = p2
+        if p1 in state.point_point:
+            if state.point_point[p1] is not p2:
+                state.point_point[p2] = state.point_point[p1]
+            # No matter what remove the intermediate
+            del state.point_point[p1]
+        else:
+            state.point_point[p2] = p1
         return True
     m = index_point_pat.match(line)
     if m is not None:
@@ -13374,7 +13525,7 @@ class State(object):
         if self.detailed_logging:
             print('Computing physical reachable...')
             total_nodes = len(self.unique_ops) + len(self.copies) + \
-                            len(self.fills) + len(self.depparts)
+                    len(self.fills) + len(self.depparts) + len(self.instances)
             count = 0
             # Compute the physical reachable
             for op in self.unique_ops:
@@ -13394,6 +13545,12 @@ class State(object):
                     print_progress_bar(count, total_nodes, length=50)
             for deppart in itervalues(self.depparts):
                 deppart.compute_physical_reachable()
+                if not self.verbose:
+                    count += 1
+                    print_progress_bar(count, total_nodes, length=50)
+            for instance in itervalues(self.instances):
+                if instance.deletion is not None:
+                    instance.deletion.compute_physical_reachable()
                 if not self.verbose:
                     count += 1
                     print_progress_bar(count, total_nodes, length=50)
@@ -13922,7 +14079,8 @@ class State(object):
         printer = GraphPrinter(path, file_name)
         elevate = dict()
         all_nodes = set()
-        op.print_event_graph(printer, elevate, all_nodes, True) 
+        tree_fields = set()
+        op.print_event_graph(printer, elevate, all_nodes, tree_fields, True)
         # Now print the edges at the very end
         for node in all_nodes:
             node.print_incoming_event_edges(printer) 
@@ -14371,6 +14529,12 @@ class State(object):
         result = RealmDeppart(self, event, self.next_realm_num)
         self.next_realm_num += 1
         self.depparts[event] = result
+        return result
+
+    def create_deletion(self, inst, pre):
+        result = InstanceDeletion(self, self.next_realm_num, inst, pre)
+        self.next_realm_num += 1
+        inst.set_deletion(result)
         return result
 
     def create_copy(self, creator):

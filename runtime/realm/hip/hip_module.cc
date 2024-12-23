@@ -306,6 +306,14 @@ namespace Realm {
       : Realm::Operation::AsyncWorkItem(op)
     {}
 
+    void GPUWorkFence::mark_finished(bool successful)
+    {
+      if(op->wants_gpu_work_start()) {
+        op->add_gpu_work_end(Clock::current_time_in_nanoseconds());
+      }
+      AsyncWorkItem::mark_finished(successful);
+    }
+
     void GPUWorkFence::request_cancellation(void)
     {
       // ignored - no way to shoot down HIP work
@@ -1307,20 +1315,23 @@ namespace Realm {
     // GPUFBMemory supports ExternalHipMemoryResource and
     //  ExternalHipArrayResource (not implemented)
     bool GPUFBMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
-                                                         size_t& inst_offset)
+                                                         size_t &inst_offset)
     {
+      switch(inst->metadata.ext_resource->get_type_id()) {
+      case REALM_HASH_TOKEN(ExternalHipMemoryResource):
       {
-        ExternalHipMemoryResource *res = dynamic_cast<ExternalHipMemoryResource *>(inst->metadata.ext_resource);
-        if(res) {
-          // automatic success
-          inst_offset = res->base - reinterpret_cast<uintptr_t>(base); // offset relative to our base
-          return true;
-        }
+        ExternalHipMemoryResource *res =
+            static_cast<ExternalHipMemoryResource *>(inst->metadata.ext_resource);
+        // automatic success
+        inst_offset =
+            res->base - reinterpret_cast<uintptr_t>(base); // offset relative to our base
+        return true;
+      }
+      // TODO: add hip array
+      default:
+        break;
       }
 
-      // TODO: add hip array
-
-      // not a kind we recognize
       return false;
     }
 
@@ -2452,56 +2463,8 @@ namespace Realm {
 
     hipModule_t GPU::load_hip_module(const void *data)
     {
-      const unsigned num_options = 4;
-      hipJitOption jit_options[num_options];
-      void*        option_vals[num_options];
-      const size_t buffer_size = 16384;
-      char* log_info_buffer = (char*)malloc(buffer_size);
-      char* log_error_buffer = (char*)malloc(buffer_size);
-      jit_options[0] = hipJitOptionInfoLogBuffer;
-      jit_options[1] = hipJitOptionInfoLogBufferSizeBytes;
-      jit_options[2] = hipJitOptionErrorLogBuffer;
-      jit_options[3] = hipJitOptionErrorLogBufferSizeBytes;
-      option_vals[0] = log_info_buffer;
-      option_vals[1] = (void*)buffer_size;
-      option_vals[2] = log_error_buffer;
-      option_vals[3] = (void*)buffer_size;
+      assert(0);
       hipModule_t module;
-      hipError_t result = hipModuleLoadDataEx(&module, data, num_options, 
-                                           jit_options, option_vals); 
-      if (result != hipSuccess)
-      {
-#ifdef REALM_ON_MACOS
-        if (result == hipErrorOperatingSystem) {
-          log_gpu.error("ERROR: Device side asserts are not supported by the "
-                              "HIP driver for MAC OSX, see NVBugs 1628896.");
-        } else
-#endif
-        if (result == hipErrorNoBinaryForGpu) {
-          log_gpu.error("ERROR: The binary was compiled for the wrong GPU "
-                              "architecture. Update the 'GPU_ARCH' flag at the top "
-                              "of runtime/runtime.mk to match/include your current GPU "
-			      "architecture (%d).",
-			(info->major * 10 + info->minor));
-        } else {
-	  log_gpu.error("Failed to load HIP module! Error log: %s", 
-			log_error_buffer);
-#if HIP_VERBOSE_ERROR_MSG == 1
-	  const char *name, *str;
-	  name = hipGetErrorName(result);
-	  str = hipGetErrorString(result);
-	  fprintf(stderr,"CU: hipModuleLoadDataEx = %d (%s): %s\n",
-		  result, name, str);
-#else
-	  fprintf(stderr,"CU: hipModuleLoadDataEx = %d\n", result);
-#endif
-	}
-	abort();
-      }
-      else
-        log_gpu.info("Loaded HIP Module. JIT Output: %s", log_info_buffer);
-      free(log_info_buffer);
-      free(log_error_buffer);
       return module;
     }
 

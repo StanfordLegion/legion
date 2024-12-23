@@ -10,6 +10,8 @@ pub mod common;
 ))]
 pub mod data_source;
 pub mod dump;
+#[cfg(feature = "nvtxw")]
+pub mod nvtxw;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod trace_viewer;

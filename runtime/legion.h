@@ -2496,15 +2496,22 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(UnboundPoolScope s) 
-        : size(0), alignment(0), scope(s) { }
+      PoolBounds(UnboundPoolScope u, size_t s = 0)
+        : size(s), alignment(0), scope(u) { }
       PoolBounds(size_t s = 0, uint32_t a = 16)
         : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
       PoolBounds& operator=(PoolBounds&&) = default;
+      inline bool is_bounded(void) const
+        { return (scope == LEGION_BOUNDED_POOL); }
     public:
+      // If this is a bounded pool then size is the number of bytes in the pool 
+      // If it is an unbounded pool then size is how many free bytes the pool 
+      // is allowed to keep locally from freed instances without returning
+      // them back to the Realm allocator, zero means that all freed instances
+      // are immediately sent back to the Realm allocator
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
       UnboundPoolScope scope; // scope for unbound pools
@@ -3737,6 +3744,10 @@ namespace Legion {
       inline DeferredValue<T>& operator=(T value);
     public:
       inline void finalize(Context ctx) const;
+    public:
+      typedef T value_type;
+      typedef T& reference;
+      typedef const T& const_reference;
     protected:
       friend class UntypedDeferredValue;
       DeferredValue(void);
@@ -3763,6 +3774,10 @@ namespace Legion {
       inline void reduce(typename REDOP::RHS val) const;
       __CUDA_HD__
       inline void operator<<=(typename REDOP::RHS val) const;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
     };
 
     /**
@@ -3790,7 +3805,7 @@ namespace Legion {
       inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
     public:
       void finalize(Context ctx) const;
-      Realm::RegionInstance get_instance() const;
+      Realm::RegionInstance get_instance(void) const;
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;
@@ -3873,10 +3888,10 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = std::alignment_of<T>());
     protected:
-      Memory get_memory_from_kind(Memory::Kind kind);
-      void initialize_layout(size_t alignment, bool fortran_order_dims);
-      void initialize(Memory memory,
-                      DomainT<DIM,COORD_T> bounds,
+      inline Memory get_memory_from_kind(Memory::Kind kind);
+      inline void initialize_layout(size_t alignment, bool fortran_order_dims);
+      inline void initialize(Memory memory,
+                             DomainT<DIM,COORD_T> bounds,
                       const T *initial_value);
     public:
       __CUDA_HD__
@@ -3892,18 +3907,23 @@ namespace Legion {
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
     public:
-      void destroy();
-      Realm::RegionInstance get_instance() const;
+      inline void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
+      __CUDA_HD__
+      inline Realm::RegionInstance get_instance(void) const;
+      __CUDA_HD__
+      inline Rect<DIM,COORD_T> get_bounds(void) const;
+    public:
+      typedef T value_type;
+      typedef T& reference;
+      typedef const T& const_reference;
     protected:
       friend class OutputRegion;
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
       std::array<DimensionKind,DIM> ordering;
+      Rect<DIM,COORD_T> bounds;
       size_t alignment;
-#ifdef LEGION_BOUNDS_CHECKS
-      DomainT<DIM,COORD_T> bounds;
-#endif
     };
 
     /**
@@ -3951,7 +3971,7 @@ namespace Legion {
       template<typename T, int DIM, bool BC>
       inline operator DeferredBuffer<T,DIM,COORD_T,BC>(void) const;
     public:
-      inline void destroy(void);
+      inline void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
       inline Realm::RegionInstance get_instance(void) const { return instance; }
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
@@ -8455,8 +8475,22 @@ namespace Legion {
        * that you can create an instance of this size as the memory 
        * may be fragmented and the largest hole might be much smaller
        * than the size returned by this function.
+       * @param ctx enclosing task context
+       * @param target the memory being queried
+       * @return the instantaneous remaining size in the target memory
        */
       size_t query_available_memory(Context ctx, Memory target);
+
+      /**
+       * Inform the runtime that a task is done performing memory
+       * allocations in a given memory ahead of the completion of
+       * the task. This will allow the runtime to free up the memory
+       * pool for additional allocations earlier than waiting for
+       * the completion of the task. 
+       * @param ctx enclosing task context
+       * @param memory the memory in which allocations are finished
+       */
+      void release_memory_pool(Context ctx, Memory target);
 
       /**
        * Indicate that data in a particular physical region
@@ -9447,6 +9481,9 @@ namespace Legion {
        *              In general these are tiny and not worth profiling,
        *              but you might still want to see them. They are not
        *              recorded by default.
+       * -lg:prof_no_critical_paths Disable logging for performing critial
+       *              path analysis as it is can greatly increase the size
+       *              of the Legion Prof log files
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
@@ -10315,7 +10352,8 @@ namespace Legion {
       friend class UntypedDeferredBuffer;
       Realm::RegionInstance create_task_local_instance(Memory memory,
                                 Realm::InstanceLayoutGeneric *layout);
-      void destroy_task_local_instance(Realm::RegionInstance instance);
+      void destroy_task_local_instance(Realm::RegionInstance instance,
+                                Realm::Event precondition);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some

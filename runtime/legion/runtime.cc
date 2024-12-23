@@ -76,7 +76,6 @@ namespace Legion {
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
     Realm::Logger log_tracing("tracing");
-    Realm::Logger log_eager("eager");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
     };
@@ -87,6 +86,7 @@ namespace Legion {
     thread_local LegionProfInstance *implicit_profiler = NULL;
     thread_local AutoLock *local_lock_list = NULL;
     thread_local UniqueID implicit_provenance = 0;
+    thread_local LgEvent implicit_fevent = LgEvent::NO_LG_EVENT;
     thread_local unsigned inside_registration_callback=NO_REGISTRATION_CALLBACK;
     thread_local ImplicitReferenceTracker *implicit_reference_tracker = NULL;
 #ifdef DEBUG_LEGION_CALLERS
@@ -117,6 +117,13 @@ namespace Legion {
     {
       ctx->end_wait(*this, from_application);
     }
+    
+    //--------------------------------------------------------------------------
+    void LgEvent::begin_mapper_call_wait(MappingCallInfo *call) const
+    //--------------------------------------------------------------------------
+    {
+      call->begin_wait();
+    }
 
     //--------------------------------------------------------------------------
     void LgEvent::record_event_wait(LegionProfInstance *profiler,
@@ -124,6 +131,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       profiler->record_event_wait(*this, bt);
+    }
+
+    //--------------------------------------------------------------------------
+    void LgEvent::record_event_trigger(LgEvent precondition) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(exists());
+      assert(implicit_profiler != NULL);
+#endif
+      implicit_profiler->record_event_trigger(*this, precondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -472,7 +490,7 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-              InnerContext::NO_FUTURE_COORDINATE, provenance, true/*reg now*/));
+              InnerContext::NO_BLOCKING_INDEX, provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -858,8 +876,8 @@ namespace Legion {
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
         coordinate((o == NULL) ?
-            ContextCoordinate(InnerContext::NO_FUTURE_COORDINATE) :
-            ContextCoordinate(o->get_context()->get_next_future_coordinate())),
+            ContextCoordinate(InnerContext::NO_BLOCKING_INDEX) :
+            ContextCoordinate(o->get_context()->get_next_blocking_index())),
         provenance(prov), local_visible_memory(Memory::NO_MEMORY),
         metadata(NULL), metasize(0), future_size(0), upper_bound_size(SIZE_MAX),
         callback_functor(NULL), own_callback_functor(false),
@@ -1083,11 +1101,8 @@ namespace Legion {
       // Do this wait after everything is ready for pipelining of communication
       subscribed.wait();
       ApEvent inst_ready;
-      FutureInstance *instance = find_or_create_instance(memory,
-          (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
-           implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
-           inst_ready);
+      FutureInstance *instance = find_or_create_instance(memory, inst_ready,
+          silence_warnings, warning_string);
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -1176,11 +1191,8 @@ namespace Legion {
       // Do this wait after everything is ready for pipelining of communication
       subscribed.wait();
       ApEvent inst_ready;
-      FutureInstance *instance = find_or_create_instance(memory,
-          (implicit_context != NULL) ? implicit_context->owner_task : NULL,
-          (implicit_context != NULL) && (implicit_context->owner_task != NULL) ?
-           implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/,
-           inst_ready);
+      FutureInstance *instance = find_or_create_instance(memory, inst_ready,
+          silence_warnings, warning_string);
       if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
@@ -1232,165 +1244,168 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureImpl::find_or_create_application_instance(Memory target,
-                                                         UniqueID task_uid)
-    //--------------------------------------------------------------------------
-    {
-      const RtEvent ready = request_application_instance(target, NULL, task_uid,
-          runtime->address_space, true/*can fail*/);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      AutoLock f_lock(future_lock,1,false/*exclusive*/);
-      if (target.address_space() == runtime->address_space)
-        return (instances.find(target) != instances.end()) ||
-          (pending_instances.find(target) != pending_instances.end());
-      else
-        return (remote_instance_allocations.find(target) !=
-                  remote_instance_allocations.end());
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent FutureImpl::request_application_instance(Memory target,
-      SingleTask *task, UniqueID task_uid, AddressSpaceID source, 
-      bool can_fail, size_t known_upper_bound_size)
+    bool FutureImpl::request_application_instance(Memory target,
+                 SingleTask *task, RtEvent *safe_for_unbounded_pools,
+                 bool can_fail, size_t known_upper_bound_size)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(task != NULL);
       assert(target.exists());
 #endif
-      RtEvent ready_event;
-      RtUserEvent send_event;
-      bool need_subscribe = false;
+      TaskTreeCoordinates coordinates;
+      task->compute_task_tree_coordinates(coordinates);
+      const UniqueID task_uid = task->get_unique_id();
+      // Check to see if this target is local, if not we need to send it
+      // to the node where it needs to be made and wait for the response
       const AddressSpaceID target_space = target.address_space();
+      if (target_space != runtime->address_space)
       {
-        AutoLock f_lock(future_lock);
-        // Check first to see if we have such an instance
-        std::map<Memory,FutureInstanceTracker>::const_iterator
-          inst_finder = instances.find(target);
-        if (inst_finder != instances.end())
-          return RtEvent::NO_RT_EVENT;
-        // We don't have it yet, see if we're on the right node to
-        // try to make this instance or not
-        if (target_space != runtime->address_space)
-        {
-          // See if we already have a pending request in flight
-          std::map<Memory,RtUserEvent>::iterator finder = 
-            remote_instance_allocations.find(target);
-          if (finder != remote_instance_allocations.end())
-            return finder->second;
-          send_event = Runtime::create_rt_user_event();
-          remote_instance_allocations[target] = send_event;
-        }
-        else
-        {
-          // We're on the right node to make this instance
-          // See if we've subscribed yet or not
-          if (empty.load())
-          {
-            std::map<Memory,PendingInstance>::iterator finder =
-              pending_instances.find(target);
-            if (finder == pending_instances.end())
-            {
-              // See if we have a size yet that we can use to try
-              // to make the allocation, if not we'll need to wait
-              if (future_size_set || (known_upper_bound_size < SIZE_MAX))
-              {
-                // Try to make the instance now
-                const size_t pending_size =
-                  future_size_set ? future_size : known_upper_bound_size;
-                if (pending_size > 0)
-                {
-                  MemoryManager *manager = runtime->find_memory_manager(target);
-                  FutureInstance *instance = manager->create_future_instance(
-                      can_fail ? NULL : task, task_uid, 
-                       pending_size, false/*eager*/);
-                  if (instance == NULL)
-                  {
-                    if (source != runtime->address_space)
-                    {
-                      RtUserEvent notified = Runtime::create_rt_user_event();
-                      Serializer rez;
-                      {
-                        RezCheck z(rez);
-                        rez.serialize(did);
-                        rez.serialize(target);
-                        rez.serialize(notified);
-                      }
-                      runtime->send_future_create_instance_response(source,rez);
-                      ready_event = notified;
-                    }
-                  }
-                  else
-                    pending_instances[target] = PendingInstance(instance);
-                }
-              }
-              else
-              {
-                // Defer making this, the subscription we'll send
-                // will guarantee that we see the size asap
-                const RtUserEvent mapped = Runtime::create_rt_user_event();
-                pending_instances.emplace(std::make_pair(target,
-                      PendingInstance(task, task_uid, mapped, false/*eager*/)));
-                ready_event = mapped;
-                if ((source != runtime->address_space) && can_fail)
-                  pending_instances[target].can_fail_remote_requests.insert(
-                                                                    source);
-              }
-            }
-            else
-            {
-              if ((source != runtime->address_space) && can_fail)
-                finder->second.can_fail_remote_requests.insert(source);
-              ready_event = finder->second.alloc_ready;
-            }
-            need_subscribe = !subscription_event.exists();
-          }
-          else
-          {
-            ApEvent inst_ready;
-            FutureInstance *instance =
-              find_or_create_instance(target, can_fail ? NULL : task, 
-                  task_uid, false/*eager*/, inst_ready, false/*need lock*/);
-            if (can_fail && (instance == NULL))
-            {
-              const RtUserEvent notified = Runtime::create_rt_user_event();
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                rez.serialize(target);
-                rez.serialize(notified);
-              }
-              runtime->send_future_create_instance_response(source, rez);
-              return notified;
-            }
-            return RtEvent::NO_RT_EVENT;
-          }
-        }
-      }
-      if (send_event.exists())
-      {
-        // Send the request to the node that owns the memory
+        // Send the request off to the target node
+        bool result = true;
+        const RtUserEvent wait_on = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           pack_future(rez, target_space);
           rez.serialize(target);
+          rez.serialize(known_upper_bound_size);
           rez.serialize(task_uid);
-          rez.serialize(send_event);
-          rez.serialize(source);
-          rez.serialize<bool>(can_fail);
+          coordinates.serialize(rez);
+          rez.serialize(safe_for_unbounded_pools);
+          rez.serialize(wait_on);
+          rez.serialize(&result);
         }
         runtime->send_future_create_instance_request(target_space, rez);
-        return send_event;
+        wait_on.wait();
+        if (result)
+          return true;
       }
-      else if (need_subscribe)
-        subscribe();
-      return ready_event;
+      else if (find_or_create_application_instance(target, 
+            known_upper_bound_size, task_uid, coordinates,
+            safe_for_unbounded_pools))
+        return true;
+      if (!can_fail && ((safe_for_unbounded_pools == NULL) ||
+            !safe_for_unbounded_pools->exists()))
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Failed to allocate future for task %s (UID %lld) "
+              "in parent task %s (UID %lld) because %s memory " IDFMT 
+              " is full.", task->get_task_name(), task->get_unique_id(),
+              task->get_context()->get_task_name(),
+              task->get_context()->get_unique_id(),
+              mem_names[target.kind()], target.id)
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::request_runtime_instance(Operation *op, bool eager)
+    bool FutureImpl::find_or_create_application_instance(Memory target,
+         size_t known_upper_bound_size, UniqueID task_uid,
+         const TaskTreeCoordinates &coordinates,
+         RtEvent *safe_for_unbounded_pools)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target.address_space() == runtime->address_space);
+#endif
+      // Check to see if we already have an instance that will be ready
+      bool need_subscribe = false;
+      {
+        AutoLock f_lock(future_lock);
+        if (instances.find(target) != instances.end())
+          return true;
+        if (pending_instances.find(target) != pending_instances.end())
+          return true;
+        need_subscribe = !subscription_event.exists();
+        // Check to see if we know the size of the future yet
+        if (known_upper_bound_size == SIZE_MAX)
+        {
+          if (future_size_set)
+            known_upper_bound_size = future_size;
+          else if (upper_bound_size < SIZE_MAX)
+            known_upper_bound_size = upper_bound_size;
+          else
+          {
+            // We don't have any bound on the size of this future so we
+            // need to wait for it so we can try to make the instance
+            if (!future_size_ready.exists())
+              future_size_ready = Runtime::create_rt_user_event();
+            const RtEvent wait_on = future_size_ready;
+            f_lock.release();
+            if (need_subscribe)
+            {
+              subscribe();
+              need_subscribe = false;
+            }
+            wait_on.wait();
+            f_lock.reacquire();
+#ifdef DEBUG_LEGION
+            assert(future_size_set);
+#endif
+            // Check to see if we lost the race
+            if (instances.find(target) != instances.end())
+              return true;
+            if (pending_instances.find(target) != pending_instances.end())
+              return true;
+            known_upper_bound_size = future_size;
+          }
+        }
+      }
+      if (known_upper_bound_size == 0)
+        return true;
+      if (need_subscribe)
+        subscribe();
+#ifdef DEBUG_LEGION
+      assert(known_upper_bound_size < SIZE_MAX);
+#endif
+      // Create the future instance of the given size
+      MemoryManager *manager = runtime->find_memory_manager(target);
+      FutureInstance *instance = manager->create_future_instance(task_uid,
+          coordinates, known_upper_bound_size, safe_for_unbounded_pools);
+      if (instance == NULL)
+        return false;
+      // Retake the lock and register the instance in the right place
+      // to be updated once the future is set
+      AutoLock f_lock(future_lock);
+      if (instances.find(target) != instances.end())
+      {
+        // Somebody else already made the instance
+        if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+          delete instance;
+        return true;
+      }
+      std::map<Memory,PendingInstance>::iterator finder =
+        pending_instances.find(target);
+      if (finder != pending_instances.end())
+      {
+        // See if we tightened the size of the instance or not
+        if (instance->size < finder->second.instance->size)
+        {
+          if (!finder->second.instance->defer_deletion(ApEvent::NO_AP_EVENT))
+            delete finder->second.instance;
+          finder->second.instance = instance;
+        }
+        else if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+          delete instance;
+        return true;
+      }
+      // See if the future is set yet or not
+      if (empty.load())
+        pending_instances.emplace(std::make_pair(target, 
+              PendingInstance(instance, task_uid)));
+      else
+        record_instance(instance, task_uid);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::request_runtime_instance(Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1398,66 +1413,124 @@ namespace Legion {
 #endif
       // Check to see if we have an internal buffer to use already
       // If not record that we need one and do the subscription
-      RtEvent ready_event;
       bool need_subscribe = false;
+      size_t known_upper_bound_size = SIZE_MAX;
       {
         AutoLock f_lock(future_lock);
-        if (!empty.load())
+        if (empty.load())
         {
-          if (local_visible_memory.exists())
-            return RtEvent::NO_RT_EVENT;
-          // We don't have one yet, but we can make one since we've got
-          // the canonical instance at this point
-          ApEvent inst_ready;
-          find_or_create_instance(runtime->runtime_system_memory, op,
-              op->get_unique_op_id(), eager, inst_ready, false/*need lock*/);
-          return RtEvent::NO_RT_EVENT;
-        }
-        for (std::map<Memory,PendingInstance>::iterator it =
-              pending_instances.begin(); it != pending_instances.end(); it++)
-        {
-          if (it->second.instance == NULL)
-          {
+          for (std::map<Memory,PendingInstance>::const_iterator it =
+                pending_instances.begin(); it != pending_instances.end(); it++)
             if (FutureInstance::check_meta_visible(it->first))
-            {
-#ifdef DEBUG_LEGION
-              assert(it->second.alloc_ready.exists());
-#endif
-              // Keep it sticky to eager so that if any requests are eager
-              // then we must do an eager allocation
-              if (eager)
-                it->second.eager = true;
-              return it->second.alloc_ready;
-            }
-          }
-          else if (it->second.instance->is_meta_visible)
-            return RtEvent::NO_RT_EVENT;
+              return;
         }
-        // No pending instances that are meta visible yet
+        else if (local_visible_memory.exists())
+          return;
+        need_subscribe = !subscription_event.exists();
+        // Don't have a local instance yet so we need to make one
+        // See if we know the upper bound size of the future
         if (future_size_set)
-        {
-          if (future_size > 0)
-          {
-            MemoryManager *manager = 
-              runtime->find_memory_manager(runtime->runtime_system_memory); 
-            FutureInstance *instance = manager->create_future_instance(op,
-                op->get_unique_op_id(), future_size, eager);
-            pending_instances.emplace(std::make_pair(
-                  runtime->runtime_system_memory, PendingInstance(instance)));
-          }
-        }
+          known_upper_bound_size = future_size;
+        else if (upper_bound_size < SIZE_MAX)
+          known_upper_bound_size = upper_bound_size;
         else
         {
-          const RtUserEvent mapped = Runtime::create_rt_user_event();
-          pending_instances[runtime->runtime_system_memory] = PendingInstance(
-              op, op->get_unique_op_id(), mapped, eager);
-          ready_event = mapped;
+          // We don't have any bound on the size of this future so we
+          // need to wait for it so we can try to make the instance
+          if (!future_size_ready.exists())
+            future_size_ready = Runtime::create_rt_user_event();
+          const RtEvent wait_on = future_size_ready;
+          f_lock.release();
+          if (need_subscribe)
+          {
+            subscribe();
+            need_subscribe = false;
+          }
+          wait_on.wait();
+          f_lock.reacquire();
+#ifdef DEBUG_LEGION
+          assert(future_size_set);
+#endif
+          // Check to see if we lost the race
+          if (empty.load())
+          {
+            for (std::map<Memory,PendingInstance>::const_iterator it =
+                  pending_instances.begin(); it != 
+                  pending_instances.end(); it++)
+              if (FutureInstance::check_meta_visible(it->first))
+                return;
+          }
+          else if (local_visible_memory.exists())
+            return;
+          known_upper_bound_size = future_size;
         }
-        need_subscribe = !subscription_event.exists();
       }
       if (need_subscribe)
         subscribe();
-      return ready_event;
+#ifdef DEBUG_LEGION
+      assert(known_upper_bound_size < SIZE_MAX);
+#endif
+      // Create the future instance of the given size
+      TaskTreeCoordinates coordinates;
+      op->compute_task_tree_coordinates(coordinates);
+      MemoryManager *manager = 
+        runtime->find_memory_manager(runtime->runtime_system_memory);
+      // Safe to block here indefinitely waiting for unbounded pools
+      FutureInstance *instance = manager->create_future_instance(
+          op->get_unique_op_id(), coordinates, known_upper_bound_size,
+          NULL/*safe_for_unbounded_pools*/);
+      if (instance == NULL)
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+          "Failed to allocate future for %s (UID %lld) in parent task %s "
+          "(UID %lld) because %s memory " IDFMT " is full.",
+          op->get_logging_name(), op->get_unique_op_id(),
+          op->get_context()->get_task_name(),
+          op->get_context()->get_unique_id(), manager->get_name(), 
+          runtime->runtime_system_memory.id)
+      // Retake the lock and see if we lost the race making the instance
+      AutoLock f_lock(future_lock);
+      if (empty.load())
+      {
+        for (std::map<Memory,PendingInstance>::const_iterator it =
+              pending_instances.begin(); it != pending_instances.end(); it++)
+        {
+          if (!FutureInstance::check_meta_visible(it->first))
+            continue;
+          // Somebody else already made the instance
+          if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+            delete instance;
+          return;
+        }
+      }
+      else if (local_visible_memory.exists())
+      {
+        // Somebody else already made the instance
+        if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+          delete instance;
+        return;
+      }
+      for (std::map<Memory,PendingInstance>::iterator it =
+            pending_instances.begin(); it != pending_instances.end(); it++)
+      {
+        if (!FutureInstance::check_meta_visible(it->first))
+          continue;
+        // See if we tightened the size of the instance or not
+        if (instance->size < it->second.instance->size)
+        {
+          if (!it->second.instance->defer_deletion(ApEvent::NO_AP_EVENT))
+            delete it->second.instance;
+          it->second.instance = instance;
+        }
+        else if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+          delete instance;
+        return;
+      }
+      // See if the future is set yet or not
+      if (empty.load())
+        pending_instances.emplace(std::make_pair(runtime->runtime_system_memory,
+              PendingInstance(instance, op->get_unique_op_id())));
+      else
+        record_instance(instance, op->get_unique_op_id());
     }
 
     //--------------------------------------------------------------------------
@@ -1801,7 +1874,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(FutureImpl *previous, Operation *op)
+    void FutureImpl::set_result(Operation *op, FutureImpl *previous,
+                                RtEvent *safe_for_unbounded_pools)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent subscribed = previous->subscribe();
+      if (subscribed.exists() && !subscribed.has_triggered())
+        subscribed.wait();
+      const size_t size = previous->get_untyped_size();
+      ApEvent complete = previous->get_complete_event();
+      ApEvent ready;
+      FutureInstance *instance = NULL;
+      if (size > 0)
+      {
+        instance = create_instance(op, runtime->runtime_system_memory,
+            size, safe_for_unbounded_pools);
+        ready = previous->copy_to(instance, op, ApEvent::NO_AP_EVENT);
+      }
+      AutoLock f_lock(future_lock);
+      if (!empty.load() || (callback_functor != NULL))
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_FUTURE_SET,
+            "Duplicate future set! This can be either a runtime bug or a "
+            "user error. If you have a must epoch launch in this program "
+            "please check that all of the point tasks that it creates have "
+            "unique index points. If your program has no must epoch launches "
+            "then this is likely a runtime bug.")
+#ifdef DEBUG_LEGION
+      assert(instances.empty());
+      assert(metadata == NULL);
+#endif
+      future_size = size;
+      if (instance != NULL)
+      {
+        instances.emplace(std::make_pair(instance->memory, 
+              FutureInstanceTracker(instance, ready)));
+        local_visible_memory = instance->memory;
+      }
+      const void *meta = previous->get_metadata(&metasize);
+      if (metasize > 0)
+        save_metadata(meta, metasize);
+      finish_set_future(complete);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureImpl::set_result(TaskContext *ctx, FutureImpl *previous)
     //--------------------------------------------------------------------------
     {
       const RtEvent subscribed = previous->subscribe();
@@ -1823,11 +1939,10 @@ namespace Legion {
 #endif
       if (size > 0)
       {
-        MemoryManager *manager = 
-          runtime->find_memory_manager(runtime->runtime_system_memory); 
-        FutureInstance *instance = manager->create_future_instance(op,
-            op->get_unique_op_id(), size, false/*eager*/);
-        ApEvent ready = previous->copy_to(instance, op, ApEvent::NO_AP_EVENT);
+        FutureInstance *instance = ctx->create_task_local_future(
+            runtime->runtime_system_memory, size);
+        ApEvent ready = previous->copy_to(instance, ctx->owner_task, 
+                                          ApEvent::NO_AP_EVENT);
         instances.emplace(std::make_pair(instance->memory,
               FutureInstanceTracker(instance, ready)));
         local_visible_memory = instance->memory;
@@ -1887,50 +2002,25 @@ namespace Legion {
           runtime->send_future_result_size(*it, rez);
         }
       }
-      // Check to see if there are any pending instances to make now
-      if (future_size > 0)
+      // If the future size is zero then clean out any pending instances
+      // that were made with the upper bound size
+      if (future_size == 0)
       {
         for (std::map<Memory,PendingInstance>::iterator it = 
               pending_instances.begin(); it != pending_instances.end(); it++)
         {
-          if (it->second.instance == NULL)
-          {
-#ifdef DEBUG_LEGION
-            assert(it->second.alloc_ready.exists());
-#endif
-            MemoryManager *manager = runtime->find_memory_manager(it->first);
-            it->second.instance = manager->create_future_instance(
-                it->second.op, it->second.uid, future_size, it->second.eager);
-            Runtime::trigger_event(it->second.alloc_ready);
-          }
-#ifdef DEBUG_LEGION
-          else
-          {
-            // This can happend when replaying a trace which already
-            // knows exactly how big the future is going to be
-            assert(it->second.instance->size <= future_size);
-            assert(it->second.inst_ready.exists());
-          }
-#endif
-        }
-      }
-      else
-      {
-        for (std::map<Memory,PendingInstance>::iterator it = 
-              pending_instances.begin(); it != pending_instances.end(); it++)
-        {
-          // If we made an instance because we were replaying a trace
-          // with a known upper bound then we can delete it now
-          if (it->second.instance != NULL)
+          if (!it->second.instance->defer_deletion(ApEvent::NO_AP_EVENT))
             delete it->second.instance;
-#ifdef DEBUG_LEGION
-          assert(it->second.alloc_ready.exists());
-#endif
           if (it->second.inst_ready.exists())
             Runtime::trigger_event(NULL, it->second.inst_ready);
-          Runtime::trigger_event(it->second.alloc_ready); 
         }
         pending_instances.clear();
+      }
+      // If we have a future size ready then trigger it now
+      if (future_size_ready.exists())
+      {
+        Runtime::trigger_event(future_size_ready);
+        future_size_ready = RtUserEvent::NO_RT_USER_EVENT;
       }
     }
 
@@ -1946,6 +2036,11 @@ namespace Legion {
       future_size =
         instances.empty() ? 0 : instances.begin()->second.instance->size;
       future_size_set = true;
+      if (future_size_ready.exists())
+      {
+        Runtime::trigger_event(future_size_ready);
+        future_size_ready = RtUserEvent::NO_RT_USER_EVENT;
+      }
       if (future_complete.exists())
       {
         // If there's already a complete here then we know that it is a 
@@ -1977,132 +2072,152 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(future_size_set);
       assert(!pending_instances.empty());
 #endif
-      for (std::map<Memory,PendingInstance>::const_iterator it =
+      for (std::map<Memory,PendingInstance>::iterator it =
             pending_instances.begin(); it != pending_instances.end(); it++)
       {
-        FutureInstance *instance = NULL;
-        if (it->second.instance != NULL)
+        // Check to see if we already have an instance for this memory
+        // or if the future doesn't have any size to begin with
+        std::map<Memory,FutureInstanceTracker>::iterator finder =
+          instances.find(it->first);
+        if ((finder != instances.end()) || (future_size == 0))
         {
-#ifdef DEBUG_LEGION
-          assert(!it->second.alloc_ready.exists() ||
-              it->second.alloc_ready.has_triggered());
-#endif
-          // If we already had an allocation then we can try to use
-          // it although we might already find we have an instance
-          // for this future in that particular memory
-          ApEvent inst_ready;
-          instance = find_or_create_instance(it->first, it->second.op, 
-              it->second.uid, it->second.eager, inst_ready,
-              false/*need lock*/, it->second.instance);
-          if (instance != it->second.instance)
-            delete it->second.instance;
+          // If we do then we just trigger any events that we need to
           if (it->second.inst_ready.exists())
-            Runtime::trigger_event(NULL, it->second.inst_ready, inst_ready);
+            Runtime::trigger_event(NULL, it->second.inst_ready,
+                finder->second.ready_event);
+          // Delete the instance we had made since it can't have escaped
+          // yet and therefore we can replace it with the new instance
+          if (!it->second.instance->defer_deletion(ApEvent::NO_AP_EVENT))
+            delete it->second.instance;
+          continue;
         }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(it->second.alloc_ready.exists());
-#endif
-          ApEvent inst_ready;
-          instance = find_or_create_instance(it->first,
-                     it->second.op, it->second.uid, it->second.eager,
-                     inst_ready, false/*need lock*/);
-          if (instance == NULL)
-          {
-            std::vector<RtEvent> preconditions;
-            preconditions.reserve(it->second.can_fail_remote_requests.size());
-            for (std::set<AddressSpaceID>::const_iterator fit =
-                  it->second.can_fail_remote_requests.begin(); fit !=
-                  it->second.can_fail_remote_requests.end(); fit++)
-            {
-              const RtUserEvent notified = Runtime::create_rt_user_event();
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-                rez.serialize(it->first);
-                rez.serialize(notified);
-              }
-              runtime->send_future_create_instance_response(*fit, rez);
-              preconditions.push_back(notified);
-            }
-            if (!preconditions.empty())
-              Runtime::trigger_event(it->second.alloc_ready,
-                  Runtime::merge_events(preconditions));
-            else
-              Runtime::trigger_event(it->second.alloc_ready);
-            if (it->second.inst_ready.exists())
-              Runtime::poison_event(it->second.inst_ready);
-          }
-          else
-          {
-            Runtime::trigger_event(it->second.alloc_ready);
-            if (it->second.inst_ready.exists())
-              Runtime::trigger_event(NULL, it->second.inst_ready, inst_ready);
-          }
-        }
+        ApEvent inst_ready =
+          record_instance(it->second.instance, it->second.creator_uid);
+        if (it->second.inst_ready.exists())
+          Runtime::trigger_event(NULL, it->second.inst_ready, inst_ready);
       }
       pending_instances.clear();
     }
 
     //--------------------------------------------------------------------------
-    FutureInstance* FutureImpl::find_or_create_instance(Memory memory,
-              Operation *op, UniqueID creator_uid, bool eager,
-              ApEvent &ready_event, bool need_lock, FutureInstance *existing)
+    FutureInstance* FutureImpl::find_or_create_instance(Memory target,
+        ApEvent &inst_ready, bool silence_warnings, const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      // No need to track subscribe since that was done in the caller
+      size_t known_upper_bound_size = SIZE_MAX;
+      {
+        AutoLock f_lock(future_lock);
+#ifdef DEBUG_LEGION
+        assert(future_size_set);
+        assert((future_size == 0) == instances.empty());
+#endif
+        // This is safe for control replication because all shards will 
+        // see the same size for the future and know if they need to 
+        // sync or not
+        if (instances.empty())
+          return NULL;
+        std::map<Memory,FutureInstanceTracker>::const_iterator finder =
+          instances.find(target);
+        if (finder != instances.end())
+        {
+          inst_ready = finder->second.ready_event;
+          return finder->second.instance;
+        }
+        known_upper_bound_size = future_size;
+      }
+#ifdef DEBUG_LEGION
+      assert(0 < known_upper_bound_size);
+      assert(known_upper_bound_size < SIZE_MAX);
+#endif
+      // Make the instance and then try to record it
+      FutureInstance *instance = NULL;
+      if (implicit_context == NULL)
+      {
+        // This only happens with external requests for futures, this happens
+        // outside the Legion mapping pipeline so there's no hope of ever
+        // being able to do this in a sane way, we need to make an external
+        // instance for this using malloc
+        if (target != runtime->runtime_system_memory)
+          REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+              "Request for Legion to allocate a future instance in a "
+              "non-system memory by external code. All requests for "
+              "future instances by external code are required to ask "
+              "for the data in the system memory.")
+        instance = new FutureInstance(malloc(known_upper_bound_size),
+            known_upper_bound_size, true/*external*/, true/*own allocation*/);
+      }
+      else
+        instance = implicit_context->create_task_local_future(target,
+            known_upper_bound_size, silence_warnings, warning_string);
+      if (instance == NULL)
+        return instance;
+      // Retake the lock and see if we lost the race to register it
+      AutoLock f_lock(future_lock);
+      std::map<Memory,FutureInstanceTracker>::const_iterator finder =
+        instances.find(target);
+      if (finder != instances.end())
+      {
+        FutureInstance *result = finder->second.instance;
+        inst_ready = finder->second.ready_event;
+        f_lock.release();
+        if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+          delete instance;
+        return result;
+      }
+      else
+        inst_ready = record_instance(instance, 
+            (implicit_context == NULL) ? 0 : implicit_context->get_unique_id());
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* FutureImpl::create_instance(Operation *op, Memory memory,
+        size_t size, RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      // This better be a local memory by the time that we get here
+      assert(size > 0);
+      assert(instances.find(memory) == instances.end());
       assert(memory.address_space() == runtime->address_space);
 #endif
-      if (need_lock)
-      {
-        AutoLock f_lock(future_lock);
-        return find_or_create_instance(memory, op, creator_uid, eager,
-                            ready_event, false/*need lock*/, existing);
-      }
-#ifdef DEBUG_LEGION
-      assert((future_size == 0) == instances.empty());
-#endif
-      // Handle the case where we don't have a payload
-      if (instances.empty())
-        return NULL;
-      // See if we've already got one
-      std::map<Memory,FutureInstanceTracker>::const_iterator finder =
-        instances.find(memory);
-      if (finder != instances.end())
-      {
-        ready_event = finder->second.ready_event;
-        return finder->second.instance;
-      }
-      // Don't have it so we need to make it
-      // Unless we have a pre-existing one
-      FutureInstance *instance = existing;
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      TaskTreeCoordinates coordinates;
+      op->compute_task_tree_coordinates(coordinates);
+      FutureInstance *instance = manager->create_future_instance(
+          op->get_unique_op_id(), coordinates, size, safe_for_unbounded_pools);
       if (instance == NULL)
-      {
-        MemoryManager *manager = runtime->find_memory_manager(memory); 
-        instance = manager->create_future_instance(op, creator_uid,
-                                                  future_size, eager);
-      }
-      // Can happen if we fail to allocation and op is NULL
-      if (instance == NULL)
-      {
+        REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
+          "Failed to allocate future of %zd bytes for %s (UID %lld) "
+          "in parent task %s (UID %lld) because %s memory " IDFMT 
+          " is full.", size, op->get_logging_name(), op->get_unique_op_id(),
+          op->get_context()->get_task_name(),
+          op->get_context()->get_unique_id(),
+          manager->get_name(), memory.id)
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureImpl::record_instance(FutureInstance *instance, UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-        assert(op == NULL);
+      assert(future_size > 0);
+      assert(!instances.empty());
+      assert(instances.find(instance->memory) == instances.end());
+      assert(instance->memory.address_space() == runtime->address_space);
 #endif
-        return instance;
-      }
       // Initialize the instance from one of the existing instances
-      Memory source = find_best_source(memory);
+      const Memory source = find_best_source(instance->memory);
       FutureInstanceTracker &tracker = instances[source];
 #ifdef DEBUG_LEGION
       assert(tracker.instance != NULL);
 #endif
-      ready_event =
-        instance->copy_from(tracker.instance, op, tracker.ready_event); 
+      const ApEvent ready_event =
+        instance->copy_from(tracker.instance, uid, tracker.ready_event); 
       if (tracker.remote_postcondition.exists())
       {
         // This is a remote instance that we don't own so once we're
@@ -2113,11 +2228,11 @@ namespace Legion {
       }
       else if (ready_event.exists())
         tracker.read_events.push_back(ready_event);
-      instances.emplace(std::make_pair(memory, 
+      instances.emplace(std::make_pair(instance->memory, 
             FutureInstanceTracker(instance, ready_event)));
       if (!local_visible_memory.exists() && instance->is_meta_visible)
-        local_visible_memory = memory;
-      return instance;
+        local_visible_memory = instance->memory;
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2159,19 +2274,6 @@ namespace Legion {
       if (local_visible_memory.exists())
         return local_visible_memory;
       return instances.begin()->first;
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::notify_allocation_failure(Memory target)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock f_lock(future_lock);
-      std::map<Memory,RtUserEvent>::iterator finder =
-        remote_instance_allocations.find(target);
-#ifdef DEBUG_LEGION
-      assert(finder != remote_instance_allocations.end());
-#endif
-      remote_instance_allocations.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -2391,8 +2493,10 @@ namespace Legion {
                 pending_instances.begin();
               // Issue the copy to the pending instance
               ApEvent ready = pending->second.instance->copy_from(instance,
-                    pending->second.op, precondition);
+                    pending->second.creator_uid, precondition);
               Runtime::trigger_event(NULL, postcondition, ready);
+              if (pending->second.inst_ready.exists())
+                Runtime::trigger_event(NULL, pending->second.inst_ready, ready);
               instances.emplace(std::make_pair(pending->second.instance->memory,
                     FutureInstanceTracker(pending->second.instance, ready)));
 #ifdef DEBUG_LEGION
@@ -2425,6 +2529,12 @@ namespace Legion {
       if (!pending_instances.empty())
         create_pending_instances();
       empty.store(false);
+      // If we have a future size ready then trigger it now
+      if (future_size_ready.exists())
+      {
+        Runtime::trigger_event(future_size_ready);
+        future_size_ready = RtUserEvent::NO_RT_USER_EVENT;
+      }
       if (subscription_event.exists())
       {
         Runtime::trigger_event(subscription_event);
@@ -2543,7 +2653,7 @@ namespace Legion {
       if (ctx != context)
         return false;
       // No coordinates if we are an application-generated future
-      if (coordinate.context_index == InnerContext::NO_FUTURE_COORDINATE)
+      if (coordinate.context_index == InnerContext::NO_BLOCKING_INDEX)
         return false;
       coord = coordinate;
       return true;
@@ -2667,13 +2777,14 @@ namespace Legion {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_FUTURE_USE,
                 "Illegal use of future produced in context %s (UID %lld) "
                 "but consumed in context %s (UID %lld) by operation %s "
-                "(UID %lld) launched from %s. Futures are only permitted "
+                "(UID %lld) launched from %.*s. Futures are only permitted "
                 "to be used in the task sub-tree rooted by the context "
                 "that produced the future.", context->get_task_name(),
                 context->get_unique_id(), consumer_context->get_task_name(), 
                 consumer_context->get_unique_id(),
                 consumer_op->get_logging_name(),
-                consumer_op->get_unique_op_id(), provenance->human_str())
+                consumer_op->get_unique_op_id(), 
+                int(provenance->human.length()), provenance->human.data())
           }
         }
       }
@@ -2731,8 +2842,14 @@ namespace Legion {
           }
           if (!subscribers_without_instances.empty())
           {
-            find_or_create_instance(runtime->runtime_system_memory, NULL/*op*/,
-                producer_uid, true/*eager*/, inst_ready, false/*need lock*/);
+            // This looks scary because we're not actually in the mapping
+            // stage of the pipeline for some operation, but it's a "small"
+            // future and it's going to the host memory so it will hit the
+            // path that just calls malloc and not perform an allocation
+            FutureInstance *instance = create_instance(context->owner_task,
+                runtime->runtime_system_memory, future_size,
+                NULL/*safe_for_unbounded_pools*/);
+            inst_ready = record_instance(instance, context->get_unique_id());
 #ifdef DEBUG_LEGION
             assert(local_visible_memory.exists());
 #endif
@@ -2838,9 +2955,15 @@ namespace Legion {
             // If we don't see if we need to make a local visible
             if (!local_visible_memory.exists())
             {
-              find_or_create_instance(runtime->runtime_system_memory,
-                  NULL/*op*/, producer_uid, true/*eager*/, 
-                  local_visible_ready, false/*need lock*/);
+              // This looks scary because we're not actually in the mapping
+              // stage of the pipeline for some operation, but it's a "small"
+              // future and it's going to the host memory so it will hit the
+              // path that just calls malloc and not perform an allocation
+              FutureInstance *instance = create_instance(
+                  context->owner_task, runtime->runtime_system_memory,
+                  future_size, NULL/*safe_for_unbounded_pools*/);
+              local_visible_ready = 
+                record_instance(instance, context->get_unique_id());
 #ifdef DEBUG_LEGION
               assert(local_visible_memory.exists());
 #endif
@@ -3078,24 +3201,45 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void FutureImpl::handle_future_create_instance_request(
-                                          Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       Future f = FutureImpl::unpack_future(runtime, derez);
       Memory target;
       derez.deserialize(target);
+      size_t known_upper_bound_size;
+      derez.deserialize(known_upper_bound_size);
       UniqueID creator_uid;
       derez.deserialize(creator_uid);
-      RtUserEvent mapped_event;
-      derez.deserialize(mapped_event);
-      AddressSpaceID source;
-      derez.deserialize(source);
-      bool can_fail;
-      derez.deserialize<bool>(can_fail);
-      const RtEvent mapped = f.impl->request_application_instance(target, 
-          NULL/*task*/, creator_uid, source, can_fail);
-      Runtime::trigger_event(mapped_event, mapped);
+      TaskTreeCoordinates coordinates;
+      coordinates.deserialize(derez);
+      RtEvent *remote_safe_for_unbounded_pools;
+      derez.deserialize(remote_safe_for_unbounded_pools);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      bool *result;
+      derez.deserialize(result);
+
+      RtEvent safe_for_unbounded_pools;
+      if (!f.impl->find_or_create_application_instance(target,
+            known_upper_bound_size, creator_uid, coordinates,
+            (remote_safe_for_unbounded_pools == NULL) ? NULL :
+            &safe_for_unbounded_pools))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(result);
+          rez.serialize(remote_safe_for_unbounded_pools);
+          if (remote_safe_for_unbounded_pools != NULL)
+            rez.serialize(safe_for_unbounded_pools);
+          rez.serialize(done_event);
+        }
+        runtime->send_future_create_instance_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3104,22 +3248,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
-      assert(future != NULL);
-#else
-      FutureImpl *future = static_cast<FutureImpl*>(dc);
-#endif
-      Memory target;
-      derez.deserialize(target);
-      future->notify_allocation_failure(target); 
-      RtUserEvent notified;
-      derez.deserialize(notified);
-      Runtime::trigger_event(notified);
-    } 
+      bool *result;
+      derez.deserialize(result);
+      *result = false;
+      RtEvent *safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      if (safe_for_unbounded_pools != NULL)
+        derez.deserialize(*safe_for_unbounded_pools);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
+    }
 
     //--------------------------------------------------------------------------
     void FutureImpl::contribute_to_collective(const DynamicCollective &dc, 
@@ -3142,7 +3281,7 @@ namespace Legion {
         size_t result_size = 0;
         const void *result = get_buffer(runtime->runtime_system_memory,
             &result_size, false/*check size*/, true/*silence warnings*/);
-        Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
+        runtime->phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT,
                                       result, result_size);
       }
     }
@@ -3166,7 +3305,7 @@ namespace Legion {
       
     //--------------------------------------------------------------------------
     FutureInstance::FutureInstance(const void *d, size_t s,
-                              bool eager, bool external, bool own,
+                              bool external, bool own,
                               LgEvent unique, PhysicalInstance inst,
                               Processor p, RtEvent use)
       : size(s), memory(inst.exists() ? inst.get_location() : 
@@ -3175,7 +3314,7 @@ namespace Legion {
             new Realm::ExternalMemoryResource(reinterpret_cast<uintptr_t>(d),
               s, false/*read only*/)), freefunc(inst.exists() || !p.exists() ? 
               NULL : free_host_memory), freeproc(p),
-        eager_allocation(eager), external_allocation(external),
+        external_allocation(external),
         is_meta_visible(check_meta_visible(memory)),
         own_allocation(own), data(d), instance(inst), use_event(use),
         unique_event(unique), own_instance(own && inst.exists())
@@ -3203,8 +3342,7 @@ namespace Legion {
       : size(s), memory(inst.exists() ?
           inst.get_location() : allocation->suggested_memory()),
         resource(allocation), freefunc(func), freeproc(proc),
-        eager_allocation(false), external_allocation(true),
-        is_meta_visible(check_meta_visible(memory)), 
+        external_allocation(true), is_meta_visible(check_meta_visible(memory)), 
         own_allocation(own), data(d), instance(inst), use_event(use),
         unique_event(unique), own_instance(own && inst.exists())
     //--------------------------------------------------------------------------
@@ -3288,8 +3426,7 @@ namespace Legion {
           // Free the future instance through the memory manager
           MemoryManager *manager =
             implicit_runtime->find_memory_manager(memory);
-          manager->free_future_instance(instance, size, 
-                RtEvent::NO_RT_EVENT, eager_allocation);
+          manager->free_future_instance(instance, size, RtEvent::NO_RT_EVENT);
         }
       }
       else if (own_instance)
@@ -3338,7 +3475,8 @@ namespace Legion {
 #else
           closure->record_instance_name(dst_inst, unique_event);
 #endif
-          implicit_runtime->profiler->add_fill_request(requests, closure, op);
+          implicit_runtime->profiler->add_fill_request(
+              requests, closure, op, precondition);
         }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
@@ -3361,6 +3499,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent FutureInstance::copy_from(FutureInstance *source, Operation *op,
+                                      ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      return copy_from(source, op->get_unique_op_id(), precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureInstance::copy_from(FutureInstance *source, UniqueID uid,
                                       ApEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -3406,7 +3552,8 @@ namespace Legion {
           closure->record_instance_name(src_inst, source->unique_event);
           closure->record_instance_name(dst_inst, unique_event);
 #endif
-          implicit_runtime->profiler->add_copy_request(requests, closure, op);
+          implicit_runtime->profiler->add_copy_request(
+              requests, closure, uid, precondition);
         }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
@@ -3490,7 +3637,8 @@ namespace Legion {
           closure->record_instance_name(src_inst, source->unique_event);
           closure->record_instance_name(dst_inst, unique_event);
 #endif
-          implicit_runtime->profiler->add_copy_request(requests, closure, op);
+          implicit_runtime->profiler->add_copy_request(
+              requests, closure, op, precondition);
         }
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
@@ -3610,8 +3758,9 @@ namespace Legion {
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-        const RtUserEvent temp_unique_event = Runtime::create_rt_user_event();        
-        Runtime::trigger_event(temp_unique_event);
+        const Realm::UserEvent temp_unique_event =
+          Realm::UserEvent::create_user_event();
+        temp_unique_event.trigger();
 #endif
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
@@ -3619,7 +3768,7 @@ namespace Legion {
         if (implicit_runtime->profiler != NULL)
           implicit_runtime->profiler->add_inst_request(requests, 
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-                      implicit_provenance, temp_unique_event);
+                      implicit_provenance, LgEvent(temp_unique_event));
 #else
                       implicit_provenance, unique_event);
 #endif
@@ -3627,8 +3776,10 @@ namespace Legion {
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
               result, alt_resource->suggested_memory(), ilg,
               *alt_resource, requests));
+        if (inst_ready.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(inst_ready, unique_event);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
-        inst_event = temp_unique_event; 
+        inst_event = LgEvent(temp_unique_event);
 #endif
         own_inst = true;
         if (resource == NULL)
@@ -3661,9 +3812,9 @@ namespace Legion {
         if (implicit_runtime->profiler != NULL)
         {
           // Need to try to make a unique event
-          RtUserEvent unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(unique);
-          unique_event = unique;
+          Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
           implicit_runtime->profiler->add_inst_request(requests,
                       implicit_provenance, unique_event);
         }
@@ -3672,6 +3823,8 @@ namespace Legion {
         use_event = RtEvent(PhysicalInstance::create_external_instance(instance,
               resource->suggested_memory(), ilg, *resource, requests));
         own_instance = true;
+        if (use_event.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(use_event, unique_event);
       }
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
       inst_event = unique_event;
@@ -3713,6 +3866,13 @@ namespace Legion {
         }
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool FutureInstance::is_immediate(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !use_event.exists() || use_event.has_triggered();
     }
 
     //--------------------------------------------------------------------------
@@ -3775,13 +3935,17 @@ namespace Legion {
           rez.serialize(freeproc);
         }
         else
-        {
           rez.serialize<bool>(false); // external allocation
-          rez.serialize<bool>(eager_allocation);
-        }
         // Not packed by value
         return false;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureInstance::pack_null(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -3799,7 +3963,7 @@ namespace Legion {
       {
         void *data = malloc(size);
         derez.deserialize(data, size);
-        return new FutureInstance(data, size, false/*eager*/, true/*external*/);
+        return new FutureInstance(data, size, true/*external*/);
       }
       void *data;
       derez.deserialize(data);
@@ -3824,13 +3988,9 @@ namespace Legion {
            NULL/*resource*/, freefunc, proc, unique_event, instance, use_event);
       }
       else
-      {
-        bool eager_alloc;
-        derez.deserialize<bool>(eager_alloc);
-        return new FutureInstance(data, size, eager_alloc,
+        return new FutureInstance(data, size,
                     false/*external*/, own_allocation, unique_event,
                     instance, Processor::NO_PROC, use_event);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -3871,7 +4031,7 @@ namespace Legion {
         value = buffer;
         own = true;
       }
-      return new FutureInstance(value, size, false/*eager*/, true/*external*/);
+      return new FutureInstance(value, size, true/*external*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3965,7 +4125,7 @@ namespace Legion {
           register_now, mapping),
         context(ctx), op(o), op_gen(o->get_generation()),
         op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
-        future_coordinate(o->get_context()->get_next_future_coordinate()),
+        blocking_index(o->get_context()->get_next_blocking_index()),
         provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
@@ -3983,14 +4143,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
-                                 DistributedID did, uint64_t coordinate,
+                                 DistributedID did, uint64_t blocking,
                                  Provenance *prov,
                                  bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
         context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
-        future_coordinate(coordinate), provenance(prov), future_map_domain(d)
+        blocking_index(blocking), provenance(prov), future_map_domain(d)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4006,14 +4166,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t coord,
+    FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t index,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
-        future_coordinate(coord), provenance(prov), future_map_domain(domain)
+        blocking_index(index), provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4125,7 +4285,7 @@ namespace Legion {
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(), op, op_gen, 
-              ContextCoordinate(future_coordinate, point),
+              ContextCoordinate(blocking_index, point),
               op_uid, op_depth, provenance);
         result->add_nested_gc_ref(did);
         result->add_nested_resource_ref(did);
@@ -4179,7 +4339,7 @@ namespace Legion {
             context->get_task_name(),
             context->get_unique_id(),
             (warning_string == NULL) ? "" : warning_string)
-      context->record_blocking_call(future_coordinate);
+      context->record_blocking_call(blocking_index);
       if (op != NULL)
         context->wait_on_future_map(this, op->get_commit_event(op_gen));
     }
@@ -4211,7 +4371,7 @@ namespace Legion {
       {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
-        rez.serialize(future_coordinate);
+        rez.serialize(blocking_index);
         if (provenance != NULL)
           provenance->serialize(rez);
         else
@@ -4419,7 +4579,7 @@ namespace Legion {
     void FutureMapImpl::process_future_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ContextCoordinate coordinate(future_coordinate);
+      ContextCoordinate coordinate(blocking_index);
       derez.deserialize(coordinate.index_point);
       DistributedID future_did;
       derez.deserialize(future_did);
@@ -4466,7 +4626,7 @@ namespace Legion {
     TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
                               IndexSpaceNode *domain, PointTransformFnptr fnptr,
                               Provenance *prov)
-      : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
+      : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prov),
@@ -4481,7 +4641,7 @@ namespace Legion {
     TransformFutureMapImpl::TransformFutureMapImpl(FutureMapImpl *prev,
           IndexSpaceNode *domain, PointTransformFunctor *functor, bool own_func,
           Provenance *prov)
-      : FutureMapImpl(prev->context, prev->op, prev->future_coordinate,
+      : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
           prov),
@@ -4809,7 +4969,7 @@ namespace Legion {
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(), op, op_gen, 
-              ContextCoordinate(future_coordinate, point),
+              ContextCoordinate(blocking_index, point),
               op_uid, op_depth, provenance);
         result->add_nested_gc_ref(did);
         result->add_nested_resource_ref(did);
@@ -4954,12 +5114,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
       RtEvent mapped, ApEvent ready, ApUserEvent term, bool m, TaskContext *ctx, 
-      MapperID mid, MappingTagID t, bool leaf, bool virt, bool col, Runtime *rt)
+      MapperID mid, MappingTagID t, bool leaf, bool virt, bool col,
+      uint64_t blocking, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), collective(col),
         replaying((ctx != NULL) ? ctx->owner_task->is_replaying() : false),
         req(r),mapped_event(mapped),ready_event(ready),termination_event(term),
-        mapped(m), valid(false), made_accessor(false)
+        blocking_index(blocking), mapped(m), valid(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4990,7 +5151,7 @@ namespace Legion {
       assert(implicit_context != NULL);
       assert(implicit_context == context);
 #endif
-      context->record_blocking_call(InnerContext::NO_FUTURE_COORDINATE);
+      context->record_blocking_call(blocking_index);
       if (runtime->runtime_warnings && !silence_warnings &&
           (context != NULL) && !context->is_leaf_context())
       {
@@ -5122,13 +5283,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PhysicalRegionImpl::remap_region(ApEvent new_ready)
+    ApEvent PhysicalRegionImpl::remap_region(ApEvent new_ready,
+                                             uint64_t blocking)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!mapped);
       assert(!termination_event.exists());
 #endif
+      blocking_index = blocking;
       termination_event = Runtime::create_ap_user_event(NULL);
       ready_event = new_ready;
       mapped = true;
@@ -5900,12 +6063,13 @@ namespace Legion {
                                        const InstanceSet &instances,
                                        TaskContext *ctx, Runtime *rt,
                                        const bool global,
-                                       const bool valid)
+                                       const bool valid,
+                                       const bool grouped)
       : Collectable(), runtime(rt), context(ctx), req(r), 
         region(runtime->forest->get_node(req.region)), index(idx),
         created_region(
           (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
-        global_indexing(global)
+        global_indexing(global), grouped_fields(grouped)
     //--------------------------------------------------------------------------
     {
       region->add_base_gc_ref(OUTPUT_REGION_REF);
@@ -6074,31 +6238,78 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(const DomainPoint &new_extents,
-                                       FieldID field_id,
-                                       uintptr_t ptr,
-                                       size_t alignment)
+    void OutputRegionImpl::return_data(
+                              const DomainPoint &new_extents,
+                              FieldID field_id,
+                              PhysicalInstance instance,
+                              const LayoutConstraintSet *constraints,
+                              bool check_constraints)
     //--------------------------------------------------------------------------
     {
       if (req.privilege_fields.find(field_id) == req.privilege_fields.end())
-      {
-          REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_FIELD,
-            "Output region %u of task %s (UID: %lld) does not have privilege "
-            "on field %u.", index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id(), field_id);
-      }
-      std::map<FieldID,ReturnedInstanceInfo>::iterator finder =
-        returned_instances.find(field_id);
-      if (finder != returned_instances.end())
-      {
+        REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_FIELD,
+          "Output region %u of task %s (UID: %lld) does not have privilege "
+          "on field %u.", index, context->owner_task->get_task_name(),
+          context->owner_task->get_unique_op_id(), field_id);
+      if (returned_instances.find(field_id) != returned_instances.end())
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
           "Data has already been set to field %u of output region %u of "
           "task %s (UID: %lld). You can return data for each field of an "
           "output region only once.",
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id());
-      }
+      PhysicalManager *manager = get_manager(field_id);
+      const LayoutConstraints *manager_cons = manager->layout->constraints;
+      if (check_constraints && (constraints != NULL))
+      {
+        bool has_conflict = false;
+        if (!req.global_indexing && context->owner_task->is_index_space)
+        {
+          // Unfortunately, for local indexing, the ordering constraint
+          // prescribes the ordering of dimensions that the returned
+          // buffer does not contain. (those dimensions are added
+          // by the runtime and invisible to the point task.) So, here
+          // we filter out the dimensions that would otherwise fail
+          // the constraint check innocuously.
+          LayoutConstraintSet copied;
+          copied.alignment_constraints = manager_cons->alignment_constraints;
+          std::vector<DimensionKind> ordering;
+          int32_t ndim = NT_TemplateHelper::get_dim(req.type_tag);
+          for (std::vector<DimensionKind>::const_iterator it =
+               manager_cons->ordering_constraint.ordering.begin(); it !=
+               manager_cons->ordering_constraint.ordering.end(); ++it)
+          {
+            int32_t dim = *it;
+            if (((dim - LEGION_DIM_X) < ndim) || (dim == LEGION_DIM_F))
+              ordering.push_back(static_cast<DimensionKind>(dim));
+          }
+          copied.ordering_constraint =
+            OrderingConstraint(
+              ordering, manager_cons->ordering_constraint.contiguous);
 
+          has_conflict = constraints->conflicts(copied);
+        }
+        else
+          has_conflict = constraints->conflicts(*manager_cons);
+
+        if (has_conflict)
+          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "The returned instance for field %u of output region %u of "
+            "task %s (UID: %lld) does not satisfy the layout constraints "
+            "chosen by the mapper. This is an illegal usage right now. "
+            "In the future, the runtime will copy this returned instance "
+            "into a fresh one with the correct layout.",
+            field_id, index, context->owner_task->get_task_name(),
+            context->owner_task->get_unique_op_id());
+      }
+      else if (check_constraints)
+      {
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+          "Currently the constraint checks need to be turned off to pass "
+          "naked instances to output regions. In the future, layout "
+          "constraints will be inferred from the instances and used for "
+          "the checks.");
+      } 
       if (extents.dim == 0)
       {
         extents = new_extents;
@@ -6152,223 +6363,191 @@ namespace Legion {
            << "the same extents to all the fields in the same output region.";
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE, "%s", ss.str().c_str());
       }
-
-      // Here we simply queue up the output data, rather than eagerly
-      // creating and setting an instance to the output region.
-      ReturnedInstanceInfo &info = returned_instances[field_id];
-      // Sanitize the pointer when the size is 0
-      size_t num_elements = 1;
-      for (int32_t dim = 0; dim < extents.dim; ++dim)
-        num_elements *= extents[dim];
-      info.ptr = num_elements != 0 ? ptr : 0;
-      info.alignment = alignment;
-    }
-
-    //--------------------------------------------------------------------------
-    void OutputRegionImpl::return_data(
-                              const DomainPoint &extents,
-                              FieldID field_id,
-                              PhysicalInstance instance,
-                              const LayoutConstraintSet *constraints,
-                              bool check_constraints)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalManager *manager = get_manager(field_id);
-      if (instance.get_location() != manager->get_memory())
+      if (instance.exists() && 
+          (instance.get_location() != manager->get_memory()))
         REPORT_LEGION_ERROR(ERROR_INVALID_OUTPUT_SIZE,
           "Field %u of output region %u of task %s (UID: %lld) is requested "
-          "to have an instance on memory " IDFMT ", but the returned instance "
-          "is allocated on memory " IDFMT ".",
+          "to have an instance on memory " IDFMT ", but the returned instance"
+          " is allocated on memory " IDFMT ".",
           field_id, index, context->owner_task->get_task_name(),
           context->owner_task->get_unique_op_id(),
           manager->get_memory().id, instance.get_location().id);
-
-      if (!context->is_task_local_instance(instance))
-        REPORT_LEGION_ERROR(ERROR_DUPLICATE_RETURN_REQUESTS,
-          "Instance passed to field %u of output region %u of task %s "
-          "(UID: %lld) is already bound to this field or some other fields. "
-          "You cannot assign a buffer to more than one output region field. ",
-          field_id, index, context->owner_task->get_task_name(),
-          context->owner_task->get_unique_op_id());
-
-      // The realm instance backing a deferred buffer is currently tagged as
-      // a task local instance, so we need to tell the runtime that the instance
-      // now escapes the context.
-      context->escape_task_local_instance(instance);
-      const uintptr_t ptr = 
-        reinterpret_cast<uintptr_t>(instance.pointer_untyped(0,0)); 
-
-      if (check_constraints && constraints != NULL)
+      if (grouped_fields && !returned_instances.empty())
       {
-        bool has_conflict = false;
+        // Make sure that all the fields have the same instance
+        if (instance != returned_instances.begin()->second)
+          REPORT_LEGION_ERROR(ERROR_DUPLICATE_RETURN_REQUESTS,
+                "Instance passed to field %u of output region %u of task %s "
+                "(UID: %lld) is not the same as previous instance returned "
+                "for this output region requirement. The layout constraints "
+                "for this output region suggested that the fields need to "
+                "be grouped into one instance and therefore they must all "
+                "be in the same instance.", field_id, index,
+                context->get_task_name(), context->get_unique_id());
+      }
+      returned_instances.emplace(std::make_pair(field_id, instance));
+    }
 
-        LayoutConstraints *manager_cons = manager->layout->constraints;
-        if (!req.global_indexing && context->owner_task->is_index_space)
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::finalize(RtEvent safe_effects)
+    //--------------------------------------------------------------------------
+    {
+      // Transpose the returned instances 
+      std::map<PhysicalInstance,std::vector<FieldID> > instance_fields;
+      for (std::map<FieldID,PhysicalInstance>::const_iterator it = 
+            returned_instances.begin(); it != returned_instances.end(); it++)
+        instance_fields[it->second].push_back(it->first);
+
+      for (std::map<PhysicalInstance,std::vector<FieldID> >::const_iterator
+            pit = instance_fields.begin(); pit != instance_fields.end(); pit++)
+      {
+        const Realm::InstanceLayoutGeneric *current = pit->first.exists() ?
+          pit->first.get_layout() : NULL;
+        if (grouped_fields)
         {
-          // Unfortunately, for local indexing, the ordering constraint
-          // prescribes the ordering of dimensions that the returned
-          // buffer does not contain. (those dimensions are added
-          // by the runtime and invisible to the point task.) So, here
-          // we filter out the dimensions that would otherwise fail
-          // the constraint check innocuously.
-          LayoutConstraintSet copied;
-          copied.alignment_constraints = manager_cons->alignment_constraints;
-          std::vector<DimensionKind> ordering;
-          int32_t ndim = NT_TemplateHelper::get_dim(req.type_tag);
-          for (std::vector<DimensionKind>::const_iterator it =
-               manager_cons->ordering_constraint.ordering.begin(); it !=
-               manager_cons->ordering_constraint.ordering.end(); ++it)
-          {
-            int32_t dim = *it;
-            if (dim - LEGION_DIM_X < ndim || dim == LEGION_DIM_F)
-              ordering.push_back(static_cast<DimensionKind>(dim));
-          }
-          copied.ordering_constraint =
-            OrderingConstraint(
-              ordering, manager_cons->ordering_constraint.contiguous);
+          // Redistricting to just one layout for all the fields
+          std::vector<size_t> sizes(pit->second.size());
+          for (unsigned idx = 0; idx < pit->second.size(); idx++)
+            sizes[idx] = get_field_size(pit->second[idx]);
 
-          has_conflict = constraints->conflicts(copied);
+          PhysicalManager *manager = get_manager(pit->second.back());
+          const LayoutConstraints *constraints = manager->layout->constraints;
+
+          Realm::InstanceLayoutGeneric *layout =
+            region->row_source->create_layout(*constraints, pit->second,
+                sizes, false/*compact*/, NULL, NULL, NULL, 
+                (current != NULL) ? current->alignment_reqd : 1);
+#ifdef DEBUG_LEGION
+          assert((current == NULL) || 
+              (layout->bytes_used <= current->bytes_used));
+          assert((current == NULL) ||
+              (layout->alignment_reqd == current->alignment_reqd));
+#endif
+          // Create an external Realm instance
+          Realm::ProfilingRequestSet requests;
+          if (runtime->profiler != NULL)
+          {
+            const LgEvent unique_event = manager->get_unique_event();
+#ifdef DEBUG_LEGION
+            assert(unique_event.exists());
+#endif
+            runtime->profiler->add_inst_request(requests,
+                      context->get_unique_id(), unique_event);
+          }
+          PhysicalInstance instance = pit->first;
+          const size_t footprint = layout->bytes_used;
+          if (instance.exists())
+          {
+            LgEvent unique_event = manager->get_unique_event();
+            const RtEvent ready = context->escape_task_local_instance(
+                instance, safe_effects, 1/*count*/, &instance, &unique_event,
+                (const Realm::InstanceLayoutGeneric**)&layout);
+            if (manager->update_physical_instance(instance, ready, footprint))
+              delete manager;
+            delete layout;
+          }
+          else
+          {
+            // We don't have an existing instance so we need to make one
+            const RtEvent ready(
+                Realm::RegionInstance::create_instance(instance,
+                  manager->memory_manager->memory, layout, requests));
+            if (ready.exists() && (implicit_profiler != NULL))
+              implicit_profiler->record_instance_ready(ready,
+                  manager->get_unique_event());
+            if (manager->update_physical_instance(instance, ready, footprint))
+              delete manager;
+          }
+        }
+        else if (pit->first.exists())
+        {
+          // Use redistricting to make N instances for each manager
+          std::vector<Realm::InstanceLayoutGeneric*> 
+            layouts(pit->second.size());
+          std::vector<LgEvent> unique_events(pit->second.size());
+          std::vector<PhysicalManager*> managers(pit->second.size());
+          for (unsigned idx = 0; idx < layouts.size(); idx++)
+          {
+            const FieldID field_id = pit->second[idx];
+            PhysicalManager *manager = get_manager(field_id);
+            managers[idx] = manager;
+            // Create a layout to use for redistricting
+            const LayoutConstraints *constraints = manager->layout->constraints;
+
+            const std::vector<FieldID> fields(1, field_id);
+            const std::vector<size_t> sizes(1, get_field_size(field_id));
+
+            // Base alignment of 1 if not specified
+            size_t alignment = 1;
+            if (!constraints->alignment_constraints.empty())
+            {
+#ifdef DEBUG_LEGION
+              // Should only be one alignment constraint at most since there
+              // should just be one field for this manager
+              assert(constraints->alignment_constraints.size() == 1);
+#endif
+              const AlignmentConstraint &constraint = 
+                constraints->alignment_constraints.front();
+#ifdef DEBUG_LEGION
+              assert(constraint.fid == field_id);
+#endif
+              alignment = constraint.alignment;
+            }
+            layouts[idx] = region->row_source->create_layout(*constraints,
+                fields, sizes, false/*compact*/, NULL, NULL, NULL, alignment);
+            unique_events[idx] = manager->get_unique_event();
+          }
+          std::vector<PhysicalInstance> instances(layouts.size());
+          const RtEvent ready = context->escape_task_local_instance(pit->first,
+              safe_effects, instances.size(), &instances.front(),
+              &unique_events.front(), 
+              (const Realm::InstanceLayoutGeneric**)&layouts.front());
+          for (unsigned idx = 0; idx < instances.size(); idx++)
+          {
+            if (managers[idx]->update_physical_instance(instances[idx],
+                  ready, layouts[idx]->bytes_used))
+              delete managers[idx];
+            delete layouts[idx];
+          }
         }
         else
-          has_conflict = constraints->conflicts(*manager_cons);
-
-        if (has_conflict)
-          REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-            "The returned instance for field %u of output region %u of "
-            "task %s (UID: %lld) does not satisfy the layout constraints "
-            "chosen by the mapper. This is an illegal usage right now. "
-            "In the future, the runtime will copy this returned instance "
-            "into a fresh one with the correct layout.",
-            field_id, index, context->owner_task->get_task_name(),
-            context->owner_task->get_unique_op_id());
-      }
-      else if (check_constraints)
-      {
-        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-          "Currently the constraint checks need to be turned off to pass "
-          "naked instances to output regions. In the future, layout "
-          "constraints will be inferred from the instances and used for "
-          "the checks.");
-      }
-
-      return_data(
-          extents, field_id, ptr, instance.get_layout()->alignment_reqd);
-
-      // This instance was escaped so the context is no longer responsible
-      // for destroying it when the task is done, we take that responsibility
-      escaped_instances.push_back(instance);
-    }
-
-    //--------------------------------------------------------------------------
-    void OutputRegionImpl::finalize(void)
-    //--------------------------------------------------------------------------
-    {
-      Domain domain;
-      region->row_source->get_domain(domain);
-      // Create a Realm instance and update the physical manager
-      // for each output field
-      for (std::map<FieldID,ReturnedInstanceInfo>::iterator it =
-           returned_instances.begin(); it !=
-           returned_instances.end(); ++it)
-      {
-        FieldID field_id = it->first;
-        PhysicalManager *manager = get_manager(field_id);
-
-        // Create a Realm layout
-        LayoutConstraints *manager_cons = manager->layout->constraints;
-
-        // Extract the order of dimensions from the ordering constraint
-        const std::vector<DimensionKind> &ordering =
-          manager_cons->ordering_constraint.ordering;
-        std::vector<int> dim_order;
-        for (size_t idx = 0; idx < ordering.size(); ++idx)
-          if (ordering[idx] != LEGION_DIM_F)
-            dim_order.push_back(ordering[idx] - static_cast<int>(LEGION_DIM_X));
-
-        std::map<Realm::FieldID,size_t> field_sizes;
-        size_t field_size = get_field_size(field_id);
-        field_sizes[field_id] = field_size;
-        Realm::InstanceLayoutConstraints constraints(field_sizes,
-                                                     0 /*block_size*/);
-
-        // Make a Realm layout descriptor of the right type using demux
-        Realm::InstanceLayoutGeneric *layout = NULL;
-        LayoutCreator creator(layout, domain, constraints, dim_order);
-        NT_TemplateHelper::demux<LayoutCreator>(req.region.get_type_tag(),
-                                                &creator);
-#ifdef DEBUG_LEGION
-        assert(layout != NULL);
-#endif
-
-        // Extract the alignment info from the alignment constraints
-        // if there is one
-        size_t alignment = 0;
-        if (!manager_cons->alignment_constraints.empty())
         {
+          // Make an empty instance for each manager
+          for (unsigned idx = 0; idx < pit->second.size(); idx++)
+          {
+            const FieldID field_id = pit->second[idx];
+            PhysicalManager *manager = get_manager(field_id);
+            // Create a layout to use for redistricting
+            const LayoutConstraints *constraints = manager->layout->constraints;
+
+            const std::vector<FieldID> fields(1, field_id);
+            const std::vector<size_t> sizes(1, get_field_size(field_id));
+            Realm::InstanceLayoutGeneric *layout =
+              region->row_source->create_layout(*constraints, fields,
+                  sizes, false/*compact*/);
+            Realm::ProfilingRequestSet requests;
+            if (runtime->profiler != NULL)
+            {
+              const LgEvent unique_event = manager->get_unique_event();
 #ifdef DEBUG_LEGION
-          assert(manager_cons->alignment_constraints.size() == 1);
-          assert(manager_cons->alignment_constraints[0].fid == field_id);
+              assert(unique_event.exists()); 
 #endif
-          alignment = manager_cons->alignment_constraints[0].alignment;
+              runtime->profiler->add_inst_request(requests,
+                        context->owner_task->get_unique_id(), unique_event);
+            }
+            PhysicalInstance instance;
+            const RtEvent ready(
+              Realm::RegionInstance::create_instance(instance,
+                manager->memory_manager->memory, layout, requests));
+            if (ready.exists() && (implicit_profiler != NULL))
+              implicit_profiler->record_instance_ready(ready,
+                  manager->get_unique_event());
+            if (manager->update_physical_instance(instance, ready,
+                  0/*footprint*/))
+              delete manager;
+          }
         }
-        // If no alignment is given, set it to the field size
-        if (alignment == 0) alignment = field_size;
-
-        size_t volume = 1;
-        for (int32_t dim = 0; dim < extents.dim; ++dim) volume *= extents[dim];
-
-        size_t bytes_used =
-          field_size > 0
-          ? (volume * field_size + alignment - 1) / alignment * alignment
-          : 0;
-        layout->bytes_used = bytes_used;
-
-        if (!manager_cons->offset_constraints.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(manager_cons->offset_constraints.size() == 1);
-          assert(manager_cons->offset_constraints[0].fid == field_id);
-#endif
-          Realm::InstanceLayoutGeneric::FieldLayout &fl =
-            layout->fields[field_id];
-          fl.rel_offset = manager_cons->offset_constraints[0].offset;
-        }
-
-        // Create an external Realm instance
-        Realm::RegionInstance instance;
-        Realm::ProfilingRequestSet no_requests;
-        ReturnedInstanceInfo &info = it->second;
-
-        MemoryManager* memory_manager =
-          runtime->find_memory_manager(manager->get_memory());
-        RtEvent wait_on = memory_manager->create_sub_eager_instance(instance,
-            info.ptr, bytes_used, layout, manager->get_unique_event());
-        if (wait_on.exists())
-          wait_on.wait();
-#ifdef DEBUG_LEGION
-        assert(instance.exists());
-#endif
-        // Finally we set the instance to the physical manager
-        const bool delete_now = manager->update_physical_instance(instance,
-                                          bytes_used, info.ptr);
-        if (delete_now)
-          delete manager;
       }
-      // Lasty destroy our physical instance objects since the task is done
-      for (std::vector<PhysicalInstance>::const_iterator it =
-            escaped_instances.begin(); it != escaped_instances.end(); it++)
-        it->destroy();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void OutputRegionImpl::handle_finalize_output(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const FinalizeOutputArgs *finalize_args = (const FinalizeOutputArgs*)args;
-      OutputRegionImpl *region = finalize_args->region;
-      region->finalize();
-      if (region->remove_reference())
-        delete region;
     }
 
     //--------------------------------------------------------------------------
@@ -6633,21 +6812,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionHandshakeImpl::LegionHandshakeImpl(bool init_ext, int ext_parts,
-                                                   int legion_parts)
-      : init_in_ext(init_ext), ext_participants(ext_parts), 
-        legion_participants(legion_parts)
+    LegionHandshakeImpl::LegionHandshakeImpl(bool init_ext)
+      : init_in_ext(init_ext), split(false), runtime(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LegionHandshakeImpl::LegionHandshakeImpl(const LegionHandshakeImpl &rhs)
-      : init_in_ext(false), ext_participants(-1), legion_participants(-1)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -6655,42 +6823,39 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ext_wait_barrier.get_barrier().destroy_barrier();
-      legion_wait_barrier.get_barrier().destroy_barrier();
+      legion_next_barrier.get_barrier().destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
-    LegionHandshakeImpl& LegionHandshakeImpl::operator=(
-                                                 const LegionHandshakeImpl &rhs)
+    void LegionHandshakeImpl::initialize(Runtime *rt)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionHandshakeImpl::initialize(void)
-    //--------------------------------------------------------------------------
-    {
-      ext_wait_barrier = PhaseBarrier(ApBarrier(
-            Realm::Barrier::create_barrier(legion_participants)));
-      legion_wait_barrier = PhaseBarrier(ApBarrier(
-            Realm::Barrier::create_barrier(ext_participants)));
+      runtime = rt;
+      ext_wait_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
+      legion_wait_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
       ext_arrive_barrier = legion_wait_barrier;
       legion_arrive_barrier = ext_wait_barrier;
-      // Advance the two wait barriers
-      Runtime::advance_barrier(ext_wait_barrier);
-      Runtime::advance_barrier(legion_wait_barrier);
-      // Whoever is waiting first, we have to advance their arrive barriers
-      if (init_in_ext)
+      // Legion runs split-phase on its side so we need to advance its
+      // wait barrier so that we can always refer to the previous phase
+      legion_next_barrier = legion_wait_barrier;
+      // If control is starting on the Legion side then make it seems like
+      // the previous phase of the legion_wait barrier has already triggered
+      if (!init_in_ext)
       {
-        Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
-        Runtime::advance_barrier(ext_wait_barrier);
-      }
-      else
-      {
-        Runtime::phase_barrier_arrive(ext_arrive_barrier, ext_participants);
-        Runtime::advance_barrier(legion_wait_barrier);
+        // Trigger the first generation of the ext arrival so that 
+        // the legion_wait_barrier always points to a valid generation
+        // This makes it look like we always start the cycle from the 
+        // external side which is how we know that the barriers from 
+        // the external to the legion side will be the first ones to 
+        // exhaust their generations and we know we need to generate
+        // new barriers for both sides.
+        // Same trick as below for the profiler to tell it this is an 
+        // external handshake
+        const LgEvent previous_fevent = implicit_fevent;
+        implicit_fevent = LgEvent(ext_arrive_barrier.get_barrier());
+        runtime->phase_barrier_arrive(ext_arrive_barrier, 1);
+        implicit_fevent = previous_fevent;
+        Runtime::advance_barrier(ext_arrive_barrier);
       }
     }
 
@@ -6698,30 +6863,49 @@ namespace Legion {
     void LegionHandshakeImpl::ext_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
-      // Just have to do our arrival
-      Runtime::phase_barrier_arrive(ext_arrive_barrier, 1);
+      if (implicit_fevent.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Detected an illegal handshake calling 'ext_handoff_to_legion' "
+            "from inside of a Legion task.")
+      // We need to detect the case where we are about to trigger the last
+      // external barrier generation and update the legion side with new
+      // barriers before we do that
+      PhaseBarrier to_arrive = ext_arrive_barrier;
+      Runtime::advance_barrier(ext_arrive_barrier);
+      if (!ext_arrive_barrier.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(!ext_wait_barrier.exists());
+        assert(!legion_next_barrier.exists());
+        assert(!legion_arrive_barrier.exists());
+#endif
+        ext_wait_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
+        legion_next_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
+        ext_arrive_barrier = legion_next_barrier;
+        legion_arrive_barrier = ext_wait_barrier;
+      }
+      // A little trick for profiling, nominally we don't have an fevent
+      // since we're external to Legion, but we need the profiling critical
+      // path logging to know this is an external handshake. We signal this
+      // by setting the implicit fevent to be the same as arrival barrier.
+      // The profiler will record this and recognize it as a handshake
+      implicit_fevent = LgEvent(to_arrive.get_barrier());
+      runtime->phase_barrier_arrive(to_arrive, 1);
+      implicit_fevent = LgEvent::NO_LG_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void LegionHandshakeImpl::ext_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
-      // When we get this call, we know we have done 
-      // all the arrivals so we can advance it
-      Runtime::advance_barrier(ext_arrive_barrier);
-      // Wait for ext  to be ready to run
+      if (implicit_fevent.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Detected an illegal handshake calling 'ext_wait_on_legion' "
+            "from inside of a Legion task.")
+      // Wait for ext to be ready to run
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
-      ApBarrier previous = Runtime::get_previous_phase(ext_wait_barrier);
-      if (!previous.has_triggered_faultignorant())
-      {
-        // We can't call external wait directly on the barrier
-        // right now, so as a work-around we'll make an event
-        // and then wait on that
-        ApUserEvent wait_on = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, wait_on, previous);
-        wait_on.external_wait();
-      }
+      ext_wait_barrier.get_barrier().external_wait();
       // Now we can advance our wait barrier
       Runtime::advance_barrier(ext_wait_barrier);
     }
@@ -6730,28 +6914,51 @@ namespace Legion {
     void LegionHandshakeImpl::legion_handoff_to_ext(void)
     //--------------------------------------------------------------------------
     {
-      // Just have to do our arrival
-      Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+      if (!implicit_fevent.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Detected an illegal handshake calling 'legion_handoff_to_ext' "
+            "while not inside of a Legion task.")
+      if (split)
+      {
+        Runtime::advance_barrier(legion_arrive_barrier);
+        split = false;
+      }
+      // Always advance this barrier before doing the arrival to avoid a
+      // race when we run out of barrier generations
+      PhaseBarrier to_arrive = legion_arrive_barrier;
+      Runtime::advance_barrier(legion_arrive_barrier);
+      runtime->phase_barrier_arrive(to_arrive, 1);
     }
 
     //--------------------------------------------------------------------------
     void LegionHandshakeImpl::legion_wait_on_ext(void)
     //--------------------------------------------------------------------------
     {
-      Runtime::advance_barrier(legion_arrive_barrier);
+      if (!implicit_fevent.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Detected an illegal handshake calling 'legion_wait_on_ext' "
+            "while not inside of a Legion task.")
       // Wait for Legion to be ready to run
       // No need to avoid being drafted by the
       // Realm runtime here
       legion_wait_barrier.wait();
       // Now we can advance our wait barrier
-      Runtime::advance_barrier(legion_wait_barrier);
+      legion_wait_barrier = legion_next_barrier;
+      Runtime::advance_barrier(legion_next_barrier);
+      // Check to see if we're out of generations and need to wait for the
+      // external side to catch up and give us a new barrier
+      if (!legion_next_barrier.exists())
+        legion_wait_barrier.wait();
     }
 
     //--------------------------------------------------------------------------
     PhaseBarrier LegionHandshakeImpl::get_legion_wait_phase_barrier(void)
     //--------------------------------------------------------------------------
     {
-      return legion_wait_barrier;
+      // A bit non-intuitive but return the next barrier because this is
+      // going to be passed into the launcher's phase barrier which will
+      // do the work of getting the previous phase for us
+      return legion_next_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -6765,8 +6972,20 @@ namespace Legion {
     void LegionHandshakeImpl::advance_legion_handshake(void)
     //--------------------------------------------------------------------------
     {
-      Runtime::advance_barrier(legion_wait_barrier);
-      Runtime::advance_barrier(legion_arrive_barrier);
+      if (!implicit_fevent.exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Detected an illegal handshake calling 'advance_legion_handshake ' "
+            "while not inside of a Legion task.")
+      legion_wait_barrier = legion_next_barrier;
+      Runtime::advance_barrier(legion_next_barrier);
+      if (split) // already in split mode execution
+        Runtime::advance_barrier(legion_arrive_barrier);
+      else // not in split mode execution yet
+        split = true;
+      // Check to see if we're out of generations and need to wait for the
+      // external side to catch up and give us a new barrier
+      if (!legion_next_barrier.exists())
+        legion_wait_barrier.wait();
     }
 
     /////////////////////////////////////////////////////////////
@@ -7506,6 +7725,18 @@ namespace Legion {
       if (finder != mappers.end())
         result = finder->second.first;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProcessorManager::has_non_default_mapper(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock, 0/*mode*/, false/*exclusive*/);
+      for (std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+            it = mappers.begin(); it != mappers.end(); it++)
+        if (!it->second.first->is_default_mapper)
+          return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -8376,17 +8607,1540 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Memory Pool 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    /*static*/ MemoryPool* MemoryPool::deserialize(Deserializer &derez,
+                                                   Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      Memory memory;
+      derez.deserialize(memory);
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      bool bounded;
+      derez.deserialize<bool>(bounded);
+      if (bounded)
+      {
+        size_t size;
+        derez.deserialize(size);
+        size_t alignment;
+        derez.deserialize(alignment);
+        PhysicalInstance instance;
+        derez.deserialize(instance);
+        RtEvent use_event;
+        derez.deserialize(use_event);
+        return new ConcretePool(instance, size, alignment, use_event, manager);
+      }
+      else
+      {
+        size_t max_free_bytes;
+        derez.deserialize(max_free_bytes);
+        UnboundPoolScope scope;
+        derez.deserialize(scope);
+        TaskTreeCoordinates coordinates;
+        coordinates.deserialize(derez);
+        return new UnboundPool(manager, scope, coordinates, max_free_bytes);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Realm::InstanceLayoutGeneric* MemoryPool::create_layout(
+                                   size_t size, size_t alignment, size_t offset)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(alignment > 0);
+#endif
+      const DomainT<1,coord_t> bounds = (size == 0) ?
+        Rect<1>(1, 0) : Rect<1>(offset, Point<1>(offset + size - 1));
+      const std::vector<Realm::FieldID> field_ids(1, FID);
+      const std::vector<size_t> field_sizes(1, sizeof(uint8_t));
+      Realm::InstanceLayoutConstraints constraints(field_ids, field_sizes,
+                                                 0/*blocking*/);
+      const int dim_order[] = {0};
+      Realm::InstanceLayoutGeneric *layout =
+        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
+                                                             constraints,
+                                                             dim_order);
+      layout->alignment_reqd = alignment;
+      return layout;
+    }
+
+    //--------------------------------------------------------------------------
+    ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
+        size_t alignment, RtEvent use, MemoryManager *man)
+      : MemoryPool(alignment), manager(man), limit(remain),
+        remaining_bytes(remain), first_unused_range(SENTINEL), released(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+      assert(inst.exists() == (remain > 0));
+#endif
+      // Might not have an instance if this is a zero-sized pool
+      if (inst.exists())
+      {
+        backing_instances.emplace(std::make_pair(inst, use));
+        // If we're on the local node for the instance then set up the ranges
+        const void *base = inst.pointer_untyped(0, 0);
+        if (base != NULL)
+        {
+          // Initialize the first range with the full allocated space
+          Range &r = ranges.emplace_back(Range());
+          r.first = reinterpret_cast<uintptr_t>(base);
+          r.last = r.first + limit;
+          r.prev = r.next = r.prev_free = r.next_free = SENTINEL;
+          r.instance = inst;
+          const unsigned log2_size = floor_log2(limit);
+          size_based_free_lists.resize(log2_size+1, SENTINEL);
+          size_based_free_lists[log2_size] = 0;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ConcretePool::~ConcretePool(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ConcretePool::query_memory_limit(void)
+    //--------------------------------------------------------------------------
+    {
+      return limit;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ConcretePool::query_available_memory(void)
+    //--------------------------------------------------------------------------
+    {
+      if (released)
+        return 0;
+      else
+        return remaining_bytes;
+    }
+
+    //--------------------------------------------------------------------------
+    PoolBounds ConcretePool::get_bounds(void) const
+    //--------------------------------------------------------------------------
+    {
+      return PoolBounds(limit, max_alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* ConcretePool::allocate_future(UniqueID creator_uid,
+                                                  size_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+      assert(!released);
+#endif
+      if (remaining_bytes < size)
+        return NULL;
+      // Align futures on the largest power of 2 that divides the size of 
+      // field, but cap at 128 bytes for GPUs
+      size_t alignment = std::min<size_t>(size & ~(size-1), 128);
+      uintptr_t start = 0;
+      const unsigned range_index = allocate(size, alignment, start);
+      if (range_index == SENTINEL)
+        return NULL;
+      // Create the layout for the future
+      const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+      const std::vector<size_t> sizes(1, size);
+      const int dim_order[1] = { 0 };
+      const Realm::Point<1,coord_t> zero(0);
+      const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+      const Realm::IndexSpace<1,coord_t> rect_space(
+                                     Realm::Rect<1,coord_t>(zero, zero));
+      Realm::InstanceLayoutGeneric *layout =
+        Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+            rect_space, constraints, dim_order);
+      layout->alignment_reqd = alignment;
+      // Futures are always going to escape out of this pool and ownership
+      // will be taken by the caller so we escape them eagerly
+      LgEvent unique_event;
+      PhysicalInstance instance;
+      RtEvent use_event = escape_range(range_index, 1/*num_results*/,
+          &instance, &unique_event, 
+          (const Realm::InstanceLayoutGeneric**)&layout, creator_uid);
+      delete layout;
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
+      return new FutureInstance(reinterpret_cast<const void*>(start), size, 
+          false/*external*/, true/*own allocation*/, unique_event, instance,
+          Processor::NO_PROC, use_event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance ConcretePool::allocate_instance(UniqueID creator_uid,
+        LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
+        RtEvent &use_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!released);
+      // Should have been checked earlier
+      assert(layout->alignment_reqd <= max_alignment);
+#endif
+      if (layout->bytes_used == 0)
+      {
+        // Special case for empty instances
+        Realm::InstanceLayoutGeneric *layout = create_layout(0, 1);
+        PhysicalInstance instance;
+        const Realm::ProfilingRequestSet empty_requests;
+        use_event = RtEvent(PhysicalInstance::create_instance(
+              instance, manager->memory, layout->clone(), empty_requests));
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+        assert(allocated.find(instance) == allocated.end());
+#endif
+        allocated[instance] = SENTINEL;
+        return instance;
+      }
+      // Iterate over the free lists from smallest to largets looking
+      // for a hole that is big enough to store the instance
+      uintptr_t start = 0;
+      unsigned range_index = 
+        allocate(layout->bytes_used, layout->alignment_reqd, start);
+      if (range_index != SENTINEL)
+      {
+        // Allocation succeeded
+        // Make an external instance for the data
+        const size_t offset = start - ranges.front().first;
+        const Point<1> start(offset);
+        const Point<1> stop(offset + layout->bytes_used - 1);
+        const Rect<1> bounds(start, stop);
+        const Range &range = ranges[range_index];
+        Realm::ExternalInstanceResource *external_resource =
+          range.instance.generate_resource_info(
+              Realm::IndexSpaceGeneric(bounds), FID, false/*read only*/);
+        // We don't profile intermediate instances like this since no
+        // Legion operations will happen on them until they're escaped
+        PhysicalInstance instance;
+        const Realm::ProfilingRequestSet empty_requests;
+        // Normally Realm insists that we use suggested_memory() to 
+        // name the memory but since we know this pool is backed by
+        // a normal Realm instance we can use that memory
+        use_event = RtEvent(PhysicalInstance::create_external_instance(
+              instance, manager->memory, layout->clone(), *external_resource,
+              empty_requests, backing_instances[range.instance]));
+#ifdef DEBUG_LEGION
+        assert(instance.exists());
+        assert(allocated.find(instance) == allocated.end());
+#endif
+        // Store it in the allocated data structure
+        allocated[instance] = range_index;
+        return instance;
+      }
+      else
+        return PhysicalInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ConcretePool::contains_instance(PhysicalInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+      return (allocated.find(instance) != allocated.end());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ConcretePool::escape_task_local_instance(PhysicalInstance instance,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *results,
+          LgEvent *unique_events, const Realm::InstanceLayoutGeneric **layouts,
+          UniqueID creator_uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
+      std::map<PhysicalInstance,unsigned>::iterator finder = 
+        allocated.find(instance);
+      if (finder == allocated.end())
+        REPORT_LEGION_ERROR(ERROR_POOL_USE_AFTER_FREE,
+            "Detected a use-after-free case for instance " IDFMT
+            " in memory %s by task %s (UID %lld) while trying to "
+            "escape the instance for an output region.",
+            instance.id, manager->get_name(), 
+            implicit_context->get_task_name(),
+            implicit_context->get_unique_id())
+      const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
+      if (layouts == NULL)
+      {
+        // Handle the case where we are escaping a deferred buffer/value
+        // to become a future and we're just going to reuse the same layout
+#ifdef DEBUG_LEGION
+        assert(num_results == 1);
+#endif
+        layouts = &layout;
+      }
+      RtEvent result;
+      if (finder->second == SENTINEL)
+      {
+        // This is a zero-sized range, so we can just redistrict it directly
+        // into the N instances that we need
+        std::vector<Realm::ProfilingRequestSet> requests(num_results);
+#ifdef DEBUG_LEGION
+        std::vector<MemoryManager::TaskLocalInstanceAllocator> allocators;
+        allocators.reserve(num_results);
+        std::vector<ProfilingResponseBase> bases;
+        bases.reserve(num_results);
+#endif
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+          if (manager->runtime->profiler != NULL)
+          {
+            if (!unique_events[idx].exists())
+            {
+              const Realm::UserEvent unique = 
+                Realm::UserEvent::create_user_event();
+              unique.trigger();
+              unique_events[idx] = LgEvent(unique);
+            }
+            manager->runtime->profiler->add_inst_request(requests[idx],
+                                      creator_uid, unique_events[idx]);
+          }
+#ifdef DEBUG_LEGION
+          allocators.emplace_back(
+              MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
+          bases.emplace_back(
+              ProfilingResponseBase(&allocators[idx], creator_uid, false));
+          Realm::ProfilingRequest &req = requests[idx].add_request(
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+        }
+        result = RtEvent(instance.redistrict(results, layouts,
+              num_results, &requests.front()));
+#ifdef DEBUG_LEGION
+        for (unsigned idx = 0; idx < allocators.size(); idx++)
+        {
+#ifndef NDEBUG
+          const bool success =
+#endif
+            allocators[idx].succeeded();
+          assert(success);
+        }
+#endif
+      }
+      else // Non-zero-sized instance so can escape like normal
+        result = escape_range(finder->second, num_results, results,
+            unique_events, layouts, creator_uid);
+      // Remove the allocated instance
+      allocated.erase(finder);
+      // Destroy the external instance that we created
+      instance.destroy(safe_effects);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::free_instance(PhysicalInstance instance,
+                                     RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
+      std::map<PhysicalInstance,unsigned>::iterator finder = 
+        allocated.find(instance);
+      if (finder == allocated.end())
+        REPORT_LEGION_ERROR(ERROR_POOL_USE_AFTER_FREE,
+            "Detected a duplicate delete for instance " IDFMT
+            " in memory %s by task %s (UID %lld). This most likely "
+            "means that you called 'destroy' on your deferred buffer "
+            " or deferred value twice which is illegal.",
+            instance.id, manager->get_name(), 
+            implicit_context->get_task_name(),
+            implicit_context->get_unique_id())
+#ifdef DEBUG_LEGION
+      assert(finder != allocated.end());
+#endif
+      if (released)
+      {
+        // If we're released then we can free the backing instance
+        // immediately as we know that it is only for this instance
+        const Range &range = ranges[finder->second];
+        // Free up the back instance since we know that we're not
+        // going to bother recycling this memory since we're released
+        std::map<PhysicalInstance,RtEvent>::iterator backing_finder =
+          backing_instances.find(range.instance);
+#ifdef DEBUG_LEGION
+        assert(backing_finder != backing_instances.end());
+#endif
+        backing_finder->first.destroy(
+            Runtime::merge_events(backing_finder->second, precondition));
+        backing_instances.erase(backing_finder);
+      }
+      else if (finder->second != SENTINEL)
+      {
+        if (precondition.exists() && !precondition.has_triggered())
+          pending_frees.emplace(std::make_pair(finder->second, precondition));
+        else
+          deallocate(finder->second);
+      }
+      allocated.erase(finder);
+      // Finally destroy the external Realm instance that we made
+      instance.destroy(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ConcretePool::allocate(
+                          size_t size, size_t alignment, uintptr_t &alloc_first)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      bool try_again = true;
+      while (try_again)
+      {
+        // Walk the free lists from the smallest one big enough to have holes
+        // up to the one with the largest holes to find the smallest hole
+        // that we can use for this allocation
+        for (unsigned idx = floor_log2(size); 
+              idx < size_based_free_lists.size(); idx++)
+        {
+          unsigned index = size_based_free_lists[idx];
+          while (index != SENTINEL)
+          {
+            Range *r = &ranges[index];
+
+            size_t offset = 0;
+            if (alignment > 0)
+            {
+              size_t remainder = r->first % alignment;
+              if (remainder > 0)
+                offset = alignment - remainder;
+            }
+            // do we have enough space?
+            if ((r->last - r->first) < (size + offset))
+            {
+              // No, keep going
+              index = r->next_free;
+              continue;
+            }
+            // We have enough space
+            // Remove this from the current size free list
+            remove_from_free_list(index, *r);
+            // but we we may to chop things up to make the exact range
+            alloc_first = r->first + offset;
+            uintptr_t alloc_last = alloc_first + size;
+            // do we need to carve off a new (free) block before us?
+            if (offset > 0)
+            {
+              unsigned new_index =
+                alloc_range(r->first, alloc_first,r->instance);
+              Range &new_prev = ranges[new_index];
+              r = &ranges[index];  // alloc may have moved this!
+              r->first = alloc_first;
+              // insert into all-block dllist
+              new_prev.prev = r->prev;
+              new_prev.next = index;
+              if (r->prev != SENTINEL)
+                ranges[r->prev].next = new_index;
+              r->prev = new_index;
+              // Insert into the free list of the appropriate size
+              add_to_free_list(new_index, new_prev); 
+            }
+            // see if we have leftover space and need to make a new range
+            // to represent the remainder
+            if (alloc_last != r->last) 
+            {
+              // case 2 - leftover at end - put in new range
+              unsigned after_index = 
+                alloc_range(alloc_last, r->last,r->instance);
+              Range &r_after = ranges[after_index];
+              r = &ranges[index];  // alloc may have moved this!
+              r->last = alloc_last;
+              // r_after goes after r in all block list
+              r_after.prev = index;
+              r_after.next = r->next;
+              r->next = after_index;
+              if (r_after.next != SENTINEL)
+                ranges[r_after.next].prev = after_index;
+              // Put r_after in the free list of the right size
+              add_to_free_list(after_index, r_after);
+            }
+            // tie this off because we use it to detect allocated-ness
+            r->prev_free = r->next_free = index;
+            // Decrement the number of free bytes available
+#ifdef DEBUG_LEGION
+            assert(size <= remaining_bytes);
+#endif
+            remaining_bytes -= size;
+            return index;
+          }
+        }
+        // If we made it here we couldn't find a hole, see if there
+        // are any pending frees that we can wait for to free up more
+        // space to use for doing the allocation
+        try_again = false;
+        unsigned smallest_index = ranges.size();
+        size_t smallest_hole = std::numeric_limits<size_t>::max();
+        // See if any of the pending frees are done and can be deallocated
+        // and that will allow us to try again
+        for (std::map<unsigned,RtEvent>::iterator it =
+              pending_frees.begin(); it != pending_frees.end(); /*nothing*/)
+        {
+          if (it->second.has_triggered())
+          {
+            try_again = true;
+            deallocate(it->first);
+            std::map<unsigned,RtEvent>::iterator delete_it = it++;
+            pending_frees.erase(delete_it);
+          }
+          else
+          {
+            // See if this has enough space for the allocation
+            const Range &range = ranges[it->first];
+            const size_t hole_size = range.last - range.first;
+            if ((size <= hole_size) && (hole_size < smallest_hole))
+            {
+              smallest_hole = hole_size;
+              smallest_index = it->first;
+            }
+            it++;
+          }
+        }
+        if (!try_again)
+        {
+          if (smallest_index < ranges.size())
+          {
+            // Wait for the smallest hole to be ready
+            try_again = true;
+            std::map<unsigned,RtEvent>::iterator finder =
+              pending_frees.find(smallest_index);
+#ifdef DEBUG_LEGION
+            assert(finder != pending_frees.end());
+#endif
+            deallocate(finder->first);
+            finder->second.wait();
+            pending_frees.erase(finder);
+          }
+          else if (!pending_frees.empty())
+          {
+            // Wait for all the tiny holes to be ready and then try again
+            try_again = true;
+            std::vector<RtEvent> done_events;
+            done_events.reserve(pending_frees.size());
+            for (std::map<unsigned,RtEvent>::const_iterator it =
+                  pending_frees.begin(); it != pending_frees.end(); it++)
+            {
+              deallocate(it->first);
+              done_events.push_back(it->second);
+            }
+            pending_frees.clear();
+            Runtime::merge_events(done_events).wait();
+          }
+        }
+      }
+      // Failed to perform the allocation
+      return SENTINEL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::deallocate(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      Range& r = ranges[index];
+      // Add these bytes back into the available pool
+      remaining_bytes += (r.last - r.first);
+#ifdef DEBUG_LEGION
+      assert(remaining_bytes <= limit);
+#endif
+      // See if the previous range is free so we can merge with it
+      const unsigned pf_idx = r.prev;
+      const bool merge_prev = (pf_idx != SENTINEL) && 
+        (ranges[pf_idx].prev_free != pf_idx);
+      // See if the next range is free so we can merge with it
+      const unsigned nf_idx = r.next;
+      const bool merge_next = (nf_idx != SENTINEL) &&
+        (ranges[nf_idx].next_free != nf_idx);
+
+      // four cases - ordered to match the allocation cases
+      if (!merge_next) 
+      {
+        if (!merge_prev) 
+        {
+          // case 1 - no merging (exact match)
+          // just add ourselves to the free list
+          add_to_free_list(index, r);
+        } 
+        else 
+        {
+          // case 2 - merge before
+          // merge ourselves into the range before
+          Range& r_before = ranges[pf_idx];
+          grow_hole(pf_idx, r_before, r.last, false/*before*/);
+          r_before.next = r.next;
+          ranges[r.next].prev = pf_idx;
+          free_range(index);
+        }
+      } 
+      else 
+      {
+        if (!merge_prev) 
+        {
+          // case 3 - merge after
+          // merge ourselves into the range after
+          Range& r_after = ranges[nf_idx];
+          grow_hole(nf_idx, r_after, r.first, true/*before*/);
+          r_after.prev = r.prev;
+          ranges[r.prev].next = nf_idx;
+          free_range(index);
+        } 
+        else 
+        {
+          // case 4 - merge both
+          // merge both ourselves and range after into range before
+          Range& r_before = ranges[pf_idx];
+          Range& r_after = ranges[nf_idx];
+          remove_from_free_list(nf_idx, r_after);
+          grow_hole(pf_idx, r_before, r_after.last, false/*before*/);
+
+          // adjust both normal list and free list
+          r_before.next = r_after.next;
+          if (r_after.next != SENTINEL)
+            ranges[r_after.next].prev = pf_idx;
+
+          free_range(index);
+          free_range(nf_idx);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ConcretePool::alloc_range(uintptr_t first, uintptr_t last,
+                                       PhysicalInstance instance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(first < last); // should not be allocating empty ranges
+#endif
+      // find/make a free index in the range list for this range
+      unsigned new_idx;
+      if (first_unused_range != SENTINEL) 
+      {
+        new_idx = first_unused_range;
+        first_unused_range = ranges[new_idx].next;
+      }
+      else 
+      {
+        new_idx = ranges.size();
+        ranges.resize(new_idx + 1);
+      }
+      ranges[new_idx].first = first;
+      ranges[new_idx].last = last;
+      ranges[new_idx].instance = instance;
+      return new_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::free_range(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      ranges[index].next = first_unused_range;
+      first_unused_range = index;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ConcretePool::escape_range(unsigned index, size_t num_results,
+        PhysicalInstance *results, LgEvent *unique_events,
+        const Realm::InstanceLayoutGeneric **layouts, UniqueID creator_uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < ranges.size());
+#endif
+      Range *range = &ranges[index];
+      // We only need to update the ranges if we're not released because
+      // releasing means we're never going to need to allocated again
+      if (!released)
+      {
+        // First update the ranges 
+        // If there is any padding needed for alignment before the first
+        // instance then we'll add that range to the free list
+        unsigned prev_index = SENTINEL;
+        unsigned next_index = SENTINEL;
+        uintptr_t offset = range->first;
+        if (layouts[0]->alignment_reqd > 0)
+        {
+          size_t remainder = offset % layouts[0]->alignment_reqd;
+          if (remainder > 0)
+          {
+            offset += (layouts[0]->alignment_reqd - remainder);
+            prev_index = alloc_range(range->first, offset, range->instance);
+            // Update the original range to start later
+            range = &ranges[index]; // vector might have resized
+            range->first = offset;
+            // Add the new previous range into the linked list
+            Range &prev_range = ranges[prev_index];
+            prev_range.prev = range->prev;
+            prev_range.next = index;
+            range->prev = prev_index; 
+            if (prev_range.prev != SENTINEL)
+              ranges[prev_range.prev].next = prev_index;
+            // Deallocate the previous range
+            deallocate(prev_index);
+          }
+        }
+        offset += layouts[0]->bytes_used;
+        // Note this throws away padding bytes between instances, but those
+        // were unlikely to matter to anyone anyway since it's unlikely they'll
+        // be able to be used for anything
+        for (unsigned idx = 1; idx < num_results; idx++)
+        {
+          if (layouts[idx]->alignment_reqd > 0)
+          {
+            size_t remainder = offset % layouts[idx]->alignment_reqd;
+            if (remainder > 0)
+              offset += (layouts[idx]->alignment_reqd - remainder);
+          }
+          offset += layouts[idx]->bytes_used;
+        }
+        // Do the same thing with any leftover bytes at the end of the range
+        // after considering how the new instances will be laid out
+        if (offset < range->last)
+        {
+          next_index = alloc_range(offset, range->last, range->instance);
+          // Update the original range to start later
+          range = &ranges[index]; // vector might have resized
+          range->last = offset;
+          // Add the new next range into the linked list
+          Range &next_range = ranges[next_index];
+          next_range.prev = index;
+          next_range.next = range->next;
+          range->next = next_index;
+          if (next_range.next != SENTINEL)
+            ranges[next_range.next].prev = next_index;
+          // Deallocate the next range
+          deallocate(next_index);
+        }
+      }
+      // Find the first and last range with the same backing instance
+      unsigned current = range->prev;
+      unsigned prev_index = index;
+      while (current != SENTINEL)
+      {
+        const Range &current_range = ranges[current];
+        if (current_range.instance != range->instance)
+          break;
+        prev_index = current;
+        current = current_range.prev;
+      }
+      current = range->next;
+      unsigned next_index = index;
+      while (current != SENTINEL)
+      {
+        const Range &current_range = ranges[current];
+        if (current_range.instance != range->instance)
+          break;
+        next_index = current;
+        current = current_range.next;
+      }
+      // Perform instance redistricting to create all the new instances
+      std::map<PhysicalInstance,RtEvent>::iterator
+        finder = backing_instances.find(range->instance);
+#ifdef DEBUG_LEGION
+      assert(finder != backing_instances.end());
+#endif
+      RtEvent result;
+#ifdef DEBUG_LEGION
+      std::vector<MemoryManager::TaskLocalInstanceAllocator> allocators;
+      allocators.reserve(num_results+2);
+      std::vector<ProfilingResponseBase> bases;
+      bases.reserve(num_results+2);
+#endif
+      if ((prev_index != index) || (index != next_index))
+      {
+#ifdef DEBUG_LEGION
+        // Shouldn't be here if we're released because each allocated range 
+        // should have exactly one backing instance
+        assert(!released);
+#endif
+        std::vector<LgEvent> extra_unique_events;
+        std::vector<const Realm::InstanceLayoutGeneric*> extra_layouts;
+        if (prev_index != index)
+        {
+          const Range &prev_range = ranges[prev_index];
+          size_t size = range->first - prev_range.first;
+          size_t offset = prev_range.first - ranges.front().first;
+          extra_layouts.push_back(create_layout(size, 1/*alignment*/, offset));
+          if (manager->runtime->profiler != NULL)
+          {
+            const Realm::UserEvent unique = 
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            extra_unique_events.push_back(LgEvent(unique));
+          }
+          else
+            extra_unique_events.push_back(LgEvent::NO_LG_EVENT);
+        }
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+          extra_layouts.push_back(layouts[idx]);
+          if ((manager->runtime->profiler != NULL) && 
+              !unique_events[idx].exists())
+          {
+            const Realm::UserEvent unique = 
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            unique_events[idx] = LgEvent(unique);
+          }
+          extra_unique_events.push_back(unique_events[idx]);
+        }
+        if (next_index != index)
+        {
+          const Range &next_range = ranges[next_index];
+          size_t size = next_range.last - range->last;
+          size_t offset = range->last - ranges.front().first;
+          extra_layouts.push_back(create_layout(size, 1/*alignment*/, offset));
+          if (manager->runtime->profiler != NULL)
+          {
+            const Realm::UserEvent unique = 
+              Realm::UserEvent::create_user_event();
+            unique.trigger();
+            extra_unique_events.push_back(LgEvent(unique));
+          }
+          else
+            extra_unique_events.push_back(LgEvent::NO_LG_EVENT);
+        }
+        std::vector<Realm::ProfilingRequestSet> requests(extra_layouts.size());
+        for (unsigned idx = 0; idx < requests.size(); idx++)
+        {
+          if (manager->runtime->profiler != NULL)
+            manager->runtime->profiler->add_inst_request(requests[idx],
+                                  creator_uid, extra_unique_events[idx]);
+#ifdef DEBUG_LEGION
+          allocators.emplace_back(MemoryManager::TaskLocalInstanceAllocator(
+                extra_unique_events[idx]));
+          bases.emplace_back(
+              ProfilingResponseBase(&allocators[idx], creator_uid, false));
+          Realm::ProfilingRequest &req = requests[idx].add_request(
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+        }
+        std::vector<PhysicalInstance> extra_instances(extra_layouts.size());
+        result = RtEvent(range->instance.redistrict(&extra_instances.front(),
+              &extra_layouts.front(), extra_layouts.size(),
+              &requests.front(), finder->second));
+
+        if (prev_index != index)
+        {
+          // Update all the previous ranges with the new backing instance
+          backing_instances.emplace(
+              std::make_pair(extra_instances.front(), result));
+          while (prev_index != index)
+          {
+            Range &prev_range = ranges[prev_index];
+            prev_range.instance = extra_instances.front();
+            prev_index = prev_range.next;
+          }
+          delete extra_layouts.front();
+          // Copy over the names of the newly created instances
+          for (unsigned idx = 0; idx < num_results; idx++)
+            results[idx] = extra_instances[idx+1];
+        }
+        else
+        {
+          // Copy over the names of the newly created instances
+          for (unsigned idx = 0; idx < num_results; idx++)
+            results[idx] = extra_instances[idx];
+        }
+        if (next_index != index)
+        {
+          // Update all the next ranges with the new backing instance
+          backing_instances.emplace(
+              std::make_pair(extra_instances.back(), result));
+          while (next_index != index)
+          {
+            Range &next_range = ranges[next_index];
+            next_range.instance = extra_instances.back();
+            next_index = next_range.prev;
+          }
+          delete extra_layouts.back();
+        }
+      }
+      else
+      {
+        // We're literally redistricting exactly the instance we want
+        // with no space left over at the beginning or the end
+        std::vector<Realm::ProfilingRequestSet> requests(num_results);
+        for (unsigned idx = 0; idx < num_results; idx++)
+        {
+          if (manager->runtime->profiler != NULL)
+          {
+            if (!unique_events[idx].exists())
+            {
+              const Realm::UserEvent unique = 
+                Realm::UserEvent::create_user_event();
+              unique.trigger();
+              unique_events[idx] = LgEvent(unique);
+            }
+            manager->runtime->profiler->add_inst_request(requests[idx],
+                                      creator_uid, unique_events[idx]);
+          }
+#ifdef DEBUG_LEGION
+          allocators.emplace_back(
+              MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
+          bases.emplace_back(
+              ProfilingResponseBase(&allocators[idx], creator_uid, false));
+          Realm::ProfilingRequest &req = requests[idx].add_request(
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+#endif
+        }
+        result = RtEvent(range->instance.redistrict(results, layouts,
+              num_results, &requests.front(), finder->second));
+        // Nothing to update here since we're just going to leave the
+        // existing range in place as though it is allocated and it
+        // will never be deallocated
+      }
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < allocators.size(); idx++)
+      {
+#ifndef NDEBUG
+        const bool success =
+#endif
+          allocators[idx].succeeded();
+        assert(success);
+      }
+#endif
+      // Mark the current range as having escaped
+      range->instance = PhysicalInstance::NO_INST;
+      // Remove the backing instance from the map
+      backing_instances.erase(finder);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ConcretePool::is_released(void) const
+    //--------------------------------------------------------------------------
+    {
+      return released;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::release_pool(UniqueID creator)
+    //--------------------------------------------------------------------------
+    {
+      if (!released)
+      {
+        // Release all the pending frees
+        for (std::map<unsigned,RtEvent>::const_iterator it =
+              pending_frees.begin(); it != pending_frees.end(); it++)
+          deallocate(it->first);
+        pending_frees.clear();
+        // Iterate over all the existing allocations and escape their ranges
+        // and replace their backing stores with the escaped instances
+        std::map<PhysicalInstance,RtEvent> new_backing_instances;
+        for (std::map<PhysicalInstance,unsigned>::const_iterator it =
+              allocated.begin(); it != allocated.end(); it++)
+        {
+          // If this is a zero-sized instance we can skip it as it is not
+          // backed by any memory so there is nothing to escape
+          if (it->second == SENTINEL)
+            continue;
+          LgEvent unique_event;
+          PhysicalInstance backing_instance;
+          const Realm::InstanceLayoutGeneric *layout = it->first.get_layout();
+          const RtEvent ready = escape_range(it->second, 1/*num results*/,
+              &backing_instance, &unique_event, &layout, creator);
+          new_backing_instances[backing_instance] = ready;
+          Range &range = ranges[it->second];
+          range.instance = backing_instance;  
+        }
+        // Then go through and delete the remaining backing stores
+        for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
+              backing_instances.begin(); it != backing_instances.end(); it++)
+        {
+          manager->update_remaining_capacity(
+              it->first.get_layout()->bytes_used);
+          it->first.destroy(it->second);
+        }
+        // Now the only remaining backing instances are the ones we made
+        backing_instances.swap(new_backing_instances);
+        released = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::finalize_pool(RtEvent done)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over all the remaining backing stores delete them
+      // once the done event is triggered
+      for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
+            backing_instances.begin(); it != backing_instances.end(); it++)
+      {
+        manager->update_remaining_capacity(
+            it->first.get_layout()->bytes_used);
+        it->first.destroy(Runtime::merge_events(it->second, done));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned ConcretePool::floor_log2(uint64_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      // Round down to the nearest power of two to figure out which range
+      // to put it in using DeBruijin algorithm to compute integer log2
+      // Taken from Hacker's Delight
+      static const unsigned tab64[64] = {
+          63,  0, 58,  1, 59, 47, 53,  2,
+          60, 39, 48, 27, 54, 33, 42,  3,
+          61, 51, 37, 40, 49, 18, 28, 20,
+          55, 30, 34, 11, 43, 14, 22,  4,
+          62, 57, 46, 52, 38, 26, 32, 41,
+          50, 36, 17, 19, 29, 10, 13, 21,
+          56, 45, 25, 31, 35, 16,  9, 12,
+          44, 24, 15,  8, 23,  7,  6,  5 };
+      uint64_t value = size;
+      value |= value >> 1;
+      value |= value >> 2;
+      value |= value >> 4;
+      value |= value >> 8;
+      value |= value >> 16;
+      value |= value >> 32;
+      return tab64[
+        ((uint64_t)((value - (value >> 1))*0x07EDD5E59A4E28C2)) >> 58];
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::add_to_free_list(unsigned index, Range &range)
+    //--------------------------------------------------------------------------
+    {
+      const size_t size = range.last - range.first;
+      const unsigned log2_size = floor_log2(size); 
+      if (size_based_free_lists.size() <= log2_size)
+        size_based_free_lists.resize(log2_size+1, SENTINEL);
+      // Insert the range into the list such that it maintains a sorted
+      // list from smallest to largest
+      unsigned prev = SENTINEL;
+      unsigned next = size_based_free_lists[log2_size];
+      while (next != SENTINEL)
+      {
+        Range &next_range = ranges[next]; 
+        const size_t next_size = next_range.last - next_range.first;
+        if (size <= next_size)
+        {
+          // We can insert this here and we're done
+          range.prev_free = next_range.prev_free;
+          if (range.prev_free == SENTINEL)
+            size_based_free_lists[log2_size] = index;
+          else
+            ranges[range.prev_free].next_free = index;
+          range.next_free = next;
+          next_range.prev_free = index;
+          return;
+        }
+        // Step to the next entry
+        prev = next;
+        next = next_range.next_free;
+      }
+      // If we get here then we're adding ourselves to the end of the list
+      range.prev_free = prev;
+      range.next_free = SENTINEL;
+      if (prev == SENTINEL)
+        size_based_free_lists[log2_size] = index;
+      else
+        ranges[prev].next_free = index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::remove_from_free_list(unsigned index, Range &range)
+    //--------------------------------------------------------------------------
+    {
+      if (range.prev_free != SENTINEL)
+      {
+        if (range.next_free != SENTINEL)
+        {
+          // Remove an item in the middle of the list
+          ranges[range.prev_free].next_free = range.next_free;
+          ranges[range.next_free].prev_free = range.prev_free;
+        }
+        else // last item in the list can just be removed
+          ranges[range.prev_free].next_free = SENTINEL;
+      }
+      else
+      {
+        // We're the first item in the list
+        const size_t size = range.last - range.first;
+        const unsigned log2_size = floor_log2(size);
+#ifdef DEBUG_LEGION
+        assert(log2_size < size_based_free_lists.size());
+        assert(size_based_free_lists[log2_size] == index);
+#endif
+        if (range.next_free != SENTINEL)
+          ranges[range.next_free].prev_free = SENTINEL;
+        size_based_free_lists[log2_size] = range.next_free;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::grow_hole(unsigned index, Range &range,
+                                 uintptr_t bound, bool before)
+    //--------------------------------------------------------------------------
+    {
+      unsigned old_bin = floor_log2(range.last - range.first);
+      size_t new_size =
+        (before ? range.last : bound) - (before ? bound : range.first);
+      unsigned new_bin = floor_log2(new_size);
+      if (old_bin == new_bin)
+      {
+        if (before)
+          range.first = bound;
+        else
+          range.last = bound;
+        // Bubble ourselves up the free list to keep things sorted
+        while (range.next_free != SENTINEL) 
+        {
+          unsigned next_index = range.next_free;
+          Range &next_range = ranges[next_index]; 
+          size_t next_size = next_range.last - next_range.first;
+          if (new_size <= next_size)
+            break;
+          // Swap places with the next range
+          if (range.prev_free != SENTINEL)
+            ranges[range.prev_free].next_free = next_index;
+          if (next_range.next_free != SENTINEL)
+            ranges[next_range.next_free].prev_free = index;
+          next_range.prev_free = range.prev_free;
+          range.next_free = next_range.next_free;
+          range.prev_free = next_index;
+          next_range.next_free = index;
+          // Make sure to handle the case where we're the first entry
+          // in the free lists
+          if (size_based_free_lists[old_bin] == index)
+            size_based_free_lists[old_bin] = next_index;
+        }
+      }
+      else
+      {
+        remove_from_free_list(index, range);
+        if (before)
+          range.first = bound;
+        else
+          range.last = bound;
+        add_to_free_list(index, range);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcretePool::serialize(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(manager->memory);
+      rez.serialize<bool>(true); // bounded;
+      rez.serialize(remaining_bytes);
+      rez.serialize(max_alignment);
+      if (!backing_instances.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(backing_instances.size() == 1);
+#endif
+        std::map<PhysicalInstance,RtEvent>::const_iterator finder =
+          backing_instances.begin();
+        rez.serialize(finder->first);
+        rez.serialize(finder->second);
+      }
+      else
+      {
+        rez.serialize(PhysicalInstance::NO_INST);
+        rez.serialize(RtEvent::NO_RT_EVENT); 
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    UnboundPool::UnboundPool(MemoryManager *man, UnboundPoolScope s,
+                             TaskTreeCoordinates &coords, size_t max_bytes)
+      : MemoryPool(std::numeric_limits<size_t>::max()), manager(man),
+        max_freed_bytes(max_bytes), freed_bytes(0), scope(s), released(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+      assert(!coords.empty());
+#endif
+      coordinates.swap(coords);
+    }
+
+    //--------------------------------------------------------------------------
+    UnboundPool::~UnboundPool(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    size_t UnboundPool::query_memory_limit(void)
+    //--------------------------------------------------------------------------
+    {
+      return manager->capacity;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t UnboundPool::query_available_memory(void)
+    //--------------------------------------------------------------------------
+    {
+      if (released)
+        return 0;
+      else
+        return manager->query_available_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    PoolBounds UnboundPool::get_bounds(void) const
+    //--------------------------------------------------------------------------
+    {
+      return PoolBounds(scope);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* UnboundPool::allocate_future(UniqueID creator_uid,
+                                                 size_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+      assert(!released);
+#endif
+      // Check to see if we have a local freed instance that is big enough
+      // to use for this instance
+      if (!freed_instances.empty())
+      {
+        size_t previous_size = 0;
+        Realm::InstanceLayoutGeneric *layout = NULL;
+        PhysicalInstance previous = find_local_freed_hole(size, previous_size);
+        while (previous.exists())
+        {
+          // Redistrict the previously freed instance into a future instance
+          if (layout == NULL)
+          {
+            // Create the layout description for this instance
+            const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
+            const std::vector<size_t> sizes(1, size);
+            const int dim_order[1] = { 0 };
+            const Realm::Point<1,coord_t> zero(0);
+            const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
+            const Realm::IndexSpace<1,coord_t> rect_space(
+                                           Realm::Rect<1,coord_t>(zero, zero));
+            layout =
+              Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
+                  rect_space, constraints, dim_order);
+          }
+          LgEvent unique_event;
+          if (manager->runtime->legion_spy_enabled || 
+              (manager->runtime->profiler != NULL))
+          {
+            const Realm::UserEvent unique =
+                Realm::UserEvent::create_user_event();
+            unique.trigger();
+            unique_event = LgEvent(unique);
+          }
+          // Try to do the redistrict the previous instance into a new one
+          MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
+          ProfilingResponseBase base(&allocator, creator_uid, false);
+          Realm::ProfilingRequestSet requests;
+          Realm::ProfilingRequest &req = requests.add_request(
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+              &base, sizeof(base), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+          if (manager->runtime->profiler != NULL)
+            manager->runtime->profiler->add_inst_request(requests, creator_uid,
+                                                         unique_event);
+          PhysicalInstance instance;
+          RtEvent use_event(previous.redistrict(instance, layout, requests));
+          if (allocator.succeeded())
+          {
+            size_t bytes_used = instance.get_layout()->bytes_used;
+#ifdef DEBUG_LEGION
+            assert(bytes_used <= previous_size);
+#endif
+            if (bytes_used < previous_size)
+              manager->update_remaining_capacity(previous_size - bytes_used);
+            delete layout;
+            return new FutureInstance(NULL/*data*/, size, false/*external*/,
+                true/*own allocation*/, unique_event, instance,
+                Processor::NO_PROC, use_event);
+          }
+          else
+            manager->update_remaining_capacity(previous_size);
+          previous = find_local_freed_hole(size, previous_size);
+        }
+        if (layout != NULL)
+          delete layout;
+        // Try to do the allocation normal way
+        FutureInstance *instance = manager->create_future_instance(creator_uid,
+            coordinates, size, NULL/*safe_for_unbounded_pools*/);
+        if (instance != NULL)
+          return instance;
+        // If it doesn't work, free all our freed instances (which are all
+        // smaller than the size or we would have found a hole to use) and
+        // then try again
+        for (std::map<size_t,
+             std::list<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
+             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+                it = fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->first, it->second);
+        freed_instances.clear();
+        freed_bytes = 0;
+      }
+      // This is safe for unbounded pools because we are the unbounded pool :)
+      return manager->create_future_instance(creator_uid, coordinates, size,
+          NULL/*safe_for_unbounded_pools*/);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance UnboundPool::allocate_instance(UniqueID creator_uid,
+        LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
+        RtEvent &use_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!released);
+#endif
+      if (layout->bytes_used == 0)
+      {
+        // Special case for empty instances, we don't need to talk to anyone
+        Realm::InstanceLayoutGeneric *layout = create_layout(0, 1);
+        PhysicalInstance instance;
+        const Realm::ProfilingRequestSet empty_requests;
+        use_event = RtEvent(PhysicalInstance::create_instance(
+              instance, manager->memory, layout->clone(), empty_requests));
+        return instance;
+      }
+      if (!freed_instances.empty())
+      {
+        size_t previous_size = 0;
+        PhysicalInstance previous =
+          find_local_freed_hole(layout->bytes_used, previous_size);
+        while (previous.exists())
+        {
+          // Redistrict the previously freed instance into a new instance
+          MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
+          ProfilingResponseBase base(&allocator, creator_uid, false);
+          Realm::ProfilingRequestSet requests;
+          Realm::ProfilingRequest &req = requests.add_request(
+              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+              &base, sizeof(base), LG_RESOURCE_PRIORITY);
+          req.add_measurement<
+            Realm::ProfilingMeasurements::InstanceAllocResult>();
+          if (manager->runtime->profiler != NULL)
+            manager->runtime->profiler->add_inst_request(requests, creator_uid,
+                                                         unique_event);
+          PhysicalInstance instance;
+          use_event = RtEvent(previous.redistrict(instance, layout, requests));
+          if (allocator.succeeded())
+          {
+            size_t bytes_used = instance.get_layout()->bytes_used;
+#ifdef DEBUG_LEGION
+            assert(bytes_used <= previous_size);
+#endif
+            if (bytes_used < previous_size)
+              manager->update_remaining_capacity(previous_size - bytes_used);
+            return instance;
+          }
+          else
+            manager->update_remaining_capacity(previous_size);
+          previous = find_local_freed_hole(layout->bytes_used, previous_size);
+        }
+        // Try to do the allocation the normal way
+        PhysicalInstance instance = manager->create_task_local_instance(
+            creator_uid, coordinates, unique_event, layout, use_event, 
+            NULL/*safe_for_unbound_pools*/); 
+        if (instance.exists())
+          return instance;
+        // If it doesn't work, free all our freed instances (which are all
+        // smaller than the size or we would have found a hole to use) and
+        // then try again
+        for (std::map<size_t,
+             std::list<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
+             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+                it = fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->first, it->second);
+        freed_instances.clear();
+        freed_bytes = 0;
+      }
+      // We are the unbound pool so it is always safe for us
+      return manager->create_task_local_instance(creator_uid, coordinates,
+          unique_event, layout, use_event, NULL/*safe_for_unbound_pools*/);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance UnboundPool::find_local_freed_hole(size_t size,
+                                                        size_t &previous_size)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<size_t,std::list<std::pair<PhysicalInstance,RtEvent> > >
+            ::iterator sit = freed_instances.lower_bound(size);
+            sit != freed_instances.end(); sit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!sit->second.empty());
+        assert(sit->first <= freed_bytes);
+#endif
+        for (std::list<std::pair<PhysicalInstance,RtEvent> >::iterator it =
+              sit->second.begin(); it != sit->second.end(); it++)
+        {
+          // If the event hasn't triggered then skip it
+          if (!it->second.has_triggered())
+            continue;
+          PhysicalInstance result = it->first;
+          freed_bytes -= sit->first;
+          previous_size = sit->first;
+          sit->second.erase(it);
+          if (sit->second.empty())
+            freed_instances.erase(sit);
+          return result;
+        }
+      }
+      return PhysicalInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    bool UnboundPool::contains_instance(PhysicalInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+      // We don't track any instances we made
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent UnboundPool::escape_task_local_instance(PhysicalInstance instance,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
+          LgEvent *unique_events, const Realm::InstanceLayoutGeneric **layouts,
+          UniqueID creator_uid)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::free_instance(PhysicalInstance instance,
+                                    RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!released && (max_freed_bytes > 0))
+      {
+        // Add it to the freed instances 
+        const size_t size = instance.get_layout()->bytes_used;
+        // Special case for empty instances
+        if (size == 0)
+        {
+          instance.destroy(precondition);
+          return;
+        }
+        freed_instances[size].emplace_back(
+            std::make_pair(instance, precondition));
+        freed_bytes += size;
+        if (max_freed_bytes < freed_bytes)
+        {
+          // Start releasing the smallest instances to reduce fragmentation
+          // until we're back under the limit of bytes we can buffer
+          while (!freed_instances.empty())
+          {
+            std::map<size_t,std::list<
+              std::pair<PhysicalInstance,RtEvent> > >::iterator it =
+                freed_instances.begin();
+            while (!it->second.empty())
+            {
+              manager->free_task_local_instance(
+                  it->second.back().first, it->second.back().second);
+              it->second.pop_back();
+              freed_bytes -= it->first;
+              if (freed_bytes <= max_freed_bytes)
+              {
+                if (it->second.empty())
+                  freed_instances.erase(it);
+                return;
+              }
+            }
+            freed_instances.erase(it);
+          }
+        }
+      }
+      else // Release it right away
+        manager->free_task_local_instance(instance, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    bool UnboundPool::is_released(void) const
+    //--------------------------------------------------------------------------
+    {
+      return released;
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::release_pool(UniqueID creator)
+    //--------------------------------------------------------------------------
+    {
+      if (!released)
+      {
+        for (std::map<size_t,std::list<
+              std::pair<PhysicalInstance,RtEvent> > >::const_iterator fit =
+              freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
+                it = fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->first, it->second);
+        manager->release_unbound_pool();
+        freed_instances.clear();
+        freed_bytes = 0;
+        released = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::finalize_pool(RtEvent done)
+    //--------------------------------------------------------------------------
+    {
+      release_pool(0);
+    }
+
+    //--------------------------------------------------------------------------
+    void UnboundPool::serialize(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      rez.serialize(manager->memory);
+      rez.serialize<bool>(false); // bounded;
+      rez.serialize(max_freed_bytes);
+      rez.serialize(scope);
+      coordinates.serialize(rez);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Memory Manager 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
-      : memory(m), owner_space(m.address_space()), 
+      : memory(m), owner_space(m.address_space()),
         is_owner(is_owner_memory(m, rt->address_space)),
         capacity(m.capacity()), remaining_capacity(capacity), runtime(rt),
-        eager_pool_instance(PhysicalInstance::NO_INST), eager_pool(0),
-        eager_allocator(NULL), eager_remaining_capacity(0),
-        next_allocation_id(0)
+        outstanding_task_local_allocations(0),
+        outstanding_unbounded_allocations(0),
+        unbounded_pool_scope(LEGION_BOUNDED_POOL), collective_lamport_clock(0),
+        ready_collective_tasks(0), outstanding_collective_tasks(0)
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
@@ -8409,59 +10163,12 @@ namespace Legion {
         local_gpu = finder.first();
       }
 #endif
-      // We do not make eager pool instances if we are not the owner or if the
-      // memory has capacity zero (e.g. disk memory) where the creation of any 
-      // instances that are not external instances are disallowed
-      if (!is_owner || (capacity == 0)) 
-        return;
-
-      // Override the eager allocation percentage if we were
-      // requested to do so for a particular memory kind.
-      auto alloc_percentage = runtime->eager_alloc_percentage;
-      auto override = runtime->eager_alloc_percentage_overrides.find(memory.kind());
-      if (override != runtime->eager_alloc_percentage_overrides.end()) {
-        alloc_percentage = override->second;
-      }
-
-      // Allocate eager pool
-      const coord_t eager_pool_size = capacity * alloc_percentage / 100;
-      log_eager.info("create an eager pool of size %lld on memory " IDFMT,
-                     eager_pool_size, memory.id);
-      const DomainT<1,coord_t> bounds(Rect<1>(0,Point<1>(eager_pool_size - 1)));
-      const std::vector<Realm::FieldID> field_ids(1,0/*fid*/);
-      const std::vector<size_t> field_sizes(1,sizeof(char));
-      Realm::InstanceLayoutConstraints constraints(field_ids, field_sizes, 
-                                                   0/*blocking*/);
-      int dim_order[] = {0};
-      Realm::InstanceLayoutGeneric *layout =
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds,
-                                                             constraints,
-                                                             dim_order);
-      Realm::ProfilingRequestSet no_requests;
-      Realm::RegionInstance::create_instance(eager_pool_instance,
-                                             memory,
-                                             layout,
-                                             no_requests);
-
-      if (eager_pool_size > 0)
-      {
-        Realm::AffineAccessor<char,1,coord_t> accessor(eager_pool_instance,
-                                                       0/*field id*/);
-        eager_pool = reinterpret_cast<uintptr_t>(accessor.ptr(0));
-
-        eager_allocator = new EagerAllocator();
-        eager_allocator->add_range(0, eager_pool_size - 1);
-        eager_remaining_capacity = eager_pool_size;
-      }
     }
 
     //--------------------------------------------------------------------------
     MemoryManager::~MemoryManager(void)
     //--------------------------------------------------------------------------
     {
-      if (eager_pool_instance.exists())
-        eager_pool_instance.destroy();
-      delete eager_allocator;
     }
 
     //--------------------------------------------------------------------------
@@ -8674,11 +10381,13 @@ namespace Legion {
     bool MemoryManager::create_physical_instance(
                                 const LayoutConstraintSet &constraints,
                                 const std::vector<LogicalRegion> &regions,
+                                const TaskTreeCoordinates &coordinates,
                                 MappingInstance &result,
                                 Processor processor, bool acquire, 
                                 GCPriority priority, bool tight_bounds,
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
+                                RtEvent *safe_for_unbounded_pools,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -8697,6 +10406,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          coordinates.serialize(rez);
           constraints.serialize(rez);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -8704,6 +10414,7 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&success);
@@ -8729,7 +10440,11 @@ namespace Legion {
         InstanceBuilder builder(regions, constraints, runtime, this,creator_id);
         builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if ((safe_for_unbounded_pools != NULL) && 
+            safe_for_unbounded_pools->exists())
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the result
@@ -8754,11 +10469,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MemoryManager::create_physical_instance(LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result,
                                      Processor processor, bool acquire, 
                                      GCPriority priority, bool tight_bounds,
                                      LayoutConstraintKind *unsat_kind,
                                      unsigned *unsat_index, size_t *footprint, 
+                                     RtEvent *safe_for_unbounded_pools,
                                      UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -8777,6 +10494,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          coordinates.serialize(rez);
           rez.serialize(constraints->layout_id);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -8784,6 +10502,7 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&success);
@@ -8809,7 +10528,11 @@ namespace Legion {
         InstanceBuilder builder(regions,*constraints, runtime, this,creator_id);
         builder.initialize(runtime->forest);
         // Acquire allocation privilege before doing anything
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if ((safe_for_unbounded_pools != NULL) && 
+            safe_for_unbounded_pools->exists())
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Try to make the instance
@@ -8835,12 +10558,14 @@ namespace Legion {
     bool MemoryManager::find_or_create_physical_instance(
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
+                                  const TaskTreeCoordinates &coordinates,
                                   MappingInstance &result, bool &created, 
                                   Processor processor,
                                   bool acquire, GCPriority priority,
                                   bool tight_region_bounds, 
                                   LayoutConstraintKind *unsat_kind,
                                   unsigned *unsat_index, size_t *footprint, 
+                                  RtEvent *safe_for_unbounded_pools,
                                   UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -8865,6 +10590,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          coordinates.serialize(rez);
           constraints.serialize(rez);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -8872,6 +10598,7 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&remote_created);
@@ -8900,7 +10627,11 @@ namespace Legion {
         builder.initialize(runtime->forest); 
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if ((safe_for_unbounded_pools != NULL) &&
+            safe_for_unbounded_pools->exists())
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -8937,12 +10668,14 @@ namespace Legion {
     bool MemoryManager::find_or_create_physical_instance(
                                 LayoutConstraints *constraints, 
                                 const std::vector<LogicalRegion> &regions,
+                                const TaskTreeCoordinates &coordinates,
                                 MappingInstance &result, bool &created,
                                 Processor processor,
                                 bool acquire, GCPriority priority, 
                                 bool tight_region_bounds, 
                                 LayoutConstraintKind *unsat_kind,
                                 unsigned *unsat_index, size_t *footprint, 
+                                RtEvent *safe_for_unbounded_pools,
                                 UniqueID creator_id, bool remote)
     //--------------------------------------------------------------------------
     {
@@ -8967,6 +10700,7 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
+          coordinates.serialize(rez);
           rez.serialize(constraints->layout_id);
           rez.serialize(processor);
           rez.serialize(priority);
@@ -8974,6 +10708,7 @@ namespace Legion {
           rez.serialize(unsat_kind);
           rez.serialize(unsat_index);
           rez.serialize(footprint);
+          rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
           rez.serialize(&remote_manager);
           rez.serialize(&remote_created);
@@ -9002,7 +10737,11 @@ namespace Legion {
         builder.initialize(runtime->forest);
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
-        const RtEvent wait_on = acquire_allocation_privilege();
+        const RtEvent wait_on =
+          acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
+        if ((safe_for_unbounded_pools != NULL) &&
+            safe_for_unbounded_pools->exists())
+          return false;
         if (wait_on.exists())
           wait_on.wait();
         // Since this is find or acquire, first see if we can find
@@ -9033,6 +10772,233 @@ namespace Legion {
         // Release our allocation privilege after doing the record
         release_allocation_privilege();
         return success;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::redistrict_physical_instance(MappingInstance &instance,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire,
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+#ifdef DEBUG_LEGION
+      assert(manager->memory_manager == this);
+#endif
+      if (!is_owner)
+      {
+        // Not the owner, send a meessage to the owner to request the redistrict
+        Serializer rez;
+        std::atomic<bool> success(false);
+        std::atomic<PhysicalManager*> remote_manager(NULL);
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(REDISTRICT_INSTANCE_CONSTRAINTS);
+          rez.serialize(ready_event);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          // No need to pack a reference, held by the MapppingInstance
+          rez.serialize(manager->did);
+          constraints.serialize(rez);
+          rez.serialize(processor);
+          rez.serialize(priority);
+          rez.serialize<bool>(tight_bounds);
+          rez.serialize(creator_id);
+          rez.serialize(&remote_manager);
+          rez.serialize(&success);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          instance = MappingInstance(manager);
+          manager->unpack_global_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
+          else
+            return true;
+        }
+        return success.load();
+      }
+      else
+      {
+        // Try to do the collection
+        // We don't need to get the allocation privileges here because 
+        // we're redistricting an existing instance
+        RtEvent collected;
+        PhysicalInstance hole = PhysicalInstance::NO_INST;
+        if (manager->collect(collected, &hole) && hole.exists())
+        {
+          // Create the builder and initialize it before getting
+          // the allocation privilege to avoid deadlock scenario
+          InstanceBuilder builder(regions,constraints,runtime,this,creator_id);
+          builder.initialize(runtime->forest);
+          size_t footprint = 0;
+          PhysicalManager *manager = builder.create_physical_instance(
+              runtime->forest, NULL/*unsat kind*/, NULL/*unset index*/,
+              &footprint, collected, hole);
+          if (manager != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(footprint <= manager->instance_footprint);
+#endif
+            if (runtime->legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
+            instance = MappingInstance(manager);
+            record_created_instance(manager, acquire, priority);
+            // Update the footprint if necessary
+            if (footprint < manager->instance_footprint)
+            {
+              const size_t diff = manager->instance_footprint - footprint;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const size_t previous =
+#endif
+#endif
+                remaining_capacity.fetch_add(diff);
+#ifdef DEBUG_LEGION
+              assert((previous + diff) <= capacity);
+#endif
+            }
+            return true;
+          }
+          else
+          {
+            // The previous instance was deleted but we didn't reallocate
+            // so we freed up all the space for it
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const size_t previous =
+#endif
+#endif
+              remaining_capacity.fetch_add(manager->instance_footprint);
+#ifdef DEBUG_LEGION
+            assert((previous + manager->instance_footprint) <= capacity);
+#endif
+          }
+        }
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::redistrict_physical_instance(MappingInstance &instance,
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire,
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+#ifdef DEBUG_LEGION
+      assert(manager->memory_manager == this);
+#endif
+      if (!is_owner)
+      {
+        // Not the owner, send a meessage to the owner to request the redistrict
+        Serializer rez;
+        std::atomic<bool> success(false);
+        std::atomic<PhysicalManager*> remote_manager(NULL);
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(REDISTRICT_INSTANCE_LAYOUT);
+          rez.serialize(ready_event);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          // No need to pack a reference, held by the MapppingInstance
+          rez.serialize(manager->did);
+          rez.serialize(constraints->layout_id);
+          rez.serialize(processor);
+          rez.serialize(priority);
+          rez.serialize<bool>(tight_bounds);
+          rez.serialize(creator_id);
+          rez.serialize(&remote_manager);
+          rez.serialize(&success);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        PhysicalManager *manager = remote_manager.load();
+        if (manager != NULL)
+        {
+          instance = MappingInstance(manager);
+          manager->unpack_global_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
+          else
+            return true;
+        }
+        return success.load();
+      }
+      else
+      {
+        // Try to do the collection
+        // We don't need to get the allocation privileges here because 
+        // we're redistricting an existing instance
+        RtEvent collected;
+        PhysicalInstance hole = PhysicalInstance::NO_INST;
+        PhysicalManager *manager = instance.impl->as_physical_manager();
+        if (manager->collect(collected, &hole) && hole.exists())
+        {
+          // Create the builder and initialize it before getting
+          // the allocation privilege to avoid deadlock scenario
+          InstanceBuilder builder(regions,*constraints,runtime,this,creator_id);
+          builder.initialize(runtime->forest);
+          size_t footprint = 0;
+          PhysicalManager *manager = builder.create_physical_instance(
+              runtime->forest, NULL/*unsat kind*/, NULL/*unset index*/,
+              &footprint, collected, hole);
+          if (manager != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(footprint <= manager->instance_footprint);
+#endif
+            if (runtime->legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
+            instance = MappingInstance(manager);
+            record_created_instance(manager, acquire, priority);
+            // Update the footprint if necessary
+            if (footprint < manager->instance_footprint)
+            {
+              const size_t diff = manager->instance_footprint - footprint;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const size_t previous =
+#endif
+#endif
+                remaining_capacity.fetch_add(diff);
+#ifdef DEBUG_LEGION
+              assert((previous + diff) <= capacity);
+#endif
+            }
+            return true;
+          }
+          else
+          {
+            // The previous instance was deleted but we didn't reallocate
+            // so we freed up all the space for it
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+            const size_t previous =
+#endif
+#endif
+              remaining_capacity.fetch_add(manager->instance_footprint);
+#ifdef DEBUG_LEGION
+            assert((previous + manager->instance_footprint) <= capacity);
+#endif
+          }
+        }
+        return false;
       }
     }
 
@@ -9274,6 +11240,15 @@ namespace Legion {
             {
               it->first->add_base_gc_ref(MEMORY_MANAGER_REF);
               to_delete.push_back(it->first);
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              const size_t previous =
+#endif
+#endif
+                remaining_capacity.fetch_add(it->first->instance_footprint);
+#ifdef DEBUG_LEGION
+              assert((previous + it->first->instance_footprint) <= capacity);
+#endif
             }
             else if (already_collected)
               remove_collectable(it->second, it->first);
@@ -9329,6 +11304,8 @@ namespace Legion {
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             Processor processor;
@@ -9343,6 +11320,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            RtEvent *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -9353,13 +11332,17 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            RtEvent safe_for_unbounded_pools;
             bool success = create_physical_instance(constraints, regions, 
-                                 result, processor, false/*acquire*/,
+                                 coordinates, result,processor,false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
+                                 (remote_safe_for_unbounded_pools == NULL) ? 
+                                 NULL : &safe_for_unbounded_pools,
                                  creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) || 
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               // Send back the response starting with the instance
               Serializer rez;
@@ -9378,11 +11361,17 @@ namespace Legion {
                   rez.serialize(remote_success);
                 }
                 rez.serialize(remote_kind);
-                rez.serialize(local_kind);
+                if (remote_kind != NULL)
+                  rez.serialize(local_kind);
                 rez.serialize(remote_index);
-                rez.serialize(local_index);
+                if (remote_index != NULL)
+                  rez.serialize(local_index);
                 rez.serialize(remote_footprint);
-                rez.serialize(local_footprint);
+                if (remote_footprint != NULL)
+                  rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                if (remote_safe_for_unbounded_pools != NULL)
+                  rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9392,6 +11381,8 @@ namespace Legion {
           }
         case CREATE_INSTANCE_LAYOUT:
           {
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             Processor processor;
@@ -9406,6 +11397,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            RtEvent *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -9418,13 +11411,17 @@ namespace Legion {
             size_t local_footprint;
             LayoutConstraintKind local_kind;
             unsigned local_index;
+            RtEvent safe_for_unbounded_pools;
             bool success = create_physical_instance(constraints, regions, 
-                                 result, processor, false/*acquire*/,
+                                 coordinates, result,processor,false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
+                                 (remote_safe_for_unbounded_pools == NULL) ?
+                                 NULL : &safe_for_unbounded_pools,
                                  creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               Serializer rez;
               {
@@ -9442,11 +11439,17 @@ namespace Legion {
                   rez.serialize(remote_success);
                 }
                 rez.serialize(remote_kind);
-                rez.serialize(local_kind);
+                if (remote_kind != NULL)
+                  rez.serialize(local_kind);
                 rez.serialize(remote_index);
-                rez.serialize(local_index);
+                if (remote_index != NULL)
+                  rez.serialize(local_index);
                 rez.serialize(remote_footprint);
-                rez.serialize(local_footprint);
+                if (remote_footprint != NULL)
+                  rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                if (remote_safe_for_unbounded_pools != NULL)
+                  rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9456,6 +11459,8 @@ namespace Legion {
           }
         case FIND_OR_CREATE_CONSTRAINTS:
           {
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintSet constraints;
             constraints.deserialize(derez);
             Processor processor;
@@ -9470,6 +11475,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            RtEvent *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -9481,13 +11488,17 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool created;
+            RtEvent safe_for_unbounded_pools;
             bool success = find_or_create_physical_instance(constraints, 
-                                regions, result, created, processor,
+                                regions, coordinates, result, created,processor,
                                 false/*acquire*/, priority, tight_bounds,
-                                &local_kind, &local_index,
-                                &local_footprint, creator_id, true/*remote*/);
+                                &local_kind, &local_index, &local_footprint,
+                                (remote_safe_for_unbounded_pools == NULL) ?
+                                NULL : &safe_for_unbounded_pools,
+                                creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               Serializer rez;
               {
@@ -9506,11 +11517,17 @@ namespace Legion {
                   rez.serialize<bool>(created);
                 }
                 rez.serialize(remote_kind);
-                rez.serialize(local_kind);
+                if (remote_kind != NULL)
+                  rez.serialize(local_kind);
                 rez.serialize(remote_index);
-                rez.serialize(local_index);
+                if (remote_index != NULL)
+                  rez.serialize(local_index);
                 rez.serialize(remote_footprint);
-                rez.serialize(local_footprint);
+                if (remote_footprint != NULL)
+                  rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                if (remote_safe_for_unbounded_pools != NULL)
+                  rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9520,6 +11537,8 @@ namespace Legion {
           }
         case FIND_OR_CREATE_LAYOUT:
           {
+            TaskTreeCoordinates coordinates;
+            coordinates.deserialize(derez);
             LayoutConstraintID layout_id;
             derez.deserialize(layout_id);
             Processor processor;
@@ -9534,6 +11553,8 @@ namespace Legion {
             derez.deserialize(remote_index);
             size_t *remote_footprint; // warning: remote pointer
             derez.deserialize(remote_footprint);
+            RtEvent *remote_safe_for_unbounded_pools;
+            derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
             std::atomic<PhysicalManager*> *remote_target;
@@ -9547,13 +11568,17 @@ namespace Legion {
             LayoutConstraintKind local_kind;
             unsigned local_index;
             bool created;
+            RtEvent safe_for_unbounded_pools;
             bool success = find_or_create_physical_instance(constraints, 
-                                 regions, result, created, processor,
+                                 regions, coordinates, result,created,processor,
                                  false/*acquire*/, priority, tight_bounds,
-                                 &local_kind, &local_index,
-                                 &local_footprint, creator_id, true/*remote*/);
+                                 &local_kind, &local_index, &local_footprint,
+                                 (remote_safe_for_unbounded_pools == NULL) ?
+                                 NULL : &safe_for_unbounded_pools,
+                                 creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
-                (remote_kind != NULL) || (remote_index != NULL))
+                (remote_kind != NULL) || (remote_index != NULL) ||
+                (remote_safe_for_unbounded_pools != NULL))
             {
               Serializer rez;
               {
@@ -9572,15 +11597,129 @@ namespace Legion {
                   rez.serialize<bool>(created);
                 }
                 rez.serialize(remote_kind);
-                rez.serialize(local_kind);
+                if (remote_kind != NULL)
+                  rez.serialize(local_kind);
                 rez.serialize(remote_index);
-                rez.serialize(local_index);
+                if (remote_index != NULL)
+                  rez.serialize(local_index);
                 rez.serialize(remote_footprint);
-                rez.serialize(local_footprint);
+                if (remote_footprint != NULL)
+                  rez.serialize(local_footprint);
+                rez.serialize(remote_safe_for_unbounded_pools);
+                if (remote_safe_for_unbounded_pools != NULL)
+                  rez.serialize(safe_for_unbounded_pools);
               }
               runtime->send_instance_response(source, rez);
             }
             else // we failed so just trigger the response
+              Runtime::trigger_event(to_trigger);
+            break;
+          }
+        case REDISTRICT_INSTANCE_CONSTRAINTS:
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_instance_manager(did, ready);
+            LayoutConstraintSet constraints;
+            constraints.deserialize(derez);
+            Processor processor;
+            derez.deserialize(processor);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool tight_region_bounds;
+            derez.deserialize<bool>(tight_region_bounds);
+            UniqueID creator_id;
+            derez.deserialize(creator_id);
+            std::atomic<PhysicalManager*> *remote_target;
+            derez.deserialize(remote_target);
+            std::atomic<bool> *remote_success;
+            derez.deserialize(remote_success);
+            ready.wait();
+            MappingInstance result(manager);
+            bool success = redistrict_physical_instance(result, constraints,
+                regions, processor, false/*acquire*/, priority,
+                tight_region_bounds, creator_id);
+            if (success)
+            {
+              // Send back the response starting with the instance
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(kind);
+                rez.serialize<bool>(true);
+                InstanceManager *manager = result.impl;
+                manager->pack_global_ref();
+                rez.serialize(manager->did);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                // No things for us to pass back here
+                rez.serialize<LayoutConstraintKind*>(NULL);
+                rez.serialize<unsigned*>(NULL);
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<RtEvent*>(NULL);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we can just trigger the done event since we failed
+              Runtime::trigger_event(to_trigger);
+            break;
+          }
+        case REDISTRICT_INSTANCE_LAYOUT:
+          {
+            DistributedID did;
+            derez.deserialize(did);
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_instance_manager(did, ready);
+            LayoutConstraintID layout_id;
+            derez.deserialize(layout_id);
+            Processor processor;
+            derez.deserialize(processor);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool tight_region_bounds;
+            derez.deserialize<bool>(tight_region_bounds);
+            UniqueID creator_id;
+            derez.deserialize(creator_id);
+            std::atomic<PhysicalManager*> *remote_target;
+            derez.deserialize(remote_target);
+            std::atomic<bool> *remote_success;
+            derez.deserialize(remote_success);
+            LayoutConstraints *constraints = 
+              runtime->find_layout_constraints(layout_id);
+            ready.wait();
+            MappingInstance result(manager);
+            bool success = redistrict_physical_instance(result, constraints,
+                regions, processor, false/*acquire*/, priority,
+                tight_region_bounds, creator_id);
+            if (success)
+            {
+              // Send back the response starting with the instance
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(kind);
+                rez.serialize<bool>(true);
+                InstanceManager *manager = result.impl;
+                manager->pack_global_ref();
+                rez.serialize(manager->did);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                // No things for us to pass back here
+                rez.serialize<LayoutConstraintKind*>(NULL);
+                rez.serialize<unsigned*>(NULL);
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<RtEvent*>(NULL);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we can just trigger the done event since we failed
               Runtime::trigger_event(to_trigger);
             break;
           }
@@ -9610,11 +11749,9 @@ namespace Legion {
                 rez.serialize(remote_target);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
-                rez.serialize(LEGION_SPECIALIZED_CONSTRAINT);
                 rez.serialize<unsigned*>(NULL);
-                rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
-                rez.serialize<size_t>(0);
+                rez.serialize<RtEvent*>(NULL);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9650,11 +11787,9 @@ namespace Legion {
                 rez.serialize(remote_target);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
-                rez.serialize(LEGION_SPECIALIZED_CONSTRAINT);
                 rez.serialize<unsigned*>(NULL);
-                rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
-                rez.serialize<size_t>(0);
+                rez.serialize<RtEvent*>(NULL);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9692,11 +11827,9 @@ namespace Legion {
                 }
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
-                rez.serialize(LEGION_SPECIALIZED_CONSTRAINT);
                 rez.serialize<unsigned*>(NULL);
-                rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
-                rez.serialize<size_t>(0);
+                rez.serialize<RtEvent*>(NULL);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9736,11 +11869,9 @@ namespace Legion {
                 }
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(NULL);
-                rez.serialize(LEGION_SPECIALIZED_CONSTRAINT);
                 rez.serialize<unsigned*>(NULL);
-                rez.serialize<unsigned>(0);
                 rez.serialize<size_t*>(NULL);
-                rez.serialize<size_t>(0);
+                rez.serialize<RtEvent*>(NULL);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -9786,7 +11917,9 @@ namespace Legion {
           target->store(manager);
         }
         if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
-            (kind == CREATE_INSTANCE_LAYOUT))
+            (kind == CREATE_INSTANCE_LAYOUT) ||
+            (kind == REDISTRICT_INSTANCE_CONSTRAINTS) ||
+            (kind == REDISTRICT_INSTANCE_LAYOUT))
         {
           std::atomic<bool> *remote_success;
           derez.deserialize(remote_success);
@@ -9831,23 +11964,21 @@ namespace Legion {
       // Unpack the constraint responses
       LayoutConstraintKind *local_kind;
       derez.deserialize(local_kind);
-      LayoutConstraintKind constraint_kind;
-      derez.deserialize(constraint_kind);
       if (local_kind != NULL)
-        *local_kind = constraint_kind;
+        derez.deserialize(*local_kind);
       unsigned *local_index;
       derez.deserialize(local_index);
-      unsigned index;
-      derez.deserialize(index);
       if (local_index != NULL)
-        *local_index = index;
+        derez.deserialize(*local_index);
       // Unpack the footprint and asign it if necessary
       size_t *local_footprint;
       derez.deserialize(local_footprint);
-      size_t footprint;
-      derez.deserialize(footprint);
       if (local_footprint != NULL)
-        *local_footprint = footprint;
+        derez.deserialize(*local_footprint);
+      RtEvent *local_safe_for_unbounded_pools;
+      derez.deserialize(local_safe_for_unbounded_pools);
+      if (local_safe_for_unbounded_pools != NULL)
+        derez.deserialize(*local_safe_for_unbounded_pools);
       // Trigger that we are done
       if (!preconditions.empty())
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
@@ -10213,9 +12344,9 @@ namespace Legion {
       {
         // When Legion Spy is enabled, we want the ready event to be unique.
         // So we create a fresh event and trigger it with the producer event
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
 
       PhysicalManager *manager =
@@ -10244,19 +12375,150 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::acquire_allocation_privilege(void)
+    RtEvent MemoryManager::acquire_allocation_privilege(
+      const TaskTreeCoordinates &coordinates, RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner); // should only happen on the owner
 #endif
-      const RtUserEvent our_event = Runtime::create_rt_user_event();
       AutoLock m_lock(manager_lock);
-      // Wait for the previous allocation if there is one
-      const RtEvent wait_on = pending_allocation_attempts.empty() ? 
-        RtEvent::NO_RT_EVENT : pending_allocation_attempts.back();
-      pending_allocation_attempts.push_back(our_event);
-      return wait_on;
+      if (!pending_allocation_attempts.empty())
+      {
+        // See if we're prepending or appending
+        // We prepend if we're bypassing an unbounded pool allocation
+        // which only occurs for strict and index task scopes
+        if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) &&
+            (unbounded_coordinates == coordinates))
+        {
+          // See if the front allocation has the same coordinates, if it
+          // does then we insert ourselves after it, if not then we insert
+          // ourselves in front of it
+          std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (*front.second == unbounded_coordinates)
+          {
+            std::pair<RtUserEvent,const TaskTreeCoordinates*> current = front;
+            pending_allocation_attempts.pop_front();
+            const RtUserEvent wait_on = Runtime::create_rt_user_event();
+            pending_allocation_attempts.emplace_front(
+                std::make_pair(wait_on, &coordinates));
+            pending_allocation_attempts.emplace_front(current);
+            return wait_on;
+          }
+          else
+          {
+            // We're the first allocation bypassing, so just add
+            // ourselves to the front of the list
+            pending_allocation_attempts.emplace_front(std::make_pair(
+                  RtUserEvent::NO_RT_USER_EVENT, &coordinates));
+            return RtEvent::NO_RT_EVENT;
+          }
+        }
+        else if ((unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL) &&
+            unbounded_coordinates.same_index_space(coordinates))
+        {
+          // See if the front allocation has the same index space task 
+          // coordinates, if it does then we insert ourselves after it,
+          // if not then we insert ourselves in front of it
+          std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (unbounded_coordinates.same_index_space(*front.second))
+          {
+            std::pair<RtUserEvent,const TaskTreeCoordinates*> current = front;
+            pending_allocation_attempts.pop_front();
+            const RtUserEvent wait_on = Runtime::create_rt_user_event();
+            pending_allocation_attempts.emplace_front(
+                std::make_pair(wait_on, &coordinates));
+            pending_allocation_attempts.emplace_front(current);
+            return wait_on;
+          }
+          else
+          {
+            // We're the first allocation bypassing, so just add
+            // ourselves to the front of the list
+            pending_allocation_attempts.emplace_front(std::make_pair(
+                  RtUserEvent::NO_RT_USER_EVENT, &coordinates));
+            return RtEvent::NO_RT_EVENT;
+          }
+        }
+        else
+        {
+          // Check to see if this is safe for unbounded pools
+          if (safe_for_unbounded_pools != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(!safe_for_unbounded_pools->exists());
+#endif
+            // If there is an unbounded pool that we're going to block
+            // on that is potentially unsafe
+            if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) ||
+                (unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL))
+            {
+              if (!unbounded_transition_event.exists())
+                unbounded_transition_event = Runtime::create_rt_user_event();
+              *safe_for_unbounded_pools = unbounded_transition_event;
+              return RtEvent::NO_RT_EVENT;
+            }
+          }
+          // Appending like normal to a list of pending allocations
+          const RtUserEvent wait_on = Runtime::create_rt_user_event();
+          pending_allocation_attempts.emplace_back(
+              std::make_pair(wait_on, &coordinates));     
+          return wait_on;
+        }
+      }
+      else
+      {
+        // We have no current pending allocations, see if we have an
+        // unbounded pool that we need to bypass
+        if ((unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL) &&
+            (unbounded_coordinates != coordinates))
+        {
+          // Cannot bypass with different coordinates
+          if (safe_for_unbounded_pools != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(!safe_for_unbounded_pools->exists());
+#endif
+            if (!unbounded_transition_event.exists())
+              unbounded_transition_event = Runtime::create_rt_user_event();
+            *safe_for_unbounded_pools = unbounded_transition_event;
+            return RtEvent::NO_RT_EVENT;
+          }
+          const RtUserEvent wait_on = Runtime::create_rt_user_event();
+          pending_allocation_attempts.emplace_back(
+              std::make_pair(wait_on, &coordinates));     
+          return wait_on;
+        }
+        else if ((unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL) &&
+            !unbounded_coordinates.same_index_space(coordinates))
+        {
+          // Cannot bypass without being in the same index space task
+          if (safe_for_unbounded_pools != NULL)
+          {
+#ifdef DEBUG_LEGION
+            assert(!safe_for_unbounded_pools->exists());
+#endif
+            if (!unbounded_transition_event.exists())
+              unbounded_transition_event = Runtime::create_rt_user_event();
+            *safe_for_unbounded_pools = unbounded_transition_event;
+            return RtEvent::NO_RT_EVENT;
+          }
+          const RtUserEvent wait_on = Runtime::create_rt_user_event();
+          pending_allocation_attempts.emplace_back(
+              std::make_pair(wait_on, &coordinates));     
+          return wait_on;
+        }
+        else
+        {
+          // No unbounded pool or a permissive one so we can do our
+          // allocation immediately, put in our guard allocation
+          pending_allocation_attempts.emplace_back(std::make_pair(
+                RtUserEvent::NO_RT_USER_EVENT, &coordinates));
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10272,21 +12534,65 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!pending_allocation_attempts.empty());
 #endif
-        to_trigger = pending_allocation_attempts.front();
+        // Pop the current pending allocation off the list
         pending_allocation_attempts.pop_front();
+        if (!pending_allocation_attempts.empty())
+        {
+          const std::pair<RtUserEvent,const TaskTreeCoordinates*> &next =
+            pending_allocation_attempts.front();
+#ifdef DEBUG_LEGION
+          assert(next.first.exists());
+#endif
+          // If we're in an unbounded pool, see if the next allocation
+          // can also bypass the current one, if we're not in one of those
+          // scenarios then we can always start the next allocation
+          switch (unbounded_pool_scope)
+          {
+            case LEGION_BOUNDED_POOL:
+            case LEGION_PERMISSIVE_UNBOUNDED_POOL:
+              {
+                to_trigger = next.first;
+                break;
+              }
+            case LEGION_STRICT_UNBOUNDED_POOL:
+              {
+                if (*next.second == unbounded_coordinates)
+                  to_trigger = next.first;
+                break;
+              }
+            case LEGION_INDEX_TASK_UNBOUNDED_POOL:
+              {
+                if (unbounded_coordinates.same_index_space(*next.second))
+                  to_trigger = next.first;
+                break;
+              }
+            default:
+              assert(false);
+          }
+        }
+        else if (unbounded_transition_event.exists() && 
+            (outstanding_task_local_allocations == 0))
+        {
+          // Notify the unbounded pools that they can try again since
+          // there are no more outstanding
+          to_trigger = unbounded_transition_event;
+          unbounded_transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
       }
-      Runtime::trigger_event(to_trigger);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
     MemoryManager::GarbageCollector::GarbageCollector(LocalLock &c_lock,
                                 LocalLock &m_lock, AddressSpaceID local,
-                                Memory mem, size_t needed, 
+                                Memory mem, size_t needed, size_t cap,
+                                std::atomic<size_t> &remaining,
                                 std::map<GCPriority,std::set<PhysicalManager*>,
                                        std::greater<GCPriority> > &collectables)
       : collection_lock(c_lock), manager_lock(m_lock), 
         collectable_instances(collectables), memory(mem), local_space(local),
-        needed_size(needed)
+        needed_size(needed), capacity(cap), remaining_capacity(remaining)
     //--------------------------------------------------------------------------
     {
       AutoLock man_lock(manager_lock);
@@ -10388,7 +12694,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::GarbageCollector::perform_collection(void)
+    void MemoryManager::GarbageCollector::update_capacity(size_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const size_t previous =
+#endif
+#endif
+        remaining_capacity.fetch_add(size);
+#ifdef DEBUG_LEGION
+      assert((previous + size) <= capacity);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::GarbageCollector::perform_collection(
+                                                PhysicalInstance &hole_instance)
     //--------------------------------------------------------------------------
     {
       while (!collection_complete())
@@ -10407,8 +12729,9 @@ namespace Legion {
           PhysicalManager *manager = perfect_holes.back();
           perfect_holes.pop_back();
           RtEvent collected;
-          if (manager->collect(collected))
+          if (manager->collect(collected, &hole_instance))
           {
+            update_capacity(manager->instance_footprint);
             if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
               delete manager;
             return collected;
@@ -10427,8 +12750,9 @@ namespace Legion {
             PhysicalManager *manager = sit->second.back();
             sit->second.pop_back();
             RtEvent collected;
-            if (manager->collect(collected))
+            if (manager->collect(collected, &hole_instance))
             {
+              update_capacity(manager->instance_footprint);
               if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
                 delete manager;
               return collected;
@@ -10485,8 +12809,12 @@ namespace Legion {
                   rit->second.managers.end(); it++)
             {
               RtEvent collected;
-              if ((*it)->collect(collected) && collected.exists())
-                collected_events.push_back(collected);
+              if ((*it)->collect(collected))
+              {
+                update_capacity((*it)->instance_footprint);
+                if (collected.exists())
+                  collected_events.push_back(collected);
+              }
               if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
                 delete (*it);
             }
@@ -10511,8 +12839,12 @@ namespace Legion {
                 rit->second.managers.end(); it++)
           {
             RtEvent collected;
-            if ((*it)->collect(collected) && collected.exists())
-              collected_events.push_back(collected);
+            if ((*it)->collect(collected))
+            {
+              update_capacity((*it)->instance_footprint);
+              if (collected.exists())
+                collected_events.push_back(collected);
+            }
             freed_size += (*it)->instance_footprint;
             if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
               delete (*it);
@@ -10554,17 +12886,42 @@ namespace Legion {
       if (footprint != NULL)
         *footprint = needed_size;
       if ((result != NULL) || (needed_size == 0))
+      {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        size_t previous =
+#endif
+#endif
+          remaining_capacity.fetch_sub(needed_size);
+#ifdef DEBUG_LEGION
+        assert(needed_size <= previous);
+#endif
         return result;
+      }
       GarbageCollector collector(collection_lock, manager_lock, 
                                  runtime->address_space, memory, needed_size, 
+                                 capacity, remaining_capacity,
                                  collectable_instances);
       while (!collector.collection_complete())
       {
-        const RtEvent collection_done = collector.perform_collection(); 
+        PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
+        const RtEvent collection_done = 
+          collector.perform_collection(hole_instance); 
         result = builder.create_physical_instance(runtime->forest,
-                  unsat_kind, unsat_index, NULL, collection_done);
+            unsat_kind, unsat_index, NULL, collection_done, hole_instance);
         if (result != NULL)
+        {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          size_t previous =
+#endif
+#endif
+            remaining_capacity.fetch_sub(needed_size);
+#ifdef DEBUG_LEGION
+          assert(needed_size <= previous);
+#endif
           break;
+        }
       }
       return result;
     }
@@ -10688,8 +13045,654 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureInstance* MemoryManager::create_future_instance(Operation *op,
-                                  UniqueID creator_uid, size_t size, bool eager)
+    size_t MemoryManager::query_available_memory(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      return remaining_capacity.load();
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryPool* MemoryManager::create_memory_pool(UniqueID creator_uid,
+                     TaskTreeCoordinates &coordinates, const PoolBounds &bounds,
+                     RtEvent *safe_for_unbounded_pools)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner)
+      {
+        MemoryPool *result = NULL;
+        const RtEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(creator_uid);
+          coordinates.serialize(rez);
+          rez.serialize(bounds);
+          rez.serialize(&result);
+          rez.serialize(safe_for_unbounded_pools);
+          rez.serialize(ready);
+        }
+        runtime->send_create_memory_pool_request(owner_space, rez);
+        ready.wait();
+        return result;
+      }
+      if (bounds.is_bounded())
+      {
+        // Zero-sized pools are easy to make
+        if (bounds.size == 0)
+          return new ConcretePool(PhysicalInstance::NO_INST,
+              bounds.size, bounds.alignment, RtEvent::NO_RT_EVENT, this);
+        // Creating a normal memory pool so create a task local instance
+        // for the requested number of bytes and and then make a pool for it  
+        Realm::InstanceLayoutGeneric *layout =
+          ConcretePool::create_layout(bounds.size, bounds.alignment); 
+        LgEvent unique_event;
+        if (runtime->profiler != NULL)
+        {
+          const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
+        }
+        RtEvent use_event;
+        PhysicalInstance instance = create_task_local_instance(creator_uid,
+            coordinates, unique_event, layout, use_event, 
+            safe_for_unbounded_pools);
+        delete layout;
+        if (!instance.exists())
+          return NULL;
+        return new ConcretePool(instance, bounds.size, bounds.alignment,
+                                use_event, this);
+      }
+      else
+      {
+        // Spin wait until we have can mark that there is an unbound pool 
+        // associated with these particular coordinates
+        RtEvent wait_on;
+        do {
+          wait_on.wait();
+          wait_on = RtEvent::NO_RT_EVENT;
+          AutoLock m_lock(manager_lock);
+          // First check to see if there is an unbounded pool that we
+          // are consistent with, if so then we can break out early
+          if (outstanding_unbounded_allocations > 0)
+          {
+            switch (unbounded_pool_scope)
+            {
+              case LEGION_STRICT_UNBOUNDED_POOL:
+                {
+                  if (coordinates != unbounded_coordinates)
+                  {
+                    if (!unbounded_transition_event.exists())
+                      unbounded_transition_event =
+                        Runtime::create_rt_user_event();
+                    if (safe_for_unbounded_pools != NULL)
+                    {
+#ifdef DEBUG_LEGION
+                      assert(!safe_for_unbounded_pools->exists());
+#endif
+                      *safe_for_unbounded_pools = unbounded_transition_event;
+                      return NULL;
+                    }
+                    wait_on = unbounded_transition_event;
+                  }
+                  else
+                    outstanding_unbounded_allocations++;
+                  break;
+                }
+              case LEGION_INDEX_TASK_UNBOUNDED_POOL:
+                {
+                  if (!coordinates.same_index_space(unbounded_coordinates) ||
+                      (bounds.scope == LEGION_STRICT_UNBOUNDED_POOL))
+                  {
+                    if (!unbounded_transition_event.exists())
+                      unbounded_transition_event =
+                        Runtime::create_rt_user_event();
+                    if (safe_for_unbounded_pools != NULL)
+                    {
+#ifdef DEBUG_LEGION
+                      assert(!safe_for_unbounded_pools->exists());
+#endif
+                      *safe_for_unbounded_pools = unbounded_transition_event;
+                      return NULL;
+                    }
+                    wait_on = unbounded_transition_event;
+                  }
+                  else
+                    outstanding_unbounded_allocations++;
+                  break;
+                }
+              case LEGION_PERMISSIVE_UNBOUNDED_POOL:
+                {
+                  if (bounds.scope != LEGION_PERMISSIVE_UNBOUNDED_POOL)
+                  {
+                    if (!unbounded_transition_event.exists())
+                      unbounded_transition_event =
+                        Runtime::create_rt_user_event();
+                    if (safe_for_unbounded_pools != NULL)
+                    {
+#ifdef DEBUG_LEGION
+                      assert(!safe_for_unbounded_pools->exists());
+#endif
+                      *safe_for_unbounded_pools = unbounded_transition_event;
+                      return NULL;
+                    }
+                    wait_on = unbounded_transition_event;
+                  }
+                  else
+                    outstanding_unbounded_allocations++;
+                  break;
+                }
+              default:
+                assert(false);
+            }
+          }
+          else if (!pending_allocation_attempts.empty() ||
+              (outstanding_task_local_allocations > 0))
+          {
+            // If there are other outstanding allocations we need to wait
+            // for them to finish before we can start an unbounded allocation
+            if (!unbounded_transition_event.exists())
+              unbounded_transition_event = Runtime::create_rt_user_event();
+            wait_on = unbounded_transition_event;
+          }
+          else
+          {
+            // If there are no outstanding allocations then we can start
+            // a new unbounded allocation
+            outstanding_unbounded_allocations++;
+            unbounded_pool_scope = bounds.scope;
+            unbounded_coordinates = coordinates;
+          }
+        } while (wait_on.exists());
+        return new UnboundPool(this, bounds.scope, coordinates, bounds.size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::release_unbound_pool(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_unbounded_allocations > 0);
+#endif
+      if (--outstanding_unbounded_allocations > 0)
+        return;
+      // Wake up any waiting allocations attempts
+      if (!pending_allocation_attempts.empty())
+      {
+        if (unbounded_pool_scope == LEGION_STRICT_UNBOUNDED_POOL)
+        {
+          // If the coordinates match it is already running so only
+          // trigger the event if coordinates do not match
+          const std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (*front.second != unbounded_coordinates)
+          {
+#ifdef DEBUG_LEGION
+            assert(front.first.exists());
+#endif
+            Runtime::trigger_event(front.first);
+          }
+        }
+        else if (unbounded_pool_scope == LEGION_INDEX_TASK_UNBOUNDED_POOL)
+        {
+          // If the coordinates are from the same index space then it
+          // is running already so only trigger if they are not
+          const std::pair<RtUserEvent,const TaskTreeCoordinates*> &front =
+            pending_allocation_attempts.front();
+          if (!front.second->same_index_space(unbounded_coordinates))
+          {
+#ifdef DEBUG_LEGION
+            assert(front.first.exists());
+#endif
+            Runtime::trigger_event(front.first);
+          }
+        }
+      }
+      unbounded_pool_scope = LEGION_BOUNDED_POOL;
+      unbounded_coordinates.clear();
+      if (unbounded_transition_event.exists())
+      {
+        Runtime::trigger_event(unbounded_transition_event);
+        unbounded_transition_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_create_memory_pool_request(
+        Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory memory;
+      derez.deserialize(memory);
+      UniqueID creator_uid;
+      derez.deserialize(creator_uid);
+      TaskTreeCoordinates coordinates;
+      coordinates.deserialize(derez);
+      PoolBounds bounds;
+      derez.deserialize(bounds);
+      MemoryPool **result;
+      derez.deserialize(result);
+      RtEvent *remote_safe_for_unbounded_pools;
+      derez.deserialize(remote_safe_for_unbounded_pools);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      RtEvent safe_for_unbounded_pools;
+      MemoryPool *pool = manager->create_memory_pool(creator_uid, coordinates,
+          bounds, (remote_safe_for_unbounded_pools == NULL) ? NULL :
+          &safe_for_unbounded_pools);
+      if ((pool != NULL) || ((remote_safe_for_unbounded_pools != NULL) && 
+            safe_for_unbounded_pools.exists()))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(result);
+          if (pool != NULL)
+            pool->serialize(rez);
+          else
+            FutureInstance::pack_null(rez);
+          rez.serialize(remote_safe_for_unbounded_pools);
+          if (remote_safe_for_unbounded_pools != NULL)
+            rez.serialize(safe_for_unbounded_pools);
+          rez.serialize(ready);
+        }
+        runtime->send_create_memory_pool_response(source, rez);
+        delete pool;
+      }
+      else
+        Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_create_memory_pool_response(
+        Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      MemoryPool **result;
+      derez.deserialize(result);
+      *result = MemoryPool::deserialize(derez, runtime);
+      RtEvent *safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      if (safe_for_unbounded_pools != NULL)
+        derez.deserialize(*safe_for_unbounded_pools);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+      Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t MemoryManager::order_collective_unbounded_pools(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(collective_tasks.find(task) == collective_tasks.end());
+#endif
+      const uint64_t lamport_clock = collective_lamport_clock++;
+      collective_tasks.insert(std::make_pair(task,
+            CollectiveState(lamport_clock)));
+      return lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::finalize_collective_unbounded_pools_order(
+                                   SingleTask *task, uint64_t max_lamport_clock)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<SingleTask*,CollectiveState>::iterator finder =
+        collective_tasks.find(task);
+#ifdef DEBUG_LEGION
+      assert(finder != collective_tasks.end());
+      assert(!finder->second.max);
+      assert(finder->second.lamport_clock <= max_lamport_clock);
+#endif
+      if (collective_lamport_clock <= max_lamport_clock)
+        collective_lamport_clock = max_lamport_clock + 1;
+      finder->second.lamport_clock = max_lamport_clock;
+      finder->second.max = true;
+      ready_collective_tasks++;
+      if (outstanding_collective_tasks == 0)
+      {
+        start_next_collective_unbounded_pools_task();
+        // Check to see if it started
+        finder = collective_tasks.find(task);
+        if (finder == collective_tasks.end())
+          return RtEvent::NO_RT_EVENT;
+      }
+      // Unable to start now so make an event to defer it
+#ifdef DEBUG_LEGION
+      assert(!finder->second.ready_event.exists());
+#endif
+      finder->second.ready_event = Runtime::create_rt_user_event();
+      return finder->second.ready_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::end_collective_unbounded_pools_task(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_collective_tasks > 0);
+#endif
+      if ((--outstanding_collective_tasks == 0) && 
+          (ready_collective_tasks > 0))
+        start_next_collective_unbounded_pools_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::start_next_collective_unbounded_pools_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!collective_tasks.empty());
+      assert(outstanding_collective_tasks == 0);
+      assert(ready_collective_tasks > 0);
+#endif
+      // See if we can prove that there is a task that is safe to start
+      uint64_t min_next = std::numeric_limits<uint64_t>::max();
+      uint64_t min_pending = std::numeric_limits<uint64_t>::max();
+      TaskTreeCoordinates next_coords;
+      std::vector<SingleTask*> next_tasks;
+      for (std::map<SingleTask*,CollectiveState>::const_iterator it =
+            collective_tasks.begin(); it != collective_tasks.end(); it++)
+      {
+        if (it->second.max)
+        {
+          if (!next_tasks.empty())
+          {
+            // Compare the lamport clocks
+            if (it->second.lamport_clock < min_next)
+            {
+              next_tasks.clear();
+              next_tasks.push_back(it->first);
+              next_coords.clear();
+              min_next = it->second.lamport_clock;
+            }
+            else if (min_next == it->second.lamport_clock)
+            {
+              // Very bad case, same min of max all-reduce of clocks
+              // Resolve this conflict based on task tree coordinates
+              TaskTreeCoordinates it_coords;
+              if (next_coords.empty())
+                next_tasks.back()->compute_task_tree_coordinates(next_coords);
+              it->first->compute_task_tree_coordinates(it_coords);
+              // See if these are the same index space
+              if (next_coords.same_index_space(it_coords))
+              {
+                next_tasks.push_back(it->first);
+                continue;
+              }
+              const size_t lower_bound =
+                std::min(next_coords.size(), it_coords.size());
+              bool equal = true;
+              for (unsigned idx = 0; idx < lower_bound; idx++)
+              {
+                const ContextCoordinate &c1 = next_coords[idx];
+                const ContextCoordinate &c2 = it_coords[idx];
+                if (c1.context_index == c2.context_index)
+                {
+                  if (c2.index_point < c1.index_point)
+                  {
+                    next_tasks.clear();
+                    next_tasks.push_back(it->first);
+                    next_coords.swap(it_coords);
+                  }
+                  else if (c1.index_point == c2.index_point)
+                    continue;
+                }
+                else if (c2.context_index < c1.context_index)
+                {
+                  next_tasks.clear();
+                  next_tasks.push_back(it->first);
+                  next_coords.swap(it_coords);
+                }
+                equal = false;
+                break;
+              }
+              if (equal)
+              {
+#ifdef DEBUG_LEGION
+                assert(next_coords.size() != it_coords.size());
+#endif
+                if (it_coords.size() < next_coords.size())
+                {
+                  next_tasks.clear();
+                  next_tasks.push_back(it->first);
+                  next_coords.swap(it_coords);
+                }
+              }
+            }
+          }
+          else
+          {
+            next_tasks.push_back(it->first);
+            min_next = it->second.lamport_clock;
+          }
+        }
+        else if (it->second.lamport_clock < min_pending)
+          min_pending = it->second.lamport_clock;
+      }
+      // If all the pending tasks with lamport clocks are
+      // larger than our max lamport clock of the next task
+      // to launch then we know they won't ever come before it
+      // so we can issue our next task now, otherwise we'll need
+      // to wait until those pending lamport clocks are done
+      if (min_next < min_pending)
+      {
+        // Start all the next tasks
+        for (std::vector<SingleTask*>::const_iterator it =
+              next_tasks.begin(); it != next_tasks.end(); it++)
+        {
+          std::map<SingleTask*,CollectiveState>::iterator finder =
+            collective_tasks.find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != collective_tasks.end());
+#endif
+          if (finder->second.ready_event.exists())
+            Runtime::trigger_event(finder->second.ready_event);
+          collective_tasks.erase(finder);
+        }
+#ifdef DEBUG_LEGION
+        assert(outstanding_collective_tasks == 0);
+        assert(next_tasks.size() <= ready_collective_tasks);
+#endif
+        ready_collective_tasks -= next_tasks.size();
+        outstanding_collective_tasks = next_tasks.size();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance MemoryManager::create_task_local_instance(
+        UniqueID creator_uid, const TaskTreeCoordinates &coordinates,
+        LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout, 
+        RtEvent &use_event, RtEvent *safe_for_unbounded_pools)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      GarbageCollector *collector = NULL;
+      PhysicalInstance instance = PhysicalInstance::NO_INST;
+      // We don't need to serialize this with respect to region allocations
+      // because these instances are not subject to find_and_create calls
+      // but we do need to make sure there are no outstanding unbounded
+      // allocations occurring when we do this (unless it is coming from
+      // an unbound pool in which case we can ignore this check
+      RtEvent wait_on;
+      {
+        AutoLock m_lock(manager_lock);
+        switch (unbounded_pool_scope)
+        {
+          case LEGION_BOUNDED_POOL:
+          case LEGION_PERMISSIVE_UNBOUNDED_POOL:
+            break;
+          case LEGION_STRICT_UNBOUNDED_POOL:
+            {
+              if (coordinates != unbounded_coordinates)
+              {
+                if (!unbounded_transition_event.exists())
+                  unbounded_transition_event = Runtime::create_rt_user_event();
+                if (safe_for_unbounded_pools != NULL)
+                {
+#ifdef DEBUG_LEGION
+                  assert(!safe_for_unbounded_pools->exists());
+#endif
+                  *safe_for_unbounded_pools = unbounded_transition_event;
+                  return PhysicalInstance::NO_INST;
+                }
+                wait_on = unbounded_transition_event;
+              }
+              break;
+            }
+          case LEGION_INDEX_TASK_UNBOUNDED_POOL:
+            {
+              if (!unbounded_coordinates.same_index_space(coordinates))
+              {
+                if (!unbounded_transition_event.exists())
+                  unbounded_transition_event = Runtime::create_rt_user_event();
+                if (safe_for_unbounded_pools != NULL)
+                {
+#ifdef DEBUG_LEGION
+                  assert(!safe_for_unbounded_pools->exists());
+#endif
+                  *safe_for_unbounded_pools = unbounded_transition_event;
+                  return PhysicalInstance::NO_INST;
+                }
+                wait_on = unbounded_transition_event;
+              }
+              break;
+            }
+          default:
+            assert(false);
+        }
+        outstanding_task_local_allocations++;
+      }
+      if (wait_on.exists())
+        wait_on.wait();
+      do {
+        RtEvent alloc_precondition;
+        PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
+        if (collector != NULL)
+          alloc_precondition = collector->perform_collection(hole_instance);
+        Realm::ProfilingRequestSet requests;
+#ifdef DEBUG_LEGION
+        assert(!instance.exists());
+#endif
+#ifndef LEGION_MALLOC_INSTANCES
+        TaskLocalInstanceAllocator allocator(unique_event);
+        ProfilingResponseBase base(&allocator, creator_uid, false);
+        Realm::ProfilingRequest &req = requests.add_request(
+            runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+            &base, sizeof(base), LG_RESOURCE_PRIORITY);
+        req.add_measurement<
+          Realm::ProfilingMeasurements::InstanceAllocResult>();
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_inst_request(requests, creator_uid, 
+                                              unique_event);
+        // Check to see if we have a hole instance, if we do then redistrict
+        if (hole_instance.exists())
+          use_event = RtEvent(hole_instance.redistrict(
+                instance, layout, requests, alloc_precondition));
+        else
+          use_event = RtEvent(PhysicalInstance::create_instance(instance,
+                    memory, layout->clone(), requests, alloc_precondition));
+        if (use_event.exists() && (implicit_profiler != NULL))
+          implicit_profiler->record_instance_ready(use_event, unique_event,
+                                                   alloc_precondition);
+        if (allocator.succeeded())
+        {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          size_t previous =
+#endif
+#endif
+            remaining_capacity.fetch_sub(layout->bytes_used);
+#ifdef DEBUG_LEGION
+          assert(layout->bytes_used <= previous);
+#endif
+          break;
+        }
+        else if (instance.exists())
+        {
+          instance.destroy();
+          instance = PhysicalInstance::NO_INST;
+        }
+#else
+        use_event = allocate_legion_instance(layout->clone(), 
+            requests, instance);
+        if (instance.exists())
+        {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          size_t previous =
+#endif
+#endif
+            remaining_capacity.fetch_sub(layout->bytes_used);
+#ifdef DEBUG_LEGIOn
+          assert(layout->bytes_used <= previous);
+#endif
+          break;
+        }
+#endif
+        if (collector == NULL)
+          collector = new GarbageCollector(collection_lock, manager_lock,
+              runtime->address_space, memory, layout->bytes_used, 
+              capacity, remaining_capacity, collectable_instances);
+      } while (!collector->collection_complete());
+      if (collector != NULL)
+        delete collector;
+      // Retake the lock and mark that our allocation is done
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(outstanding_task_local_allocations > 0);
+#endif
+      outstanding_task_local_allocations--;
+      if (unbounded_transition_event.exists() &&
+          pending_allocation_attempts.empty() && 
+          (outstanding_task_local_allocations == 0))
+      {
+        Runtime::trigger_event(unbounded_transition_event);
+        unbounded_transition_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      return instance;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_task_local_instance(PhysicalInstance instance,
+                                                 RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      const size_t size = instance.get_layout()->bytes_used;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const size_t previous =
+#endif
+#endif
+        remaining_capacity.fetch_add(size);
+#ifdef DEBUG_LEGION
+      assert((previous + size) <= capacity);
+#endif
+      instance.destroy(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureInstance* MemoryManager::create_future_instance(UniqueID creator_uid,
+                            const TaskTreeCoordinates &coordinates, size_t size,
+                            RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       if (!is_owner)
@@ -10704,47 +13707,13 @@ namespace Legion {
           rez.serialize(&result);
           rez.serialize(wait_on);
           rez.serialize(creator_uid);
+          coordinates.serialize(rez);
           rez.serialize(size);
-          rez.serialize<bool>(eager);
+          rez.serialize(safe_for_unbounded_pools);
         }
         runtime->send_create_future_instance_request(owner_space, rez);
         wait_on.wait();
-        FutureInstance *inst = result.load();
-        if (inst == NULL)
-        {
-          if (op != NULL)
-          {
-            const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-              REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-            };
-            if (op->get_operation_kind() == Operation::TASK_OP_KIND)
-            {
-              TaskOp *task = static_cast<TaskOp*>(op);
-              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                  "Failed to allocate eager future buffer for task %s "
-                  "(UID %lld) because %s memory " IDFMT " is full. This is "
-                  "an eager allocation so you must adjust the percentage of "
-                  "this mememory dedicated for eager allocations with "
-                  "'-lg:eager_alloc_percentage' flag on the command line.",
-                  task->get_task_name(), op->get_unique_op_id(),
-                  mem_names[memory.kind()], memory.id)
-            }
-            else
-              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                  "Failed to allocate eager future buffer for %s (UID %lld) "
-                  "in parent task %s (UID %lld) because %s memory " IDFMT 
-                  " is full. This is an eager allocation so you must adjust "
-                  "the percentage of this mememory dedicated for eager "
-                  "jallocations with '-lg:eager_alloc_percentage' flag on the "
-                  "command line.", op->get_logging_name(),
-                  op->get_unique_op_id(), op->get_context()->get_task_name(),
-                  op->get_context()->get_unique_id(),
-                  mem_names[memory.kind()], memory.id)
-          }
-        }
-        return inst;
+        return result.load();
       }
       // Do a quick check to see if we can handle the easy case
       if ((size <= LEGION_MAX_RETURN_SIZE) &&
@@ -10761,7 +13730,7 @@ namespace Legion {
 #endif
         // Special case where we can just allocate the buffer locally
         return new FutureInstance(malloc(size), size,
-            false/*eager*/, true/*external*/, true/*own allocation*/);
+            true/*external*/, true/*own allocation*/);
 #ifdef __GNUC__
 #if __GNUC__ >= 11
 #pragma GCC diagnostic pop
@@ -10779,152 +13748,31 @@ namespace Legion {
       Realm::InstanceLayoutGeneric *ilg =
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
-      RtEvent use_event;
+      // Create the layout for the future
+      // Align futures on the largest power of 2 that divides the size of 
+      // field, but cap at 128 bytes for GPUs
+      ilg->alignment_reqd = std::min<size_t>(size & ~(size-1), 128);
       LgEvent unique_event;
-      PhysicalInstance instance = PhysicalInstance::NO_INST;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
-      if (eager)
-      {
-        use_event = create_eager_instance(instance, unique_event, ilg);
-        if (!instance.exists())
-        {
-          if (op != NULL)
-          {
-            const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-              REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-            };
-            if (op->get_operation_kind() == Operation::TASK_OP_KIND)
-            {
-              TaskOp *task = static_cast<TaskOp*>(op);
-              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                  "Failed to allocate eager future buffer for task %s "
-                  "(UID %lld) because %s memory " IDFMT " is full. This is "
-                  "an eager allocation so you must adjust the percentage of "
-                  "this mememory dedicated for eager allocations with "
-                  "'-lg:eager_alloc_percentage' flag on the command line.",
-                  task->get_task_name(), op->get_unique_op_id(),
-                  mem_names[memory.kind()], memory.id)
-            }
-            else
-              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                  "Failed to allocate eager future buffer for %s (UID %lld) "
-                  "in parent task %s (UID %lld) because %s memory " IDFMT 
-                  " is full. This is an eager allocation so you must adjust "
-                  "the percentage of this mememory dedicated for eager "
-                  "jallocations with '-lg:eager_alloc_percentage' flag on the "
-                  "command line.", op->get_logging_name(),
-                  op->get_unique_op_id(), op->get_context()->get_task_name(),
-                  op->get_context()->get_unique_id(),
-                  mem_names[memory.kind()], memory.id)
-          }
-          return NULL;
-        } 
-      }
-      else
-      {
-        // deferred allocation case
-        // no need to serialize this with respect to the other allocations
-        // because this is not subject to find_and_create calls
-        GarbageCollector *collector = NULL;
-        do {
-          RtEvent alloc_precondition;
-          if (collector != NULL)
-            alloc_precondition = collector->perform_collection();;
-          Realm::ProfilingRequestSet requests;
-#ifdef DEBUG_LEGION
-          assert(!instance.exists());
-#endif
-#ifndef LEGION_MALLOC_INSTANCES
-          FutureInstanceAllocator allocator;
-          ProfilingResponseBase base(&allocator);
-          Realm::ProfilingRequest &req = requests.add_request(
-              runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
-              &base, sizeof(base), LG_RESOURCE_PRIORITY);
-          req.add_measurement<
-            Realm::ProfilingMeasurements::InstanceAllocResult>(); 
-          if (runtime->profiler != NULL)
-            runtime->profiler->add_inst_request(requests, 
-                                                creator_uid, unique_event);
-          use_event = RtEvent(PhysicalInstance::create_instance(instance,
-                    memory, ilg->clone(), requests, alloc_precondition));
-          if (allocator.succeeded())
-          {
-            AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-            assert(remaining_capacity >= size);
-#endif
-            remaining_capacity -= size;
-            break;
-          }
-          else if (instance.exists())
-          {
-            instance.destroy();
-            instance = PhysicalInstance::NO_INST;
-          }
-#else
-          use_event = allocate_legion_instance(ilg->clone(), requests,instance);
-          if (instance.exists())
-          {
-            AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-            assert(remaining_capacity >= size);
-#endif
-            remaining_capacity -= size;
-            break;
-          }
-#endif
-          if (collector == NULL)
-            collector = new GarbageCollector(collection_lock, manager_lock,
-                runtime->address_space, memory, size, collectable_instances);
-        } while (!collector->collection_complete());
-        if (collector != NULL)
-          delete collector;
-        delete ilg;
-        if (!instance.exists())
-        {
-          if (op != NULL)
-          {
-            const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-              REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-            };
-            if (op->get_operation_kind() == Operation::TASK_OP_KIND)
-            {
-              TaskOp *task = static_cast<TaskOp*>(op);
-              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                  "Failed to allocate future for task %s "
-                  "(UID %lld) because %s memory " IDFMT " is full.", 
-                  task->get_task_name(), op->get_unique_op_id(),
-                  mem_names[memory.kind()], memory.id)
-            }
-            else
-              REPORT_LEGION_ERROR(ERROR_DEFERRED_ALLOCATION_FAILURE,
-                  "Failed to allocate future for %s (UID %lld) "
-                  "in parent task %s (UID %lld) because %s memory " IDFMT 
-                  " is full.", op->get_logging_name(), op->get_unique_op_id(),
-                  op->get_context()->get_task_name(),
-                  op->get_context()->get_unique_id(),
-                  mem_names[memory.kind()], memory.id)
-          }
-          return NULL;
-        }
-      }
+      RtEvent use_event;
+      PhysicalInstance instance = create_task_local_instance(creator_uid,
+          coordinates, unique_event, ilg, use_event, safe_for_unbounded_pools);
+      delete ilg;
+      if (!instance.exists())
+        return NULL;
       return new FutureInstance(NULL/*data*/, size,
-              eager, false/*external*/, true/*own allocation*/, unique_event,
+              false/*external*/, true/*own allocation*/, unique_event,
               instance, Processor::NO_PROC, use_event);
     }
 
     //--------------------------------------------------------------------------
     void MemoryManager::free_future_instance(PhysicalInstance inst, size_t size, 
-                                             RtEvent free_event, bool eager)
+                                             RtEvent free_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner)
@@ -10937,35 +13785,49 @@ namespace Legion {
           rez.serialize(inst);
           rez.serialize(size);
           rez.serialize(free_event);
-          rez.serialize<bool>(eager);
         }
         runtime->send_free_future_instance(owner_space, rez); 
         return;
       }
-      if (!eager)
+      else
       {
         // perform the deferred deletion on this instance
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        const size_t previous =
+#endif
+#endif
+          remaining_capacity.fetch_add(size);
+#ifdef DEBUG_LEGION
+        assert((previous + size) <= capacity);
+#endif
         inst.destroy(free_event);
-        AutoLock m_lock(manager_lock);
-        remaining_capacity += size;
       }
-      else
-        free_eager_instance(inst, free_event);
     }
 
     //--------------------------------------------------------------------------
-    MemoryManager::FutureInstanceAllocator::FutureInstanceAllocator(void)
-      : ready(Runtime::create_rt_user_event())
+    MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
+                                                                LgEvent unique)
+      : ready(Runtime::create_rt_user_event()),
+        unique_event(unique), success(false)
     //--------------------------------------------------------------------------
     {
-      success.store(false);
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::FutureInstanceAllocator::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
+    MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
+                                               TaskLocalInstanceAllocator &&rhs)
+      : ready(rhs.ready), unique_event(rhs.unique_event), success(rhs.success)
+    //--------------------------------------------------------------------------
+    {
+      rhs.ready = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::TaskLocalInstanceAllocator::handle_profiling_response(
                                        const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+                                       const void *orig, size_t orig_length,
+                                       LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10984,8 +13846,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(measured);
 #endif
-      success.store(result.success);
+      success = result.success; 
+      fevent = unique_event;
+      failed_alloc = !result.success;
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
       Runtime::trigger_event(ready);
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -11074,181 +13941,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t MemoryManager::query_available_eager_memory(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-      return eager_remaining_capacity;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent MemoryManager::create_eager_instance(PhysicalInstance &instance,
-                     LgEvent unique_event, Realm::InstanceLayoutGeneric *layout)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
-      RtEvent wait_on;
-      instance = PhysicalInstance::NO_INST;
-      if (eager_allocator == NULL) 
-        return wait_on;
-      const size_t allocation_id = next_allocation_id.fetch_add(1);
-
-      const size_t size = layout->bytes_used;
-      bool allocated = (size == 0);
-      size_t offset = 0;
-
-      if (!allocated)
-      {
-        AutoLock m_lock(manager_lock);
-        allocated = eager_allocator->allocate(
-            allocation_id, size, layout->alignment_reqd, offset);
-        if (allocated)
-        {
-          eager_remaining_capacity -= size;
-          const uintptr_t ptr = eager_pool + offset;
-#ifdef DEBUG_LEGION
-          assert(eager_allocations.find(ptr) == eager_allocations.end());
-#endif
-          eager_allocations[ptr] = allocation_id;
-        }
-      }
-
-      if (allocated)
-      {
-        wait_on = create_sub_eager_instance(
-            instance, eager_pool + offset, size, layout, unique_event);
-        log_eager.debug("allocate instance " IDFMT
-                      " (%p+%zd, %zd) on memory " IDFMT ", %zd bytes left",
-                      instance.id,
-                      reinterpret_cast<void*>(eager_pool),
-                      offset,
-                      size,
-                      memory.id,
-                      eager_remaining_capacity);
-      }
-      else
-      {
-        log_eager.debug("failed to allocate an instance of size %zd on memory "
-                        IDFMT " (%zd bytes left)",
-                        size, memory.id, eager_remaining_capacity);
-        if (runtime->dump_free_ranges)
-        {
-          AutoLock m_lock(manager_lock);
-          eager_allocator->dump_all_free_ranges(log_eager);
-        }
-      }
-
-      return wait_on;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent MemoryManager::create_sub_eager_instance(PhysicalInstance &instance,
-                                                     uintptr_t ptr, size_t size,
-                                           Realm::InstanceLayoutGeneric *layout,
-                                                     LgEvent unique_event)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert((ptr >= eager_pool) || ((size == 0) && (ptr == 0)));
-#endif
-      Realm::ProfilingRequestSet requests;
-      if (runtime->profiler != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(unique_event.exists());
-#endif
-        runtime->profiler->add_inst_request(requests, 
-                  implicit_provenance, unique_event);
-      }
-      if (size > 0)
-      {
-        int64_t offset = ptr - eager_pool;
-        const Point<1> start(offset);
-        const Point<1> stop(offset + size - 1);
-        const Rect<1> bounds(start, stop);
-        Realm::ExternalInstanceResource *external_resource =
-          eager_pool_instance.generate_resource_info(
-              Realm::IndexSpaceGeneric(bounds), 0/*fid*/, false/*read only*/);
-#ifdef DEBUG_LEGION
-        // Note that if you hit this then that likely means that Realm 
-        // doesn't support 'generate_resource_info' yet for that kind of
-        // memory and it probably just needs to be implemented
-        assert(external_resource != NULL);
-#endif
-        const RtEvent wait_on(Realm::RegionInstance::create_external_instance(
-              instance, memory, layout, *external_resource, requests));
-        delete external_resource;
-        return wait_on;
-      }
-      else
-      {
-        const RtEvent wait_on(
-            Realm::RegionInstance::create_instance(instance, memory, 
-                                                   layout, requests));
-        return wait_on;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MemoryManager::free_eager_instance(
-                                       PhysicalInstance instance, RtEvent defer)
-    //--------------------------------------------------------------------------
-    {
-      if (defer.exists() && !defer.has_triggered())
-      {
-        log_eager.debug("defer deallocation of instance " IDFMT
-                        " on memory " IDFMT ": wait for " IDFMT,
-                        instance.id, memory.id, defer.id);
-        FreeEagerInstanceArgs args(this, instance);
-        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, defer);
-      }
-      else
-      {
-        if (instance.get_layout()->bytes_used > 0)
-        {
-          void *base = instance.pointer_untyped(0,0);
-#ifdef DEBUG_LEGION
-          // Technically realm could return us a null pointer here if the
-          // instance is not directly accessible on this node, but that
-          // should never happen because all eager allocations are done
-          // locally and to memories for which loads and stores are safe
-          assert(base != NULL);
-#endif
-          const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
-          AutoLock lock(manager_lock);
-          std::map<uintptr_t,size_t>::iterator finder = 
-            eager_allocations.find(ptr);
-
-          size_t size = 0;
-          // empty allocations are not created by the eager allocator,
-          // so we don't need to deallocate them
-          if (finder != eager_allocations.end())
-          {
-            size = eager_allocator->get_size(finder->second);
-            eager_remaining_capacity += size;
-            eager_allocator->deallocate(finder->second);
-            eager_allocations.erase(finder);
-          }
-          log_eager.debug(
-            "deallocate instance " IDFMT " of size %zd on memory " IDFMT
-            ", %zd bytes left", instance.id, size, memory.id,
-            eager_remaining_capacity);
-        }
-        instance.destroy();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MemoryManager::handle_free_eager_instance(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const FreeEagerInstanceArgs *fargs = (const FreeEagerInstanceArgs*)args;
-      fargs->manager->free_eager_instance(fargs->inst, RtEvent::NO_RT_EVENT);
-    }
-
-    //--------------------------------------------------------------------------
     void MemoryManager::free_external_allocation(uintptr_t ptr, size_t size)
     //--------------------------------------------------------------------------
     {
@@ -11323,7 +14015,8 @@ namespace Legion {
     RtEvent MemoryManager::allocate_legion_instance(
                                 Realm::InstanceLayoutGeneric *layout,
                                 const Realm::ProfilingRequestSet &requests,
-                                PhysicalInstance &instance, bool needs_deferral)
+                                PhysicalInstance &instance,
+                                LgEvent unique_event, bool needs_deferral)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11371,7 +14064,8 @@ namespace Legion {
           {
             if (needs_deferral)
             {
-              MallocInstanceArgs args(this, layout, &requests, &instance);
+              MallocInstanceArgs args(this, layout, &requests, 
+                  &instance, unique_event);
               const RtEvent wait_on = 
                 runtime->issue_application_processor_task(args,
                   LG_LATENCY_WORK_PRIORITY, local_gpu);
@@ -11426,7 +14120,8 @@ namespace Legion {
           {
             if (needs_deferral)
             {
-              MallocInstanceArgs args(this, layout, &requests, &instance);
+              MallocInstanceArgs args(this, layout, &requests,
+                  &instance, unique_event);
               const RtEvent wait_on =
                 runtime->issue_application_processor_task(args,
                   LG_LATENCY_WORK_PRIORITY, local_gpu);
@@ -11488,6 +14183,8 @@ namespace Legion {
 #endif
         allocations[instance] = footprint;
       }
+      if (result.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(result, unique_event);
       return result;
     }
 
@@ -11600,7 +14297,7 @@ namespace Legion {
       const MallocInstanceArgs *margs = (const MallocInstanceArgs*)args;
       const RtEvent ready = margs->manager->allocate_legion_instance(
           margs->layout, *(margs->requests), *(margs->instance), 
-          false/*needs defer*/);
+          margs->unique_event, false/*needs defer*/);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
     }
@@ -11841,19 +14538,20 @@ namespace Legion {
       if (profile_outgoing_messages)
       {
         Realm::ProfilingRequestSet requests;
-        LegionProfiler::add_message_request(requests, kind, target);
+        const RtEvent precondition = (ordered_channel || 
+               ((header != FULL_MESSAGE) && !first_partial)) ?
+                (send_precondition.exists() ? 
+                  Runtime::merge_events(send_precondition, last_message_event) :
+                  last_message_event) : send_precondition;
+        LegionProfiler::add_message_request(
+            requests, kind, target, precondition);
         last_message_event = RtEvent(target.spawn(
 #ifdef LEGION_SEPARATE_META_TASKS
               LG_TASK_ID + LG_MESSAGE_ID + kind,
 #else
               LG_TASK_ID, 
 #endif
-              sending_buffer, sending_index, requests, 
-              (ordered_channel || 
-               ((header != FULL_MESSAGE) && !first_partial)) ?
-                (send_precondition.exists() ? 
-                  Runtime::merge_events(send_precondition, last_message_event) :
-                  last_message_event) : send_precondition, 
+              sending_buffer, sending_index, requests, precondition,
               response ? response_priority : request_priority));
         if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
@@ -11925,14 +14623,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::confirm_shutdown(ShutdownManager *shutdown_manager,
-                                          bool phase_one)
+               bool phase_one, Processor target, bool profiling_virtual_channel)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(channel_lock);
       if (phase_one)
       {
         if (packaged_messages > 0)
+        {
           shutdown_manager->record_recent_message();
+          // If this is the profiling channel then flush the messages
+          if (profiling_virtual_channel)
+            send_message(true/*complete*/, implicit_runtime, target,
+                SEND_PROFILER_EVENT_TRIGGER, false/*response*/,
+                RtEvent::NO_RT_EVENT);
+        }
         if (ordered_channel)
         {
           if (!last_message_event.has_triggered())
@@ -11978,7 +14683,14 @@ namespace Legion {
       else
       {
         if (observed_recent || (packaged_messages > 0)) 
+        {
           shutdown_manager->record_recent_message(); 
+          // If this is the profiling channel then flush the messages
+          if (profiling_virtual_channel && (packaged_messages > 0))
+            send_message(true/*complete*/, implicit_runtime, target,
+                SEND_PROFILER_EVENT_TRIGGER, false/*response*/,
+                RtEvent::NO_RT_EVENT);
+        }
         else
         {
           if (ordered_channel)
@@ -12025,16 +14737,6 @@ namespace Legion {
                          Runtime *runtime, AddressSpaceID remote_address_space)
     //--------------------------------------------------------------------------
     {
-      // Pull this onto the stack before we do anything else
-      LegionProfiler *profiler = runtime->profiler;
-      // If we have a profiler we need to increment our requests count
-      if (profiler != NULL)
-#ifdef DEBUG_LEGION
-        profiler->increment_total_outstanding_requests(
-                    LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-        profiler->increment_total_outstanding_requests();
-#endif
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const uint8_t *buffer = (const uint8_t*)args;
@@ -12269,18 +14971,6 @@ namespace Legion {
           case SEND_INDEX_SPACE_COLORS_RESPONSE:
             {
               runtime->handle_index_space_colors_response(derez);
-              break;
-            }
-          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
-            {
-              runtime->handle_index_space_remote_expression_request(derez,
-                                                          remote_address_space);
-              break;
-            }
-          case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
-            {
-              runtime->handle_index_space_remote_expression_response(derez,
-                                                          remote_address_space);
               break;
             }
           case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
@@ -12539,6 +15229,17 @@ namespace Legion {
           case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
             {
               runtime->handle_slice_rendezvous_concurrent_mapped(derez);
+              break;
+            }
+          case SLICE_COLLECTIVE_ALLREDUCE_REQUEST:
+            {
+              runtime->handle_slice_collective_allreduce_request(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SLICE_COLLECTIVE_ALLREDUCE_RESPONSE:
+            {
+              runtime->handle_slice_collective_allreduce_response(derez);
               break;
             }
           case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
@@ -12907,25 +15608,6 @@ namespace Legion {
               runtime->handle_view_find_last_users_response(derez);
               break;
             }
-#ifdef ENABLE_VIEW_REPLICATION
-          case SEND_VIEW_REPLICATION_REQUEST:
-            {
-              runtime->handle_view_replication_request(derez, 
-                                                       remote_address_space);
-              break;
-            }
-          case SEND_VIEW_REPLICATION_RESPONSE:
-            {
-              runtime->handle_view_replication_response(derez);
-              break;
-            }
-          case SEND_VIEW_REPLICATION_REMOVAL:
-            {
-              runtime->handle_view_replication_removal(derez, 
-                                                       remote_address_space);
-              break;
-            }
-#endif
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez);
@@ -12948,7 +15630,8 @@ namespace Legion {
             }
           case SEND_FUTURE_CREATE_INSTANCE_REQUEST:
             {
-              runtime->handle_future_create_instance_request(derez);
+              runtime->handle_future_create_instance_request(derez, 
+                                              remote_address_space);
               break;
             }
           case SEND_FUTURE_CREATE_INSTANCE_RESPONSE:
@@ -13639,6 +16322,17 @@ namespace Legion {
               runtime->handle_notify_collected_instances(derez);
               break;
             }
+          case SEND_CREATE_MEMORY_POOL_REQUEST:
+            {
+              runtime->handle_create_memory_pool_request(derez,
+                                          remote_address_space);
+              break;
+            }
+          case SEND_CREATE_MEMORY_POOL_RESPONSE:
+            {
+              runtime->handle_create_memory_pool_response(derez);
+              break;
+            }
           case SEND_CREATE_FUTURE_INSTANCE_REQUEST:
             {
               runtime->handle_create_future_instance_request(derez,
@@ -13716,6 +16410,16 @@ namespace Legion {
               ShardManager::handle_collective_message(derez, runtime);
               break;
             }
+          case SEND_PROFILER_EVENT_TRIGGER:
+            {
+              implicit_profiler->process_event_trigger(derez);
+              break;
+            }
+          case SEND_PROFILER_EVENT_POISON:
+            {
+              implicit_profiler->process_event_poison(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               runtime->handle_shutdown_notification(derez,remote_address_space);
@@ -13785,29 +16489,20 @@ namespace Legion {
                                    const Processor remote_util_group)
       : channels((VirtualChannel*)
                   malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))), 
-        runtime(rt), remote_address_space(remote), target(remote_util_group), 
-        always_flush(rt->profiler != NULL)
+        runtime(rt), remote_address_space(remote), target(remote_util_group)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(remote != runtime->address_space);
 #endif
+      const bool has_profiler = (runtime->profiler != NULL);
       // Initialize our virtual channels 
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
-        new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-          rt->address_space, max_message_size, always_flush);
+        VirtualChannelKind vc = (VirtualChannelKind)idx;
+        new (channels+idx) VirtualChannel(vc, rt->address_space,
+            max_message_size, has_profiler);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    MessageManager::MessageManager(const MessageManager &rhs)
-      : channels(NULL), runtime(NULL), remote_address_space(0), 
-        target(rhs.target), always_flush(false)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -13815,19 +16510,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-      {
         channels[idx].~VirtualChannel();
-      }
       free(channels);
-    }
-
-    //--------------------------------------------------------------------------
-    MessageManager& MessageManager::operator=(const MessageManager &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -13835,10 +16519,11 @@ namespace Legion {
         bool flush, bool response, RtEvent flush_precondition)
     //--------------------------------------------------------------------------
     {
-      // Always flush for the profiler if we're doing that
-      if (!flush && always_flush)
-        flush = true;
       const VirtualChannelKind channel = find_message_vc(message);
+      // Always flush for the profiler if we're doing that
+      if (!flush && (runtime->profiler != NULL) && 
+          (channel != PROFILING_VIRTUAL_CHANNEL))
+        flush = true;
       channels[channel].package_message(rez, message, flush, flush_precondition,
                                         runtime, target, response);
     }
@@ -13862,7 +16547,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-        channels[idx].confirm_shutdown(shutdown_manager, phase_one);
+        channels[idx].confirm_shutdown(shutdown_manager, phase_one,
+            target, (idx == PROFILING_VIRTUAL_CHANNEL));
     }
 
     /////////////////////////////////////////////////////////////
@@ -14090,6 +16776,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_create_memory_pool_request(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager::handle_create_memory_pool_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_memory_pool_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager::handle_create_memory_pool_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_create_future_instance_request(Deserializer &derez,
                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -14103,22 +16804,33 @@ namespace Legion {
       derez.deserialize(done);
       UniqueID uid;
       derez.deserialize(uid);
+      TaskTreeCoordinates coordinates;
+      coordinates.deserialize(derez);
       size_t size;
       derez.deserialize(size);
-      bool eager;
-      derez.deserialize<bool>(eager);
+      RtEvent *remote_safe_for_unbounded_pools;
+      derez.deserialize(remote_safe_for_unbounded_pools);
 
       MemoryManager *manager = find_memory_manager(memory);
-      FutureInstance *result =
-        manager->create_future_instance(NULL, uid, size, eager);
-      if (result != NULL)
+      RtEvent safe_for_unbounded_pools;
+      FutureInstance *result = manager->create_future_instance(uid,
+          coordinates, size, (remote_safe_for_unbounded_pools == NULL) ?
+          NULL : &safe_for_unbounded_pools);
+      if ((result != NULL) || ((remote_safe_for_unbounded_pools != NULL) &&
+            safe_for_unbounded_pools.exists()))
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(target);
-          result->pack_instance(rez, ApEvent::NO_AP_EVENT,
-              true/*pack ownership*/, false/*allow by value*/);
+          if (result != NULL)
+            result->pack_instance(rez, ApEvent::NO_AP_EVENT,
+                true/*pack ownership*/, false/*allow by value*/);
+          else
+            FutureInstance::pack_null(rez);
+          rez.serialize(remote_safe_for_unbounded_pools);
+          if (remote_safe_for_unbounded_pools != NULL)
+            rez.serialize(safe_for_unbounded_pools);
           rez.serialize(done);
         }
         send_create_future_instance_response(source, rez);
@@ -14136,6 +16848,10 @@ namespace Legion {
       std::atomic<FutureInstance*> *target;
       derez.deserialize(target);
       target->store(FutureInstance::unpack_instance(derez));
+      RtEvent *safe_for_unbounded_pools;
+      derez.deserialize(safe_for_unbounded_pools);
+      if (safe_for_unbounded_pools != NULL)
+        derez.deserialize(*safe_for_unbounded_pools);
       RtUserEvent done;
       derez.deserialize(done);
       Runtime::trigger_event(done);
@@ -14154,10 +16870,8 @@ namespace Legion {
       derez.deserialize(size);
       RtEvent free_event;
       derez.deserialize(free_event);
-      bool eager;
-      derez.deserialize<bool>(eager);
       MemoryManager *manager = find_memory_manager(memory);
-      manager->free_future_instance(instance, size, free_event, eager);
+      manager->free_future_instance(instance, size, free_event);
     }
 
     //--------------------------------------------------------------------------
@@ -14864,6 +17578,7 @@ namespace Legion {
         realm_descriptor(realm),
         execution_constraints(registrar.execution_constraints),
         layout_constraints(registrar.layout_constraints),
+        leaf_pool_bounds(registrar.leaf_pool_bounds),
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant),
@@ -15015,7 +17730,7 @@ namespace Legion {
       // Add any profiling requests
       if (runtime->profiler != NULL)
         runtime->profiler->add_task_request(requests, owner->task_id, vid,
-                                            task->get_unique_op_id(), target);
+            task->get_unique_op_id(), target, precondition);
       // Increment the number of outstanding tasks
 #ifdef DEBUG_LEGION
       runtime->increment_total_outstanding_tasks(task->task_id, false/*meta*/);
@@ -15094,6 +17809,17 @@ namespace Legion {
             if (user_data_size > 0)
               rez.serialize(user_data, user_data_size);
             rez.serialize(leaf_variant);
+            if (leaf_variant)
+            {
+              rez.serialize<size_t>(leaf_pool_bounds.size());
+              for (std::map<Memory::Kind,PoolBounds>::const_iterator it =
+                    leaf_pool_bounds.begin(); it !=
+                    leaf_pool_bounds.end(); it++)
+              {
+                rez.serialize(it->first);
+                rez.serialize(it->second);
+              }
+            }
             rez.serialize(inner_variant);
             rez.serialize(idempotent_variant);
             rez.serialize(replicable_variant);
@@ -15291,6 +18017,17 @@ namespace Legion {
       const void *user_data = derez.get_current_pointer();
       derez.advance_pointer(user_data_size);
       derez.deserialize(registrar.leaf_variant);
+      if (registrar.leaf_variant)
+      {
+        size_t num_pools;
+        derez.deserialize(num_pools);
+        for (unsigned idx = 0; idx < num_pools; idx++)
+        {
+          Memory::Kind memkind;
+          derez.deserialize(memkind);
+          derez.deserialize(registrar.leaf_pool_bounds[memkind]);
+        }
+      }
       derez.deserialize(registrar.inner_variant);
       derez.deserialize(registrar.idempotent_variant);
       derez.deserialize(registrar.replicable_variant);
@@ -16929,8 +19666,6 @@ namespace Legion {
         initial_task_window_hysteresis(config.initial_task_window_hysteresis),
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
         initial_meta_task_vector_width(config.initial_meta_task_vector_width),
-        eager_alloc_percentage(config.eager_alloc_percentage),
-        eager_alloc_percentage_overrides(config.eager_alloc_percentage_overrides),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_control_replication_contexts(
@@ -17048,13 +19783,20 @@ namespace Legion {
           std::vector<Processor> util_group(locals.begin(), locals.end());
           utility_group = ProcessorGroup::create_group(util_group);
         }
+        local_group = utility_group;
       }
-      else if (local_utils.size() == 1)
-        utility_group = *(local_utils.begin());
       else
       {
-        std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
-        utility_group = ProcessorGroup::create_group(util_g);
+        if (local_utils.size() == 1)
+          utility_group = *(local_utils.begin());
+        else
+        {
+          std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
+          utility_group = ProcessorGroup::create_group(util_g);
+        }
+        std::vector<Processor> all_local(locals.begin(), locals.end());
+        all_local.insert(all_local.end(),local_utils.begin(),local_utils.end());
+        local_group = ProcessorGroup::create_group(all_local);
       }
 #ifdef DEBUG_LEGION
       assert(utility_group.exists());
@@ -17145,7 +19887,6 @@ namespace Legion {
         initial_task_window_hysteresis(rhs.initial_task_window_hysteresis),
         initial_tasks_to_schedule(rhs.initial_tasks_to_schedule),
         initial_meta_task_vector_width(rhs.initial_meta_task_vector_width),
-        eager_alloc_percentage(rhs.eager_alloc_percentage),
         max_message_size(rhs.max_message_size),
         gc_epoch_size(rhs.gc_epoch_size), 
         max_control_replication_contexts(rhs.max_control_replication_contexts),
@@ -17554,7 +20295,9 @@ namespace Legion {
                                     config.prof_target_latency,
                                     config.prof_call_threshold,
                                     config.slow_config_ok,
-                                    config.prof_self_profile);
+                                    config.prof_self_profile,
+                                    config.prof_no_critical_paths,
+                                    config.prof_all_critical_arrivals);
       MAPPER_CALL_NAMES(lg_mapper_calls);
       profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
       RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
@@ -19883,6 +22626,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_non_default_mapper(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+        if (it->second->has_non_default_mapper())
+          return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     ProjectionID Runtime::generate_dynamic_projection_id(
                                                    bool check_context/*= true*/)
     //--------------------------------------------------------------------------
@@ -21654,25 +24408,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_remote_expression_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-        SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST, rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_index_space_remote_expression_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(
-          SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE, rez,
-          true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_index_space_generate_color_request(AddressSpaceID target,
                                                           Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22166,6 +24901,25 @@ namespace Legion {
     {
       find_messenger(target)->send_message(SLICE_RENDEZVOUS_CONCURRENT_MAPPED,
                                                             rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_allreduce_request(Processor target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_COLLECTIVE_ALLREDUCE_REQUEST, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_collective_allreduce_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SLICE_COLLECTIVE_ALLREDUCE_RESPONSE,
+          rez, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -22779,35 +25533,6 @@ namespace Legion {
       find_messenger(target)->send_message(SEND_VIEW_FIND_LAST_USERS_RESPONSE,
                                           rez, true/*flush*/, true/*response*/);
     }
-
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_request(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_REQUEST, rez,
-                                                                true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_response(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_RESPONSE, rez,
-                                              true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_replication_removal(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_VIEW_REPLICATION_REMOVAL, rez,
-                                                                true/*flush*/);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
@@ -23980,6 +26705,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_create_memory_pool_request(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_CREATE_MEMORY_POOL_REQUEST,
+                          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_memory_pool_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_CREATE_MEMORY_POOL_RESPONSE,
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_create_future_instance_request(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24006,6 +26749,26 @@ namespace Legion {
     {
       find_messenger(target)->send_message(SEND_FREE_FUTURE_INSTANCE,
                                 rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_profiler_event_trigger(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Never flush these
+      find_messenger(target)->send_message(SEND_PROFILER_EVENT_TRIGGER,
+          rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_profiler_event_poison(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // Never flush these
+      find_messenger(target)->send_message(SEND_PROFILER_EVENT_POISON,
+          rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24331,22 +27094,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_colors_response(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_remote_expression_request(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_expression_request(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_remote_expression_response(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      forest->handle_remote_expression_response(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -24761,6 +27508,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SliceTask::handle_rendezvous_concurrent_mapped(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_allreduce_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_allreduce_request(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_slice_collective_allreduce_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_allreduce_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -25246,31 +28009,6 @@ namespace Legion {
       PhysicalManager::handle_manager_request(derez, this);
     }
 
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_request(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_request(derez, this, source);
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_replication_removal(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_replication_removal(derez, this, source);
-    }
-#endif // ENABLE_VIEW_REPLICATION
-
     //--------------------------------------------------------------------------
     void Runtime::handle_future_result(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -25295,6 +28033,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_future_create_instance_request(Deserializer &derez,
+                                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FutureImpl::handle_future_create_instance_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_future_create_instance_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FutureImpl::handle_future_create_instance_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_future_map_future_request(Deserializer &derez,
                                                    AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -25307,20 +28060,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureMapImpl::handle_future_map_future_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_future_create_instance_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FutureImpl::handle_future_create_instance_request(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_future_create_instance_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FutureImpl::handle_future_create_instance_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -26665,12 +29404,14 @@ namespace Legion {
     bool Runtime::create_physical_instance(Memory target_memory,
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result,
                                      Processor processor, 
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -26678,9 +29419,10 @@ namespace Legion {
       {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
-        if (!manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+        if (!manager->create_physical_instance(constraints, regions, 
+              coordinates, result, processor, acquire, priority, tight_bounds,
+              &unsat_kind, &unsat_index, footprint, 
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -26689,21 +29431,23 @@ namespace Legion {
           return true;
       }
       else
-        return manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+        return manager->create_physical_instance(constraints, regions, 
+            coordinates, result, processor, acquire, priority, tight_bounds,
+            NULL, NULL, footprint, safe_for_unbounded_pools, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
                                      LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result,
                                      Processor processor,
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     { 
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -26711,9 +29455,10 @@ namespace Legion {
       {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
-        if (!manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         &unsat_kind, &unsat_index, footprint, creator_id))
+        if (!manager->create_physical_instance(constraints, regions, 
+              coordinates, result, processor, acquire, priority,
+              tight_bounds, &unsat_kind, &unsat_index, footprint,
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -26722,21 +29467,23 @@ namespace Legion {
           return true;
       }
       else
-        return manager->create_physical_instance(constraints, regions, result,
-                         processor, acquire, priority, tight_bounds,
-                         NULL, NULL, footprint, creator_id);
+        return manager->create_physical_instance(constraints, regions, 
+            coordinates, result, processor, acquire, priority, tight_bounds,
+            NULL, NULL, footprint, safe_for_unbounded_pools, creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
+                                     const TaskTreeCoordinates &coordinates,
                                      MappingInstance &result, bool &created, 
                                      Processor processor,
                                      bool acquire, GCPriority priority,
                                      bool tight_bounds, 
                                      const LayoutConstraint **unsat,
-                                     size_t *footprint, UniqueID creator_id)
+                                     size_t *footprint, UniqueID creator_id,
+                                     RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -26744,10 +29491,10 @@ namespace Legion {
       {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
-        if (!manager->find_or_create_physical_instance(constraints, regions, 
-                         result, created, processor, acquire, 
-                         priority, tight_bounds, &unsat_kind, &unsat_index,
-                         footprint, creator_id))
+        if (!manager->find_or_create_physical_instance(constraints, regions,
+              coordinates, result, created, processor, acquire, priority,
+              tight_bounds, &unsat_kind, &unsat_index, footprint,
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints.convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -26757,20 +29504,23 @@ namespace Legion {
       }
       else
         return manager->find_or_create_physical_instance(constraints, regions, 
-                         result, created, processor, acquire, 
-                         priority, tight_bounds,NULL,NULL,footprint,creator_id);
+            coordinates, result, created, processor, acquire, priority,
+            tight_bounds, NULL, NULL, footprint, safe_for_unbounded_pools,
+            creator_id);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id)
+                                    size_t *footprint, UniqueID creator_id,
+                                    RtEvent *safe_for_unbounded_pools)
     //--------------------------------------------------------------------------
     { 
       MemoryManager *manager = find_memory_manager(target_memory);
@@ -26779,9 +29529,9 @@ namespace Legion {
         LayoutConstraintKind unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
         unsigned unsat_index = 0;
         if (!manager->find_or_create_physical_instance(constraints, regions,
-                           result, created, processor, acquire, 
-                           priority, tight_bounds, &unsat_kind, &unsat_index,
-                           footprint, creator_id))
+              coordinates, result, created, processor, acquire, priority,
+              tight_bounds, &unsat_kind, &unsat_index, footprint,
+              safe_for_unbounded_pools, creator_id))
         {
           *unsat = constraints->convert_unsatisfied(unsat_kind, unsat_index);
           return false;
@@ -26791,8 +29541,9 @@ namespace Legion {
       }
       else
         return manager->find_or_create_physical_instance(constraints, regions,
-                     result, created, processor, acquire, 
-                     priority, tight_bounds, NULL, NULL, footprint, creator_id);
+            coordinates, result, created, processor, acquire, priority,
+            tight_bounds, NULL, NULL, footprint, safe_for_unbounded_pools,
+            creator_id);
     }
 
     //--------------------------------------------------------------------------
@@ -27593,7 +30344,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->human_str());
+            (provenance == NULL) ? std::string_view() : provenance->human);
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -30341,11 +33092,6 @@ namespace Legion {
       // Configure legion spy if necessary
       if (config.legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
-      // Configure MPI Interoperability
-      const std::vector<LegionHandshake> &pending_handshakes =
-        get_pending_handshake_table();
-      if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
-        configure_interoperability(config.separate_runtime_instances);
       // Construct our runtime objects 
       std::set<Processor> local_procs;
       std::map<Processor,Runtime*> processor_mapping;
@@ -30360,6 +33106,11 @@ namespace Legion {
       assert(first_proc.address_space() == 0);
       assert(!local_procs.empty());
 #endif 
+      // Configure MPI Interoperability
+      const std::vector<LegionHandshake> &pending_handshakes =
+        get_pending_handshake_table();
+      if ((mpi_rank >= 0) || (!pending_handshakes.empty()))
+        configure_interoperability(config.separate_runtime_instances);
       // We have to set these prior to starting Realm as once we start
       // Realm it might fork child processes so they all need to see
       // the same values for these static variables
@@ -30573,12 +33324,6 @@ namespace Legion {
                         config.initial_tasks_to_schedule, !filter)
         .add_option_int("-lg:vector", 
                         config.initial_meta_task_vector_width, !filter)
-        .add_option_int("-lg:eager_alloc_percentage",
-                        config.eager_alloc_percentage, !filter)
-        .add_option_method("-lg:eager_alloc_percentage_override",
-                           &config,
-                           &LegionConfiguration::parse_alloc_percentage_override_argument,
-                           !filter)
         .add_option_bool("-lg:dump_free_ranges",
                          config.dump_free_ranges, !filter)
         .add_option_int("-lg:message",config.max_message_size, !filter)
@@ -30608,6 +33353,10 @@ namespace Legion {
         .add_option_int("-lg:prof_call_threshold",
                         config.prof_call_threshold, !filter)
         .add_option_bool("-lg:prof_self", config.prof_self_profile, !filter)
+        .add_option_bool("-lg:prof_no_critical_paths",
+                        config.prof_no_critical_paths, !filter)
+        .add_option_bool("-lg:prof_all_critical_arrivals",
+                        config.prof_all_critical_arrivals, !filter)
         .add_option_bool("-lg:debug_ok",config.slow_config_ok, !filter)
         // These are all the deprecated versions of these flag
         .add_option_bool("-hl:separate",
@@ -30743,76 +33492,6 @@ namespace Legion {
               "LEVEL_FATAL" : "LEVEL_NONE")
       runtime_cmdline_parsed = true;
       return config;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::LegionConfiguration::parse_alloc_percentage_override_argument(
-        const std::string &s) {
-    //--------------------------------------------------------------------------
-      // Some of this code is borrowed from Realm's logger initialization.
-      const char *p1 = s.c_str();
-      while (true) {
-        // Skip commas.
-        while(*p1 == ',') p1++;
-        if(!*p1) break;
-
-        // We follow a similar format as the logger's -level arguments, where
-        // users can specify for particular memory kinds the amount of eager
-        // allocation space should be used. For example:
-        // -lg:eager_alloc_percentage_overrides socket_mem=35,system_mem=20.
-        std::string mem_kind_name;
-        if (!isdigit(*p1)) {
-          const char *p2 = p1;
-          while (*p2 != '=') {
-            if (!*p2) {
-              fprintf(stderr, "ERROR: memory kind in "
-                              "-lg:eager_alloc_percentage_override "
-                              "must be followed by =.\n");
-              return false;
-            }
-            p2++;
-          }
-          mem_kind_name.assign(p1, p2 - p1);
-          p1 = p2 + 1;
-        }
-        // Parse the memory kind now. First, convert the memory
-        // string to all upper case.
-        std::transform(
-            mem_kind_name.begin(),
-            mem_kind_name.end(),
-            mem_kind_name.begin(),
-            ::toupper
-        );
-        Realm::Memory::Kind mem_kind = Memory::NO_MEMKIND;
-        #define MEM_STR_EQ(name, desc) \
-          if (strcmp(mem_kind_name.c_str(), #name) == 0) { \
-            mem_kind = Realm::Memory::name;                \
-          }
-          REALM_MEMORY_KINDS(MEM_STR_EQ)
-        #undef MEM_STR_EQ
-        if (mem_kind == Realm::Memory::NO_MEMKIND) {
-          fprintf(stderr, "ERROR: unable to parse memory kind %s.\n",
-                  mem_kind_name.c_str());
-          return false;
-        }
-
-        // Advance until we don't see any more numbers.
-        const char* p2 = p1;
-        while (*p2 && isdigit(*p2)) p2++;
-        if (!*p2 || (*p2 == ',')) {
-          std::string percentage_str(p1, p2);
-          char* pos;
-          errno = 0; // No errors from before.
-          long percentage = strtol(percentage_str.c_str(), &pos, 10);
-          if (errno != 0) {
-            fprintf(stderr, "ERROR: unable to parse percentage value.\n");
-            return false;
-          }
-          this->eager_alloc_percentage_overrides[mem_kind] = percentage;
-          p1 = p2;
-        }
-      }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -31059,6 +33738,8 @@ namespace Legion {
       ctx->begin_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
       implicit_context = NULL;
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
+      implicit_provenance = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -31094,6 +33775,8 @@ namespace Legion {
           NULL/*metadataptr*/, 0/*metadatasize*/, effects);
       implicit_context = NULL;
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
+      implicit_provenance = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -31265,7 +33948,7 @@ namespace Legion {
       {
         for (std::vector<LegionHandshake>::const_iterator it = 
               pending_handshakes.begin(); it != pending_handshakes.end(); it++)
-          it->impl->initialize();
+          it->impl->initialize(the_runtime);
       }
     }
 
@@ -31520,16 +34203,17 @@ namespace Legion {
 #endif
       }
       // Lastly do any other registrations we might have
-#ifdef DEBUG_LEGION_COLLECTIVES
       ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
+      red_table[BarrierArrivalReduction::REDOP] =
+        Realm::ReductionOpUntyped::create_reduction_op<
+                            BarrierArrivalReduction>();
+#ifdef DEBUG_LEGION_COLLECTIVES
       red_table[CollectiveCheckReduction::REDOP] =
         Realm::ReductionOpUntyped::create_reduction_op<
                                 CollectiveCheckReduction>();
       red_table[CloseCheckReduction::REDOP]=
         Realm::ReductionOpUntyped::create_reduction_op<
                                 CloseCheckReduction>();
-#else
-      const ReductionOpTable& red_table = get_reduction_table(true/*safe*/);
 #endif
       for(ReductionOpTable::const_iterator it = red_table.begin();
           it != red_table.end();
@@ -31653,7 +34337,7 @@ namespace Legion {
       if (runtime_started)
       {
         // If it's started, we can just do the initialization now
-        handshake.impl->initialize();
+        handshake.impl->initialize(the_runtime);
       }
       else
       {
@@ -32245,7 +34929,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
+      log_run.fatal("LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32256,7 +34940,7 @@ namespace Legion {
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
+      log_run.error("LEGION ERROR: %s (from file %s:%d)",
                     message, file_name, line);
       abort();
     }
@@ -32268,13 +34952,12 @@ namespace Legion {
                                          const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
+      log_run.warning("LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
       if (Runtime::the_runtime && Runtime::the_runtime->warnings_backtrace)
       {
         Realm::Backtrace bt;
         bt.capture_backtrace();
-        bt.lookup_symbols();
         log_run.warning() << bt;
       }
 #ifndef LEGION_WARNINGS_FATAL
@@ -32296,6 +34979,7 @@ namespace Legion {
         implicit_runtime = runtime;
       // We don't profile this task
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
       // Finalize the runtime and then delete it
       std::vector<RtEvent> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
@@ -32330,9 +35014,6 @@ namespace Legion {
 #endif
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler = 
-          runtime->profiler->find_or_create_profiling_instance();
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
@@ -32351,6 +35032,17 @@ namespace Legion {
 #endif
       data += sizeof(tid);
       arglen -= sizeof(tid);
+      if (runtime->profiler != NULL)
+      {
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+        // If this is a message task, then we need to initialize the
+        // implicit_fevent before doing anything that can block
+        if (tid == LG_MESSAGE_ID)
+          runtime->profiler->increment_outstanding_message_request();
+        if (implicit_profiler == NULL)
+          implicit_profiler = 
+            runtime->profiler->find_or_create_profiling_instance();
+      }
       switch (tid)
       {
         case LG_SCHEDULER_ID:
@@ -32779,16 +35471,6 @@ namespace Legion {
             CopyAcrossExecutor::handle_deferred_copy_across(args);
             break;
           }
-        case LG_FREE_EAGER_INSTANCE_TASK_ID:
-          {
-            MemoryManager::handle_free_eager_instance(args);
-            break;
-          }
-        case LG_FINALIZE_OUTPUT_ID:
-          {
-            OutputRegionImpl::handle_finalize_output(args);
-            break;
-          } 
 #ifdef LEGION_MALLOC_INSTANCES
         // LG_MALLOC_INSTANCE_TASK_ID should always run app processor
         case LG_FREE_INSTANCE_TASK_ID:
@@ -32880,23 +35562,57 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      // Only profile this if we're doing self profiling
-      if ((runtime->profiler == NULL) || !runtime->profiler->self_profile)
-        implicit_profiler = NULL;
-      else if (implicit_profiler == NULL)
-        implicit_profiler = 
-          runtime->profiler->find_or_create_profiling_instance();
+      if (runtime->profiler != NULL) 
+      {
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+        if (implicit_profiler == NULL)
+          implicit_profiler = 
+            runtime->profiler->find_or_create_profiling_instance();
+      }
       Realm::ProfilingResponse response(args, arglen);
       const ProfilingResponseBase *base = 
-        (const ProfilingResponseBase*)response.user_data();
+        static_cast<const ProfilingResponseBase*>(response.user_data());
+      LgEvent fevent;
+      bool failed_alloc = false;
       if (base->handler == NULL)
       {
-        // If we got a NULL let's assume they meant the profiler
-        // this mainly happens with messages that cross nodes
-        runtime->profiler->handle_profiling_response(base,response,args,arglen);
+        // This is the remote message case
+#ifdef DEBUG_LEGION
+        assert(runtime->profiler != NULL);
+#endif
+        const long long t_start = Realm::Clock::current_time_in_nanoseconds();
+        // Check to see if should report this profiling
+        if (runtime->profiler->handle_profiling_response(response, args,
+              arglen, fevent, failed_alloc))
+        {
+          if (failed_alloc)
+            runtime->profiler->handle_failed_instance_allocation();
+          const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+          const LgEvent finish_event(Processor::get_current_finish_event());
+          implicit_profiler->process_proc_desc(p);
+          implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
+              fevent, finish_event, base->completion || failed_alloc);
+        }
+      }
+      else if (runtime->profiler != NULL)
+      {
+        const long long t_start = Realm::Clock::current_time_in_nanoseconds();
+        // Check to see if should report this profiling
+        if (base->handler->handle_profiling_response(response, args, arglen, 
+                                                     fevent, failed_alloc))
+        {
+          if (failed_alloc)
+            runtime->profiler->handle_failed_instance_allocation();
+          const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+          const LgEvent finish_event(Processor::get_current_finish_event());
+          implicit_profiler->process_proc_desc(p);
+          implicit_profiler->record_proftask(p, base->op_id, t_start, t_stop,
+              fevent, finish_event, base->completion || failed_alloc);
+        }
       }
       else
-        base->handler->handle_profiling_response(base, response, args, arglen);
+        base->handler->handle_profiling_response(response, args, arglen,
+            fevent, failed_alloc);
     }
 
     //--------------------------------------------------------------------------
@@ -32946,7 +35662,9 @@ namespace Legion {
         implicit_runtime = runtime;
       // We don't profile this task
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
       // Create the startup barrier and send it out
+      // Note we don't profile this for critical paths
       RtBarrier startup_barrier(
         Realm::Barrier::create_barrier(runtime->total_address_spaces));
       runtime->broadcast_startup_barrier(startup_barrier);
@@ -32968,6 +35686,7 @@ namespace Legion {
         implicit_runtime = runtime;
       // We don't profile this task
       implicit_profiler = NULL;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
       runtime->handle_endpoint_creation(derez);
     }
 
@@ -32985,9 +35704,13 @@ namespace Legion {
 #endif
       if (implicit_runtime == NULL)
         implicit_runtime = runtime;
-      if ((runtime->profiler != NULL) && (implicit_profiler == NULL))
-        implicit_profiler =
-          runtime->profiler->find_or_create_profiling_instance();
+      if (runtime->profiler != NULL)
+      {
+        implicit_fevent = LgEvent(Processor::get_current_finish_event());
+        if (implicit_profiler == NULL)
+          implicit_profiler =
+            runtime->profiler->find_or_create_profiling_instance();
+      }
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);

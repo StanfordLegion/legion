@@ -299,20 +299,14 @@ namespace Legion {
       struct PendingInstance {
       public:
         PendingInstance(void)
-          : instance(NULL), op(NULL), uid(0), eager(false) { }
-        PendingInstance(FutureInstance *i)
-          : instance(i), op(NULL), uid(0), eager(false) { }
-        PendingInstance(Operation *o, UniqueID id, RtUserEvent a, bool e)
-          : instance(NULL), op(o), uid(id), alloc_ready(a), eager(e) { }
+          : instance(NULL), creator_uid(0) { }
+        PendingInstance(FutureInstance *i, UniqueID u)
+          : instance(i), creator_uid(u) { }
       public:
         FutureInstance *instance;
-        Operation *op;
-        UniqueID uid;
-        RtUserEvent alloc_ready;
+        UniqueID creator_uid;
         ApUserEvent inst_ready;
         RtEvent safe_inst_ready;
-        std::set<AddressSpaceID> can_fail_remote_requests;
-        bool eager;
       };
       struct FutureInstanceTracker {
       public:
@@ -369,13 +363,15 @@ namespace Legion {
                              bool silence_warnings, const char *warning_string);
       void report_incompatible_accessor(const char *accessor_kind,
                                         PhysicalInstance instance);
-      bool find_or_create_application_instance(Memory target, UniqueID uid);
-      RtEvent request_application_instance(Memory target, SingleTask *task,
-                       UniqueID uid, AddressSpaceID source, 
-                       bool can_fail = false, 
-                       size_t known_upper_bound_size = SIZE_MAX);
+      bool request_application_instance(Memory target, SingleTask *task,
+          RtEvent *safe_for_unbounded_pools, bool can_fail = false,
+          size_t known_upper_bound_size = SIZE_MAX);
+      bool find_or_create_application_instance(Memory target, 
+          size_t known_upper_bound_size, UniqueID task_uid,
+          const TaskTreeCoordinates &coordinates,
+          RtEvent *safe_for_unbounded_pools);
       ApEvent find_application_instance_ready(Memory target, SingleTask *task);
-      RtEvent request_runtime_instance(Operation *op, bool eager);
+      void request_runtime_instance(Operation *op);
       RtEvent find_runtime_instance_ready(void);
       const void *find_runtime_buffer(TaskContext *ctx, size_t &expected_size);
       ApEvent copy_to(FutureInstance *target, Operation *op,
@@ -401,7 +397,9 @@ namespace Legion {
                       const void *metadata = NULL, size_t metasize = 0);
       void set_result(ApEvent complete, FutureFunctor *callback_functor,
                       bool own, Processor functor_proc);
-      void set_result(FutureImpl *previous, Operation *op);
+      void set_result(Operation *op, FutureImpl *previous,
+                      RtEvent *safe_for_unbounded_pools);
+      void set_result(TaskContext *ctx, FutureImpl *previous);
       // This is the same as above but for data that we know is visible
       // in the system memory and should always make a local FutureInstance
       // and for which we know that there is no completion effects
@@ -432,11 +430,13 @@ namespace Legion {
     protected:
       void finish_set_future(ApEvent complete); // must be holding lock
       void create_pending_instances(void); // must be holding lock
-      FutureInstance* find_or_create_instance(Memory memory, Operation *op,
-                        UniqueID op_uid, bool eager, ApEvent &inst_ready,
-                        bool need_lock = true, FutureInstance *existing = NULL);
+      FutureInstance* find_or_create_instance(Memory memory,ApEvent &inst_ready,
+          bool silence_warnings, const char *warning_string);
+      FutureInstance* create_instance(Operation *op, Memory memory,
+          size_t size, RtEvent *safe_for_unbounded_pools);
+      // Must be holding the lock when calling initialize_instance
+      ApEvent record_instance(FutureInstance *instance, UniqueID creator_uid);
       Memory find_best_source(Memory target) const;
-      void notify_allocation_failure(Memory target);
       void mark_sampled(void);
       void broadcast_result(void); // must be holding lock
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
@@ -454,7 +454,7 @@ namespace Legion {
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
       static void handle_future_create_instance_request(Deserializer &derez,
-                                                        Runtime *runtime);
+                                    Runtime *runtime, AddressSpaceID source);
       static void handle_future_create_instance_response(Deserializer &derez,
                                                          Runtime *runtime);
     public:
@@ -471,7 +471,7 @@ namespace Legion {
       // The depth of the context in which this was made
       const int producer_depth;
       const UniqueID producer_uid;
-      // Note this is a future coordinate and not a task tree coordinate!
+      // Note this is a blocking coordinate and not a task tree coordinate!
       const ContextCoordinate coordinate;
       Provenance *const provenance;
     private:
@@ -495,11 +495,11 @@ namespace Legion {
       // The event denoting when all the effects represented by
       // this future are actually complete
       ApEvent future_complete;
+      // Event for when the future size is set if needed
+      RtUserEvent future_size_ready;
     private:
       // Instances that need to be made once we set the future
       std::map<Memory,PendingInstance> pending_instances;
-      // Events representing when remote instances have been allocated
-      std::map<Memory,RtUserEvent> remote_instance_allocations;
     private:
       Processor callback_proc;
       FutureFunctor *callback_functor;
@@ -562,7 +562,7 @@ namespace Legion {
         const PhysicalInstance instance;
       };
     public:
-      FutureInstance(const void *data, size_t size, bool eager, 
+      FutureInstance(const void *data, size_t size,
                      bool external, bool own_allocation = true,
                      LgEvent unique_event = LgEvent::NO_LG_EVENT,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
@@ -585,6 +585,8 @@ namespace Legion {
                          ApEvent precondition);
       ApEvent copy_from(FutureInstance *source, Operation *op,
                         ApEvent precondition);
+      ApEvent copy_from(FutureInstance *source, UniqueID uid,
+                        ApEvent precondition);
       ApEvent reduce_from(FutureInstance *source, Operation *op,
                           const ReductionOpID redop_id,
                           const ReductionOp *redop, bool exclusive,
@@ -604,12 +606,14 @@ namespace Legion {
 #endif
       bool defer_deletion(ApEvent precondition);
     public:
+      bool is_immediate(void) const; 
       bool can_pack_by_value(void) const;
       // You only need to check the return value if you set pack_ownership=false
       // as that is when the you need to make sure the instance isn't deleted
       // remotely, whereas in all other cases it is safe to delete locally
       bool pack_instance(Serializer &rez, ApEvent ready_event,
           bool pack_ownership, bool allow_by_value = true); 
+      static void pack_null(Serializer &rez);
       static FutureInstance* unpack_instance(Deserializer &derez);
     public:
       static bool check_meta_visible(Memory memory);
@@ -625,7 +629,6 @@ namespace Legion {
       const Realm::ExternalInstanceResource *const resource;
       void (*const freefunc)(const Realm::ExternalInstanceResource&);
       const Processor freeproc;
-      const bool eager_allocation;
       const bool external_allocation;
       const bool is_meta_visible;
     protected:
@@ -662,10 +665,10 @@ namespace Legion {
                     bool register_now = true, 
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
-                    DistributedID did, uint64_t future_coordinate,
+                    DistributedID did, uint64_t blocking_index,
                     Provenance *provenance, bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
-      FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t future_coordinate,
+      FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t blocking_index,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
                     Provenance *provenance);
@@ -716,7 +719,7 @@ namespace Legion {
       const GenerationID op_gen;
       const int op_depth;
       const UniqueID op_uid;
-      const uint64_t future_coordinate;
+      const uint64_t blocking_index;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
     protected:
@@ -836,7 +839,7 @@ namespace Legion {
       PhysicalRegionImpl(const RegionRequirement &req, RtEvent mapped_event,
             ApEvent ready_event, ApUserEvent term_event, bool mapped, 
             TaskContext *ctx, MapperID mid, MappingTagID tag, bool leaf, 
-            bool virt, bool collective, Runtime *rt);
+            bool virt, bool collective, uint64_t blocking, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs) = delete;
       ~PhysicalRegionImpl(void);
     public:
@@ -852,7 +855,7 @@ namespace Legion {
       PrivilegeMode get_privilege(void) const;
     public:
       void unmap_region(void);
-      ApEvent remap_region(ApEvent new_ready_event);
+      ApEvent remap_region(ApEvent new_ready_event, uint64_t blocking);
       const RegionRequirement& get_requirement(void) const;
       void add_padded_field(FieldID fid);
       void set_reference(const InstanceRef &references, bool safe = false);
@@ -931,6 +934,8 @@ namespace Legion {
       // Any fields which we have privileges on the padded space (sorted)
       // This enables us to access the padded space for this field
       std::vector<FieldID> padded_fields;
+      // The blocking index for when this physical region was created
+      uint64_t blocking_index;
       // "appliciation side" state
       // whether it is currently mapped
       bool mapped; 
@@ -988,7 +993,8 @@ namespace Legion {
                        const InstanceSet &instance_set,
                        TaskContext *ctx, Runtime *rt,
                        const bool global_indexing,
-                       const bool valid);
+                       const bool valid,
+                       const bool grouped_fields);
       OutputRegionImpl(const OutputRegionImpl &rhs) = delete;
       ~OutputRegionImpl(void);
     public:
@@ -1011,25 +1017,8 @@ namespace Legion {
                        PhysicalInstance instance,
                        const LayoutConstraintSet *constraints,
                        bool check_constraints);
-    private:
-      void return_data(const DomainPoint &extents,
-                       FieldID field_id,
-                       uintptr_t ptr,
-                       size_t alignment);
-    private:
-      struct FinalizeOutputArgs : public LgTaskArgs<FinalizeOutputArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_ID;
-      public:
-        FinalizeOutputArgs(OutputRegionImpl *r)
-          : LgTaskArgs<FinalizeOutputArgs>(implicit_provenance),
-            region(r) { }
-        OutputRegionImpl *region;
-      };
     public:
-      void finalize(void);
-    public:
-      static void handle_finalize_output(const void *args);
+      void finalize(RtEvent safe_effects);
     public:
       bool is_complete(FieldID &unbound_field) const;
     public:
@@ -1045,15 +1034,12 @@ namespace Legion {
       const unsigned index;
       const bool created_region;
       const bool global_indexing;
+      // Either AOS or hybrid or contiguous SOA
+      const bool grouped_fields;
     private:
-      struct ReturnedInstanceInfo {
-        uintptr_t ptr;
-        size_t alignment;
-      };
       // Output data batched during task execution
-      std::map<FieldID,ReturnedInstanceInfo> returned_instances;
+      std::map<FieldID,PhysicalInstance> returned_instances;
       std::vector<PhysicalManager*> managers;
-      std::vector<PhysicalInstance> escaped_instances;
       DomainPoint extents;
     };
 
@@ -1153,14 +1139,13 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      LegionHandshakeImpl(bool init_in_ext, int ext_participants, 
-                          int legion_participants);
-      LegionHandshakeImpl(const LegionHandshakeImpl &rhs);
+      LegionHandshakeImpl(bool init_in_ext);
+      LegionHandshakeImpl(const LegionHandshakeImpl &rhs) = delete;
       ~LegionHandshakeImpl(void);
     public:
-      LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs);
+      LegionHandshakeImpl& operator=(const LegionHandshakeImpl &rhs) = delete;
     public:
-      void initialize(void);
+      void initialize(Runtime *runtime);
     public:
       void ext_handoff_to_legion(void);
       void ext_wait_on_legion(void);
@@ -1173,13 +1158,15 @@ namespace Legion {
       void advance_legion_handshake(void);
     private:
       const bool init_in_ext;
-      const int ext_participants;
-      const int legion_participants;
     private:
+      // Whether the legion side is in split mode execution or not
+      bool split;
+      Runtime *runtime;
       PhaseBarrier ext_wait_barrier;
       PhaseBarrier ext_arrive_barrier;
-      PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
-      PhaseBarrier legion_arrive_barrier; // copy of mpi_wait_barrier
+      PhaseBarrier legion_wait_barrier;
+      PhaseBarrier legion_next_barrier; // one gen ahead of wait
+      PhaseBarrier legion_arrive_barrier;
     };
 
     class MPIRankTable {
@@ -1331,6 +1318,7 @@ namespace Legion {
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid) const;
+      bool has_non_default_mapper(void) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -1460,6 +1448,169 @@ namespace Legion {
     }; 
 
     /**
+     * \class MemoryPool
+     * A memory pool abstracts an interface for performing immediate 
+     * memory allocations without going through Realm's instance allocation
+     * pathway. This is necessary for performing allocations that happen
+     * during the execution state of the pipeline and therefore we cannot
+     * have such allocations racing with mapping allocations.
+     */
+    class MemoryPool {
+    public:
+      MemoryPool(size_t alignment) : max_alignment(alignment) { }
+      virtual ~MemoryPool(void) { }
+      virtual size_t query_memory_limit(void) = 0;
+      virtual size_t query_available_memory(void) = 0;
+      virtual PoolBounds get_bounds(void) const = 0;
+      virtual FutureInstance* allocate_future(UniqueID creator_uid,
+                                              size_t size) = 0;
+      virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
+          LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
+          RtEvent &use_event) = 0;
+      virtual bool contains_instance(PhysicalInstance instance) const = 0;
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result, 
+          LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator) = 0;
+      virtual void free_instance(PhysicalInstance instance,
+                                 RtEvent precondition) = 0;
+      virtual bool is_released(void) const = 0;
+      virtual void release_pool(UniqueID creator) = 0;
+      virtual void finalize_pool(RtEvent done) = 0;
+    public:
+      virtual void serialize(Serializer &rez) = 0;
+      static MemoryPool* deserialize(Deserializer &derez, Runtime *runtime);
+    public:
+      static constexpr FieldID FID = 0; 
+      static Realm::InstanceLayoutGeneric* create_layout(size_t size,
+          size_t alignment, size_t offset = 0);
+    public:
+      const size_t max_alignment;
+    };
+
+    /**
+     * \class ConcretePool
+     * A concrete pool has a specific amount of memory available for
+     * dynamic allocations and it will progressively shrink during
+     * the execution of the task. This pool is backed by a Realm 
+     * instance that we will redistrict to split off into new instances
+     */
+    class ConcretePool : public MemoryPool {
+    private:
+      struct Range {
+        uintptr_t first, last;  // half-open range: [first, last)
+        unsigned prev, next;  // double-linked list of all ranges (by index)
+        unsigned prev_free, next_free; // double-linked list of just free ranges
+        PhysicalInstance instance;
+      };
+    public:
+      ConcretePool(PhysicalInstance instance, size_t size, size_t alignment, 
+          RtEvent use_event, MemoryManager *manager);
+      virtual ~ConcretePool(void) override;
+      virtual size_t query_memory_limit(void) override;
+      virtual size_t query_available_memory(void) override;
+      virtual PoolBounds get_bounds(void) const override;
+      virtual FutureInstance* allocate_future(UniqueID creator_uid,
+                                              size_t size) override;
+      virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
+          LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
+          RtEvent &use_event) override;
+      virtual bool contains_instance(PhysicalInstance instance) const override;
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
+          LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
+      virtual void free_instance(PhysicalInstance instance,
+                                 RtEvent precondition) override;
+      virtual bool is_released(void) const override;
+      virtual void release_pool(UniqueID creator) override;
+      virtual void finalize_pool(RtEvent done) override;
+      virtual void serialize(Serializer &rez) override;
+    private:
+      unsigned allocate(size_t size, size_t alignment, uintptr_t &start);
+      void deallocate(unsigned index);
+      unsigned alloc_range(uintptr_t first, uintptr_t last,
+                           PhysicalInstance backing);
+      void free_range(unsigned index);
+      void add_to_free_list(unsigned index, Range &r);
+      void remove_from_free_list(unsigned index, Range &r);
+      void grow_hole(unsigned index, Range &r, uintptr_t bound, bool before);
+      RtEvent escape_range(unsigned index, size_t num_results,
+          PhysicalInstance *results, LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID creator);
+      static unsigned floor_log2(uint64_t size);
+    private:
+      MemoryManager *const manager;
+      const size_t limit;
+      size_t remaining_bytes;
+    private: 
+      static constexpr unsigned SENTINEL = std::numeric_limits<unsigned>::max();
+      std::vector<Range> ranges;
+      // Each external instance has a range that it corresponds to
+      std::map<PhysicalInstance,unsigned> allocated;
+      // Each backing instance has a start range and use event
+      std::map<PhysicalInstance,RtEvent> backing_instances;
+      // Instances that are freed with event preconditions
+      std::map<unsigned,RtEvent> pending_frees;
+      // Free lists associated with a specific sizes by powers of 2
+      // entry[0] = sizes from [2^0,2^1)
+      // entry[1] = sizes from [2^1,2^2)
+      // entry[2] = sizes from [2^2,2^3)
+      // ...
+      std::vector<unsigned> size_based_free_lists;
+      // Linked list of ranges not currently be used
+      unsigned first_unused_range;
+      // Whether this pool has been released
+      bool released;
+    };
+
+    /**
+     * \class UnboundPool
+     * An unbound pool is a place holder for being able to do allocations
+     * with an unbounded amount of memory (different from infinite since
+     * we can still run out). This will forward all allocation requests
+     * through to the actual memory manager, which is only safe because
+     * as long as this object is alive it blocks the memory manager 
+     * from doing any additional allocations.
+     */
+    class UnboundPool : public MemoryPool {
+    public:
+      UnboundPool(MemoryManager *manager, UnboundPoolScope scope,
+                  TaskTreeCoordinates &coordinates, size_t max_free_bytes);
+      virtual ~UnboundPool(void) override;
+      virtual size_t query_memory_limit(void) override;
+      virtual size_t query_available_memory(void) override;
+      virtual PoolBounds get_bounds(void) const override;
+      virtual FutureInstance* allocate_future(UniqueID creator_uid,
+                                              size_t size) override;
+      virtual PhysicalInstance allocate_instance(UniqueID creator_uid,
+          LgEvent unique_event, const Realm::InstanceLayoutGeneric *layout,
+          RtEvent &use_event) override;
+      virtual bool contains_instance(PhysicalInstance instance) const override;
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          RtEvent safe_effects, size_t num_results, PhysicalInstance *result,
+          LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
+      virtual void free_instance(PhysicalInstance instance,
+                                 RtEvent precondition) override;
+      virtual bool is_released(void) const override;
+      virtual void release_pool(UniqueID creator) override;
+      virtual void finalize_pool(RtEvent done) override;
+      virtual void serialize(Serializer &rez) override;
+    private:
+      PhysicalInstance find_local_freed_hole(size_t size, size_t &prev_size);
+    private:
+      TaskTreeCoordinates coordinates;
+      std::map<size_t,
+        std::list<std::pair<PhysicalInstance,RtEvent> > > freed_instances;
+      MemoryManager *const manager;
+      const size_t max_freed_bytes;
+      size_t freed_bytes;
+      const UnboundPoolScope scope;
+      bool released;
+    };
+
+    /**
      * \class MemoryManager
      * The goal of the memory manager is to keep track of all of
      * the physical instances that the runtime knows about in various
@@ -1474,40 +1625,39 @@ namespace Legion {
         CREATE_INSTANCE_LAYOUT,
         FIND_OR_CREATE_CONSTRAINTS,
         FIND_OR_CREATE_LAYOUT,
+        REDISTRICT_INSTANCE_CONSTRAINTS,
+        REDISTRICT_INSTANCE_LAYOUT,
         FIND_ONLY_CONSTRAINTS,
         FIND_ONLY_LAYOUT,
         FIND_MANY_CONSTRAINTS,
         FIND_MANY_LAYOUT,
       };
     public:
-      struct FreeEagerInstanceArgs : public LgTaskArgs<FreeEagerInstanceArgs> {
+      class TaskLocalInstanceAllocator : public ProfilingResponseHandler {
       public:
-        static const LgTaskID TASK_ID = LG_FREE_EAGER_INSTANCE_TASK_ID;
+        TaskLocalInstanceAllocator(void) = default;
+        TaskLocalInstanceAllocator(LgEvent unique_event);
+        TaskLocalInstanceAllocator(const TaskLocalInstanceAllocator&) = delete;
+        TaskLocalInstanceAllocator(TaskLocalInstanceAllocator && rhs);
+        virtual ~TaskLocalInstanceAllocator(void) { ready.wait(); }
       public:
-        FreeEagerInstanceArgs(MemoryManager *m, PhysicalInstance i)
-          : LgTaskArgs<FreeEagerInstanceArgs>(implicit_provenance),
-            manager(m), inst(i) { }
+        TaskLocalInstanceAllocator& operator=(
+            const TaskLocalInstanceAllocator&) = delete;
+        TaskLocalInstanceAllocator& operator=(
+            TaskLocalInstanceAllocator&&) = delete;
       public:
-        MemoryManager *const manager;
-        const PhysicalInstance inst;
-      };
-      class FutureInstanceAllocator : public ProfilingResponseHandler {
-      public:
-        FutureInstanceAllocator(void);
-      public:
-        virtual void handle_profiling_response(
-                const ProfilingResponseBase *base,
-                const Realm::ProfilingResponse &response,
-                const void *orig, size_t orig_length);
+        virtual bool handle_profiling_response(
+            const Realm::ProfilingResponse &response, const void *orig,
+            size_t orig_length, LgEvent &fevent, bool &failed_alloc);
         inline bool succeeded(void) const
         {
-          if (!ready.has_triggered())
-            ready.wait();
-          return success.load();
+          ready.wait();
+          return success;
         }
       private:
-        const RtUserEvent ready;
-        std::atomic<bool> success;
+        RtUserEvent ready;
+        LgEvent unique_event;
+        bool success;
       };
 #ifdef LEGION_MALLOC_INSTANCES
     public:
@@ -1516,14 +1666,16 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_MALLOC_INSTANCE_TASK_ID;
       public:
         MallocInstanceArgs(MemoryManager *m, Realm::InstanceLayoutGeneric *l, 
-                     const Realm::ProfilingRequestSet *r, PhysicalInstance *i)
-          : LgTaskArgs<MallocInstanceArgs>(implicit_provenance), 
-            manager(m), layout(l), requests(r), instance(i) { }
+                     const Realm::ProfilingRequestSet *r, PhysicalInstance *i,
+                     LgEvent u)
+          : LgTaskArgs<MallocInstanceArgs>(implicit_provenance), manager(m),
+            layout(l), requests(r), instance(i), unique_event(u) { }
       public:
         MemoryManager *const manager;
         Realm::InstanceLayoutGeneric *const layout;
         const Realm::ProfilingRequestSet *const requests;
         PhysicalInstance *const instance;
+        const LgEvent unique_event;
       };
       struct FreeInstanceArgs : public LgTaskArgs<FreeInstanceArgs> {
       public:
@@ -1555,6 +1707,17 @@ namespace Legion {
           // File system memories are "local" everywhere
           return ((kind == Memory::HDF_MEM) || (kind == Memory::FILE_MEM));
         }
+      inline const char* get_name(void) const 
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) #name,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          return mem_names[memory.kind()];
+        }
+      inline void update_remaining_capacity(size_t size)
+        { remaining_capacity.fetch_add(size); }
     public:
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);
@@ -1566,40 +1729,60 @@ namespace Legion {
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority, 
                                     bool tight_region_bounds, 
                                     LayoutConstraintKind *unsat_kind, 
                                     unsigned *unsat_index, size_t *footprint, 
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority, 
                                     bool tight_region_bounds, 
                                     LayoutConstraintKind *unsat_kind,
                                     unsigned *unsat_index, size_t *footprint, 
+                                    RtEvent *safe_for_unbounded_pools,
                                     UniqueID creator_id, bool remote = false);
+      bool redistrict_physical_instance(MappingInstance &instance,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id);
+      bool redistrict_physical_instance(MappingInstance &instance,
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    Processor processor, bool acquire,
+                                    GCPriority priority, bool tight_bounds,
+                                    UniqueID creator_id);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
@@ -1627,10 +1810,33 @@ namespace Legion {
                                 const std::vector<PhysicalManager*> &instances);
       static void handle_notify_collected_instances(Deserializer &derez,
                                                     Runtime *runtime);
-      FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
-                                             size_t size, bool eager);
-      void free_future_instance(PhysicalInstance inst, size_t size, 
-                                RtEvent free_event, bool eager);
+    public:
+      FutureInstance* create_future_instance(UniqueID creator_id, 
+          const TaskTreeCoordinates &coordinates, size_t size,
+          RtEvent *safe_for_unbounded_pools);
+      void free_future_instance(PhysicalInstance inst, size_t size,
+                                RtEvent free_event);
+      PhysicalInstance create_task_local_instance(UniqueID creator_uid,
+          const TaskTreeCoordinates &coordinates, LgEvent unique_event,
+          const Realm::InstanceLayoutGeneric *layout, RtEvent &use_event,
+          RtEvent *safe_for_unbounded_pools);
+      void free_task_local_instance(PhysicalInstance instance,
+                                  RtEvent precondition = RtEvent::NO_RT_EVENT);
+      size_t query_available_memory(void); 
+      MemoryPool* create_memory_pool(UniqueID creator_uid, 
+          TaskTreeCoordinates &coordinates, const PoolBounds &bounds,
+          RtEvent *safe_for_unbounded_pools);
+      void release_unbound_pool(void);
+      static void handle_create_memory_pool_request(Deserializer &derez,
+          Runtime *runtime, AddressSpaceID source);
+      static void handle_create_memory_pool_response(Deserializer &derez,
+          Runtime *runtime);
+      uint64_t order_collective_unbounded_pools(SingleTask *task); 
+      RtEvent finalize_collective_unbounded_pools_order(SingleTask *task,
+                                              uint64_t max_lamport_clock);
+      void end_collective_unbounded_pools_task(void);
+    protected:
+      void start_next_collective_unbounded_pools_task(void);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -1660,8 +1866,10 @@ namespace Legion {
       void check_instance_deletions(const std::vector<PhysicalManager*> &del);
     protected:
       // We serialize all allocation attempts in a memory in order to 
-      // ensure find_and_create calls will remain atomic
-      RtEvent acquire_allocation_privilege(void);
+      // ensure find_and_create calls will remain atomic and are also
+      // ordered with respect to any unbound pool allocations
+      RtEvent acquire_allocation_privilege(const TaskTreeCoordinates &coords,
+                                           RtEvent *safe_for_unbounded_pools);
       void release_allocation_privilege(void);
       PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
                                           size_t *footprint,
@@ -1675,23 +1883,13 @@ namespace Legion {
     public:
       bool is_visible_memory(Memory other);
     public:
-      size_t query_available_eager_memory(void);
-      RtEvent create_eager_instance(PhysicalInstance &instance, LgEvent unique,
-                                    Realm::InstanceLayoutGeneric *layout);
-      // Create an external instance that is a view to the eager pool instance
-      RtEvent create_sub_eager_instance(PhysicalInstance &instance,
-                                        uintptr_t ptr, size_t size,
-                                        Realm::InstanceLayoutGeneric *layout,
-                                        LgEvent unique_event);
-      void free_eager_instance(PhysicalInstance instance, RtEvent defer);
-      static void handle_free_eager_instance(const void *args);
-    public:
       void free_external_allocation(uintptr_t ptr, size_t size);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
       RtEvent allocate_legion_instance(Realm::InstanceLayoutGeneric *layout,
                                      const Realm::ProfilingRequestSet &requests,
                                      PhysicalInstance &inst,
+                                     LgEvent unique_event,
                                      bool needs_defer = true);
       void record_legion_instance(InstanceManager *manager, 
                                   PhysicalInstance instance);
@@ -1711,22 +1909,9 @@ namespace Legion {
       // The capacity in bytes of this memory
       const size_t capacity;
       // The remaining capacity in this memory
-      size_t remaining_capacity;
+      std::atomic<size_t> remaining_capacity;
       // The runtime we are associate with
       Runtime *const runtime;
-    public:
-      // Realm instance backin the eager pool
-      // Must be allocated at the start-up time
-      PhysicalInstance eager_pool_instance;
-      uintptr_t eager_pool;
-      // Allocator object for eager allocations
-      typedef BasicRangeAllocator<size_t, size_t> EagerAllocator;
-      EagerAllocator *eager_allocator;
-      size_t eager_remaining_capacity;
-      // Allocation counter
-      std::atomic<size_t> next_allocation_id;
-      // Mapping from pointers to their allocation ids
-      std::map<uintptr_t,size_t> eager_allocations;
     protected:
       // Lock for controlling access to the data
       // structures in this memory manager
@@ -1746,9 +1931,35 @@ namespace Legion {
       // garbage collection priorities and placement in memory
       std::map<GCPriority,std::set<PhysicalManager*>,
                std::greater<GCPriority> > collectable_instances;
-      // Keep track of outstanding requuests for allocations which
+      // Keep track of outstanding requests for allocations which
       // will be tried in the order that they arrive
-      std::deque<RtUserEvent> pending_allocation_attempts;
+      std::deque<std::pair<RtUserEvent,
+        const TaskTreeCoordinates*> > pending_allocation_attempts;
+      // Track how many outstanding local instance allocations there are
+      unsigned outstanding_task_local_allocations;
+      // Track how many outstanding unbounded allocators there are
+      unsigned outstanding_unbounded_allocations;
+      // Keep track of the current unbounded pool scope
+      UnboundPoolScope unbounded_pool_scope;
+      // If we have an unbounded pool then track the task tree coordinates
+      TaskTreeCoordinates unbounded_coordinates;
+      // Allocation transition event for switching between bounded
+      // and unbounded modes
+      RtUserEvent unbounded_transition_event;
+      // Data structures for helping to order collectively mapped tasks
+      // with unbounded memory pools
+      struct CollectiveState {
+      public:
+        CollectiveState(uint64_t clock) : lamport_clock(clock), max(false) { }
+      public:
+        uint64_t lamport_clock;
+        RtUserEvent ready_event;
+        bool max; // whether the lamport clock is the max all-reduce or not
+      };
+      std::map<SingleTask*,CollectiveState> collective_tasks;
+      uint64_t collective_lamport_clock;
+      uint32_t ready_collective_tasks;
+      uint32_t outstanding_collective_tasks;
     protected:
       std::set<Memory> visible_memories;
     protected:
@@ -1765,6 +1976,7 @@ namespace Legion {
       public:
         GarbageCollector(LocalLock &collection_lock, LocalLock &manager_lock,
                          AddressSpaceID local, Memory memory, size_t needed,
+                         size_t capacity, std::atomic<size_t> &remaining,
                          std::map<GCPriority,std::set<PhysicalManager*>,
                                  std::greater<GCPriority> > &collectables);
         GarbageCollector(const GarbageCollector &rhs) = delete;
@@ -1772,11 +1984,12 @@ namespace Legion {
       public:
         GarbageCollector& operator=(const GarbageCollector &rhs) = delete;
       public:
-        RtEvent perform_collection(void);
+        RtEvent perform_collection(PhysicalInstance &hole_instance);
         inline bool collection_complete(void) const 
           { return (current_priority == LEGION_GC_NEVER_PRIORITY); }
       protected:
         void sort_next_priority_holes(bool advance = true);
+        void update_capacity(size_t size);
       protected:
         struct Range {
         public:
@@ -1794,6 +2007,8 @@ namespace Legion {
         const Memory memory;
         const AddressSpaceID local_space;
         const size_t needed_size;
+        const size_t capacity;
+        std::atomic<size_t> &remaining_capacity;
       protected:
         std::vector<PhysicalManager*> small_holes, perfect_holes;
         std::map<size_t,std::vector<PhysicalManager*> > large_holes;
@@ -1843,7 +2058,8 @@ namespace Legion {
                            bool response);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
-      void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
+      void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one,
+          Processor target, bool profiling_virtual_channel);
     private:
       void send_message(bool complete, Runtime *runtime, Processor target, 
                         MessageKind kind, bool response,
@@ -1916,10 +2132,10 @@ namespace Legion {
       MessageManager(AddressSpaceID remote, 
                      Runtime *rt, size_t max,
                      const Processor remote_util_group);
-      MessageManager(const MessageManager &rhs);
+      MessageManager(const MessageManager &rhs) = delete;
       ~MessageManager(void);
     public:
-      MessageManager& operator=(const MessageManager &rhs);
+      MessageManager& operator=(const MessageManager &rhs) = delete;
     public:
       inline void send_message(MessageKind message, Serializer &rez, bool flush,
                         bool response = false,
@@ -1936,7 +2152,6 @@ namespace Legion {
       // State for sending messages
       const AddressSpaceID remote_address_space;
       const Processor target;
-      const bool always_flush;
     };
 
     /**
@@ -2165,6 +2380,7 @@ namespace Legion {
     public:
       const ExecutionConstraintSet execution_constraints;
       const TaskLayoutConstraintSet   layout_constraints;
+      const std::map<Memory::Kind,PoolBounds> leaf_pool_bounds;
     private:
       void *user_data;
       size_t user_data_size;
@@ -2496,8 +2712,6 @@ namespace Legion {
             initial_tasks_to_schedule(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE),
             initial_meta_task_vector_width(
                 LEGION_DEFAULT_META_TASK_VECTOR_WIDTH),
-            eager_alloc_percentage(LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE),
-            eager_alloc_percentage_overrides({}),
             max_message_size(LEGION_DEFAULT_MAX_MESSAGE_SIZE),
             gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_control_replication_contexts(
@@ -2549,7 +2763,9 @@ namespace Legion {
             prof_footprint_threshold(128 << 20),
             prof_target_latency(100),
             prof_call_threshold(0),
-            prof_self_profile(false) { }
+            prof_self_profile(false),
+            prof_no_critical_paths(false),
+            prof_all_critical_arrivals(false) { }
       public:
         int delay_start;
         int legion_collective_radix;
@@ -2557,8 +2773,6 @@ namespace Legion {
         unsigned initial_task_window_hysteresis;
         unsigned initial_tasks_to_schedule;
         unsigned initial_meta_task_vector_width;
-        unsigned eager_alloc_percentage;
-        std::map<Realm::Memory::Kind, unsigned> eager_alloc_percentage_overrides;
         unsigned max_message_size;
         unsigned gc_epoch_size;
         unsigned max_control_replication_contexts;
@@ -2609,8 +2823,8 @@ namespace Legion {
         size_t prof_target_latency;
         size_t prof_call_threshold;
         bool prof_self_profile;
-      public:
-        bool parse_alloc_percentage_override_argument(const std::string& s);
+        bool prof_no_critical_paths;
+        bool prof_all_critical_arrivals;
       };
     public:
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
@@ -2676,7 +2890,8 @@ namespace Legion {
       LegionProfiler *profiler;
       RegionTreeForest *const forest;
       VirtualManager *virtual_manager;
-      Processor utility_group;
+      Processor local_group; // all local processors
+      Processor utility_group; // all utility processors
       const size_t num_utility_procs;
     public:
       const InputArgs input_args;
@@ -2684,8 +2899,6 @@ namespace Legion {
       const unsigned initial_task_window_hysteresis;
       const unsigned initial_tasks_to_schedule;
       const unsigned initial_meta_task_vector_width;
-      const unsigned eager_alloc_percentage;
-      const std::map<Realm::Memory::Kind, unsigned> eager_alloc_percentage_overrides;
       const unsigned max_message_size;
       const unsigned gc_epoch_size;
       const unsigned max_control_replication_contexts;
@@ -2959,6 +3172,7 @@ namespace Legion {
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
+      bool has_non_default_mapper(void) const;
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                 MapperID map_id, Processor proc, bool is_default = false);
     public:
@@ -3114,10 +3328,6 @@ namespace Legion {
                                            Serializer &rez);
       void send_index_space_colors_response(AddressSpaceID target,
                                             Serializer &rez);
-      void send_index_space_remote_expression_request(AddressSpaceID target,
-                                                      Serializer &rez);
-      void send_index_space_remote_expression_response(AddressSpaceID target,
-                                                       Serializer &rez);
       void send_index_space_generate_color_request(AddressSpaceID target,
                                                    Serializer &rez);
       void send_index_space_generate_color_response(AddressSpaceID target,
@@ -3197,6 +3407,10 @@ namespace Legion {
       void send_slice_remote_commit(Processor target, Serializer &rez);
       void send_slice_rendezvous_concurrent_mapped(Processor target,
                                                    Serializer &rez);
+      void send_slice_collective_allreduce_request(Processor target,
+                                                   Serializer &rez);
+      void send_slice_collective_allreduce_response(AddressSpaceID target,
+                                                    Serializer &rez);
       void send_slice_concurrent_allreduce_request(Processor target,
                                                    Serializer &rez);
       void send_slice_concurrent_allreduce_response(AddressSpaceID target,
@@ -3313,12 +3527,6 @@ namespace Legion {
                                              Serializer &rez);
       void send_view_find_last_users_response(AddressSpaceID target,
                                               Serializer &rez);
-#ifdef ENABLE_VIEW_REPLICATION
-      void send_view_replication_request(AddressSpaceID target,Serializer &rez);
-      void send_view_replication_response(AddressSpaceID target,
-                                          Serializer &rez);
-      void send_view_replication_removal(AddressSpaceID target,Serializer &rez);
-#endif
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_result_size(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -3534,11 +3742,17 @@ namespace Legion {
       void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
       void send_notify_collected_instances(AddressSpaceID target,
                                            Serializer &rez);
+      void send_create_memory_pool_request(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_create_memory_pool_response(AddressSpaceID target,
+                                            Serializer &rez);
       void send_create_future_instance_request(AddressSpaceID target,
                                                Serializer &rez);
       void send_create_future_instance_response(AddressSpaceID target,
                                                 Serializer &rez);
       void send_free_future_instance(AddressSpaceID target, Serializer &rez);
+      void send_profiler_event_trigger(AddressSpaceID target, Serializer &rez);
+      void send_profiler_event_poison(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -3565,10 +3779,6 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
-      void handle_index_space_remote_expression_request(Deserializer &derez,
-                                                        AddressSpaceID source);
-      void handle_index_space_remote_expression_response(Deserializer &derez,
-                                                         AddressSpaceID source);
       void handle_index_space_generate_color_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_index_space_generate_color_response(Deserializer &derez);
@@ -3632,6 +3842,9 @@ namespace Legion {
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_slice_rendezvous_concurrent_mapped(Deserializer &derez);
+      void handle_slice_collective_allreduce_request(Deserializer &derez,
+                                                     AddressSpaceID source);
+      void handle_slice_collective_allreduce_response(Deserializer &derez);
       void handle_slice_concurrent_allreduce_request(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_concurrent_allreduce_response(Deserializer &derez);
@@ -3725,20 +3938,14 @@ namespace Legion {
       void handle_view_find_last_users_request(Deserializer &derez,
                                                AddressSpaceID source);
       void handle_view_find_last_users_response(Deserializer &derez);
-#ifdef ENABLE_VIEW_REPLICATION
-      void handle_view_replication_request(Deserializer &derez,
-                                           AddressSpaceID source);
-      void handle_view_replication_response(Deserializer &derez);
-      void handle_view_replication_removal(Deserializer &derez, 
-                                           AddressSpaceID source);
-#endif
       void handle_manager_request(Deserializer &derez);
       void handle_future_result(Deserializer &derez);
       void handle_future_result_size(Deserializer &derez,
                                      AddressSpaceID source);
       void handle_future_subscription(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_future_create_instance_request(Deserializer &derez);
+      void handle_future_create_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source);
       void handle_future_create_instance_response(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
@@ -3926,6 +4133,9 @@ namespace Legion {
       void handle_remote_tracing_response(Deserializer &derez);
       void handle_free_external_allocation(Deserializer &derez);
       void handle_notify_collected_instances(Deserializer &derez);
+      void handle_create_memory_pool_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_create_memory_pool_response(Deserializer &derez);
       void handle_create_future_instance_request(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_create_future_instance_response(Deserializer &derez);
@@ -3937,37 +4147,45 @@ namespace Legion {
       bool create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id);
+                                    size_t *footprint, UniqueID creator_id,
+                                    RtEvent *safe_for_unbounded_pools);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result,
                                     Processor processor, bool acquire, 
                                     GCPriority priority, bool tight_bounds,
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id);
+                                    size_t *footprint, UniqueID creator_id,
+                                    RtEvent *safe_for_unbounded_pools);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id);
+                                    size_t *footprint, UniqueID creator_id,
+                                    RtEvent *safe_for_unbounded_pools);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
+                                    const TaskTreeCoordinates &coordinates,
                                     MappingInstance &result, bool &created, 
                                     Processor processor,
                                     bool acquire, GCPriority priority,
                                     bool tight_bounds, 
                                     const LayoutConstraint **unsat,
-                                    size_t *footprint, UniqueID creator_id);
+                                    size_t *footprint, UniqueID creator_id,
+                                    RtEvent *safe_for_unbounded_pools);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -3996,6 +4214,7 @@ namespace Legion {
     public:
       void add_to_ready_queue(Processor p, TaskOp *task_op);
     public:
+      inline Processor find_local_group(void) { return local_group; }
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
       ProcessorMask find_processor_mask(const std::vector<Processor> &procs);
@@ -4902,24 +5121,30 @@ namespace Legion {
                                           const std::set<ApEvent> &events);
     public:
       static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
-      static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
+      inline void phase_barrier_arrive(const PhaseBarrier &bar, 
                 unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
       static inline void advance_barrier(PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
     public:
+      inline ApBarrier create_ap_barrier(size_t arrivals);
       static inline ApBarrier get_previous_phase(const ApBarrier &bar);
-      static inline void phase_barrier_arrive(const ApBarrier &bar, 
-                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
-                const void *reduce_value = NULL, size_t reduce_value_size = 0);
+      inline void phase_barrier_arrive(const ApBarrier &bar, 
+                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void advance_barrier(ApBarrier &bar);
       static inline bool get_barrier_result(ApBarrier bar, void *result,
                                             size_t result_size);
     public:
+      inline RtBarrier create_rt_barrier(size_t arrivals);
       static inline RtBarrier get_previous_phase(const RtBarrier &bar);
-      static inline void phase_barrier_arrive(const RtBarrier &bar,
+#ifdef DEBUG_LEGION_COLLECTIVES 
+      inline void phase_barrier_arrive(const RtBarrier &bar,
                 unsigned cnt, RtEvent precondition = RtEvent::NO_RT_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
+#else
+      inline void phase_barrier_arrive(const RtBarrier &bar,
+                unsigned cnt, RtEvent precondition = RtEvent::NO_RT_EVENT);
+#endif
       static inline void advance_barrier(RtBarrier &bar);
       static inline bool get_barrier_result(RtBarrier bar, void *result,
                                             size_t result_size);
@@ -5097,7 +5322,8 @@ namespace Legion {
       if (profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+        profiler->add_meta_request(requests, T::TASK_ID, 
+            args.provenance, precondition);
 #ifdef LEGION_SEPARATE_META_TASKS
         return RtEvent(target.spawn(LG_TASK_ID + T::TASK_ID, &args, sizeof(T),
                                     requests, precondition, priority));
@@ -5141,7 +5367,8 @@ namespace Legion {
       if (profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
-        profiler->add_meta_request(requests, T::TASK_ID, args.provenance);
+        profiler->add_meta_request(requests, T::TASK_ID,
+            args.provenance, precondition);
 #ifdef LEGION_SEPARATE_META_TASKS
         return RtEvent(target.spawn(LG_APP_PROC_TASK_ID + T::TASK_ID, &args,
                               sizeof(T), requests, precondition, priority));
@@ -5183,6 +5410,12 @@ namespace Legion {
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[2] = { e1, e2 };
+        implicit_profiler->record_event_merger(result, preconditions, 2);
+      }
+      // Always do tracing after profiling
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, e1, e2);
       return result;
@@ -5214,6 +5447,12 @@ namespace Legion {
       LegionSpy::log_event_dependence(e2, result);
       LegionSpy::log_event_dependence(e3, result);
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[3] = { e1, e2, e3 };
+        implicit_profiler->record_event_merger(result, preconditions, 3);
+      }
+      // Always do tracing after profiling
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, e1, e2, e3);
       return result;
@@ -5254,6 +5493,7 @@ namespace Legion {
       const std::set<ApEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(ApEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING
@@ -5272,6 +5512,14 @@ namespace Legion {
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(ApEvent) == sizeof(LgEvent));
+        const std::vector<ApEvent> preconditions(events.begin(), events.end());
+        implicit_profiler->record_event_merger(result,
+            &preconditions.front(), preconditions.size());
+      }
+      // Always do tracing after profiling
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, events);
       return result;
@@ -5312,6 +5560,7 @@ namespace Legion {
       const std::vector<ApEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(ApEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_DISABLE_EVENT_PRUNING 
@@ -5340,6 +5589,13 @@ namespace Legion {
             it != events.end(); it++)
         LegionSpy::log_event_dependence(*it, result);
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(ApEvent) == sizeof(LgEvent));
+        implicit_profiler->record_event_merger(result,
+            &events.front(), events.size());
+      }
+      // Always do tracing after profiling
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, events);
       return result;
@@ -5350,7 +5606,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(e1, e2)); 
+      RtEvent result(Realm::Event::merge_events(e1, e2)); 
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[2] = { e1 , e2 };
+        implicit_profiler->record_event_merger(result, preconditions, 2);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5359,7 +5621,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(e1, e2, e3)); 
+      const RtEvent result(Realm::Event::merge_events(e1, e2, e3)); 
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[3] = { e1, e2, e3 };
+        implicit_profiler->record_event_merger(result, preconditions, 3);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5377,9 +5645,18 @@ namespace Legion {
       const std::set<RtEvent> *legion_events = &events;
       const std::set<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(RtEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(*realm_events));
+      const RtEvent result(Realm::Event::merge_events(*realm_events));
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(RtEvent) == sizeof(LgEvent));
+        const std::vector<RtEvent> preconditions(events.begin(), events.end());
+        implicit_profiler->record_event_merger(result,
+            &preconditions.front(), preconditions.size());
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5397,9 +5674,17 @@ namespace Legion {
       const std::vector<RtEvent> *legion_events = &events;
       const std::vector<Realm::Event> *realm_events;
       static_assert(sizeof(legion_events) == sizeof(realm_events));
+      static_assert(sizeof(RtEvent) == sizeof(Realm::Event));
       memcpy(&realm_events, &legion_events, sizeof(legion_events));
       // No logging for runtime operations currently
-      return RtEvent(Realm::Event::merge_events(*realm_events));
+      const RtEvent result(Realm::Event::merge_events(*realm_events));
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(RtEvent) == sizeof(LgEvent));
+        implicit_profiler->record_event_merger(result,
+            &events.front(), events.size());
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5425,6 +5710,10 @@ namespace Legion {
                                    ApUserEvent to_trigger, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_trigger(to_trigger, precondition);
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
@@ -5440,6 +5729,10 @@ namespace Legion {
     /*static*/ inline void Runtime::poison_event(ApUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
+      // Record poison event timing first since it might be expensive
+      // to actually propagate the poison
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_poison(to_poison);
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
@@ -5466,6 +5759,10 @@ namespace Legion {
                                                   RtEvent precondition) 
     //--------------------------------------------------------------------------
     {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_trigger(to_trigger, precondition);
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
@@ -5477,6 +5774,10 @@ namespace Legion {
     /*static*/ inline void Runtime::poison_event(RtUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
+      // Record poison event timing first since it might be expensive
+      // to actually propagate the poison
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_poison(to_poison);
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
@@ -5502,6 +5803,11 @@ namespace Legion {
     /*static*/ inline void Runtime::trigger_event(PredUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_trigger(to_trigger,
+                                                LgEvent::NO_LG_EVENT);
       Realm::UserEvent copy = to_trigger;
       copy.trigger();
 #ifdef LEGION_SPY
@@ -5513,6 +5819,10 @@ namespace Legion {
     /*static*/ inline void Runtime::poison_event(PredUserEvent to_poison)
     //--------------------------------------------------------------------------
     {
+      // Record poison event timing first since it might be expensive
+      // to actually propagate the poison
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_poison(to_poison);
       Realm::UserEvent copy = to_poison;
       copy.cancel();
 #ifdef LEGION_SPY
@@ -5548,6 +5858,12 @@ namespace Legion {
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
 #endif
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        const LgEvent preconditions[2] = { e1, e2 };
+        implicit_profiler->record_event_merger(result, preconditions, 2);
+      }
+      // Always do tracing after profiling
       if ((info != NULL) && info->recording)
         info->record_merge_events(result, e1, e2);
       return result;
@@ -5569,6 +5885,8 @@ namespace Legion {
       LegionSpy::log_event_dependence(ApEvent(e), result);
 #endif
 #endif
+      if ((implicit_profiler != NULL) && result.exists() && (result != e))
+        implicit_profiler->record_event_trigger(result, e);
       return result;
     }
 
@@ -5577,7 +5895,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (to_protect.exists())
-        return RtEvent(Realm::Event::ignorefaults(to_protect));
+      {
+        const RtEvent result(Realm::Event::ignorefaults(to_protect));
+        if ((implicit_profiler != NULL) && result.exists() &&
+            (result.id != to_protect.id))
+          implicit_profiler->record_event_trigger(result, to_protect);
+        return result;
+      }
       else
         return RtEvent::NO_RT_EVENT;
     }
@@ -5591,17 +5915,56 @@ namespace Legion {
       const std::set<Realm::Event> *realm_events = NULL;
       static_assert(sizeof(realm_events) == sizeof(ptr));
       memcpy(&realm_events, &ptr, sizeof(realm_events));
-      return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
+      RtEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
+      if ((implicit_profiler != NULL) && result.exists())
+      {
+        static_assert(sizeof(ApEvent) == sizeof(LgEvent));
+        const std::vector<ApEvent> preconditions(events.begin(), events.end());
+        implicit_profiler->record_event_merger(result,
+            &preconditions.front(), preconditions.size());
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::phase_barrier_arrive(
+    inline void Runtime::phase_barrier_arrive(
                   const PhaseBarrier &bar, unsigned count, ApEvent precondition,
                   const void *reduce_value, size_t reduce_value_size)
     //--------------------------------------------------------------------------
     {
       Realm::Barrier copy = bar.phase_barrier;
-      copy.arrive(count, precondition, reduce_value, reduce_value_size);
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+        if (profiler->all_critical_arrivals)
+        {
+          if (implicit_profiler != NULL)
+            implicit_profiler->record_barrier_arrival(
+                bar.phase_barrier, precondition);
+          copy.arrive(count, precondition, reduce_value, reduce_value_size);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(reduce_value == NULL);
+#endif
+          // We're computing the critical path through the graph so
+          // need to record when when this arrival triggers so we can
+          // feed it into the reduction for the barrier
+          const Realm::Event pre = precondition.exists() ?
+            Realm::Event::ignorefaults(precondition) : precondition;
+          if (!pre.exists() || pre.has_triggered())
+          {
+            const ArrivalInfo info(precondition);
+            copy.arrive(count, precondition, &info, sizeof(info));          
+          }
+          else // Have the profiler profile and do the arrival
+            profiler->profile_barrier_arrival(copy, count, precondition, pre);
+        }
+      }
+      else
+        copy.arrive(count, precondition, reduce_value, reduce_value_size);
 #ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
@@ -5635,6 +5998,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline ApBarrier Runtime::create_ap_barrier(size_t arrivals) 
+    //--------------------------------------------------------------------------
+    {
+      if ((profiler == NULL) || profiler->no_critical_paths ||
+          profiler->all_critical_arrivals)
+        return ApBarrier(Realm::Barrier::create_barrier(arrivals));
+      else
+        return ApBarrier(Realm::Barrier::create_barrier(arrivals,
+              BarrierArrivalReduction::REDOP, 
+              &BarrierArrivalReduction::identity,
+              sizeof(BarrierArrivalReduction::identity)));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline ApBarrier Runtime::get_previous_phase(
                                                            const ApBarrier &bar)
     //--------------------------------------------------------------------------
@@ -5644,13 +6021,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::phase_barrier_arrive(
-                  const ApBarrier &bar, unsigned count, ApEvent precondition,
-                  const void *reduce_value, size_t reduce_value_size)
+    inline void Runtime::phase_barrier_arrive(
+                    const ApBarrier &bar, unsigned count, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
       Realm::Barrier copy = bar;
-      copy.arrive(count, precondition, reduce_value, reduce_value_size);
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+        if (profiler->all_critical_arrivals)
+        {
+          if (implicit_profiler != NULL)
+            implicit_profiler->record_barrier_arrival(bar, precondition);
+          copy.arrive(count, precondition);
+        }
+        else
+        {
+          // We're computing the critical path through the graph so
+          // need to record when when this arrival triggers so we can
+          // feed it into the reduction for the barrier
+          const Realm::Event pre = precondition.exists() ?
+            Realm::Event::ignorefaults(precondition) : precondition;
+          if (!pre.exists() || pre.has_triggered())
+          {
+            const ArrivalInfo info(precondition);
+            copy.arrive(count, precondition, &info, sizeof(info));          
+          }
+          else // Have the profiler profile and do the arrival
+            profiler->profile_barrier_arrival(bar, count, precondition, pre);
+        }
+      }
+      else
+        copy.arrive(count, precondition);
 #ifdef LEGION_SPY
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar);
@@ -5675,6 +6078,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline RtBarrier Runtime::create_rt_barrier(size_t arrivals) 
+    //--------------------------------------------------------------------------
+    {
+      if ((profiler == NULL) || profiler->no_critical_paths ||
+          profiler->all_critical_arrivals)
+        return RtBarrier(Realm::Barrier::create_barrier(arrivals));
+      else
+        return RtBarrier(Realm::Barrier::create_barrier(arrivals,
+              BarrierArrivalReduction::REDOP, 
+              &BarrierArrivalReduction::identity,
+              sizeof(BarrierArrivalReduction::identity)));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline RtBarrier Runtime::get_previous_phase(const RtBarrier &b)
     //--------------------------------------------------------------------------
     {
@@ -5682,14 +6099,61 @@ namespace Legion {
       return RtBarrier(copy.get_previous_phase());
     }
 
+#ifdef DEBUG_LEGION_COLLECTIVES
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
+    inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
            unsigned count, RtEvent precondition, const void *value, size_t size)
     //--------------------------------------------------------------------------
     {
       Realm::Barrier copy = bar;
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+#ifdef DEBUG_LEGION
+        assert(profiler->all_critical_arrivals);
+#endif
+        if (implicit_profiler != NULL)
+          implicit_profiler->record_barrier_arrival(bar, precondition);
+      }
       copy.arrive(count, precondition, value, size); 
     }
+#else
+    //--------------------------------------------------------------------------
+    inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
+                                           unsigned count, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      // Record barrier arrivals before we actually do them since it
+      // might be expensive to propagate the effects
+      if ((profiler != NULL) && !profiler->no_critical_paths)
+      {
+        if (profiler->all_critical_arrivals)
+        {
+          if (implicit_profiler != NULL)
+            implicit_profiler->record_barrier_arrival(bar, precondition);
+          copy.arrive(count, precondition);
+        }
+        else
+        {
+          // We're computing the critical path through the graph so
+          // need to record when when this arrival triggers so we can
+          // feed it into the reduction for the barrier
+          if (!precondition.exists() || precondition.has_triggered())
+          {
+            const ArrivalInfo info(precondition);
+            copy.arrive(count, precondition, &info, sizeof(info));          
+          }
+          else // Have the profiler profile and do the arrival
+            profiler->profile_barrier_arrival(
+                bar, count, precondition, precondition);
+        }
+      }
+      else
+        copy.arrive(count, precondition);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ inline void Runtime::advance_barrier(RtBarrier &bar)
@@ -5733,6 +6197,10 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_reservation_acquire(r, precondition, result);
 #endif
+      // Result can be the same as precondition if precondition is poisoned
+      if ((implicit_profiler != NULL) && result.exists() && 
+          (result != precondition))
+        implicit_profiler->record_reservation_acquire(r, result, precondition);
       return result;
     }
 
@@ -5741,7 +6209,12 @@ namespace Legion {
                                            bool exclusive, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      return RtEvent(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
+      RtEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
+      // Result can be the same as precondition if precondition is poisoned
+      if ((implicit_profiler != NULL) && result.exists() && 
+          (result != precondition))
+        implicit_profiler->record_reservation_acquire(r, result, precondition);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5791,10 +6264,6 @@ namespace Legion {
           break;
         case SEND_INDEX_SPACE_COLORS_RESPONSE:
           break;
-        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST:
-          break;
-        case SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE:
-          return EXPRESSION_VIRTUAL_CHANNEL;
         case SEND_INDEX_SPACE_GENERATE_COLOR_REQUEST:
           break;
         case SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE:
@@ -5892,6 +6361,10 @@ namespace Legion {
         case SLICE_REMOTE_COMMIT:
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
+          break;
+        case SLICE_COLLECTIVE_ALLREDUCE_REQUEST:
+          break;
+        case SLICE_COLLECTIVE_ALLREDUCE_RESPONSE:
           break;
         case SLICE_CONCURRENT_ALLREDUCE_REQUEST:
           break;
@@ -6048,12 +6521,6 @@ namespace Legion {
           break;
         case SEND_VIEW_FIND_LAST_USERS_RESPONSE:
           break;
-        case SEND_VIEW_REPLICATION_REQUEST:
-          return UPDATE_VIRTUAL_CHANNEL;
-        case SEND_VIEW_REPLICATION_RESPONSE:
-          return UPDATE_VIRTUAL_CHANNEL;
-        case SEND_VIEW_REPLICATION_REMOVAL:
-          return UPDATE_VIRTUAL_CHANNEL;
         case SEND_MANAGER_REQUEST:
           break;
         case SEND_FUTURE_RESULT:
@@ -6323,6 +6790,10 @@ namespace Legion {
           break;
         case SEND_NOTIFY_COLLECTED_INSTANCES:
           break;
+        case SEND_CREATE_MEMORY_POOL_REQUEST:
+          break;
+        case SEND_CREATE_MEMORY_POOL_RESPONSE:
+          break;
         case SEND_CREATE_FUTURE_INSTANCE_REQUEST:
           break;
         case SEND_CREATE_FUTURE_INSTANCE_RESPONSE:
@@ -6380,6 +6851,9 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
         case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
           break;
+        case SEND_PROFILER_EVENT_TRIGGER:
+        case SEND_PROFILER_EVENT_POISON:
+          return PROFILING_VIRTUAL_CHANNEL;
         case SEND_SHUTDOWN_NOTIFICATION:
           return THROUGHPUT_VIRTUAL_CHANNEL;
         case SEND_SHUTDOWN_RESPONSE:

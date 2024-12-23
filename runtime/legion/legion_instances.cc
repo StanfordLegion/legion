@@ -951,8 +951,7 @@ namespace Legion {
         use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
-        kind(k), external_pointer(-1UL), producer_event(p_event),
-        gc_state(init), pending_changes(0),
+        kind(k), producer_event(p_event), gc_state(init), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
         received_valid_references(0), padded_reservations(NULL)
@@ -1421,6 +1420,9 @@ namespace Legion {
         if (gc_events.insert(user_event).second && 
             (++added_gc_events == runtime->gc_epoch_size))
         {
+          // We don't prune these when doing detailed legion spy so that we
+          // can check that there are no use-after-delete errors
+#ifndef LEGION_SPY
           // Go through and prune out any events that have triggered
           for (std::set<ApEvent>::iterator it = gc_events.begin();
                 it != gc_events.end(); /*nothing*/)
@@ -1433,6 +1435,7 @@ namespace Legion {
             else
               it++;
           }
+#endif
           added_gc_events = 0;
         }
       }
@@ -1794,15 +1797,12 @@ namespace Legion {
       if (!is_external_instance() || (gc_state != COLLECTED_GC_STATE))
       {
         gc_state = COLLECTABLE_GC_STATE;
-        // If we're an eagerly allocated instance start the collection
-        // immediately since there's no point in re-use
-        // Similarly if this instance is set to eager collection priority
+        // If this instance is set to eager collection priority
         // then we try to do that now
-        if ((kind == EAGER_INSTANCE_KIND) || 
-            (min_gc_priority == LEGION_GC_EAGER_PRIORITY))
+        if (min_gc_priority == LEGION_GC_EAGER_PRIORITY)
         {
           RtEvent dummy_ready;
-          collect(dummy_ready, &i_lock);
+          collect(dummy_ready, NULL, &i_lock);
         }
       }
       return remove_base_gc_ref(INTERNAL_VALID_REF);
@@ -2049,13 +2049,16 @@ namespace Legion {
       derez.deserialize(result);
       RtEvent *target;
       derez.deserialize(target);
+      PhysicalInstance *hole;
+      derez.deserialize(hole);
       RtUserEvent done;
       derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
       RtEvent ready;
-      if (manager->collect(ready))
+      PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
+      if (manager->collect(ready, (hole == NULL) ? NULL : &hole_instance))
       {
         Serializer rez;
         {
@@ -2063,6 +2066,9 @@ namespace Legion {
           rez.serialize(result);
           rez.serialize(target);
           rez.serialize(ready);
+          rez.serialize(hole);
+          if (hole != NULL)
+            rez.serialize(hole_instance);
           rez.serialize(done);
         }
         runtime->send_gc_response(source, rez);
@@ -2083,6 +2089,10 @@ namespace Legion {
       RtEvent *target;
       derez.deserialize(target);
       derez.deserialize(*target);
+      PhysicalInstance *hole;
+      derez.deserialize(hole);
+      if (hole != NULL)
+        derez.deserialize(*hole);
       RtUserEvent done;
       derez.deserialize(done);
 
@@ -2342,13 +2352,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::collect(RtEvent &ready, AutoLock *i_lock)
+    bool PhysicalManager::collect(RtEvent &ready, PhysicalInstance *hole, 
+                                  AutoLock *i_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((hole == NULL) || !hole->exists());
+#endif
       if (i_lock == NULL)
       {
         AutoLock i2_lock(inst_lock);
-        return collect(ready, &i2_lock);
+        return collect(ready, hole, &i2_lock);
       }
       // Do a quick to check to see if we can do a collection on the local node
       if (gc_state == VALID_GC_STATE)
@@ -2498,7 +2512,11 @@ namespace Legion {
                 // Notify the subscribers if we've been collected
                 to_notify.swap(subscribers);
                 // Now we can perform the deletion which will release the lock
-                perform_deletion(runtime->address_space, i_lock);
+                RtEvent hole_ready = 
+                  perform_deletion(runtime->address_space, hole, i_lock);
+                // Only save the event for the whole being ready if we have one
+                if ((hole != NULL) && hole->exists())
+                  ready = hole_ready;
                 // Send notification messages to the remote nodes to tell
                 // them that this instance has been deleted, this is needed
                 // so that we can invalidate any subscribers on those nodes
@@ -2592,6 +2610,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(&result);
           rez.serialize(&ready);
+          rez.serialize(hole);
           rez.serialize(done);
         }
         pack_global_ref();
@@ -2747,7 +2766,7 @@ namespace Legion {
               // in case they become locally valid and then 
               // invalid they need to know to check for that 
               // as soon as they see it
-              if (!collect(updated, &i_lock))
+              if (!collect(updated, NULL, &i_lock))
                 broadcast_priority_update = true;
             }
             if (min_gc_priority == LEGION_GC_NEVER_PRIORITY)
@@ -3226,8 +3245,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::perform_deletion(AddressSpaceID source,
-                                           AutoLock *i_lock /* = NULL*/)
+    RtEvent PhysicalManager::perform_deletion(AddressSpaceID source,
+                           PhysicalInstance *hole, AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3237,8 +3256,7 @@ namespace Legion {
       if (i_lock == NULL)
       {
         AutoLock instance_lock(inst_lock);
-        perform_deletion(source, &instance_lock);
-        return;
+        return perform_deletion(source, hole, &instance_lock);
       }
 #ifdef DEBUG_LEGION
       assert(pending_views.empty());
@@ -3263,19 +3281,30 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
 #else
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, deferred_deletion);
+      // We can't escape instances with serdez fields since we need to
+      // delete them explicity but everything else we can escape
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields, deferred_deletion);
+      else if (hole != NULL)
+        *hole = instance; // escape the hole to use for redistricting
       else
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_deletion);
-        else
-          instance.destroy(deferred_deletion);
-      }
+        instance.destroy(deferred_deletion);
 #endif
 #else
       // Release the i_lock since we're done with the atomic updates
       i_lock->release();
+#endif
+#ifdef LEGION_SPY
+      if (!deferred_deletion.exists())
+      {
+        const Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        deferred_deletion = RtEvent(rename);
+      }
+      for (std::set<ApEvent>::const_iterator it = gc_events.begin();
+            it != gc_events.end(); it++)
+        LegionSpy::log_event_dependence(*it, deferred_deletion);
+      LegionSpy::log_instance_deletion(unique_event, deferred_deletion);
 #endif
       // Once the deletion is actually done then we can tell the memory
       // manager that the deletion is finished and it is safe to remove
@@ -3288,6 +3317,7 @@ namespace Legion {
       }
       else
         memory_manager->unregister_deleted_instance(this);
+      return deferred_deletion;
     }
 
     //--------------------------------------------------------------------------
@@ -3311,16 +3341,10 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #else
-      // If this is an eager allocation, return it back to the eager pool
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
       else
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields);
-        else
-          instance.destroy();
-      }
+        instance.destroy();
 #endif
 #endif
     }
@@ -3459,9 +3483,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::update_physical_instance(
-                                                  PhysicalInstance new_instance,
-                                                  size_t new_footprint,
-                                                  uintptr_t new_pointer)
+             PhysicalInstance new_instance, RtEvent ready, size_t new_footprint)
     //--------------------------------------------------------------------------
     {
       {
@@ -3471,15 +3493,10 @@ namespace Legion {
         assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
-        kind = EAGER_INSTANCE_KIND;
-        external_pointer = new_pointer;
-#ifdef DEBUG_LEGION
-        assert(external_pointer != -1UL);
-#endif
+        kind = INTERNAL_INSTANCE_KIND;
+        instance_footprint = new_footprint;
 
-        update_instance_footprint(new_footprint);
-
-        Runtime::trigger_event(instance_ready);
+        Runtime::trigger_event(instance_ready, ready);
 
         if (runtime->legion_spy_enabled)
         {
@@ -3507,6 +3524,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(instance);
+        rez.serialize(instance_ready);
         rez.serialize(instance_footprint);
       }
       BroadcastFunctor functor(context->runtime, rez);
@@ -3523,6 +3541,8 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalInstance instance;
       derez.deserialize(instance);
+      RtEvent ready;
+      derez.deserialize(ready);
       size_t footprint;
       derez.deserialize(footprint);
 
@@ -3532,7 +3552,7 @@ namespace Legion {
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
 
-      if (manager->update_physical_instance(instance, footprint))
+      if (manager->update_physical_instance(instance, ready, footprint))
         delete manager;
     }
 
@@ -3788,7 +3808,7 @@ namespace Legion {
         creator_id(cid), instance(PhysicalInstance::NO_INST), 
         field_space_node(node), instance_domain(expr), tree_id(tid), 
         redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-        piece_list_size(0), valid(true)
+        piece_list_size(0), valid(true), allocated(false)
     //--------------------------------------------------------------------------
     {
       if (pl != NULL)
@@ -3813,7 +3833,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
         RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
-        unsigned *unsat_index, size_t *footprint, RtEvent precondition)
+        unsigned *unsat_index, size_t *footprint, RtEvent precondition,
+        PhysicalInstance hole)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -3872,7 +3893,8 @@ namespace Legion {
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
-      Realm::InstanceLayoutGeneric *inst_layout = realm_layout->clone();
+      Realm::InstanceLayoutGeneric *inst_layout = 
+        hole.exists() ? realm_layout : realm_layout->clone();
 #ifdef DEBUG_LEGION
       assert(inst_layout != NULL);
 #endif
@@ -3885,51 +3907,60 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
-      ProfilingResponseBase base(this);
+      ProfilingResponseBase base(this, creator_id, false/*completion*/);
 #ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
-          runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+          runtime->find_local_group(), LG_LEGION_PROFILING_ID,
           &base, sizeof(base), LG_RESOURCE_PRIORITY);
       req.add_measurement<Realm::ProfilingMeasurements::InstanceAllocResult>();
       // Create a user event to wait on for the result of the profiling response
       profiling_ready = Runtime::create_rt_user_event();
 #endif
 #ifdef DEBUG_LEGION
+      assert(!allocated);
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       LgEvent unique_event;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
       ApEvent ready;
       if (runtime->profiler != NULL)
+      {
         runtime->profiler->add_inst_request(requests, creator_id, unique_event);
+        current_unique_event = unique_event;
+      }
 #ifndef LEGION_MALLOC_INSTANCES
-      ready = ApEvent(PhysicalInstance::create_instance(instance,
-            memory_manager->memory, inst_layout, requests, precondition));
+      if (hole.exists())
+        ready = ApEvent(
+            hole.redistrict(instance, inst_layout, requests, precondition));
+      else
+        ready = ApEvent(PhysicalInstance::create_instance(instance,
+              memory_manager->memory, inst_layout, requests, precondition));
+      if (ready.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(ready, unique_event);
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout, 
-                                                      requests, instance));
-      if (!instance.exists())
-      {
-        if (unsat_kind != NULL)
-          *unsat_kind = LEGION_MEMORY_CONSTRAINT;
-        if (unsat_index != NULL)
-          *unsat_index = 0;
-        return NULL;
-      }
+      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
+            requests, instance, unique_event));
+      allocated = instance.exists();
 #endif
       // If we couldn't make it then we are done
-      if (!instance.exists())
+      if (!allocated)
       {
+        if (instance.exists())
+        {
+          // Destroy the instance ID so Realm can reclaim the ID
+          instance.destroy();
+          instance = PhysicalInstance::NO_INST;
+        }
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
@@ -4034,10 +4065,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceBuilder::handle_profiling_response(
-                                       const ProfilingResponseBase *base,
-                                       const Realm::ProfilingResponse &response,
-                                       const void *orig, size_t orig_length)
+    bool InstanceBuilder::handle_profiling_response(
+        const Realm::ProfilingResponse &response, const void *orig,
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4057,16 +4087,16 @@ namespace Legion {
       assert(measured);
 #endif
       // If we failed then clear the instance name since it is not valid
-      if (!result.success)
-      {
-        // Destroy the instance first so that Realm can reclaim the ID
-        instance.destroy();
-        instance = PhysicalInstance::NO_INST;
-        if (runtime->profiler != NULL)
-          runtime->profiler->handle_failed_instance_allocation();
-      }
+      if (result.success)
+        allocated = true;
+      else
+        failed_alloc = true;
+      fevent = current_unique_event;
       // No matter what trigger the event
+      // Can't read anything after trigger the event as the object
+      // might be deleted after we do that
       Runtime::trigger_event(profiling_ready);
+      return true;
     }
 
     //--------------------------------------------------------------------------

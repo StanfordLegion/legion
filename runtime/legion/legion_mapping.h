@@ -67,6 +67,7 @@ namespace Legion {
       FieldSpace get_field_space(void) const;
       RegionTreeID get_tree_id(void) const;
       LayoutConstraintID get_layout_id(void) const;
+      PointerConstraint get_pointer_constraint(void) const;
     public:
       // See if our instance still exists or if it has been
       // garbage collected, this is just a sample, using the
@@ -589,6 +590,19 @@ namespace Legion {
        * 'copy_prof_requests' field. The 'profiling_priority' field
        * indicates with which priority the profiling results should
        * be send back to the mapper.
+       *
+       * When selecting a leaf-task variant for the task, the mapper can
+       * use the 'leaf_pool_bounds' to specify sizes of memory pools for
+       * the runtime to allocate to handle dynamic memory allocations during
+       * the execution of the task. These must be big enough to handle all
+       * such dynamic memory allocations in each kind of memory. The mapper
+       * can use the value of zero to indicate that an "unbound" pool should
+       * be created which will block all future memory allocations in that 
+       * memory until the task is done running (this will likely result in
+       * severe performance degradations). If the task variant also has
+       * statically specified pool bounds, then the dynamically sized upper
+       * bound provided by the mapper will override the static bound 
+       * provided at the time of task variant registration.
        *
        * Finally, the mapper can requrest a postmap_task mapper call be
        * performed to make additional copies of any output regions of the
@@ -2022,6 +2036,13 @@ namespace Legion {
       void disable_reentrant(MapperContext ctx) const;
     public:
       //------------------------------------------------------------------------
+      // These two methods allow mappers to define their own profile ranges
+      // inside of the profiler. Each start call must be matched with a 
+      // corresponding stop call inside of the same mapper context.
+      void start_profiling_range(MapperContext ctx) const;
+      void stop_profiling_range(MapperContext ctx,const char *provenance) const;
+    public:
+      //------------------------------------------------------------------------
       // Methods for updating mappable data 
       // The mapper is responsible for atomicity of these calls 
       // (usually through the choice of mapper synchronization model) 
@@ -2284,10 +2305,37 @@ namespace Legion {
       void collect_instances(MapperContext ctx,
                              const std::vector<PhysicalInstance> &instances,
                              std::vector<bool> &collected) const;
+      // This method will attempt to redistrict an instance from one layout
+      // to another one, thereby reusing the memory associated with the first
+      // instance to create the new instance (thereby deleting the original 
+      // instance in the process). This will only be permitted if the original
+      // instance does not not contain any valid data and if the new layout
+      // fits within the footprint of the original instance. The runtime will
+      // return a boolean indicating whether the redistricting was successful.
+      // If the invocation is successful, the 'instance' will be overwritten
+      // with a handle to the new instance.
+      bool redistrict_instance(MapperContext ctx, PhysicalInstance &instance,
+                               const LayoutConstraintSet &constraints,
+                               const std::vector<LogicalRegion> &regions,
+                               bool acquire = true, GCPriority priority = 0,
+                               bool tight_region_bounds = false);
+      bool redistrict_instance(MapperContext ctx, PhysicalInstance &instance,
+                               LayoutConstraintID layout_id,
+                               const std::vector<LogicalRegion> &regions,
+                               bool acquire = true, GCPriority priority = 0,
+                               bool tight_region_bounds = false);
     public:
       // Futures can also be acquired to ensure that they are available in
       // particular memories prior to running a task.
       bool acquire_future(MapperContext ctx, const Future &f, Memory mem) const;
+      // Users can also acquire memory for unbound memory pools when mapping
+      // tasks. These pools will be implicitly used to satisfy any leaf_pool
+      // bounds requested for mapping the task. This interface allows mappers
+      // to discover if leaf pools can be allocated and potentially switch to
+      // an alternative mapping strategy if they cannot.
+      bool acquire_pool(MapperContext ctx, Memory memory,
+                        const PoolBounds &bounds) const;
+      void release_pool(MapperContext ctx, Memory memory);
     public:
       //------------------------------------------------------------------------
       // Methods for creating index spaces which mappers need to do

@@ -187,6 +187,8 @@ namespace Realm {
           return i;
         }
         allocated[new_tags[i]] = SENTINEL;
+        // Make sure zero-sized instances have a valid offset
+        allocs_first[i] = 0;
       }
       deallocate(old_tag);
       return n;
@@ -251,6 +253,8 @@ namespace Realm {
         }
       } else { // Zero-sized instances are easy
         allocated[new_tags[i]] = SENTINEL;
+        // Make sure zero-sized instances have a valid offset
+        allocs_first[i] = 0;
       }
     }
     // deallocate whatever is left of the old instance
@@ -540,10 +544,6 @@ namespace Realm {
       // no, go to next one
       idx = r->next_free;
     }
-
-#ifdef DEBUG_REALM
-    dump_allocator_status();
-#endif
 
     // allocation failed
     return false;

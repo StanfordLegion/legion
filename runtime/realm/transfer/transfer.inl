@@ -26,41 +26,43 @@ namespace Realm {
   //
 
   template <typename S>
-  bool serialize(S& serializer, const TransferIterator& ti)
+  bool serialize(S &serializer, const TransferIterator &ti)
   {
-    return Serialization::PolymorphicSerdezHelper<TransferIterator>::serialize(serializer, ti);
+    return Serialization::PolymorphicSerdezHelper<TransferIterator>::serialize(serializer,
+                                                                               ti);
   }
 
   template <typename S>
-  /*static*/ TransferIterator *TransferIterator::deserialize_new(S& deserializer)
+  /*static*/ TransferIterator *TransferIterator::deserialize_new(S &deserializer)
   {
-    return Serialization::PolymorphicSerdezHelper<TransferIterator>::deserialize_new(deserializer);
+    return Serialization::PolymorphicSerdezHelper<TransferIterator>::deserialize_new(
+        deserializer);
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class TransferDomain
   //
 
-  inline std::ostream& operator<<(std::ostream& os, const TransferDomain& td)
+  inline std::ostream &operator<<(std::ostream &os, const TransferDomain &td)
   {
     td.print(os);
     return os;
   }
 
   template <typename S>
-  bool serialize(S& serializer, const TransferDomain& ci)
+  bool serialize(S &serializer, const TransferDomain &ci)
   {
-    return Serialization::PolymorphicSerdezHelper<TransferDomain>::serialize(serializer, ci);
+    return Serialization::PolymorphicSerdezHelper<TransferDomain>::serialize(serializer,
+                                                                             ci);
   }
 
   template <typename S>
-  /*static*/ TransferDomain *TransferDomain::deserialize_new(S& deserializer)
+  /*static*/ TransferDomain *TransferDomain::deserialize_new(S &deserializer)
   {
-    return Serialization::PolymorphicSerdezHelper<TransferDomain>::deserialize_new(deserializer);
+    return Serialization::PolymorphicSerdezHelper<TransferDomain>::deserialize_new(
+        deserializer);
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -68,47 +70,40 @@ namespace Realm {
   //
 
   template <typename S>
-  inline bool serialize(S& s, const XferDesPortInfo& i)
+  inline bool serialize(S &s, const XferDesPortInfo &i)
   {
-    return ((s << i.port_type) &&
-	    (s << i.peer_guid) &&
-	    (s << i.peer_port_idx) &&
-	    (s << i.indirect_port_idx) &&
-	    (s << i.mem) &&
-	    (s << i.inst) &&
-	    (s << i.ib_offset) &&
-	    (s << i.ib_size) &&
-	    (s << *i.iter) &&
-	    (s << i.serdez_id));
+    return ((s << i.port_type) && (s << i.peer_guid) && (s << i.peer_port_idx) &&
+            (s << i.indirect_port_idx) && (s << i.mem) && (s << i.inst) &&
+            (s << i.ib_offset) && (s << i.ib_size) && (s << *i.iter) &&
+            (s << i.serdez_id));
   }
 
   template <typename S>
-  inline bool deserialize(S& s, XferDesPortInfo& i)
+  inline bool deserialize(S &s, XferDesPortInfo &i)
   {
-    if(!((s >> i.port_type) &&
-	 (s >> i.peer_guid) &&
-	 (s >> i.peer_port_idx) &&
-	 (s >> i.indirect_port_idx) &&
-	 (s >> i.mem) &&
-	 (s >> i.inst) &&
-	 (s >> i.ib_offset) &&
-	 (s >> i.ib_size)))
+    if(!((s >> i.port_type) && (s >> i.peer_guid) && (s >> i.peer_port_idx) &&
+         (s >> i.indirect_port_idx) && (s >> i.mem) && (s >> i.inst) &&
+         (s >> i.ib_offset) && (s >> i.ib_size))) {
       return false;
+    }
     i.iter = TransferIterator::deserialize_new(s);
-    if(!i.iter) return false;
-    if(!((s >> i.serdez_id)))
+    if(!i.iter) {
       return false;
+    }
+    if(!((s >> i.serdez_id))) {
+      return false;
+    }
     return true;
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class TransferGraph::XDTemplate
   //
 
-  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_inst(RegionInstance _inst,
-										     unsigned _fld_start, unsigned _fld_count)
+  /*static*/ inline TransferGraph::XDTemplate::IO
+  TransferGraph::XDTemplate::mk_inst(RegionInstance _inst, unsigned _fld_start,
+                                     unsigned _fld_count)
   {
     IO io;
     io.iotype = IO_INST;
@@ -118,9 +113,10 @@ namespace Realm {
     return io;
   }
 
-  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_indirect(unsigned _ind_idx, unsigned _port,
-											 RegionInstance _inst,
-											 unsigned _fld_start, unsigned _fld_count)
+  /*static*/ inline TransferGraph::XDTemplate::IO
+  TransferGraph::XDTemplate::mk_indirect(unsigned _ind_idx, unsigned _port,
+                                         RegionInstance _inst, unsigned _fld_start,
+                                         unsigned _fld_count)
   {
     IO io;
     io.iotype = IO_INDIRECT_INST;
@@ -131,16 +127,19 @@ namespace Realm {
     io.indirect.fld_count = _fld_count;
     return io;
   }
-  
-  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_edge(unsigned _edge)
+
+  /*static*/ inline TransferGraph::XDTemplate::IO
+  TransferGraph::XDTemplate::mk_edge(unsigned _edge)
   {
     IO io;
     io.iotype = IO_EDGE;
     io.edge = _edge;
     return io;
   }
-  
-  /*static*/ inline TransferGraph::XDTemplate::IO TransferGraph::XDTemplate::mk_fill(unsigned _fill_start, unsigned _fill_size, size_t _fill_total)
+
+  /*static*/ inline TransferGraph::XDTemplate::IO
+  TransferGraph::XDTemplate::mk_fill(unsigned _fill_start, unsigned _fill_size,
+                                     size_t _fill_total)
   {
     IO io;
     io.iotype = IO_FILL_DATA;
@@ -150,18 +149,17 @@ namespace Realm {
     return io;
   }
 
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class TransferDesc
   //
 
   template <int N, typename T>
-  TransferDesc::TransferDesc(IndexSpace<N,T> _is,
-			     const std::vector<CopySrcDstField> &_srcs,
-			     const std::vector<CopySrcDstField> &_dsts,
-			     const std::vector<const typename CopyIndirection<N,T>::Base *> &_indirects,
-			     const ProfilingRequestSet &requests)
+  TransferDesc::TransferDesc(
+      IndexSpace<N, T> _is, const std::vector<CopySrcDstField> &_srcs,
+      const std::vector<CopySrcDstField> &_dsts,
+      const std::vector<const typename CopyIndirection<N, T>::Base *> &_indirects,
+      const ProfilingRequestSet &requests)
     : refcount(1)
     , deferred_analysis(this)
     , srcs(_srcs)
@@ -175,23 +173,21 @@ namespace Realm {
     domain = TransferDomain::construct(_is);
 
     indirects.resize(_indirects.size());
-    for(size_t i = 0; i < _indirects.size(); i++)
+    for(size_t i = 0; i < _indirects.size(); i++) {
       indirects[i] = _indirects[i]->create_info(_is);
+    }
 
     check_analysis_preconditions();
   }
 
-  inline void TransferDesc::add_reference()
-  {
-    refcount.fetch_add_acqrel(1);
-  }
+  inline void TransferDesc::add_reference() { refcount.fetch_add_acqrel(1); }
 
   inline void TransferDesc::remove_reference()
   {
     int prev = refcount.fetch_sub_acqrel(1);
-    if(prev == 1)
+    if(prev == 1) {
       delete this;
+    }
   }
-
 
 }; // namespace Realm

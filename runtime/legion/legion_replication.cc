@@ -33,7 +33,7 @@ namespace Legion {
     /*static*/ const long CollectiveCheckReduction::identity = IDENTITY;
     /*static*/ const long CollectiveCheckReduction::BAD = -2;
     /*static*/ const ReductionOpID CollectiveCheckReduction::REDOP = 
-                                                MAX_APPLICATION_REDUCTION_ID;
+                                        LEGION_MAX_APPLICATION_REDOP_ID + 1;
 
     //--------------------------------------------------------------------------
     template<>
@@ -106,7 +106,7 @@ namespace Legion {
     /*static*/ const CloseCheckReduction::CloseCheckValue
       CloseCheckReduction::identity = IDENTITY;
     /*static*/ const ReductionOpID CloseCheckReduction::REDOP = 
-                                              MAX_APPLICATION_REDUCTION_ID + 1;
+                                          LEGION_MAX_APPLICATION_REDOP_ID + 2;
 
     //--------------------------------------------------------------------------
     CloseCheckReduction::CloseCheckValue::CloseCheckValue(void)
@@ -840,7 +840,7 @@ namespace Legion {
       // which one we want to do the work)
       // Trigger the output barrier if we have one
       if (output_bar.exists())
-        Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(output_bar, 1/*count*/);
       if (repl_ctx->owner_shard->shard_id > 0)
         shard_off(RtEvent::NO_RT_EVENT);
       else
@@ -948,7 +948,7 @@ namespace Legion {
       // Launch the meta-task to perform the registration
       // Make sure we don't complete the task until the barrier is done
       // on the shard that actually owns the task
-      Runtime::phase_barrier_arrive(output_bar, 1/*count*/, registered);
+      runtime->phase_barrier_arrive(output_bar, 1/*count*/, registered);
       FinalizeOutputEqKDTreeArgs args(this);
       output_regions_registered = 
         runtime->issue_runtime_meta_task(args,
@@ -990,6 +990,7 @@ namespace Legion {
       concurrent_mapping_rendezvous = NULL;
       concurrent_exchange = NULL;
       concurrent_exchange_id = 0;
+      collective_exchange = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1014,6 +1015,8 @@ namespace Legion {
         delete concurrent_mapping_rendezvous;
       if (concurrent_exchange != NULL)
         delete concurrent_exchange;
+      if (collective_exchange != NULL)
+        delete collective_exchange;
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -1210,6 +1213,17 @@ namespace Legion {
         // Check to see if we still need to participate in the premap_task call
         if (must_epoch == NULL)
           premap_task();
+        // Still need to participate in any collective mappings
+        if (concurrent_task || !check_collective_regions.empty())
+        {
+          collective_exchange =
+            new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                repl_ctx, collective_exchange_id);
+          collective_exchange->async_all_reduce(collective_lamport_clock);
+          AutoLock o_lock(op_lock);
+          commit_preconditions.insert(
+              collective_exchange->get_done_event());
+        }
         // Still need to participate in any collective view rendezvous
         if (!collective_view_rendezvous.empty())
           shard_off_collective_rendezvous(commit_preconditions);
@@ -1272,8 +1286,8 @@ namespace Legion {
               sharding_function->find_owner(*itr, sharding_domain);
             if (first_nonempty_shard == repl_ctx->owner_shard->shard_id)
             {
-              const RtBarrier barrier(Realm::Barrier::create_barrier(
-                    launch_space->get_volume()));
+              const RtBarrier barrier = runtime->create_rt_barrier(
+                  launch_space->get_volume());
               concurrent_mapping_rendezvous->set_trace_barrier(barrier);
             }
           }
@@ -1374,6 +1388,12 @@ namespace Legion {
     void ReplIndexTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
       perform_base_dependence_analysis();
       ShardingFunction *analysis_sharding_function = sharding_function;
       if (must_epoch_task)
@@ -1383,33 +1403,24 @@ namespace Legion {
         // tasks to the special shard UINT_MAX so that they appear to be
         // on a different shard than any other tasks, but on the same shard
         // for all the tasks in the must epoch launch.
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
         analysis_sharding_function = 
           repl_ctx->get_universal_sharding_function();
       }
       analyze_region_requirements(launch_space,
                                   analysis_sharding_function,
                                   sharding_space);
-      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+      if (concurrent_task || !check_collective_regions.empty())
       {
-        RegionRequirement &req = logical_regions[idx];
-        if (IS_COLLECTIVE(req) && !std::binary_search(
-              check_collective_regions.begin(),
-              check_collective_regions.end(), idx))
-          create_collective_rendezvous(req.parent.get_tree_id(), idx);
+        // Create the collective exchange ID in case we need it
+        collective_exchange_id = repl_ctx->get_next_collective_index(
+            COLLECTIVE_LOC_68, true/*logical*/);
+        // Generate any collective view rendezvous that we will need
+        for (std::vector<unsigned>::const_iterator it =
+              check_collective_regions.begin(); it !=
+              check_collective_regions.end(); it++)
+          create_collective_rendezvous(
+              logical_regions[*it].parent.get_tree_id(), *it);
       }
-      // Generate any collective view rendezvous that we will need
-      for (std::vector<unsigned>::const_iterator it =
-            check_collective_regions.begin(); it != 
-            check_collective_regions.end(); it++)
-        create_collective_rendezvous(
-            logical_regions[*it].parent.get_tree_id(), *it);
     }
 
     //--------------------------------------------------------------------------
@@ -1435,9 +1446,12 @@ namespace Legion {
         {
           MemoryManager *manager = 
             runtime->find_memory_manager(reduction_instance.load()->memory);
-          FutureInstance *shadow_instance = 
-            manager->create_future_instance(this, unique_op_id,
-                reduction_op->sizeof_rhs, false/*eager*/);
+          TaskTreeCoordinates coordinates;
+          compute_task_tree_coordinates(coordinates);
+          // Safe to block indefinitely here waiting for unbounded pools
+          FutureInstance *shadow_instance = manager->create_future_instance(
+              unique_op_id, coordinates, reduction_op->sizeof_rhs,
+              NULL/*safe_for_unbounded_pools*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -1522,8 +1536,11 @@ namespace Legion {
         // No need to do anything with the output local precondition
         // We already added it to the complete_effects when we made
         // the collective at the beginning
-        if (collective_done.exists())
+        if (collective_done.exists() && !collective_done.has_triggered())
+        {
+          AutoLock o_lock(op_lock);
           commit_preconditions.insert(collective_done);
+        }
       }
       // Now call the base version of this to finish making
       // the instances for the future results
@@ -1584,7 +1601,7 @@ namespace Legion {
       if (output_size_collective != NULL)
       {
         output_size_collective->elide_collective();
-        Runtime::phase_barrier_arrive(output_bar, 1/*count*/);
+        runtime->phase_barrier_arrive(output_bar, 1/*count*/);
       }
       elide_collective_rendezvous();
       // Now continue through and do the base case
@@ -1830,8 +1847,8 @@ namespace Legion {
           {
             ShardID owner = sharding_function->find_owner(*itr,sharding_domain);
             if (owner == repl_ctx->owner_shard->shard_id)
-              concurrent_task_barrier = RtBarrier(
-                  Realm::Barrier::create_barrier(launch_space->get_volume()));    
+              concurrent_task_barrier =
+                runtime->create_rt_barrier(launch_space->get_volume());    
             break;
           }
         }
@@ -1839,6 +1856,60 @@ namespace Legion {
             concurrent_lamport_clock, concurrent_poisoned,
             concurrent_task_barrier, concurrent_variant);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t ReplIndexTask::collective_lamport_allreduce(uint64_t lamport_clock,
+                                                size_t points, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      {
+        AutoLock o_lock(op_lock);
+        if (collective_lamport_clock < lamport_clock)
+          collective_lamport_clock = lamport_clock;
+        collective_unbounded_points += points;
+#ifdef DEBUG_LEGION
+        assert(collective_unbounded_points <= total_points);
+#endif
+        if (collective_unbounded_points < total_points)
+        {
+          if (need_result)
+          {
+            if (collective_exchange == NULL)
+              collective_exchange =
+                new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                    repl_ctx, collective_exchange_id);
+            o_lock.release();
+            collective_exchange->get_done_event().wait();
+            return collective_exchange->get_result();
+          }
+          else
+            return collective_lamport_clock; 
+        }
+        // Otherwise we're going to fall through and do the allreduce
+        if (collective_exchange == NULL)
+        {
+          collective_exchange =
+              new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                  repl_ctx, collective_exchange_id);
+          commit_preconditions.insert(
+                collective_exchange->get_done_event());
+        }
+      }
+      collective_exchange->async_all_reduce(collective_lamport_clock);
+      if (need_result)
+      {
+        collective_exchange->get_done_event().wait();
+        return collective_exchange->get_result();
+      }
+      else
+        return collective_lamport_clock;
     }
 
     //--------------------------------------------------------------------------
@@ -1952,7 +2023,7 @@ namespace Legion {
       if (output_preconditions.size() == total_points)
       {
         // Can only do the registration once all registrations are done
-        Runtime::phase_barrier_arrive(output_bar, 1/*count*/,
+        runtime->phase_barrier_arrive(output_bar, 1/*count*/,
             Runtime::merge_events(output_preconditions));
         // Can only mark the EqKDTree ready once all the points are registered
         FinalizeOutputEqKDTreeArgs args(this);
@@ -2125,7 +2196,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(mapped_barrier, 1/*count*/);
       // Then complete the mapping once the barrier has triggered
       // A small performance optimization here: if we have a physical trace
       // and we're replaying it then we don't need to actually do the 
@@ -2217,7 +2288,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(refinement_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(refinement_barrier, 1/*count*/);
       enqueue_ready_operation(refinement_barrier);
     }
 
@@ -2285,10 +2356,10 @@ namespace Legion {
         }
       }
       if (!map_applied_conditions.empty())
-        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+        runtime->phase_barrier_arrive(mapped_barrier, 1/*count*/,
             Runtime::merge_events(map_applied_conditions));
       else
-        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(mapped_barrier, 1/*count*/);
       complete_mapping(mapped_barrier);
       complete_execution();
     }
@@ -2345,7 +2416,7 @@ namespace Legion {
     void ReplResetOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      Runtime::phase_barrier_arrive(reset_barrier, 1/*count*/); 
+      runtime->phase_barrier_arrive(reset_barrier, 1/*count*/); 
       const RtEvent precondition = reset_barrier;
       Runtime::advance_barrier(reset_barrier);
       enqueue_ready_operation(precondition);
@@ -2362,10 +2433,10 @@ namespace Legion {
       parent_ctx->refine_equivalence_sets(parent_req_index,
           node->row_source, refinement_mask, map_applied_conditions);
       if (!map_applied_conditions.empty())
-        Runtime::phase_barrier_arrive(reset_barrier, 1/*count*/,
+        runtime->phase_barrier_arrive(reset_barrier, 1/*count*/,
             Runtime::merge_events(map_applied_conditions));
       else
-        Runtime::phase_barrier_arrive(reset_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(reset_barrier, 1/*count*/);
       complete_mapping(reset_barrier);
       complete_execution();
     }
@@ -2449,7 +2520,7 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Signal that all of our mapping dependences are satisfied
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
       const RtEvent view_ready = initialize_fill_view();
       if (view_ready.exists())
@@ -2528,7 +2599,7 @@ namespace Legion {
       if (collective_map_barrier.exists())
       {
         // Normal analysis path
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+        runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
 #ifdef DEBUG_LEGION
         const RtEvent result = collective_map_barrier;
         collective_map_barrier = RtBarrier::NO_RT_BARRIER;
@@ -2549,11 +2620,11 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Trigger both generations of the barrier and move on
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       // Advance the first generation of the barrier for trigger_ready
       Runtime::advance_barrier(collective_map_barrier);
       // Trigger the second generation
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       elide_collective_rendezvous();
       // Second generation triggered by callback to finalize_complete_mapping
@@ -2565,7 +2636,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Trigger the first generation of the collective_map_barrier
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       // Advance the first generation of the barrier for trigger_ready
       Runtime::advance_barrier(collective_map_barrier);
       elide_collective_rendezvous();
@@ -2914,7 +2985,7 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Signal that all of our mapping dependences are satisfied
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -2938,7 +3009,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
 #ifdef DEBUG_LEGION
       const RtEvent result = collective_map_barrier;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
@@ -3389,7 +3460,7 @@ namespace Legion {
           const PhysicalTraceInfo trace_info(this, 0/*index*/);
           for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
           {
-            Runtime::phase_barrier_arrive(pre_indirection_barriers[idx], 1);
+            runtime->phase_barrier_arrive(pre_indirection_barriers[idx], 1);
             if (trace_info.recording)
             {
               const std::pair<size_t,size_t> key(trace_local_id, idx);
@@ -3399,7 +3470,7 @@ namespace Legion {
           }
           for (unsigned idx = 0; idx < post_indirection_barriers.size(); idx++)
           {
-            Runtime::phase_barrier_arrive(post_indirection_barriers[idx], 1);
+            runtime->phase_barrier_arrive(post_indirection_barriers[idx], 1);
             if (trace_info.recording)
             {
               const std::pair<size_t,size_t> key(trace_local_id,
@@ -3535,7 +3606,7 @@ namespace Legion {
           {
             const ApEvent local_precondition = 
               Runtime::merge_events(&trace_info, exchange.local_preconditions);
-            Runtime::phase_barrier_arrive(pre_indirection_barriers[index],
+            runtime->phase_barrier_arrive(pre_indirection_barriers[index],
                                           1/*count*/, local_precondition);
             if (trace_info.recording)
             {
@@ -3552,7 +3623,7 @@ namespace Legion {
           {
             const ApEvent local_postcondition =
               Runtime::merge_events(&trace_info, exchange.local_postconditions);
-            Runtime::phase_barrier_arrive(post_indirection_barriers[index],
+            runtime->phase_barrier_arrive(post_indirection_barriers[index],
                                           1/*count*/, local_postcondition);
             if (trace_info.recording)
             {
@@ -3587,7 +3658,7 @@ namespace Legion {
           {
             const ApEvent local_precondition = 
               Runtime::merge_events(&trace_info, exchange.local_preconditions);
-            Runtime::phase_barrier_arrive(pre_indirection_barriers[index],
+            runtime->phase_barrier_arrive(pre_indirection_barriers[index],
                                           1/*count*/, local_precondition);
             if (trace_info.recording)
             {
@@ -3604,7 +3675,7 @@ namespace Legion {
           {
             const ApEvent local_postcondition =
               Runtime::merge_events(&trace_info, exchange.local_postconditions);
-            Runtime::phase_barrier_arrive(post_indirection_barriers[index],
+            runtime->phase_barrier_arrive(post_indirection_barriers[index],
                                           1/*count*/, local_postcondition);
             if (trace_info.recording)
             {
@@ -3889,7 +3960,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((kind == FIELD_DELETION) || (kind == LOGICAL_REGION_DELETION))
-        Runtime::phase_barrier_arrive(ready_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(ready_barrier, 1/*count*/);
       if (kind == FIELD_DELETION)
       {
         // Field deletions need to compute their version infos
@@ -3967,10 +4038,10 @@ namespace Legion {
       if (mapping_barrier.exists())
       {
         if (!map_applied_conditions.empty())
-          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(mapping_barrier, 1/*count*/,
               Runtime::merge_events(map_applied_conditions));
         else
-          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
+          runtime->phase_barrier_arrive(mapping_barrier, 1/*count*/);
         complete_mapping(mapping_barrier);
       }
       else if (!map_applied_conditions.empty())
@@ -3998,7 +4069,7 @@ namespace Legion {
         // shard. If we ever move to a mode where we do a commit barrier
         // for every operation in a control replicated context then we can
         // get rid of this but for now it is absolutely necessary
-        Runtime::phase_barrier_arrive(commit_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(commit_barrier, 1/*count*/);
         if (!commit_barrier.has_triggered())
         {
           DeferDeletionCommitArgs args(this);
@@ -4537,7 +4608,13 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(sharding_function != NULL);
+        assert(points_completed.load() == 0);
 #endif
+        // This is a bit tricky, but set the points_completed to be -1 as
+        // a guard so that we don't call complete_execution until we've see
+        // all our completed points and had a chance to run trigger_execution
+        // for ourselves as they both need to be done before finishing execution
+        points_completed.store(-1);
         // Compute the local index space of points for this shard
         IndexSpace local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
@@ -4559,7 +4636,7 @@ namespace Legion {
             assert(exchange != NULL);
 #endif
             // We won't have any preconditions on the collective ready event
-            Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+            runtime->phase_barrier_arrive(collective_ready, 1/*count*/);
             // Perform the exchange of the instance data and then 
             // trigger execution when it is ready
             exchange->perform_collective_async();
@@ -4626,7 +4703,7 @@ namespace Legion {
       RtEvent precondition;
       if (!map_applied_conditions.empty())
         precondition = Runtime::merge_events(map_applied_conditions);
-      Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/, precondition);
+      runtime->phase_barrier_arrive(mapping_barrier, 1/*count*/, precondition);
       if (!acquired_instances.empty())
         precondition = release_nonempty_acquired_instances(mapping_barrier, 
                                                            acquired_instances);
@@ -4684,9 +4761,9 @@ namespace Legion {
             exchange->perform_collective_async();
             // Arrive on the ready barrier
             if (index_preconditions.empty())
-              Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+              runtime->phase_barrier_arrive(collective_ready, 1/*count*/);
             else
-              Runtime::phase_barrier_arrive(collective_ready, 1/*count*/,
+              runtime->phase_barrier_arrive(collective_ready, 1/*count*/,
                   Runtime::merge_events(&info, index_preconditions));
             const RtEvent exchanged = 
               exchange->perform_collective_wait(false/*block*/);
@@ -4756,6 +4833,7 @@ namespace Legion {
       assert(requirement.privilege_fields.size() == 1);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(-1 <= points_completed.load());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -4771,7 +4849,7 @@ namespace Legion {
           done_event = thunk->perform(this, runtime->forest, fid,
                                       collective_ready, instances);
         }
-        Runtime::phase_barrier_arrive(collective_done, 1/*count*/, done_event);
+        runtime->phase_barrier_arrive(collective_done, 1/*count*/, done_event);
       }
       else
       {
@@ -4794,9 +4872,12 @@ namespace Legion {
                          instances, &remote_targets, &deppart_results);
         }
       }
-      // If we don't have any points then we need to complete our execution
-      // now since we're not going to get any calls for it later
-      if (points.empty())
+      // Remove our guard that we added in trigger_ready and see if we're done
+      const unsigned received = ++points_completed;
+#ifdef DEBUG_LEGION
+      assert(received <= points.size());
+#endif
+      if (received == points.size())
         complete_execution();
     }
 
@@ -5287,7 +5368,7 @@ namespace Legion {
           return;
       }
       // Make sure the other shards have received all their returns too
-      Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(resource_return_barrier, 1/*count*/);
       if (!has_return_resources())
         return;
       if (!resource_return_barrier.has_triggered())
@@ -5489,7 +5570,7 @@ namespace Legion {
       }
       // Trigger this if we're not expecting to see any returns
       if (remaining_resource_returns == 0)
-        Runtime::phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(resource_return_barrier, 1/*count*/);
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
@@ -5621,7 +5702,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(execution_fence_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(execution_fence_barrier, 
+      runtime->phase_barrier_arrive(execution_fence_barrier, 
                                     1/*count*/, complete);
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -5927,9 +6008,12 @@ namespace Legion {
             (target->size > LEGION_MAX_RETURN_SIZE))
         {
           MemoryManager *manager = runtime->find_memory_manager(target->memory);
-          FutureInstance *shadow_instance = 
-            manager->create_future_instance(this, unique_op_id,
-                redop->sizeof_rhs, false/*eager*/);
+          TaskTreeCoordinates coordinates;
+          compute_task_tree_coordinates(coordinates);
+          // Safe to block here indefinitely waiting for unbounded pools
+          FutureInstance *shadow_instance = manager->create_future_instance(
+              unique_op_id, coordinates, redop->sizeof_rhs,
+              NULL/*safe_for_unbounded_pools*/);
           all_reduce_collective->set_shadow_instance(shadow_instance);
         }
       }
@@ -6201,10 +6285,10 @@ namespace Legion {
       }
       // Do our arrival
       if (!map_applied_conditions.empty())
-        Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
+        runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
             Runtime::merge_events(map_applied_conditions));
       else
-        Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
       // We're mapped when everyone is mapped
       complete_mapping(mapping_fence_barrier);
       complete_execution();
@@ -6218,7 +6302,7 @@ namespace Legion {
       assert(mapping_fence_barrier.exists());
 #endif
       // We don't need the mapping fence barrier
-      Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
       FenceOp::trigger_replay();
     }
 
@@ -6231,7 +6315,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(execution_fence_barrier.exists());
 #endif
-        Runtime::phase_barrier_arrive(execution_fence_barrier, 
+        runtime->phase_barrier_arrive(execution_fence_barrier, 
                                       1/*count*/, complete);
         FenceOp::trigger_complete(execution_fence_barrier);
       }
@@ -6324,7 +6408,7 @@ namespace Legion {
     {
       // Signal that all our mapping dependences have been met
       if (collective_map_barrier.exists())
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
       // Compute the version numbers for this mapping operation
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
@@ -6394,7 +6478,7 @@ namespace Legion {
     {
       if (collective_map_barrier.exists())
       {
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/,
+        runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/,
                                       precondition);
         const RtEvent result = collective_map_barrier;
 #ifdef DEBUG_LEGION
@@ -6583,6 +6667,9 @@ namespace Legion {
       collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
       if (collective_instances)
         create_collective_rendezvous(requirement.parent.get_tree_id(), 0);
+      else // Only need the versioning rendezvous in this case
+        ReplCollectiveVersioning<
+          CollectiveViewCreator<AttachOp> >::create_collective_rendezvous(0);
     }
 
     //--------------------------------------------------------------------------
@@ -6594,7 +6681,7 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Signal that all our mapping dependences are met
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
@@ -6623,18 +6710,18 @@ namespace Legion {
         if (!deduplicate_across_shards || is_first_local_shard)
         {
           const RtEvent attached = external_manager->attach_external_instance();
-          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
+          runtime->phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
         }
         else
-          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+          runtime->phase_barrier_arrive(resource_barrier, 1/*count*/);
       }
       else if (external_manager->is_owner())
       {
         const RtEvent attached = external_manager->attach_external_instance();
-        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
+        runtime->phase_barrier_arrive(resource_barrier, 1/*count*/, attached);
       }
       else
-        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(resource_barrier, 1/*count*/);
       // Make sure the attaches are done across all shards before continuing
       if (!resource_barrier.has_triggered())
         resource_barrier.wait();
@@ -6649,7 +6736,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
     }
 
@@ -6713,9 +6800,9 @@ namespace Legion {
         if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
             making_instance)
         {
-          const RtUserEvent unique = Runtime::create_rt_user_event();
-          Runtime::trigger_event(unique);
-          unique_event = unique;
+          const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+          unique.trigger();
+          unique_event = LgEvent(unique);
           if (runtime->profiler != NULL)
             runtime->profiler->add_inst_request(requests, this, unique_event);
         }
@@ -6741,6 +6828,8 @@ namespace Legion {
                                                       requirement.region);
           implicit_profiler->register_physical_instance_layout(unique_event,
               requirement.region.field_space, layout_constraint_set);
+          if (ready_event.exists())
+            implicit_profiler->record_instance_ready(ready_event, unique_event);
         }
       }
       // Do the arrival on the attach barrier for any collective instances
@@ -6947,6 +7036,9 @@ namespace Legion {
           create_collective_rendezvous(requirement.parent.get_tree_id(),
               0/*requirement index*/, 1/*analysis index*/);
       }
+      else // Only need the versioning rendezvous in this case
+        ReplCollectiveVersioning<
+          CollectiveViewCreator<DetachOp> >::create_collective_rendezvous(0);
     }
 
     //--------------------------------------------------------------------------
@@ -6958,7 +7050,7 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Signal that all our mapping dependences are met
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
@@ -6983,10 +7075,10 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Always arrive on the effects barrier with the detach event
-      Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
+      runtime->phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
       // Then update the detach event with the effects barrier
       detach_event = effects_barrier;
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
     }
 
@@ -7530,7 +7622,7 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Signal that all of our mapping dependences are satisfied
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -7554,7 +7646,7 @@ namespace Legion {
       if (collective_map_barrier.exists())
       {
         // Normal analysis path
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+        runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
         return collective_map_barrier;
       }
       else // Tracing path
@@ -7590,7 +7682,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
       elide_collective_rendezvous();
       AcquireOp::predicate_false();
@@ -7604,9 +7696,9 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Elide both generations of the mapping fence barrier
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       elide_collective_rendezvous();
       AcquireOp::trigger_replay();
@@ -7727,7 +7819,7 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Signal that all of our mapping dependences are satisfied
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -7751,7 +7843,7 @@ namespace Legion {
       if (collective_map_barrier.exists())
       {
         // Normal analysis path
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+        runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
         return collective_map_barrier;
       }
       else // Tracing path
@@ -7787,7 +7879,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
       elide_collective_rendezvous();
       ReleaseOp::predicate_false();
@@ -7801,9 +7893,9 @@ namespace Legion {
       assert(collective_map_barrier.exists());
 #endif
       // Elide both generations of the mapping fence barrier
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      runtime->phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       elide_collective_rendezvous();
       ReleaseOp::trigger_replay();
@@ -8034,7 +8126,7 @@ namespace Legion {
     {
       if (recording_fence.exists())
       {
-        Runtime::phase_barrier_arrive(recording_fence, 1/*count*/);
+        runtime->phase_barrier_arrive(recording_fence, 1/*count*/);
         enqueue_ready_operation(recording_fence);
       }
       else
@@ -8458,7 +8550,7 @@ namespace Legion {
         {
           // Have to do the mapping fence on the way in to guarantee that
           // everyone is done mapping befor we try to capture conditions
-          Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+          runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
           enqueue_ready_operation(mapping_fence_barrier);
           return;
         }
@@ -8949,7 +9041,7 @@ namespace Legion {
         // parallel with the refresh since we're not going to look inside
         // the equivalence sets until later and any refinements to the 
         // equivalence sets will do their own barriers across the shards
-        Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+        runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
         if (!refresh_ready.empty())
         {
           refresh_ready.insert(mapping_fence_barrier);
@@ -9132,10 +9224,10 @@ namespace Legion {
         assert(mapping_fence_barrier.exists());
 #endif
         if (!fence_events.empty())
-          Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/,
               Runtime::merge_events(fence_events));
         else
-          Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
+          runtime->phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
         if (!ready_events.empty())
         {
           ready_events.insert(mapping_fence_barrier);
@@ -9362,9 +9454,8 @@ namespace Legion {
 #endif
         if (control_replicated)
         {
-          callback_barrier =
-            RtBarrier(Realm::Barrier::create_barrier(
-                (collective_mapping == NULL) ? 1 : collective_mapping->size()));
+          callback_barrier = runtime->create_rt_barrier(
+                (collective_mapping == NULL) ? 1 : collective_mapping->size());
         }
       }
 #ifdef DEBUG_LEGION
@@ -10200,12 +10291,12 @@ namespace Legion {
           // Make sure to bump the future coordinate for this context as well
 #ifndef NDEBUG
 #ifdef DEBUG_LEGION
-          const uint64_t coord =
+          const uint64_t index =
 #endif
 #endif
-            ctx->get_next_future_coordinate();
+            ctx->get_next_blocking_index();
 #ifdef DEBUG_LEGION
-          assert(coord == finder->second.first->coordinate.context_index);
+          assert(index == finder->second.first->coordinate.context_index);
 #endif
           Future result(finder->second.first);
 #ifdef DEBUG_LEGION
@@ -10222,7 +10313,7 @@ namespace Legion {
         // Didn't find it so make it
         FutureImpl *result = new FutureImpl(ctx, runtime, false/*register*/,
             did, op, op->get_generation(),
-            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
+            ContextCoordinate(ctx->get_next_blocking_index(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -10242,7 +10333,7 @@ namespace Legion {
       {
         FutureImpl *impl = new FutureImpl(ctx, runtime, false/*register*/,
             did, op, op->get_generation(),
-            ContextCoordinate(ctx->get_next_future_coordinate(), index_point),
+            ContextCoordinate(ctx->get_next_blocking_index(), index_point),
             op->get_unique_op_id(), ctx->get_depth(), op->get_provenance(),
             collective_mapping);
         if (runtime->legion_spy_enabled)
@@ -10273,12 +10364,12 @@ namespace Legion {
           // Make sure to bump the future coordinate for this context as well
 #ifndef NDEBUG
 #ifdef DEBUG_LEGION
-          const uint64_t coord =
+          const uint64_t index =
 #endif
 #endif
-            ctx->get_next_future_coordinate();
+            ctx->get_next_blocking_index();
 #ifdef DEBUG_LEGION
-          assert(coord == finder->second.first->future_coordinate);
+          assert(index== finder->second.first->blocking_index);
 #endif
           FutureMap result(finder->second.first);
 #ifdef DEBUG_LEGION
@@ -12281,15 +12372,15 @@ namespace Legion {
         if (!local_preconditions.empty())
         {
           local_preconditions.insert(local_done);
-          Runtime::phase_barrier_arrive(callback_barrier, 1/*count*/,
+          runtime->phase_barrier_arrive(callback_barrier, 1/*count*/,
                           Runtime::merge_events(local_preconditions));
         }
         else
-          Runtime::phase_barrier_arrive(callback_barrier,
+          runtime->phase_barrier_arrive(callback_barrier,
                                         1/*count*/, local_done);
       }
       else // there will be a callback on every node anyway
-        Runtime::phase_barrier_arrive(callback_barrier,1/*count*/,local_done);
+        runtime->phase_barrier_arrive(callback_barrier,1/*count*/,local_done);
       preconditions.insert(callback_barrier);
       Runtime::advance_barrier(callback_barrier);
       if (!callback_barrier.exists())
@@ -13897,6 +13988,7 @@ namespace Legion {
     // Instantiate this for a common use case
     template class AllReduceCollective<SumReduction<bool>,false>;
     template class AllReduceCollective<ProdReduction<bool>,false>;
+    template class AllReduceCollective<MaxReduction<uint32_t>,false>;
     template class AllReduceCollective<MaxReduction<uint64_t>,false>;
 
     /////////////////////////////////////////////////////////////
@@ -17141,6 +17233,17 @@ namespace Legion {
         Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
+      if (!participating)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage == -1);
+#endif
+        // When the bulk of these are being sent back to a non-participating
+        // shard then we need to clear them so we don't duplicate
+        concurrent_processors.clear();
+        nonempty_shards.clear();
+        preconditions.clear();
+      }
       RtEvent precondition;
       derez.deserialize(precondition);
       if (precondition.exists())
@@ -17220,7 +17323,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ConcurrentAllreduce::ConcurrentAllreduce(ReplicateContext *ctx,
         CollectiveID id, const std::vector<ShardID> &parts)
-      : AllGatherCollective<true>(ctx, id, parts)
+      : AllGatherCollective<false>(ctx, id, parts)
     //--------------------------------------------------------------------------
     {
     }

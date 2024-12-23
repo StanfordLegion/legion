@@ -174,8 +174,7 @@ namespace Realm {
   template <typename S>
   bool ExternalCudaArrayResource::serialize(S& s) const
   {
-    return ((s << cuda_device_id) &&
-	    (s << array));
+    return ((s << cuda_device_id) && (s << reinterpret_cast<uintptr_t>(array)));
   }
 
   template <typename S>
@@ -183,12 +182,11 @@ namespace Realm {
   {
     int cuda_device_id;
     uintptr_t array;
-    if((s >> cuda_device_id) &&
-       (s >> array))
+    if((s >> cuda_device_id) && (s >> array))
       return new ExternalCudaArrayResource(cuda_device_id,
                                            reinterpret_cast<CUarray_st *>(array));
     else
-      return 0;
+      return nullptr;
   }
 
 
