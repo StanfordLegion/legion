@@ -1428,6 +1428,15 @@ impl StateDataSource {
                     ))
                 }
             }
+            EventEntryKind::ExternalHandshake => {
+                assert!(event.is_barrier());
+                let trigger_time = event_entry.trigger_time.unwrap();
+                let trigger_ts: ts::Timestamp = trigger_time.into();
+                Field::String(format!(
+                    "External handshake on node {} at {}",
+                    node.0, trigger_ts
+                ))
+            }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution
@@ -1992,7 +2001,8 @@ impl StateDataSource {
                     }
                 } else {
                     // Critical path is waiting for other instances to be deleted
-                    let ready_ts: ts::Timestamp = entry.time_range.ready.unwrap().into();
+                    let ready_time = entry.time_range.ready.unwrap();
+                    let ready_ts: ts::Timestamp = ready_time.into();
                     fields.push((
                         self.fields.critical,
                         Field::String(format!(
@@ -2000,6 +2010,13 @@ impl StateDataSource {
                             ready_ts
                         )),
                         Some(Color32::GOLD),
+                    ));
+                    // Record the deferred time here for how long we waited for
+                    // the instance to be ready
+                    fields.push((
+                        self.fields.deferred_time,
+                        Field::Interval(ts::Interval::new(creation_time.into(), ready_ts)),
+                        self.select_interval_color(creation_time, ready_time),
                     ));
                     // Still need to record the creator
                     if let Some(creator) = entry.creator() {

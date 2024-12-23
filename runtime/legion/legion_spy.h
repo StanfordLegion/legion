@@ -1393,6 +1393,12 @@ namespace Legion {
                       inst_event.id, fid, offset);
       }
 
+      static inline void log_instance_deletion(LgEvent inst_event, LgEvent deletion)
+      {
+        log_spy.print("Instance Deletion " IDFMT " " IDFMT,
+            inst_event.id, deletion.id);
+      }
+
       // Logger calls for mapping decisions
       static inline void log_variant_decision(UniqueID unique_id, unsigned vid)
       {

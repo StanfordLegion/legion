@@ -2039,6 +2039,8 @@ namespace Legion {
       virtual void concurrent_allreduce(SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
+      virtual uint64_t collective_lamport_allreduce(uint64_t lamport_clock,
+          size_t points, bool need_result);
       void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -2075,6 +2077,9 @@ namespace Legion {
       ConcurrentMappingRendezvous *concurrent_mapping_rendezvous;
       ConcurrentAllreduce *concurrent_exchange;
       CollectiveID concurrent_exchange_id;
+    protected:
+      CollectiveID collective_exchange_id;
+      AllReduceCollective<MaxReduction<uint64_t>,false> *collective_exchange;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2482,7 +2487,8 @@ namespace Legion {
                        const FieldMask &mask, unsigned parent_req_index);
     protected:
       void select_sharding_function(void);
-      void find_remote_targets(std::vector<ApEvent> &preconditions);
+      void find_remote_targets(std::vector<ApEvent> &preconditions,
+          ApUserEvent &to_trigger);
     protected:
       ShardingFunction *sharding_function;
       IndexSpaceNode *shard_points;

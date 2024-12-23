@@ -55,7 +55,9 @@ list(APPEND REALM_TESTS
   rsrv_acquire_poisoned
   refcount_image_test
   inst_chain_redistrict
+  refcount_setops_test
   refcount_preimage_test
+  refcount_byfield_test
   )
 
 if(Legion_USE_CUDA)

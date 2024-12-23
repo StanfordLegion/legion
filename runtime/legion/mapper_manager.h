@@ -238,9 +238,12 @@ namespace Legion {
       virtual void begin_mapper_call(MappingCallInfo *info,
                                      bool prioritize = false) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
-      virtual void resume_mapper_call(MappingCallInfo *info,
-                                      RuntimeCallKind kind) = 0;
+      virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
+    public:
+      virtual bool is_safe_for_unbounded_pools(void) = 0;
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind) = 0;
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
@@ -300,9 +303,12 @@ namespace Legion {
       virtual void begin_mapper_call(MappingCallInfo *info,
                                      bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
-      virtual void resume_mapper_call(MappingCallInfo *info,
-                                      RuntimeCallKind kind);
+      virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    public:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the mapper reservation
       RtUserEvent complete_pending_pause_mapper_call(void);
@@ -359,9 +365,12 @@ namespace Legion {
       virtual void begin_mapper_call(MappingCallInfo *info,
                                      bool prioritize = false);
       virtual void pause_mapper_call(MappingCallInfo *info);
-      virtual void resume_mapper_call(MappingCallInfo *info,
-                                      RuntimeCallKind kind);
+      virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    public:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the lock
       void release_lock(std::vector<RtUserEvent> &to_trigger); 
@@ -378,10 +387,30 @@ namespace Legion {
                       Operation *op, bool prioritize = false);
       ~MappingCallInfo(void);
     public:
+      inline void begin_wait(void)
+        {
+          if (!paused)
+          {
+            manager->pause_mapper_call(this);
+            paused = true;
+          }
+        }
       inline void pause_mapper_call(void)
-        { manager->pause_mapper_call(this); }
-      inline void resume_mapper_call(RuntimeCallKind kind)
-        { manager->resume_mapper_call(this, kind); }
+        {
+#ifdef DEBUG_LEGION
+          assert(!paused);
+#endif
+          manager->pause_mapper_call(this);
+          paused = true;
+        }
+      inline void resume_mapper_call(void)
+        { 
+          if (paused)
+          {
+            manager->resume_mapper_call(this);
+            paused = false;
+          }
+        }
       inline const char* get_mapper_name(void) const
         { return manager->get_mapper_name(); }
       inline const char* get_mapper_call_name(void) const
@@ -398,7 +427,10 @@ namespace Legion {
         { manager->enable_reentrant(this); }
       inline void disable_reentrant(void)
         { manager->disable_reentrant(this); }
-      void record_acquired_instance(InstanceManager *manager, bool created);
+      inline void report_unsafe_allocation_in_unbounded_pool(
+          Memory m, RuntimeCallKind k)
+        { manager->report_unsafe_allocation_in_unbounded_pool(this, m, k); }
+      void record_acquired_instance(InstanceManager *manager);
       void release_acquired_instance(InstanceManager *manager);
       bool perform_acquires(
           const std::vector<MappingInstance> &instances,
@@ -414,8 +446,8 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       std::vector<long long>*           profiling_ranges;
       long long                         start_time;
-      long long                         pause_time;
       bool                              reentrant;
+      bool                              paused;
     };
 
   };

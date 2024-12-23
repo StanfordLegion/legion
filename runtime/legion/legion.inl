@@ -340,11 +340,11 @@ namespace Legion {
       static inline void end_task(Context ctx, T *result)
       {
         StructHandler<T,std::is_class<T>::value>::end_task(ctx, result);
-      }
+      } 
 
       template<typename T>
       static inline Future from_value(const T *value)
-      {
+      { 
         return StructHandler<T,std::is_class<T>::value>::from_value(value);
       }
 
@@ -486,6 +486,13 @@ namespace Legion {
       };
 
     }; // Serialization namespace
+
+    // Specialization for Domain
+    template<>
+    inline void LegionSerialization::end_task<Domain>(Context ctx, Domain *result)
+    {
+      Runtime::legion_task_postamble(ctx, *result, true/*take ownership*/);
+    }
 
     // Special namespace for providing multi-dimensional 
     // array syntax on accessors 
@@ -16875,15 +16882,7 @@ namespace Legion {
       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> buffer(
         bounds, target_memory(), ord, initial_value, alignment);
       if (return_buffer)
-      {
-#ifdef DEBUG_LEGION
-        return_data(extents, field_id, buffer);
-#else
-        // In release mode, we don't check the constraints, as we already know
-        // that the instance satisfies them.
-        return_data(extents, field_id, buffer.instance, NULL, false);
-#endif
-      }
+        return_data(extents, field_id, buffer.instance, false);
       return buffer;
     }
 
@@ -18817,6 +18816,8 @@ namespace Legion {
     /*static*/ inline Future Future::from_value(Runtime *rt, const T &value)
     //--------------------------------------------------------------------------
     {
+      static_assert(!std::is_base_of<Domain,T>::value,
+            "Use Future::from_domain for returning domains in futures");
       return LegionSerialization::from_value(&value);
     } 
 
@@ -18825,6 +18826,8 @@ namespace Legion {
     /*static*/ inline Future Future::from_value(const T &value)
     //--------------------------------------------------------------------------
     {
+      static_assert(!std::is_base_of<Domain,T>::value,
+            "Use Future::from_domain for returning domains in futures");
       return LegionSerialization::from_value(&value);
     }
 
@@ -19326,12 +19329,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                           const DomainT<DIM,T> &bounds, const char *provenance)
+      const DomainT<DIM,T> &bounds, const char *provenance, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       const Domain domain(bounds);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance,
+        take_ownership));
     }
 
     //--------------------------------------------------------------------------
@@ -19357,7 +19361,8 @@ namespace Legion {
       const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       const Domain domain(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance,
+        true/*take ownership*/));
     }
 
     //--------------------------------------------------------------------------
@@ -19373,7 +19378,8 @@ namespace Legion {
       const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
       const Domain domain(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance,
+        true/*take ownership*/));
     }
 
     //--------------------------------------------------------------------------
@@ -19696,7 +19702,7 @@ namespace Legion {
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     bool perform_intersections,
                                     PartitionKind part_kind, Color color,
-                                    const char *provenance)
+                                    const char *provenance, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,Domain> converted_domains;
@@ -19705,7 +19711,8 @@ namespace Legion {
         converted_domains[DomainPoint(it->first)] = Domain(it->second);
       return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), converted_domains, IndexSpace(color_space),
-              perform_intersections, part_kind, color, provenance));
+              perform_intersections, part_kind, color, provenance,
+              take_ownership));
     }
 
     //--------------------------------------------------------------------------
@@ -19744,7 +19751,8 @@ namespace Legion {
                 rectangles.begin(); it != rectangles.end(); it++)
         {
           const DomainT<DIM,T> domain(it->second);
-          futures[DomainPoint(it->first)] = Future::from_value(Domain(domain));
+          futures[DomainPoint(it->first)] = 
+            Future::from_domain(Domain(domain), true/*take ownership*/);
         }
         FutureMap fm = construct_future_map(ctx, IndexSpace(color_space),
                               futures, true/*collective*/, 0/*shard id*/, 
@@ -19765,7 +19773,8 @@ namespace Legion {
           domains[DomainPoint(it->first)] = DomainT<DIM,T>(it->second); 
         return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), domains, IndexSpace(color_space),
-              perform_intersections, part_kind, color, provenance));
+              perform_intersections, part_kind, color, provenance,
+              true/*take ownership*/));
       }
     }
 

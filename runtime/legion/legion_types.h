@@ -455,11 +455,9 @@ namespace Legion {
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID,
-      LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
       LG_DEFER_TRACE_UPDATE_TASK_ID,
-      LG_FINALIZE_OUTPUT_ID,
       LG_DEFER_DELETE_FUTURE_INSTANCE_TASK_ID,
       LG_FREE_EXTERNAL_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
@@ -565,11 +563,9 @@ namespace Legion {
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Collective Instance Message",                      \
-        "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
         "Defer Trace Update",                                     \
-        "Finalize Output Region Instance",                        \
         "Defer Delete Future Instance",                           \
         "Free External Allocation",                               \
         "Defer Consensus Match",                                  \
@@ -826,6 +822,8 @@ namespace Legion {
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
       SLICE_RENDEZVOUS_CONCURRENT_MAPPED,
+      SLICE_COLLECTIVE_ALLREDUCE_REQUEST,
+      SLICE_COLLECTIVE_ALLREDUCE_RESPONSE,
       SLICE_CONCURRENT_ALLREDUCE_REQUEST,
       SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
@@ -1028,6 +1026,8 @@ namespace Legion {
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
       SEND_NOTIFY_COLLECTED_INSTANCES,
+      SEND_CREATE_MEMORY_POOL_REQUEST,
+      SEND_CREATE_MEMORY_POOL_RESPONSE,
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
@@ -1157,6 +1157,8 @@ namespace Legion {
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
         "Slice Rendezvous Concurrent Mapped",                         \
+        "Slice Collective Unbounded Pools Allreduce Request",         \
+        "Slice Collective Unbounded Pools Allreduce Response",        \
         "Slice Concurrent Allreduce Request",                         \
         "Slice Concurrent Allreduce Response",                        \
         "Slice Find Intra-Space Dependence",                          \
@@ -1359,6 +1361,8 @@ namespace Legion {
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \
         "Send Notify Collected Instances",                            \
+        "Send Create Memory Pool Request",                            \
+        "Send Create Memory Pool Response",                           \
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
@@ -1465,6 +1469,7 @@ namespace Legion {
       MAPPER_FILTER_INSTANCES_CALL,
       MAPPER_CREATE_PHYSICAL_INSTANCE_CALL,
       MAPPER_FIND_OR_CREATE_PHYSICAL_INSTANCE_CALL,
+      MAPPER_REDISTRICT_INSTANCE_CALL,
       MAPPER_FIND_PHYSICAL_INSTANCE_CALL,
       MAPPER_FIND_PHYSICAL_INSTANCES_CALL,
       MAPPER_SET_GC_PRIORITY_CALL,
@@ -1478,6 +1483,8 @@ namespace Legion {
       MAPPER_COLLECT_INSTANCE_CALL,
       MAPPER_COLLECT_INSTANCES_CALL,
       MAPPER_ACQUIRE_FUTURE_CALL,
+      MAPPER_ACQUIRE_POOL_CALL,
+      MAPPER_RELEASE_POOL_CALL,
       MAPPER_CREATE_INDEX_SPACE_CALL,
       MAPPER_UNION_INDEX_SPACES_CALL,
       MAPPER_INTERSECT_INDEX_SPACES_CALL,
@@ -1693,6 +1700,7 @@ namespace Legion {
       "MapperRuntime::filter_instances",                              \
       "MapperRuntime::create_physical_instance",                      \
       "MapperRuntime::find_or_create_physical_instance",              \
+      "MapperRuntime::redistrict_instance",                           \
       "MapperRuntime::find_physical_instance",                        \
       "MapperRuntime::find_physical_instances",                       \
       "MapperRuntime::set_garbage_collection_priority",               \
@@ -1706,6 +1714,8 @@ namespace Legion {
       "MapperRuntime::collect_instance",                              \
       "MapperRuntime::collect_instances",                             \
       "MapperRuntime::acquire_future",                                \
+      "MapperRuntime::acquire_pool",                                  \
+      "MapperRuntime::release_pool",                                  \
       "MapperRuntime::create_index_space",                            \
       "MapperRuntime::union_index_spaces",                            \
       "MapperRuntime::intersect_index_spaces",                        \
@@ -1975,7 +1985,7 @@ namespace Legion {
       COLLECTIVE_LOC_65 = 65,
       COLLECTIVE_LOC_66 = 66,
       COLLECTIVE_LOC_67 = 67,
-      //COLLECTIVE_LOC_68 = 68,
+      COLLECTIVE_LOC_68 = 68,
       //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
       COLLECTIVE_LOC_71 = 71,
@@ -2050,6 +2060,7 @@ namespace Legion {
     class LegionHandshakeImpl;
     class ProcessorManager;
     class MemoryManager;
+    class MemoryPool;
     class VirtualChannel;
     class MessageManager;
     class ShutdownManager;
@@ -2636,7 +2647,7 @@ namespace Legion {
     typedef unsigned long long IndexSpaceExprID;
     struct ContextCoordinate;
     typedef ContextCoordinate TraceLocalID;
-    typedef std::vector<ContextCoordinate> TaskTreeCoordinates;
+    class TaskTreeCoordinates;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
@@ -2896,6 +2907,7 @@ namespace Legion {
     protected:
       void begin_context_wait(Context ctx, bool from_application) const;
       void end_context_wait(Context ctx, bool from_application) const;
+      void begin_mapper_call_wait(MappingCallInfo *call) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
       void record_event_trigger(LgEvent precondition) const;
@@ -3252,6 +3264,17 @@ namespace Legion {
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
 #endif
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      // If we're in a mapper call, notify the mapper that we're waiting
+      // Do this first in case we get a re-entrant wait (e.g. because
+      // SerializingManager::pause_mapper_call takes and lock and we might
+      // end up coming back around here to wait on that event too)
+      if (local_call != NULL)
+      {
+        Internal::implicit_mapper_call = NULL;
+        begin_mapper_call_wait(local_call);
+      }
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
       // Save the reference tracker that we have
@@ -3268,10 +3291,7 @@ namespace Legion {
       }
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      Internal::implicit_context = NULL;
-      // Save the mapper call locally
-      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
-      Internal::implicit_mapper_call = NULL;
+      Internal::implicit_context = NULL; 
       // Save the implicit fevent
       LgEvent local_fevent = Internal::implicit_fevent;
       Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
@@ -3361,6 +3381,17 @@ namespace Legion {
       LgTaskID local_kind = Internal::implicit_task_kind;
       LgTaskID local_caller = Internal::implicit_task_caller;
 #endif
+      // Save the mapper call locally
+      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      // If we're in a mapper call, notify the mapper that we're waiting
+      // Do this first in case we get a re-entrant wait (e.g. because
+      // SerializingManager::pause_mapper_call takes and lock and we might
+      // end up coming back around here to wait on that event too)
+      if (local_call != NULL)
+      {
+        Internal::implicit_mapper_call = NULL;
+        begin_mapper_call_wait(local_call);
+      }
       // Save whether we are in a registration callback
       unsigned local_callback = Internal::inside_registration_callback;
       // Save the reference tracker that we have
@@ -3378,9 +3409,6 @@ namespace Legion {
       // Save the context locally
       Internal::TaskContext *local_ctx = Internal::implicit_context; 
       Internal::implicit_context = NULL;
-      // Save the mapper call locally
-      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
-      Internal::implicit_mapper_call = NULL;
       // Save the fevent
       LgEvent local_fevent = Internal::implicit_fevent;
       Internal::implicit_fevent = LgEvent::NO_LG_EVENT;

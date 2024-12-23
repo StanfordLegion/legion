@@ -1949,7 +1949,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx->compute_task_tree_coordinates(coords);
-      coords.push_back(ContextCoordinate(context_index, DomainPoint()));
+      coords.emplace_back(get_task_tree_coordinate());
+    }
+
+    //--------------------------------------------------------------------------
+    ContextCoordinate Operation::get_task_tree_coordinate(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ContextCoordinate(context_index, DomainPoint());
     }
 
     //--------------------------------------------------------------------------
@@ -4318,7 +4325,7 @@ namespace Legion {
         else return;
       }
       else
-        shard_proj->domain->get_domain(local_domain);
+        local_domain = shard_proj->domain->get_tight_domain();
 
       for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
       {
@@ -4437,8 +4444,7 @@ namespace Legion {
           this->get_requirement(region_idx);
         std::vector<DomainPoint> previous_index_task_points;
 
-        Domain index_domain;
-        finder->second.launch_space->get_domain(index_domain);
+        Domain index_domain = finder->second.launch_space->get_tight_domain();
 
         get_points(req, finder->second.projection,
             lr, index_domain,
@@ -7840,7 +7846,8 @@ namespace Legion {
     {
       collective_pre = local_pre;
       collective_post = local_post;
-      records.emplace_back(IndirectRecord(runtime->forest, req, insts));
+      records.emplace_back(
+          IndirectRecord(runtime->forest, req, insts, 1/*total points*/));
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -8645,7 +8652,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_domain(index_domain);
+        index_domain = launch_space->get_tight_domain();
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -9177,10 +9184,9 @@ namespace Legion {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
       IndexSpaceNode *local_points = get_shard_points();
-      Domain launch_domain;
-      local_points->get_domain(launch_domain);
+      Domain launch_domain = local_points->get_tight_domain();
       // Now enumerate the points
-      size_t num_points = launch_domain.get_volume();
+      size_t num_points = local_points->get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
@@ -9358,8 +9364,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        copies[index].src_indirect_records.emplace_back(
-            IndirectRecord(runtime->forest, req, insts));
+        copies[index].src_indirect_records.emplace_back(IndirectRecord(
+              runtime->forest, req, insts, launch_space->get_volume()));
         exchange.src_records.push_back(&records);
         if (copies[index].src_indirect_records.size() == points.size())
           return finalize_exchange(index, true/*sources*/);
@@ -9395,8 +9401,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        copies[index].dst_indirect_records.emplace_back(
-            IndirectRecord(runtime->forest, req, insts));
+        copies[index].dst_indirect_records.emplace_back(IndirectRecord(
+              runtime->forest, req, insts, launch_space->get_volume()));
         exchange.dst_records.push_back(&records);
         if (copies[index].dst_indirect_records.size() == points.size())
           return finalize_exchange(index, false/*sources*/);
@@ -9733,9 +9739,8 @@ namespace Legion {
       AutoLock o_lock(op_lock);
       if (need_to_clear)
       {
-        Domain local_domain;
+        Domain local_domain = launch_space->get_tight_domain();
         std::vector<DomainPoint> points;
-        launch_space->get_domain(local_domain);
 
         for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
         {
@@ -10624,12 +10629,8 @@ namespace Legion {
               // Have to request internal buffers before completing mapping
               // in case we have to make an instance as part of it
               FutureImpl *impl = futures[0].impl;
-              const RtEvent mapped = 
-                impl->request_runtime_instance(this, false/*eager*/);
-              if (mapped.exists())
-                complete_mapping(mapped);
-              else
-                complete_mapping();
+              impl->request_runtime_instance(this);
+              complete_mapping();
               const RtEvent ready = impl->find_runtime_instance_ready();
               if (ready.exists() && !ready.has_triggered())
                 parent_ctx->add_to_trigger_execution_queue(this, ready);
@@ -10650,10 +10651,7 @@ namespace Legion {
               for (unsigned idx = 0; idx < futures.size(); idx++)
               {
                 FutureImpl *impl = futures[idx].impl;
-                const RtEvent mapped =
-                  impl->request_runtime_instance(this,false/*eager*/);
-                if (mapped.exists())
-                  mapped_events.push_back(mapped);
+                impl->request_runtime_instance(this);
                 const RtEvent subscribed = impl->find_runtime_instance_ready();
                 if (subscribed.exists())
                   ready_events.push_back(subscribed);
@@ -10708,7 +10706,8 @@ namespace Legion {
                   "The type of futures for index space domains must be a "
                   "Domain.", parent_ctx->get_task_name(), 
                   parent_ctx->get_unique_id(), sizeof(Domain))
-            if (owner && index_space_node->set_domain(*domain)) 
+            if (owner && index_space_node->set_domain(*domain,
+                  ApEvent::NO_AP_EVENT, true/*take ownership*/))
               delete index_space_node;
             break;      
           }
@@ -14242,8 +14241,8 @@ namespace Legion {
       // Mark that we completed mapping this operation
       if (to_predicate)
       {
-        complete_mapping(
-            future.impl->request_runtime_instance(this, false/*eager*/));
+        future.impl->request_runtime_instance(this);
+        complete_mapping();
         const RtEvent ready = future.impl->find_runtime_instance_ready();
         if (ready.exists() && !ready.has_triggered())
           parent_ctx->add_to_trigger_execution_queue(this, ready);
@@ -14786,8 +14785,9 @@ namespace Legion {
       if (!launch_space.exists())
       {
         if (!launch_domain.exists())
-          compute_launch_space(launcher);
-        launch_space = ctx->find_index_launch_space(launch_domain, provenance);
+          launch_space = compute_launch_space(launcher, provenance);
+        else
+          launch_space = ctx->find_index_launch_space(launch_domain,provenance);
       }
       if (!launch_domain.exists())
       {
@@ -15434,7 +15434,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::compute_launch_space(const MustEpochLauncher &launcher)
+    IndexSpace MustEpochOp::compute_launch_space(
+                      const MustEpochLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       const size_t single_tasks = launcher.single_tasks.size();
@@ -15497,6 +15498,8 @@ namespace Legion {
             default:
               assert(false);
           }
+          return parent_ctx->find_index_launch_space(launch_domain,
+              provenance, true/*take ownership*/);
         }
         else // Easy case of a single index task
         {
@@ -15504,6 +15507,7 @@ namespace Legion {
           if (!launch_domain.exists())
             forest->find_domain(
                 launcher.index_tasks[0].launch_space, launch_domain);
+          return parent_ctx->find_index_launch_space(launch_domain, provenance);
         }
       }
       else
@@ -15533,11 +15537,14 @@ namespace Legion {
             default:
               assert(false);
           }
+          return parent_ctx->find_index_launch_space(launch_domain,
+              provenance, true/*take ownership*/);
         }
         else // Easy case of a single point task
         {
           DomainPoint point = launcher.single_tasks[0].point;
           launch_domain = Domain(point, point);
+          return parent_ctx->find_index_launch_space(launch_domain, provenance);
         }
       }
     }
@@ -16305,10 +16312,7 @@ namespace Legion {
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent mapped =
-          it->second->request_runtime_instance(this, false/*eager*/);
-        if (mapped.exists())
-          mapped_events.insert(mapped);
+        it->second->request_runtime_instance(this);
         const RtEvent ready = it->second->find_runtime_instance_ready();
         if (ready.exists())
           ready_events.insert(ready);
@@ -17114,10 +17118,9 @@ namespace Legion {
         // Need to get the launch domain in case it is different than
         // the original index domain due to control replication
         IndexSpaceNode *local_points = get_shard_points();
-        Domain launch_domain;
-        local_points->get_domain(launch_domain);
+        Domain launch_domain = local_points->get_tight_domain();
         // Now enumerate the points and kick them off
-        size_t num_points = launch_domain.get_volume();
+        size_t num_points = local_points->get_volume();
 #ifdef DEBUG_LEGION
         assert(num_points > 0);
 #endif
@@ -17251,7 +17254,8 @@ namespace Legion {
 #endif
       IndexSpaceNode *node = runtime->forest->get_node(handle);
       Domain domain;
-      ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
+      ApUserEvent to_trigger;
+      ApEvent domain_ready = node->get_loose_domain(domain, to_trigger);
       if (is_index_space)
       {
         // Update our data structure and see if we are the ones
@@ -17284,6 +17288,8 @@ namespace Legion {
               Runtime::merge_events(&info, index_preconditions), instances);
           Runtime::trigger_event(&info, intermediate_index_event, done_event);
         }
+        if (to_trigger.exists())
+          Runtime::trigger_event(NULL, to_trigger, intermediate_index_event);
         return intermediate_index_event;
       }
       else
@@ -17307,8 +17313,11 @@ namespace Legion {
           else
             instances_ready = domain_ready;
         }
-        return thunk->perform(this, runtime->forest, fid,
+        ApEvent result = thunk->perform(this, runtime->forest, fid,
                               instances_ready, instances);
+        if (to_trigger.exists())
+          Runtime::trigger_event(NULL, to_trigger, result);
+        return result;
       }
     }
 
@@ -18760,10 +18769,7 @@ namespace Legion {
         assert(future.impl != NULL);
 #endif
         // This will make sure we have a mapping locally
-        const RtEvent buffer_ready = 
-          future.impl->request_runtime_instance(this, false/*eager*/);
-        if (buffer_ready.exists())
-          map_applied_conditions.insert(buffer_ready);
+        future.impl->request_runtime_instance(this);
       }
       if (is_recording())
         trace_info.record_complete_replay(map_applied_conditions);
@@ -19077,7 +19083,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_domain(index_domain);
+        index_domain = launch_space->get_tight_domain();
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -19248,10 +19254,7 @@ namespace Legion {
         assert(future.impl != NULL);
 #endif
         // This will make sure we have a mapping locally
-        const RtEvent buffer_ready = 
-          future.impl->request_runtime_instance(this, false/*eager*/);
-        if (buffer_ready.exists())
-          map_applied_conditions.insert(buffer_ready);
+        future.impl->request_runtime_instance(this);
       }
       // Launch the points
       for (unsigned idx = 0; idx < points.size(); idx++)
@@ -19341,10 +19344,9 @@ namespace Legion {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
       IndexSpaceNode *local_points = get_shard_points();
-      Domain launch_domain;
-      local_points->get_domain(launch_domain);
+      Domain launch_domain = local_points->get_tight_domain();
       // Now enumerate the points
-      size_t num_points = launch_domain.get_volume();
+      size_t num_points = local_points->get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
@@ -19581,8 +19583,7 @@ namespace Legion {
       if (need_to_clear)
       {
         IndexSpaceNode *local_points = this->get_shard_points();
-        Domain local_domain;
-        local_points->get_domain(local_domain);
+        Domain local_domain = local_points->get_tight_domain();
 
         std::vector<DomainPoint> points;
 
@@ -20525,6 +20526,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);      
+      const ContextCoordinate coordinate = get_task_tree_coordinate();
+      rez.serialize(coordinate.index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -21945,6 +21948,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
+      const ContextCoordinate coordinate = get_task_tree_coordinate();
+      rez.serialize(coordinate.index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -22700,10 +22705,7 @@ namespace Legion {
       for (std::vector<Future>::const_iterator it =
             futures.begin(); it != futures.end(); it++)
       {
-        const RtEvent mapped = 
-          it->impl->request_runtime_instance(this, false/*eager*/);
-        if (mapped.exists())
-          mapped_events.push_back(mapped);
+        it->impl->request_runtime_instance(this);
         const RtEvent ready = it->impl->find_runtime_instance_ready();
         if (ready.exists())
           ready_events.push_back(ready);
@@ -22716,8 +22718,11 @@ namespace Legion {
       {
         MemoryManager *manager = 
           runtime->find_memory_manager(runtime->runtime_system_memory);
-        instance = manager->create_future_instance(this, unique_op_id,
-                                      return_type_size, false/*eager*/);
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
+        // Safe to block here indefinitely waiting for unbounded pools
+        instance = manager->create_future_instance(unique_op_id,
+            coordinates, return_type_size, NULL/*safe_for_unbounded_pools*/);
         complete_mapping(futures_mapped);
       }
       // Also make sure we wait for any execution fences that we have
@@ -22769,7 +22774,7 @@ namespace Legion {
               return_type_size)
         // Copy the result into the instance
         FutureInstance *local = 
-            new FutureInstance(output.value, output.size, false/*eager*/,
+            new FutureInstance(output.value, output.size,
                 true/*external*/, output.take_ownership);
         const ApEvent done = 
           instance->copy_from(local, this, ApEvent::NO_AP_EVENT);
@@ -22899,10 +22904,7 @@ namespace Legion {
                                      FutureImpl *future)
     //--------------------------------------------------------------------------
     {
-      const RtEvent ready =
-        future->request_runtime_instance(this, false/*eager*/);
-      if (ready.exists() && !ready.has_triggered())
-        preconditions.push_back(ready);
+      future->request_runtime_instance(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22956,7 +22958,7 @@ namespace Legion {
       // create an external instance for the current allocation
       FutureInstance *serdez_redop_instance = 
         new FutureInstance(serdez_redop_buffer, future_result_size,
-          false/*eager*/, true/*external*/, false/*own allocation*/);
+          true/*external*/, false/*own allocation*/);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
@@ -23186,6 +23188,8 @@ namespace Legion {
       const size_t result_size = 
         ((serdez_redop_fns == NULL) || (serdez_upper_bound == SIZE_MAX)) ?
         future_result_size : serdez_upper_bound;
+      TaskTreeCoordinates coordinates;
+      compute_task_tree_coordinates(coordinates);
       int runtime_visible = -1;
       for (std::vector<Memory>::const_iterator it =
             target_memories.begin(); it != target_memories.end(); it++)
@@ -23194,8 +23198,10 @@ namespace Legion {
             FutureInstance::check_meta_visible(*it))
           runtime_visible = targets.size();
         MemoryManager *manager = runtime->find_memory_manager(*it);
-        FutureInstance *instance = manager->create_future_instance(this, 
-            unique_op_id, result_size, false/*eager*/);
+        // Safe to block here indefinitely waiting for unbounded pools
+        FutureInstance *instance = manager->create_future_instance(
+            unique_op_id, coordinates, result_size,
+            NULL/*safe for unbounded pools*/);
         targets.push_back(instance);
       }
       // This is an important optimization: if we're doing a small
@@ -24698,13 +24704,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
+      rez.serialize(index_point); 
     }
 
     //--------------------------------------------------------------------------
     void RemoteAttachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing for the moment
+      derez.deserialize(index_point);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -24784,13 +24791,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
+      rez.serialize(index_point);
     }
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing for the moment
+      derez.deserialize(index_point);
     }
 
     ///////////////////////////////////////////////////////////// 

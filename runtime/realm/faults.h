@@ -66,6 +66,13 @@ namespace Realm {
 
     bool empty(void) const;
 
+    size_t size(void) const;
+
+    std::vector<uintptr_t> get_pcs(void) const;
+
+    // operator[] for const access, it is not allowed to change the value of pcs
+    const uintptr_t &operator[](size_t index) const;
+
     // attempts to prune this backtrace by removing frames that appear
     //  in the other one
     bool prune(const Backtrace &other);
@@ -75,22 +82,21 @@ namespace Realm {
     //   so you probably don't want to ask for these during any normal execution paths
     void capture_backtrace(int skip = 0, int max_depth = 0);
 
-    // attempts to map the pointers in the back trace to symbol names - this can be
-    //   much more expensive
-    void lookup_symbols(void);
+    // attempts to map the pointers in the back trace to symbol names and print them out
+    // this can be more expensive than capture and print the raw trace
+    void print_symbols(std::vector<std::string> &symbols) const;
 
+    void print_symbols(std::ostream &os) const;
+
+    // this only prints the pcs
     REALM_PUBLIC_API
     friend std::ostream& operator<<(std::ostream& os, const Backtrace& bt);
 
   protected:
     uintptr_t compute_hash(int depth = 0) const;
 
-    uintptr_t pc_hash; // used for fast comparisons
+    uintptr_t pc_hash = 0; // used for fast comparisons
     std::vector<uintptr_t> pcs;
-    std::vector<std::string> symbols;
-
-    template <typename S>
-      friend bool serdez(S& serdez, const Backtrace& b);
   };
 
   // Realm execution exceptions
@@ -146,7 +152,5 @@ namespace Realm {
   };
 
 }; // namespace Realm
-
-#include "realm/faults.inl"
 
 #endif // REALM_FAULTS_H

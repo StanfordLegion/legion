@@ -1224,7 +1224,6 @@ INSTALL_HEADERS += legion.h \
 		   realm/bytearray.h \
 		   realm/bytearray.inl \
 		   realm/faults.h \
-		   realm/faults.inl \
 		   realm/atomics.h \
 		   realm/atomics.inl \
 		   realm/point.h \
