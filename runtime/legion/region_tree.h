@@ -41,6 +41,8 @@ namespace Legion {
       inline bool operator<(const FieldDataDescriptor &rhs) const
         { return (color < rhs.color); }
     public:
+      // Index space user events for these domains are already
+      // added by the operation that populates these structs
       Domain domain;
       DomainPoint color;
       PhysicalInstance inst;
@@ -65,7 +67,8 @@ namespace Legion {
       IndirectRecord(void) { }
       IndirectRecord(RegionTreeForest *forest, 
                      const RegionRequirement &req,
-                     const InstanceSet &insts);
+                     const InstanceSet &insts,
+                     size_t total_points);
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -161,7 +164,8 @@ namespace Legion {
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
       IndexSpaceNode* create_index_space(IndexSpace handle, 
-                              const Domain *domain,
+                              const Domain &domain,
+                              bool take_ownership,
                               DistributedID did, 
                               Provenance *provenance,
                               CollectiveMapping *mapping = NULL,
@@ -691,8 +695,8 @@ namespace Legion {
 #endif
     public:
       // We know the domain of the index space
-      IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 
-                                  bool is_domain, IndexPartNode *par, 
+      IndexSpaceNode* create_node(IndexSpace is, const Domain &domain, 
+                                  bool take_ownership, IndexPartNode *par, 
                                   LegionColor color, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
@@ -1063,7 +1067,7 @@ namespace Legion {
           src_indirect_field(0), dst_indirect_field(0),
           src_indirect_instance(PhysicalInstance::NO_INST),
           dst_indirect_instance(PhysicalInstance::NO_INST) { }
-      virtual ~CopyAcrossUnstructured(void) { }
+      virtual ~CopyAcrossUnstructured(void);
     public:
       // From InstanceNameClosure
       virtual LgEvent find_instance_name(PhysicalInstance inst) const;
@@ -1285,13 +1289,11 @@ namespace Legion {
       inline bool deterministic_pointer_less(const IndexSpaceExpression *rhs) 
         const { return (expr_id < rhs->expr_id); }
     public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
-                                           bool need_tight_result) = 0;
       virtual bool is_sparse(void) = 0;
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
+      virtual Domain get_tight_domain(void) = 0;
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event) = 0;
+      virtual void record_index_space_user(ApEvent user) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool is_set(void) const { return true; }
       virtual bool check_empty(void) = 0;
@@ -1616,12 +1618,10 @@ namespace Legion {
     public:
       virtual void notify_local(void);
     public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
-                                           bool need_tight_result) = 0;
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
+      virtual Domain get_tight_domain(void) = 0;
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event) = 0;
+      virtual void record_index_space_user(ApEvent user) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
@@ -1660,6 +1660,7 @@ namespace Legion {
       const OperationKind op_kind;
     protected:
       mutable LocalLock inter_lock;
+      std::deque<ApEvent> index_space_users;
       std::atomic<int> invalidated;
     };
 
@@ -1672,13 +1673,11 @@ namespace Legion {
           TypeTag tag, Deserializer &derez);
       virtual ~IndexSpaceOperationT(void);
     public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
-                                           bool need_tight_result);
       virtual bool is_sparse(void);
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true);
+      virtual Domain get_tight_domain(void);
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event);
+      virtual void record_index_space_user(ApEvent user);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
@@ -1778,8 +1777,12 @@ namespace Legion {
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
     public:
-      ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
-                                    bool need_tight_result);
+      DomainT<DIM,T> get_tight_index_space(void);
+      // Return event is when the result index space is safe to use
+      // The done event must be triggered after the index space is
+      // done being used if it is not a no-event
+      [[nodiscard]] ApEvent get_loose_index_space(
+          DomainT<DIM,T> &result, ApUserEvent &done_event);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space, tight_index_space;
       ApEvent realm_index_space_ready; 
@@ -2229,17 +2232,15 @@ namespace Legion {
       static void handle_release_color(RegionTreeForest *forest, 
                                        Deserializer &derez);
     public:
-      // From IndexSpaceExpression
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
-                                           bool need_tight_result) = 0;
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
-      
-      virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
-      virtual bool set_bounds(const void *bounds, bool is_domain, 
-                              bool inititializing, ApEvent is_ready) = 0;
+      virtual Domain get_tight_domain(void) = 0;
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event) = 0;
+      virtual RtEvent add_sparsity_map_references(const Domain &domain,
+          unsigned references) = 0;
+      virtual void record_index_space_user(ApEvent user) = 0;
+      virtual bool set_domain(const Domain &domain, ApEvent is_ready,
+          bool take_ownership, bool broadcast = false, 
+          bool initializing = false) = 0;
       virtual bool set_output_union(
             const std::map<DomainPoint,DomainPoint> &sizes) = 0;
       virtual void tighten_index_space(void) = 0;
@@ -2307,8 +2308,8 @@ namespace Legion {
       bool intersects_with(IndexPartNode *rhs, bool compute = true);
       bool dominates(IndexSpaceNode *rhs);
     public:
-      virtual void pack_index_space(Serializer &rez, 
-                                    bool include_size) const = 0;
+      virtual void pack_index_space(Serializer &rez,
+                                    bool pack_reference) const = 0; 
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source) = 0;
     public:
@@ -2443,6 +2444,7 @@ namespace Legion {
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
+      std::deque<ApEvent> index_space_users;
     protected:
       static constexpr uintptr_t REMOVED_CHILD = 0xdead;
       Color                     next_uncollected_color;
@@ -2474,25 +2476,28 @@ namespace Legion {
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs) = delete;
     public:
-      ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
-				    bool need_tight_result);
+      DomainT<DIM,T> get_tight_index_space(void);
+      // Return event is when the result index space is safe to use
+      // The done event must be triggered after the index space is
+      // done being used if it is not a no-event
+      [[nodiscard]] ApEvent get_loose_index_space(
+          DomainT<DIM,T> &result, ApUserEvent &done_event);
       bool set_realm_index_space(const Realm::IndexSpace<DIM,T> &value,
                                  ApEvent valid, bool initialization = false,
                                  bool broadcast = false, 
                                  AddressSpaceID source = UINT_MAX);
       RtEvent get_realm_index_space_ready(bool need_tight_result);
     public:
-      // From IndexSpaceExpression
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
-                                           bool need_tight_result);
       virtual bool is_sparse(void);
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight);
-      virtual bool set_domain(const Domain &domain, bool broadcast = false);
-      virtual bool set_bounds(const void *bounds, bool is_domain, 
-                              bool inititializing, ApEvent is_ready);
+      virtual Domain get_tight_domain(void);
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event);
+      virtual RtEvent add_sparsity_map_references(const Domain &domain,
+          unsigned references);
+      virtual void record_index_space_user(ApEvent user);
+      virtual bool set_domain(const Domain &domain, ApEvent is_ready,
+          bool take_ownership, bool broadcast = false,
+          bool initializing = false);
       virtual bool set_output_union(
                 const std::map<DomainPoint,DomainPoint> &sizes);
       virtual void tighten_index_space(void);
@@ -2537,7 +2542,8 @@ namespace Legion {
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
       virtual size_t compute_color_offset(LegionColor color);
     public:
-      virtual void pack_index_space(Serializer &rez, bool include_size) const;
+      virtual void pack_index_space(Serializer &rez,
+                                    bool pack_refrence) const;
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
     public:
