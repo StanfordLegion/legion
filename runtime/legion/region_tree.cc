@@ -37,11 +37,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndirectRecord::IndirectRecord(RegionTreeForest *forest,
                                    const RegionRequirement &req,
-                                   const InstanceSet &insts)
+                                   const InstanceSet &insts,
+                                   size_t total_points)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
-      domain_ready = is->get_domain(domain, false/*tight*/);
+      ApUserEvent to_trigger;
+      domain_ready = is->get_loose_domain(domain, to_trigger);
+      // This call adds 'total_points' references to the sparsity map of
+      // the domain (if there is one). Each point will then make a 
+      // CopyAcrossUnstructured object that will own a reference and then
+      // remove the reference when the CopyAcrossUnstructured object is
+      // deleted. Note this is necessary for handling tracing cases where
+      // the CopyAcrossUnstructure object can outlive the operation that
+      // created it and we need to keep the sparsity maps alive.
+      RtEvent added;
+      if (!domain.dense())
+        added = is->add_sparsity_map_references(domain, total_points);
 #ifdef LEGION_SPY
       index_space = req.region.get_index_space();
 #endif
@@ -80,6 +92,13 @@ namespace Legion {
         assert(found);
 #endif
       }
+      // Wait for the sparsity map references to be added if necessary
+      if (added.exists() && !added.has_triggered())
+        added.wait();
+      // If we had a to_trigger event we can trigger it now since we added
+      // our own references to the sparsity map at this point to keep it alive
+      if (to_trigger.exists())
+        Runtime::trigger_event(NULL, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -159,7 +178,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
-                                        const Domain *domain, DistributedID did, 
+                                        const Domain &domain,
+                                        bool take_ownership,DistributedID did, 
                                         Provenance *provenance,
                                         CollectiveMapping *mapping,
                                         IndexSpaceExprID expr_id,
@@ -167,7 +187,7 @@ namespace Legion {
                                         RtEvent init /*= RtEvent::NO_RT_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, domain, true/*is domain*/, NULL/*parent*/, 
+      return create_node(handle, domain, take_ownership, NULL/*parent*/,
                          0/*color*/, did, init, provenance, ready, expr_id,
                          mapping, true/*add root reference*/);
     }
@@ -1078,7 +1098,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      node->get_domain(launch_domain);
+      launch_domain = node->get_tight_domain();
     }
 
     //--------------------------------------------------------------------------
@@ -3230,8 +3250,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
-                                                  const void *bounds,
-                                                  bool is_domain,
+                                                  const Domain &domain,
+                                                  bool take_ownership,
                                                   IndexPartNode *parent,
                                                   LegionColor color,
                                                   DistributedID did,
@@ -3264,7 +3284,7 @@ namespace Legion {
           delete result;
           result = it->second;
           // If the parent is NULL then we don't need to perform a duplicate set
-          if ((bounds == NULL) || (parent == NULL))
+          if (!domain.exists() || (parent == NULL))
             return result;
         }
         else
@@ -3275,7 +3295,7 @@ namespace Legion {
             result->add_base_valid_ref(APPLICATION_REF);
           // If we didn't give it a value add a reference to be removed once
           // the index space node has been set
-          if (bounds == NULL)
+          if (!domain.exists())
           {
             // Hold the reference on the parent partition to keep both it
             // and the child index space alive if there is a a parent
@@ -3285,7 +3305,8 @@ namespace Legion {
               result->add_base_gc_ref(REGION_TREE_REF);
           }
           else
-            result->set_bounds(bounds, is_domain, true/*init*/, is_ready);
+            result->set_domain(domain, is_ready, take_ownership,
+                false/*broadcast*/, true/*initializing*/);
           if (parent != NULL)
           {
 #ifdef DEBUG_LEGION
@@ -3299,9 +3320,9 @@ namespace Legion {
         }
       }
 #ifdef DEBUG_LEGION
-      assert(bounds != NULL);
+      assert(domain.exists());
 #endif
-      if (result->set_bounds(bounds, is_domain, false/*init*/, is_ready))
+      if (result->set_domain(domain, is_ready, take_ownership))
         assert(false); // should never hit this
       return result;
     }
@@ -6264,6 +6285,18 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    CopyAcrossUnstructured::~CopyAcrossUnstructured(void)
+    //--------------------------------------------------------------------------
+    {
+      // Need to release the sparsity map references being held by the 
+      // indirect records
+      for (unsigned idx = 0; idx < src_indirections.size(); idx++)
+        src_indirections[idx].domain.destroy(last_copy);
+      for (unsigned idx = 0; idx < dst_indirections.size(); idx++)
+        dst_indirections[idx].domain.destroy(last_copy);
+    }
+
+    //--------------------------------------------------------------------------
     void CopyAcrossUnstructured::initialize_source_fields(
        RegionTreeForest *forest, const RegionRequirement &req,
        const InstanceSet &insts, const PhysicalTraceInfo &trace_info)
@@ -8211,19 +8244,13 @@ namespace Legion {
       else
         rez.serialize(IndexPartition::NO_PART);
       rez.serialize(color);
-      rez.serialize(index_space_ready);
       rez.serialize(expr_id);
       rez.serialize(initialized);
       rez.serialize(depth);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
-        Provenance::serialize_null(rez);
-      if (index_space_set && ((collective_mapping == NULL) ||
-            !collective_mapping->contains(target)))
-        pack_index_space(rez, true/*include size*/);
-      else
-        rez.serialize<size_t>(0);
+        Provenance::serialize_null(rez); 
       if (collective_mapping != NULL)
         collective_mapping->pack(rez);
       else
@@ -8238,6 +8265,14 @@ namespace Legion {
         rez.serialize(it->second.buffer, it->second.size);
         rez.serialize(it->second.is_mutable);
       } 
+      if (index_space_set && ((collective_mapping == NULL) ||
+            !collective_mapping->contains(target)))
+      {
+        rez.serialize<bool>(true);
+        pack_index_space(rez, true/*pack reference*/);
+      }
+      else
+        rez.serialize<bool>(false);
     }
 
     //--------------------------------------------------------------------------
@@ -8320,8 +8355,6 @@ namespace Legion {
       derez.deserialize(parent);
       LegionColor color;
       derez.deserialize(color);
-      ApEvent ready_event;
-      derez.deserialize(ready_event);
       IndexSpaceExprID expr_id;
       derez.deserialize(expr_id);
       RtEvent initialized;
@@ -8329,11 +8362,6 @@ namespace Legion {
       unsigned depth;
       derez.deserialize(depth);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      size_t index_space_size;
-      derez.deserialize(index_space_size);
-      const void *index_space_ptr = (index_space_size > 0) ?
-        derez.get_current_pointer() : NULL;
-      derez.advance_pointer(index_space_size);
       size_t num_spaces;
       derez.deserialize(num_spaces);
       CollectiveMapping *mapping = NULL;
@@ -8345,9 +8373,10 @@ namespace Legion {
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
         parent_node = context->get_node(parent);
-      IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
-          false/*is domain*/, parent_node, color, did, initialized, provenance,
-          ready_event,expr_id,mapping,false/*add root reference*/,depth,valid);
+      IndexSpaceNode *node = context->create_node(handle, Domain::NO_DOMAIN,
+          true/*take ownership*/, parent_node, color, did, initialized,
+          provenance, ApEvent::NO_AP_EVENT, expr_id, mapping, 
+          false/*add root reference*/, depth, valid);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -8366,6 +8395,10 @@ namespace Legion {
         node->attach_semantic_information(tag, source, buffer, buffer_size, 
                                           is_mutable, false/*local only*/);
       }
+      bool has_index_space;
+      derez.deserialize(has_index_space);
+      if (has_index_space && node->unpack_index_space(derez, source))
+        delete node;
     }
 
     //--------------------------------------------------------------------------
@@ -8758,6 +8791,21 @@ namespace Legion {
       IndexSpaceNode *node = forest->get_node(handle);
       node->release_color(color);
       node->unpack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::record_index_space_user(ApEvent user)
+    //--------------------------------------------------------------------------
+    {
+      if (user.exists() && !user.has_triggered_faultignorant())
+      {
+        AutoLock n_lock(node_lock);
+        // Try popping entries off the front of the list
+        while (!index_space_users.empty() &&
+            index_space_users.front().has_triggered_faultignorant())
+          index_space_users.pop_front();
+        index_space_users.push_back(user);
+      }
     }
 
     //--------------------------------------------------------------------------

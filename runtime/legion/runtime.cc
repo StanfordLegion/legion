@@ -458,11 +458,13 @@ namespace Legion {
                 const Point<DIM,coord_t> point = it->first; \
                 points[index++] = point; \
               } \
-              Realm::IndexSpace<DIM,coord_t> space(points); \
+              DomainT<DIM,coord_t> space(points); \
               /* Make sure this is tight for determinism */ \
-              space = space.tighten(); \
-              const DomainT<DIM,coord_t> domaint(space); \
-              point_domain = domaint; \
+              DomainT<DIM,coord_t> tight = space.tighten(); \
+              /* Free up the sparsity map it was removed*/ \
+              if (tight.dense()) \
+                space.destroy(); \
+              point_domain = tight; \
               break; \
             }
             LEGION_FOREACH_N(DIMFUNC)
@@ -470,8 +472,8 @@ namespace Legion {
             default:
               assert(false);
           }
-          IndexSpace point_space = 
-            ctx->find_index_launch_space(point_domain, provenance);
+          IndexSpace point_space = ctx->find_index_launch_space(
+              point_domain, provenance, true/*take ownership of domain*/);
           point_set = runtime->forest->get_node(point_space);
           point_set->add_base_expression_reference(RUNTIME_REF);
         }
@@ -4216,9 +4218,7 @@ namespace Legion {
     Domain FutureMapImpl::get_domain(void) const
     //--------------------------------------------------------------------------
     {
-      Domain result;
-      future_map_domain->get_domain(result);
-      return result;
+      return future_map_domain->get_tight_domain();
     }
 
     //--------------------------------------------------------------------------
@@ -4420,8 +4420,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      Domain domain;
-      future_map_domain->get_domain(domain);
+      Domain domain = future_map_domain->get_tight_domain();
       const size_t needed = domain.get_volume();
       AutoLock fm_lock(future_map_lock);
 #ifdef DEBUG_LEGION
@@ -4677,9 +4676,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain->contains_point(point));
 #endif
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4706,9 +4704,8 @@ namespace Legion {
     {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_all_futures(previous_futures);
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         for (Domain::DomainPointIterator itr(domain); itr; itr++)
@@ -4761,9 +4758,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain->contains_point(point));
 #endif
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         const DomainPoint transformed = 
@@ -4790,9 +4786,8 @@ namespace Legion {
     {
       std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_shard_local_futures(shard, previous_futures);
-      Domain domain, range;
-      future_map_domain->get_domain(domain);
-      previous->future_map_domain->get_domain(range);
+      Domain domain = future_map_domain->get_tight_domain();
+      Domain range = previous->future_map_domain->get_tight_domain();
       if (is_functor)
       {
         if (transform.functor->is_invertible())
@@ -4922,8 +4917,7 @@ namespace Legion {
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-      Domain domain;
-      shard_domain->get_domain(domain);
+      Domain domain = shard_domain->get_tight_domain();
       const ShardID owner_shard = 
         sharding_function.load()->find_owner(point, domain);
       // Figure out which node has this future
@@ -5032,8 +5026,7 @@ namespace Legion {
                                       std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
-      Domain sharding_domain;
-      shard_domain->get_domain(sharding_domain);
+      Domain sharding_domain = shard_domain->get_tight_domain();
       if (sharding_function == NULL)
       {
         RtEvent wait_on = get_sharding_function_ready();
@@ -5047,8 +5040,7 @@ namespace Legion {
       if (!local_space.exists())
         return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
-      Domain domain;
-      local_points->get_domain(domain);
+      Domain domain = local_points->get_tight_domain();
       std::vector<RtEvent> ready_events;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
@@ -5621,8 +5613,7 @@ namespace Legion {
           }
           if (need_padded_bounds)
           {
-            Domain domain;
-            bounds->get_domain(domain);
+            Domain domain = bounds->get_tight_domain();
 #ifdef DEBUG_LEGION
             assert(domain.dense());
 #endif
@@ -5733,8 +5724,7 @@ namespace Legion {
           // If this is a padded instance, then we know that this is an affine
           // instance so we can get it's index space expression and it should
           // be dense so then we can just add the offsets
-          Domain bounds;
-          manager->instance_domain->get_domain(bounds);
+          Domain bounds = manager->instance_domain->get_tight_domain();
 #ifdef DEBUG_LEGION
           assert(bounds.dense());
 #endif
@@ -6321,7 +6311,8 @@ namespace Legion {
           {
             DomainPoint lo; lo.dim = extents.dim;
             Domain domain(lo, extents - 1);
-            if (region->row_source->set_domain(domain, true/*broadcast*/))
+            if (region->row_source->set_domain(domain, ApEvent::NO_AP_EVENT,
+                  true/*take ownership*/, true/*broadcast*/))
               assert(false); // should never end up deleting this
           }
           else
@@ -6345,7 +6336,8 @@ namespace Legion {
                 domain.rect_data[off] = 0;
                 domain.rect_data[domain.dim + off] = extents[idx] - 1;
               }
-              if (region->row_source->set_domain(domain, true/*broadcast*/))
+              if (region->row_source->set_domain(domain, ApEvent::NO_AP_EVENT,
+                    true/*take ownership*/, true/*broadcast*/))
                 assert(false); // should never end up deleting this
             }
             context->owner_task->record_output_extent(index, color, extents);
@@ -19166,8 +19158,7 @@ namespace Legion {
                          unsigned index, IndexSpaceNode *projection_space) const
     //--------------------------------------------------------------------------
     {
-      Domain launch_domain;
-      projection_space->get_domain(launch_domain);
+      Domain launch_domain = projection_space->get_tight_domain();
       if (node->is_region())
       {
         RegionNode *region = node->as_region_node();
@@ -19291,9 +19282,9 @@ namespace Legion {
                   op->get_provenance());
       if (!local_space.exists())
         return result;
-      Domain local_domain, launch_domain;
+      Domain local_domain;
       forest->find_domain(local_space, local_domain);
-      launch_space->get_domain(launch_domain);
+      Domain launch_domain = launch_space->get_tight_domain();
       std::map<RegionTreeNode*,ProjectionNode*> node_map;
       node_map[root] = result;
       Mappable *mappable = is_functional ? NULL : op->get_mappable();
@@ -30688,7 +30679,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::find_or_create_index_slice_space(const Domain &domain,
-                                       TypeTag type_tag, Provenance *provenance)
+                  bool take_ownership, TypeTag type_tag, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -30697,23 +30688,92 @@ namespace Legion {
       const std::pair<Domain,TypeTag> key(domain, type_tag);
       {
         AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
-        std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
+        std::map<std::pair<Domain,TypeTag>,
+          std::pair<IndexSpace,RtUserEvent> >::const_iterator finder =
+          index_slice_spaces.find(key);
+        if (finder != index_slice_spaces.end() && finder->second.first.exists())
+        {
+          if (take_ownership && !domain.dense())
+          {
+            Domain copy = domain;
+            copy.destroy();
+          }
+          return finder->second.first;
+        }
+      }
+      RtEvent wait_on;
+      {
+        // Retake the lock in excluisve mode
+        AutoLock is_lock(is_slice_lock);
+        // See if we lost the race
+        std::map<std::pair<Domain,TypeTag>,
+          std::pair<IndexSpace,RtUserEvent> >::iterator finder =
           index_slice_spaces.find(key);
         if (finder != index_slice_spaces.end())
-          return finder->second;
+        {
+          if (finder->second.first.exists())
+          {
+            if (take_ownership && !domain.dense())
+            {
+              Domain copy = domain;
+              copy.destroy();
+            }
+            return finder->second.first;
+          }
+          else if (!finder->second.second.exists())
+            finder->second.second = Runtime::create_rt_user_event();
+          wait_on = finder->second.second;
+        }
+        else
+        {
+          // Insert it as a guard since we're going to make it
+          index_slice_spaces.emplace(std::make_pair(key,std::make_pair(
+                  IndexSpace::NO_SPACE,RtUserEvent::NO_RT_USER_EVENT)));
+        }
       }
-      const IndexSpace result(get_unique_index_space_id(),
-                              get_unique_index_tree_id(), type_tag);
-      const DistributedID did = get_available_distributed_id();
-      forest->create_index_space(result, &domain, did, provenance);
-      if (legion_spy_enabled)
-        LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? std::string_view() : provenance->human);
-      // Overwrite and leak for now, don't care too much as this 
-      // should occur infrequently
-      AutoLock is_lock(is_slice_lock);
-      index_slice_spaces[key] = result;
-      return result;
+      if (!wait_on.exists())
+      {
+        const IndexSpace result(get_unique_index_space_id(),
+                                get_unique_index_tree_id(), type_tag);
+        const DistributedID did = get_available_distributed_id();
+        forest->create_index_space(result, domain, take_ownership,
+                                   did, provenance);
+        if (legion_spy_enabled)
+          LegionSpy::log_top_index_space(result.id, address_space,
+              (provenance == NULL) ? std::string_view() : provenance->human);
+        // Overwrite and leak for now, don't care too much as this 
+        // should occur infrequently
+        AutoLock is_lock(is_slice_lock);
+        std::map<std::pair<Domain,TypeTag>,
+          std::pair<IndexSpace,RtUserEvent> >::iterator finder =
+            index_slice_spaces.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != index_slice_spaces.end());
+        assert(!finder->second.first.exists());
+#endif
+        finder->second.first = result;
+        if (finder->second.second.exists())
+          Runtime::trigger_event(finder->second.second);
+        return result;
+      }
+      else
+      {
+        if (take_ownership && !domain.dense())
+        {
+          Domain copy = domain;
+          copy.destroy();
+        }
+        wait_on.wait();
+        AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
+          std::map<std::pair<Domain,TypeTag>,
+            std::pair<IndexSpace,RtUserEvent> >::const_iterator finder =
+            index_slice_spaces.find(key);
+#ifdef DEBUG_LEGION
+        assert(finder != index_slice_spaces.end());
+        assert(finder->second.first.exists());
+#endif
+        return finder->second.first;
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -30889,9 +30949,10 @@ namespace Legion {
         it->second->prepare_for_shutdown();
       // Destroy any index slice spaces that we made during execution
       std::set<RtEvent> applied;
-      for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
+      for (std::map<std::pair<Domain,TypeTag>,
+            std::pair<IndexSpace,RtUserEvent> >::const_iterator it =
             index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
-        forest->destroy_index_space(it->second, address_space, applied);
+        forest->destroy_index_space(it->second.first, address_space, applied);
       for (std::map<ProjectionID,ProjectionFunction*>::const_iterator it =
            projection_functions.begin(); it != projection_functions.end(); it++)
         it->second->prepare_for_shutdown();
