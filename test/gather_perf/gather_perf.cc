@@ -998,7 +998,8 @@ void top_level_task(const Task *task,
       domain_map[it->first] = Domain(DomainT<1>(it->second));
 
     IndexPartition ip = runtime->create_partition_by_domain(ctx, is_owned,
-                                                            domain_map, is_pieces);
+        domain_map, is_pieces, true, LEGION_COMPUTE_KIND, LEGION_AUTO_GENERATE_ID,
+        nullptr/*provenance*/, true/*take ownership*/);
     runtime->attach_name(ip, "ip_bloated");
     lp_owned_image_bloated = runtime->get_logical_partition(ctx, lr_owned, ip);
     runtime->attach_name(lp_owned_image_bloated, "lp_bloated");

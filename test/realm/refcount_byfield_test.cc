@@ -22,7 +22,7 @@ enum
 constexpr int NUM_INSTS = 1;
 
 struct TaskArgs {
-  IndexSpace<1> targets[NUM_INSTS];
+  IndexSpace<1> sources[NUM_INSTS];
   FieldDataDescriptor<IndexSpace<1>, Point<1>> ptr_data[NUM_INSTS];
   IndexSpace<1> parent;
 };
@@ -35,16 +35,16 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
                Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
+
+  std::vector<Point<1>> colors{0, 1};
   {
-    std::vector<IndexSpace<1>> preimages;
-    Event e2 = task_args.parent.create_subspaces_by_preimage(
+    std::vector<IndexSpace<1>> subspaces;
+    Event e2 = task_args.parent.create_subspaces_by_field(
         std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1>>>{
             std::begin(task_args.ptr_data), std::end(task_args.ptr_data)},
-        std::vector<IndexSpace<1>>{std::begin(task_args.targets),
-                                   std::end(task_args.targets)},
-        preimages, ProfilingRequestSet());
-    for(size_t i = 0; i < preimages.size(); i++) {
-      preimages[i].destroy(e2);
+        colors, subspaces, ProfilingRequestSet());
+    for(size_t i = 0; i < subspaces.size(); i++) {
+      subspaces[i].destroy(e2);
     }
     e2.wait();
   }
@@ -78,8 +78,8 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     IndexSpace<1, int> root1(rects[0]);
     IndexSpace<1> parent(rects[0]);
 
-    std::vector<IndexSpace<1>> targets;
-    root1.create_equal_subspaces(NUM_INSTS, 1, targets, Realm::ProfilingRequestSet())
+    std::vector<IndexSpace<1>> sources;
+    root1.create_equal_subspaces(NUM_INSTS, 1, sources, Realm::ProfilingRequestSet())
         .wait();
 
     std::vector<size_t> field_sizes;
@@ -91,10 +91,10 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     for(int i = 0; i < NUM_INSTS; i++) {
       int mem_idx = i % memories.size();
       RegionInstance ri;
-      RegionInstance::create_instance(ri, memories[mem_idx], targets[i], field_sizes, 0,
+      RegionInstance::create_instance(ri, memories[mem_idx], sources[i], field_sizes, 0,
                                       Realm::ProfilingRequestSet())
           .wait();
-      ptr_data[i].index_space = targets[i];
+      ptr_data[i].index_space = sources[i];
       ptr_data[i].inst = ri;
       ptr_data[i].field_offset = 0;
       AffineAccessor<int, 1> a_vals(ri, 0);
@@ -105,7 +105,7 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
 
     TaskArgs args;
     for(int i = 0; i < NUM_INSTS; i++) {
-      args.targets[0] = targets[0];
+      args.sources[0] = sources[0];
       args.ptr_data[0] = ptr_data[0];
     }
     args.parent = parent;

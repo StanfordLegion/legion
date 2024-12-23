@@ -1094,6 +1094,8 @@ namespace Realm {
     template <int N, typename T>
     IndexSpaceGeneric& operator=(const Rect<N,T>& copy_from);
 
+    void destroy(Event wait_on = Event::NO_EVENT);
+
     template <int N, typename T>
     const IndexSpace<N,T>& as_index_space() const;
 
