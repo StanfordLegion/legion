@@ -132,6 +132,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context 
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance) = 0;
       virtual IndexSpace create_index_space(const Future &future,
@@ -642,10 +643,6 @@ namespace Legion {
                                                IndexSpace launch_space,
                                                ReductionOpID redop,
                                                Provenance *provenance);
-    public:
-      // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &domain,
-                                         Provenance *provenance);
     public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,
@@ -1171,16 +1168,16 @@ namespace Legion {
                                     std::set<RtEvent> &preconditions);
       virtual void pack_return_resources(Serializer &rez,uint64_t return_index);
     protected:
-      IndexSpace create_index_space_internal(const Domain *bounds,
-                                             TypeTag type_tag,
-                                             Provenance *provenance);
+      IndexSpace create_index_space_internal(const Domain &bounds,
+          TypeTag type_tag, Provenance *provenance, bool take_ownership);
     public:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &domain,
-                                         Provenance *provenance);
+          Provenance *provenance, bool take_ownership = false);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,
@@ -2598,6 +2595,7 @@ namespace Legion {
     public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future, 
@@ -2612,9 +2610,8 @@ namespace Legion {
       virtual IndexSpace create_unbound_index_space(TypeTag type_tag,
                                                     Provenance *provenance);
     protected:
-      IndexSpace create_index_space_replicated(const Domain *bounds,
-                                               TypeTag type_tag,
-                                               Provenance *provenance);
+      IndexSpace create_index_space_replicated(const Domain &bounds,
+          TypeTag type_tag, Provenance *provenance, bool take_ownership);
     public:
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces,
@@ -3571,6 +3568,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,

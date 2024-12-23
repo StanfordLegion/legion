@@ -10,7 +10,7 @@ Logger log_app("app");
 enum
 {
   MAIN_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
-  NODE_TASK_0,
+  NODE_TASK,
 };
 
 struct TaskArgs {
@@ -19,35 +19,33 @@ struct TaskArgs {
   Event wait_on;
 };
 
-void node_task_0(const void *args, size_t arglen, const void *userdata, size_t userlen,
-                 Processor p)
+void node_task(const void *args, size_t arglen, const void *userdata, size_t userlen,
+               Processor p)
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
   task_args.sparsity_map.impl();
-  task_args.sparsity_map.remove_references(1);
+  task_args.sparsity_map.destroy();
 
   {
     Rect<1> bounds{Rect<1>(Point<1>(0), Point<1>(50000))};
     SparsityMap<1> local_sparsity =
         SparsityMap<1>::construct({bounds}, /*always_create=*/true, /*disjoint=*/false);
     IndexSpace<1> is(bounds, local_sparsity);
-    is.sparsity.add_references();
-    is.destroy();
+    IndexSpaceGeneric generic_is(is);
+    generic_is.destroy();
   }
 
   {
     std::vector<Rect<1>> bounds{Rect<1>(Point<1>(0), Point<1>(20000)),
                                 Rect<1>(Point<1>(30000), Point<1>(50000))};
     IndexSpace<1> is(bounds);
-    is.sparsity.add_references();
     is.destroy(task_args.wait_on);
   }
 
   {
     std::vector<Point<1>> points{Point<1>(0), Point<1>(20000), Point<1>(30000)};
     IndexSpace<1> is(points);
-    is.sparsity.add_references();
     is.destroy();
   }
 }
@@ -72,32 +70,29 @@ void main_task(const void *args, size_t arglen, const void *userdata, size_t use
     }
   }
 
-  std::vector<SparsityMap<1>> sparsity_maps;
-
   {
     UserEvent done = UserEvent::create_user_event();
     std::vector<Event> events;
 
-    sparsity_maps.push_back(
-        SparsityMap<1>::construct(rects, /*always_create=*/true, /*disjoint=*/true));
-    sparsity_maps.back().impl();
-
     for(std::map<NodeID, Memory>::const_iterator it = memories.begin();
         it != memories.end(); ++it) {
+
+      SparsityMap<1> sparsity_map =
+          SparsityMap<1>::construct(rects, /*always_create=*/true, /*disjoint=*/true);
+      sparsity_map.impl();
+
       Memory m = it->second;
       Processor proc = *Machine::ProcessorQuery(machine)
                             .only_kind(Processor::LOC_PROC)
                             .same_address_space_as(m)
                             .begin();
 
-      sparsity_maps.back().add_references(1);
-
       {
         TaskArgs args;
-        args.sparsity_map = sparsity_maps.back();
+        args.sparsity_map = sparsity_map;
         args.node = Network::my_node_id;
         args.wait_on = done;
-        Event e = proc.spawn(NODE_TASK_0, &args, sizeof(args));
+        Event e = proc.spawn(NODE_TASK, &args, sizeof(args));
         events.push_back(e);
       }
     }
@@ -118,13 +113,12 @@ int main(int argc, char **argv)
 
   rt.register_task(MAIN_TASK, main_task);
 
-  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, NODE_TASK_0,
-                                   CodeDescriptor(node_task_0), ProfilingRequestSet(), 0,
-                                   0)
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, NODE_TASK,
+                                   CodeDescriptor(node_task), ProfilingRequestSet(), 0, 0)
       .wait();
 
   ModuleConfig *core = Runtime::get_runtime().get_module_config("core");
-  assert(core->set_property("enable_sparsity_refcount", 1));
+  assert(core->set_property("report_sparsity_leaks", 1));
 
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
                     .only_kind(Processor::LOC_PROC)

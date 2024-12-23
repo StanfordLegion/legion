@@ -96,6 +96,7 @@ static char *strndup(const char *src, size_t maxlen)
   size_t actlen = strnlen(src, maxlen);
   char *dst = (char *)malloc(actlen + 1);
   strncpy(dst, src, actlen);
+  dst[actlen] = '\0';
   return dst;
 }
 #endif
@@ -828,7 +829,7 @@ namespace Realm {
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
-    config_map.insert({"enable_sparsity_refcount", &enable_sparsity_refcount});
+    config_map.insert({"report_sparsity_leaks", &report_sparsity_leaks});
     config_map.insert({"barrier_broadcast_radix", &barrier_broadcast_radix});
 
     resource_map.insert({"cpu", &res_num_cpus});
@@ -977,6 +978,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
         .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
         .add_option_int("-ll:ext_sysmem", use_ext_sysmem)
+        .add_option_bool("-ll:report_sparsity_leaks", report_sparsity_leaks)
         .add_option_int("-ll:barrier_radix", barrier_broadcast_radix);
 
     // config for RuntimeImpl

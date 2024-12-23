@@ -1081,6 +1081,20 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
+  inline void Domain::destroy(Realm::Event wait_on)
+  //----------------------------------------------------------------------------
+  {
+    if (!dense())
+    {
+      DestroyFunctor functor(*this, wait_on);
+      Internal::NT_TemplateHelper::demux<DestroyFunctor>(is_type, &functor);
+    }
+    is_type = 0;
+    is_id = 0;
+    dim = 0;
+  }
+
+  //----------------------------------------------------------------------------
   inline size_t Domain::get_volume(void) const
   //----------------------------------------------------------------------------
   {
@@ -1139,10 +1153,12 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     assert(dim == other.dim);
-    if ((is_id > 0) || (other.is_id > 0))
-    {
-      assert((is_type == other.is_type) ||
+    // Only allow for one of these to have a sparsity map currently
+    assert(dense() || other.dense());
+    assert((is_type == other.is_type) ||
               (is_type == 0) || (other.is_type == 0));
+    if (!dense() || !other.dense())
+    {
       Domain result;
       IntersectionFunctor functor(*this, other, result);
       Internal::NT_TemplateHelper::demux<IntersectionFunctor>(
