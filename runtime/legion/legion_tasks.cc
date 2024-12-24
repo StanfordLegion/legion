@@ -7673,8 +7673,13 @@ namespace Legion {
     {
       if (!map_all_regions(must_epoch_owner, args))
         return false;
+      // Pul this on the stack to avoid querying it after we pass control
+      // over to the slice owner
+      const bool is_origin = is_origin_mapped();
       slice_owner->record_point_mapped(get_mapped_event());
-      return true;
+      // Only return true if we're not origin-mapped, otherwise the slice
+      // will end up taking care of us once it knows we're mapped
+      return !is_origin;
     }
 
     //--------------------------------------------------------------------------
