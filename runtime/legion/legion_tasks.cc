@@ -12560,7 +12560,7 @@ namespace Legion {
       {
         trigger_slice_mapped();
         if (is_origin_mapped() && !is_remote() && !is_replaying() &&
-            distribute_task())
+            (must_epoch == NULL) && distribute_task())
           launch_task();
       }
     }
