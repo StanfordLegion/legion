@@ -6814,8 +6814,8 @@ namespace Legion {
     LegionHandshakeImpl::~LegionHandshakeImpl(void)
     //--------------------------------------------------------------------------
     {
-      ext_wait_barrier.get_barrier().destroy_barrier();
-      legion_next_barrier.get_barrier().destroy_barrier();
+      ext_wait_barrier.destroy_barrier();
+      legion_next_barrier.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -6823,13 +6823,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime = rt;
-      ext_wait_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
-      legion_wait_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
+      ext_wait_barrier = runtime->create_ap_barrier(1);
+      legion_wait_barrier = runtime->create_ap_barrier(1);
       ext_arrive_barrier = legion_wait_barrier;
       legion_arrive_barrier = ext_wait_barrier;
       // Legion runs split-phase on its side so we need to advance its
       // wait barrier so that we can always refer to the previous phase
       legion_next_barrier = legion_wait_barrier;
+      Runtime::advance_barrier(legion_next_barrier);
       // If control is starting on the Legion side then make it seems like
       // the previous phase of the legion_wait barrier has already triggered
       if (!init_in_ext)
@@ -6844,7 +6845,7 @@ namespace Legion {
         // Same trick as below for the profiler to tell it this is an 
         // external handshake
         const LgEvent previous_fevent = implicit_fevent;
-        implicit_fevent = LgEvent(ext_arrive_barrier.get_barrier());
+        implicit_fevent = ext_arrive_barrier;
         runtime->phase_barrier_arrive(ext_arrive_barrier, 1);
         implicit_fevent = previous_fevent;
         Runtime::advance_barrier(ext_arrive_barrier);
@@ -6862,7 +6863,7 @@ namespace Legion {
       // We need to detect the case where we are about to trigger the last
       // external barrier generation and update the legion side with new
       // barriers before we do that
-      PhaseBarrier to_arrive = ext_arrive_barrier;
+      ApBarrier to_arrive = ext_arrive_barrier;
       Runtime::advance_barrier(ext_arrive_barrier);
       if (!ext_arrive_barrier.exists())
       {
@@ -6871,8 +6872,8 @@ namespace Legion {
         assert(!legion_next_barrier.exists());
         assert(!legion_arrive_barrier.exists());
 #endif
-        ext_wait_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
-        legion_next_barrier = PhaseBarrier(runtime->create_ap_barrier(1));
+        ext_wait_barrier = runtime->create_ap_barrier(1);
+        legion_next_barrier = runtime->create_ap_barrier(1);
         ext_arrive_barrier = legion_next_barrier;
         legion_arrive_barrier = ext_wait_barrier;
       }
@@ -6881,7 +6882,7 @@ namespace Legion {
       // path logging to know this is an external handshake. We signal this
       // by setting the implicit fevent to be the same as arrival barrier.
       // The profiler will record this and recognize it as a handshake
-      implicit_fevent = LgEvent(to_arrive.get_barrier());
+      implicit_fevent = to_arrive;
       runtime->phase_barrier_arrive(to_arrive, 1);
       implicit_fevent = LgEvent::NO_LG_EVENT;
     }
@@ -6897,7 +6898,7 @@ namespace Legion {
       // Wait for ext to be ready to run
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
-      ext_wait_barrier.get_barrier().external_wait();
+      ext_wait_barrier.external_wait();
       // Now we can advance our wait barrier
       Runtime::advance_barrier(ext_wait_barrier);
     }
@@ -6917,7 +6918,7 @@ namespace Legion {
       }
       // Always advance this barrier before doing the arrival to avoid a
       // race when we run out of barrier generations
-      PhaseBarrier to_arrive = legion_arrive_barrier;
+      ApBarrier to_arrive = legion_arrive_barrier;
       Runtime::advance_barrier(legion_arrive_barrier);
       runtime->phase_barrier_arrive(to_arrive, 1);
     }
@@ -6933,14 +6934,14 @@ namespace Legion {
       // Wait for Legion to be ready to run
       // No need to avoid being drafted by the
       // Realm runtime here
-      legion_wait_barrier.wait();
+      legion_wait_barrier.wait_faultignorant();
       // Now we can advance our wait barrier
       legion_wait_barrier = legion_next_barrier;
       Runtime::advance_barrier(legion_next_barrier);
       // Check to see if we're out of generations and need to wait for the
       // external side to catch up and give us a new barrier
       if (!legion_next_barrier.exists())
-        legion_wait_barrier.wait();
+        legion_wait_barrier.wait_faultignorant();
     }
 
     //--------------------------------------------------------------------------
@@ -6977,7 +6978,7 @@ namespace Legion {
       // Check to see if we're out of generations and need to wait for the
       // external side to catch up and give us a new barrier
       if (!legion_next_barrier.exists())
-        legion_wait_barrier.wait();
+        legion_wait_barrier.wait_faultignorant();
     }
 
     /////////////////////////////////////////////////////////////

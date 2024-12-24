@@ -1162,11 +1162,11 @@ namespace Legion {
       // Whether the legion side is in split mode execution or not
       bool split;
       Runtime *runtime;
-      PhaseBarrier ext_wait_barrier;
-      PhaseBarrier ext_arrive_barrier;
-      PhaseBarrier legion_wait_barrier;
-      PhaseBarrier legion_next_barrier; // one gen ahead of wait
-      PhaseBarrier legion_arrive_barrier;
+      ApBarrier ext_wait_barrier;
+      ApBarrier ext_arrive_barrier;
+      ApBarrier legion_wait_barrier;
+      ApBarrier legion_next_barrier; // one gen ahead of wait
+      ApBarrier legion_arrive_barrier;
     };
 
     class MPIRankTable {
