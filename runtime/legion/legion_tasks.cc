@@ -12561,7 +12561,8 @@ namespace Legion {
       if (needs_trigger)
       {
         trigger_slice_mapped();
-        if (is_origin_mapped() && distribute_task())
+        if (is_origin_mapped() && !is_remote() && !is_replaying() &&
+            distribute_task())
           launch_task();
       }
     }
