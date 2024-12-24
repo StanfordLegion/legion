@@ -2759,6 +2759,30 @@ namespace Legion {
       DETAILED_PROFILER(runtime, FINALIZE_MAP_TASK_CALL);
       if (output.abort_mapping)
         return false;
+      // At this point we know we're going to map this task here
+      // Check to see if we need to make a remote trace recorder
+      if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
+      {
+        remote_trace_recorder = new RemoteTraceRecorder(runtime,
+            orig_proc.address_space(), get_trace_local_id(), tpl,
+            0/*did*/, 0/*tid*/, map_applied_conditions);
+        remote_trace_recorder->add_recorder_reference();
+#ifdef DEBUG_LEGION
+        assert(!single_task_termination.exists());
+#endif
+        // Really unusual case here, if we're going to be doing remote tracing
+        // then we need to get an event from the owner node because some kinds
+        // of tracing (e.g. those with control replication) don't work otherwise
+        remote_trace_recorder->request_term_event(single_task_termination);
+      }
+      // Create our task termination event at this point
+      // Note that tracing doesn't track this as a user event, it is just
+      // a name we're making for the termination event
+      if (!single_task_termination.exists())
+      {
+        single_task_termination = Runtime::create_ap_user_event(NULL); 
+        record_completion_effect(single_task_termination);
+      }
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       // first check the processors to make sure they are all on the
@@ -4219,30 +4243,6 @@ namespace Legion {
                                            defer_args, 1/*invocation count*/);
           }
         }
-      } 
-      // At this point we know we're going to map this task here
-      // Check to see if we need to make a remote trace recorder
-      if (is_remote() && is_recording() && (remote_trace_recorder == NULL))
-      {
-        remote_trace_recorder = new RemoteTraceRecorder(runtime,
-            orig_proc.address_space(), get_trace_local_id(), tpl,
-            0/*did*/, 0/*tid*/, map_applied_conditions);
-        remote_trace_recorder->add_recorder_reference();
-#ifdef DEBUG_LEGION
-        assert(!single_task_termination.exists());
-#endif
-        // Really unusual case here, if we're going to be doing remote tracing
-        // then we need to get an event from the owner node because some kinds
-        // of tracing (e.g. those with control replication) don't work otherwise
-        remote_trace_recorder->request_term_event(single_task_termination);
-      }
-      // Create our task termination event at this point
-      // Note that tracing doesn't track this as a user event, it is just
-      // a name we're making for the termination event
-      if (!single_task_termination.exists())
-      {
-        single_task_termination = Runtime::create_ap_user_event(NULL); 
-        record_completion_effect(single_task_termination);
       }
       // See if we have a remote trace info to use, if we don't then make
       // our trace info and do the initialization
@@ -7761,9 +7761,7 @@ namespace Legion {
     bool PointTask::is_stealable(void) const
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return false;
+      return ((!map_origin) && stealable);
     }
 
     //--------------------------------------------------------------------------
