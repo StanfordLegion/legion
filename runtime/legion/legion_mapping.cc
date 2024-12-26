@@ -1548,7 +1548,7 @@ namespace Legion {
       {
         const Internal::RtEvent ready =
           manager->set_garbage_collection_priority(ctx->manager->mapper_id,
-              ctx->manager->processor, runtime->address_space, priority);
+              ctx->manager->processor, priority);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
       }

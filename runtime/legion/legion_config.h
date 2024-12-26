@@ -76,7 +76,7 @@
 #endif
 
 #ifndef LEGION_GC_MAX_PRIORITY
-#define LEGION_GC_MAX_PRIORITY    INT_MAX
+#define LEGION_GC_MAX_PRIORITY    (INT_MAX-1)
 #else
 #error "legion.h requires the ability to define the macro 'LEGION_GC_MAX_PRIORITY' but it has already been defined"
 #endif
@@ -93,6 +93,13 @@
 #else
 #error "legion.h requires the ability to define the macro 'LEGION_GC_NEVER_PRIORITY' but it has already been defined"
 #endif
+
+#ifndef LEGION_GC_EAGER_PRIORITY
+#define LEGION_GC_EAGER_PRIORITY  INT_MAX
+#else
+#error "legion.h requires the ability to define the macro 'LEGION_GC_EAGER_PRIORITY' but it has already been defined"
+#endif
+
 // This is for backwards compatibility
 // Try to be nice in case someone else defined this
 #ifndef LEGION_DISABLE_DEPRECATED_ENUMS
