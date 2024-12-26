@@ -1622,13 +1622,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTaskLauncher::IndexTaskLauncher(void)
-      : task_id(0), launch_domain(Domain::NO_DOMAIN), 
-        launch_space(IndexSpace::NO_SPACE), 
-        sharding_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()), 
-        argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
-        concurrent(false), must_parallelism(false), map_id(0), tag(0),
-        static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false), 
+      : task_id(0), launch_domain(Domain::NO_DOMAIN),
+        launch_space(IndexSpace::NO_SPACE),
+        sharding_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()),
+        argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED),
+        concurrent_functor(0), concurrent(false), must_parallelism(false),
+        map_id(0), tag(0), static_dependences(NULL), enable_inlining(false),
+        independent_requirements(false), elide_future_return(false),
         silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1643,12 +1643,12 @@ namespace Legion {
                                      MappingTagID t /*=0*/, UntypedBuffer marg,
                                      const char *prov)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
-        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
-        argument_map(map), predicate(pred), concurrent(false), 
-        must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        provenance(prov), static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global),
+        argument_map(map), predicate(pred), concurrent_functor(0),
+        concurrent(false), must_parallelism(must), map_id(mid), tag(t),
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        enable_inlining(false), independent_requirements(false),
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1663,12 +1663,12 @@ namespace Legion {
                                      MappingTagID t /*=0*/, UntypedBuffer marg,
                                      const char *prov)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
-        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
-        argument_map(map), predicate(pred), concurrent(false),
-        must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        provenance(prov), static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global),
+        argument_map(map), predicate(pred), concurrent_functor(0),
+        concurrent(false), must_parallelism(must), map_id(mid), tag(t),
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        enable_inlining(false), independent_requirements(false),
+        elide_future_return(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3977,7 +3977,23 @@ namespace Legion {
           "Invocation of 'ShardingFunctor::invert_points' method "
           "without a user-provided override");
     }
-    
+
+    /////////////////////////////////////////////////////////////
+    // Concurrent Coloring Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor::ConcurrentColoringFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor::~ConcurrentColoringFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -6807,6 +6823,55 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_sharding_functor(sid);
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_dynamic_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_concurrent_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_library_concurrent_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_concurrent_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentID Runtime::generate_static_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_concurrent_id();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_concurrent_coloring_functor(ConcurrentID cid,
+                                            ConcurrentColoringFunctor *functor,
+                                            bool silence_warnings,
+                                            const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_concurrent_functor(cid, functor, silence_warnings,
+                                           warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_concurrent_coloring_functor(
+                           ConcurrentID cid, ConcurrentColoringFunctor *functor)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::preregister_concurrent_functor(cid, functor);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentColoringFunctor* 
+                      Runtime::get_concurrent_coloring_functor(ConcurrentID cid)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::get_concurrent_functor(cid);
     }
 
     //--------------------------------------------------------------------------

@@ -247,6 +247,9 @@
 #define LEGION_MAX_APPLICATION_SHARDING_ID    (MAX_APPLICATION_SHARDING_ID)
 #endif
 #endif
+#ifndef LEGION_MAX_APPLICATION_CONCURRENT_ID
+#define LEGION_MAX_APPLICATION_CONCURRENT_ID  (1<<20)
+#endif
 // Maximum ID for an application reduction ID
 #ifndef LEGION_MAX_APPLICATION_REDOP_ID
 #ifdef LEGION_USE_PYTHON_CFFI
@@ -1316,6 +1319,9 @@ typedef enum legion_error_t {
   ERROR_MISSING_FILL_VALUE = 627,
   ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER = 628,
   ERROR_POOL_USE_AFTER_FREE = 629,
+  ERROR_RESERVED_CONCURRENT_ID = 630,
+  ERROR_INVALID_CONCURRENT_ID = 631,
+  ERROR_DUPLICATE_CONCURRENT_ID = 632,
 
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,
@@ -1395,6 +1401,7 @@ typedef enum legion_error_t {
   LEGION_WARNING_MISSING_ALLOCATION_BOUNDS = 1120,
   LEGION_WARNING_UNBOUND_MEMORY_POOL = 1121,
   LEGION_WARNING_TRACING_UNBOUND_MEMORY_POOL = 1122,
+  LEGION_WARNING_DYNAMIC_CONCURRENT_REG = 1123,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
@@ -2171,6 +2178,7 @@ typedef unsigned int legion_generation_id_t;
 typedef unsigned int legion_type_handle;
 typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_sharding_id_t;
+typedef unsigned int legion_concurrent_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_local_variable_id_t;
