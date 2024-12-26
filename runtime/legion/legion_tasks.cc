@@ -10140,6 +10140,7 @@ namespace Legion {
       for (std::vector<RegionRequirement>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
         hash_requirement(hasher, *it);
+      hasher.hash(concurrent_functor);
       hasher.hash<bool>(concurrent_task);
       hasher.hash<bool>(must_epoch_task);
       hasher.hash(index_domain);
