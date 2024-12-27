@@ -41,7 +41,12 @@ task f() : int
 
   -- And of course pointer itself should be accessible.
   @x = 3
-  return s + @x
+  s += @x
+  if s ~= 123 then
+    c.printf("Bad s value %d\n", s)
+  end
+  regentlib.assert(s == 123, "test failed in f")
+  return s
 end
 
 task main()
