@@ -242,8 +242,7 @@ namespace Legion {
                     const std::deque<InstanceSet> &parent_regions) = 0;
     public:
       bool defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
-                                    const DeferMappingArgs *args,
-                                    unsigned invocation_count,
+                                    unsigned invocation_count = 0,
                                     std::vector<unsigned> *performed = NULL,
                                     std::vector<ApEvent> *effects = NULL);
     public:
@@ -585,8 +584,6 @@ namespace Legion {
       TaskPriority                                task_priority;
       bool                                        perform_postmap;
     protected:
-      // origin-mapped cases need to know if they've been mapped or not yet
-      bool                                  first_mapping;
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions;
       // The single task termination event encapsulates the exeuction of the
@@ -824,6 +821,9 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(MustEpochOp *owner = NULL,
                                    const DeferMappingArgs *args = NULL);
+      virtual bool finalize_map_task_output(Mapper::MapTaskInput &input,
+                                            Mapper::MapTaskOutput &output,
+                                            MustEpochOp *must_epoch_owner);
       virtual void handle_future_size(size_t return_type_size,
                                       bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
@@ -857,9 +857,12 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
       virtual bool is_top_level_task(void) const { return top_level_task; }
     public:
+      void set_concurrent_postcondition(RtEvent postcondition);
+      virtual ApEvent order_concurrent_launch(ApEvent start, VariantImpl *impl);
       virtual void concurrent_allreduce(ProcessorManager *manager, 
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
+      void finish_concurrent_allreduce(uint64_t lamport_clock, bool poisoned);
     protected:
       void pack_remote_complete(Serializer &rez, ApEvent effect);
       void pack_remote_commit(Serializer &rez, RtEvent precondition);
@@ -874,6 +877,9 @@ namespace Legion {
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
       static void handle_remote_output_registration(Deserializer &derez);
+      static void handle_concurrent_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      static void handle_concurrent_response(Deserializer &derez);
     protected: 
       Future result; 
     protected:
@@ -881,6 +887,11 @@ namespace Legion {
       // Event for when the output regions are registered with the context
       RtEvent output_regions_registered;
       RtEvent remote_commit_precondition;
+    protected:
+      // Events for concurrent task launches, only used for when this task
+      // is part of a must-epoch launch
+      RtUserEvent concurrent_precondition;
+      RtEvent concurrent_postcondition;
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
@@ -1314,6 +1325,8 @@ namespace Legion {
       virtual void finalize_concurrent_mapped(void);
       virtual void initialize_concurrent_group(Color color, size_t local,
           size_t global, RtBarrier barrier, const std::vector<ShardID> &shards);
+      virtual void initialize_concurrent_group(Color color,
+          RtUserEvent precondition);
       virtual void concurrent_allreduce(Color color, SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);

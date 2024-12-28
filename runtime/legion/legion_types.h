@@ -384,11 +384,6 @@ namespace Legion {
       LG_TRIGGER_OP_ID,
       LG_TRIGGER_TASK_ID,
       LG_DEFER_MAPPER_SCHEDULER_TASK_ID,
-      LG_MUST_INDIV_ID,
-      LG_MUST_INDEX_ID,
-      LG_MUST_MAP_ID,
-      LG_MUST_DIST_ID,
-      LG_MUST_LAUNCH_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
       LG_FUTURE_CALLBACK_TASK_ID,
       LG_CALLBACK_RELEASE_TASK_ID,
@@ -490,11 +485,6 @@ namespace Legion {
         "Trigger Operation Mapping",                              \
         "Trigger Task Mapping",                                   \
         "Defer Mapper Scheduler",                                 \
-        "Must Individual Task Dependence Analysis",               \
-        "Must Index Task Dependence Analysis",                    \
-        "Must Task Physical Dependence Analysis",                 \
-        "Must Task Distribution",                                 \
-        "Must Task Launch",                                       \
         "Contribute Collective",                                  \
         "Future Callback",                                        \
         "Future Callback Release",                                \
@@ -814,6 +804,8 @@ namespace Legion {
       INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
+      INDIVIDUAL_CONCURRENT_REQUEST,
+      INDIVIDUAL_CONCURRENT_RESPONSE,
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
@@ -1147,6 +1139,8 @@ namespace Legion {
         "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
+        "Individual Concurrent Request",                              \
+        "Individual Concurrent Response",                             \
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
@@ -1978,7 +1972,7 @@ namespace Legion {
       COLLECTIVE_LOC_66 = 66,
       COLLECTIVE_LOC_67 = 67,
       COLLECTIVE_LOC_68 = 68,
-      //COLLECTIVE_LOC_69 = 69,
+      COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
       COLLECTIVE_LOC_71 = 71,
       COLLECTIVE_LOC_72 = 72,

@@ -468,7 +468,7 @@ namespace Legion {
       Operation::set_must_epoch(epoch, do_registration);
       must_epoch_index = index;
       must_epoch_task = true;
-      concurrent_task = false;
+      concurrent_task = true;
       if (runtime->legion_spy_enabled)
       {
         const TaskKind kind = get_task_kind();
@@ -636,8 +636,6 @@ namespace Legion {
             }
             break;
           }
-        case POINT_TASK_KIND:
-        case INDEX_TASK_KIND:
         default:
           assert(false); // no other tasks should be sent anywhere
       }
@@ -1068,7 +1066,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool TaskOp::defer_perform_mapping(RtEvent precondition, MustEpochOp *op,
-                                          const DeferMappingArgs *defer_args,
                                           unsigned invocation_count,
                                           std::vector<unsigned> *performed,
                                           std::vector<ApEvent> *effects)
@@ -2266,7 +2263,6 @@ namespace Legion {
       selected_variant = 0;
       task_priority = 0;
       perform_postmap = false;
-      first_mapping = true;
       execution_context = NULL;
       remote_trace_recorder = NULL;
       shard_manager = NULL;
@@ -2564,13 +2560,7 @@ namespace Legion {
           // until the task ends up on the target processor
           if (is_origin_mapped())
           {
-            if (first_mapping)
-            {
-              first_mapping = false;
-              if (perform_mapping() && distribute_task())
-                launch_task();
-            }
-            else if (distribute_task())
+            if (perform_mapping() && distribute_task())
               launch_task();
           }
           else
@@ -4220,7 +4210,7 @@ namespace Legion {
             if (version_ready_event.exists() && 
                 !version_ready_event.has_triggered())
               return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                           defer_args, 1/*invocation count*/);
+                                           1/*invocation count*/);
           }
           // Now do the mapping call
           if (!invoke_mapper(must_epoch_op))
@@ -4240,7 +4230,7 @@ namespace Legion {
             if (version_ready_event.exists() && 
                 !version_ready_event.has_triggered())
               return defer_perform_mapping(version_ready_event, must_epoch_op,
-                                           defer_args, 1/*invocation count*/);
+                                           1/*invocation count*/);
           }
         }
       }
@@ -4406,7 +4396,7 @@ namespace Legion {
       }
       if (must_epoch_op != NULL)
       {
-        // If we are part of a must epoch operation, then report the 
+        // If we are part of a must epoch operation, then report the
         // event that describes when all of our mapping activies are done
         RtEvent mapping_applied;
         if (!map_applied_conditions.empty())
@@ -5728,7 +5718,6 @@ namespace Legion {
       reduction_metadata = NULL;
       reduction_metasize = 0;
       reduction_instance = NULL;
-      first_mapping = true;
       concurrent_functor = 0;
       concurrent_points = 0;
       collective_lamport_clock = 0;
@@ -6073,23 +6062,7 @@ namespace Legion {
           if (is_sliced())
           {
             if (must_epoch == NULL)
-            {
-              // See if we've done our first mapping yet or not
-              if (first_mapping)
-              {
-                first_mapping = false;
-                perform_mapping();
-              }
-              else
-              {
-                // We know that it is staying on one
-                // of our local processors.  If it is
-                // still this processor then map and run it
-                if (distribute_task())
-                  // Still local so we can launch it
-                  launch_task();
-              }
-            }
+              perform_mapping();
             else
               register_must_epoch();
           }
@@ -6418,6 +6391,8 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_INDIVIDUAL_CALL);
       SingleTask::activate();
       output_regions_registered = RtEvent::NO_RT_EVENT;
+      concurrent_precondition = RtUserEvent::NO_RT_USER_EVENT;
+      concurrent_postcondition = RtEvent::NO_RT_EVENT;
       predicate_false_result = NULL;
       predicate_false_size = 0;
       orig_task = this;
@@ -6769,12 +6744,25 @@ namespace Legion {
     bool IndividualTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
-      if (target_proc.exists() && (target_proc != current_proc))
+      if (is_origin_mapped())
       {
-        runtime->send_task(this);
-        return false;
+        if (!runtime->is_local(target_proc))
+        {
+          runtime->send_task(this);
+          return false;
+        }
+        else
+          return true;
       }
-      return true;
+      else
+      {
+        if (target_proc.exists() && (target_proc != current_proc))
+        {
+          runtime->send_task(this);
+          return false;
+        }
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6798,6 +6786,27 @@ namespace Legion {
           rez.serialize(get_mapped_event());
         }
         runtime->send_individual_remote_mapped(orig_proc, rez);
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::finalize_map_task_output(Mapper::MapTaskInput &input,
+                                                  Mapper::MapTaskOutput &output,
+                                                  MustEpochOp *must_epoch_owner)
+    //--------------------------------------------------------------------------
+    {
+      if (!SingleTask::finalize_map_task_output(input,output,must_epoch_owner))
+        return false;
+      if (concurrent_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(must_epoch_task);
+        assert(is_origin_mapped());
+        assert(concurrent_postcondition.exists());
+#endif
+        concurrent_precondition = Runtime::create_rt_user_event();
+        must_epoch->rendezvous_concurrent_mapped(concurrent_precondition);
       }
       return true;
     }
@@ -6908,6 +6917,38 @@ namespace Legion {
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualTask::handle_concurrent_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndividualTask *local, *remote;
+      derez.deserialize(local);
+      derez.deserialize(remote);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      bool poisoned;
+      derez.deserialize(poisoned);
+      local->get_must_epoch_op()->concurrent_allreduce(remote, source,
+          lamport_clock, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndividualTask::handle_concurrent_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndividualTask *local;
+      derez.deserialize(local);
+      uint64_t lamport_clock;
+      derez.deserialize(lamport_clock);
+      bool poisoned;
+      derez.deserialize(poisoned);
+      local->finish_concurrent_allreduce(lamport_clock, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -7110,11 +7151,73 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::set_concurrent_postcondition(RtEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch_task);
+      assert(!concurrent_postcondition.exists());
+#endif
+      concurrent_postcondition = postcondition;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndividualTask::order_concurrent_launch(ApEvent start,
+                                                    VariantImpl *impl)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch_task);
+      assert(target_processors.size() == 1);
+      assert(concurrent_postcondition.exists());
+#endif
+      // See the comment in PointTask::order_concurrent_launch that
+      // describes what we are doing here
+      const OrderConcurrentLaunchArgs args(this, target_processors.front(),
+          start, selected_variant);
+      RtEvent precondition;
+      if (start.exists())
+        precondition = Runtime::protect_event(start);
+      Runtime::trigger_event(concurrent_precondition, precondition);
+      // Give this very high priority as it is likely on the critical path
+      runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+          concurrent_postcondition);
+      return args.ready;
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::concurrent_allreduce(ProcessorManager *manager, 
                            uint64_t lamport_clock, VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
-      manager->finalize_concurrent_task_order(this, lamport_clock, poisoned);  
+#ifdef DEBUG_LEGION
+      assert(must_epoch_task);
+      assert(manager->local_proc == target_proc);
+#endif
+      if (is_remote())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(orig_task);
+          rez.serialize(this);
+          rez.serialize(lamport_clock);
+          rez.serialize(poisoned);
+        }
+        runtime->send_individual_concurrent_allreduce_request(orig_proc, rez);
+      }
+      else
+        must_epoch->concurrent_allreduce(this, runtime->address_space,
+            lamport_clock, poisoned);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::finish_concurrent_allreduce(uint64_t lamport_clock,
+                                                     bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      ProcessorManager *manager = runtime->find_processor_manager(target_proc);
+      manager->finalize_concurrent_task_order(this, lamport_clock, poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -7169,6 +7272,11 @@ namespace Legion {
         rez.serialize(predicate_false_size);
         if (predicate_false_size > 0)
           rez.serialize(predicate_false_result, predicate_false_size);
+      }
+      if (must_epoch_task)
+      {
+        rez.serialize(concurrent_precondition);
+        rez.serialize(concurrent_postcondition);
       }
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
@@ -7232,6 +7340,11 @@ namespace Legion {
           predicate_false_result = malloc(predicate_false_size);
           derez.deserialize(predicate_false_result, predicate_false_size);
         }
+      }
+      if (must_epoch_task)
+      {
+        derez.deserialize(concurrent_precondition);
+        derez.deserialize(concurrent_postcondition);
       }
       if (is_origin_mapped())
       {
@@ -7684,6 +7797,9 @@ namespace Legion {
     bool PointTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!is_origin_mapped());
+#endif
       // Point tasks are never sent anywhere
       return true;
     }
@@ -7723,8 +7839,17 @@ namespace Legion {
         assert(concurrent_postcondition.exists());
 #endif 
         concurrent_precondition.interpreted = Runtime::create_rt_user_event();
-        slice_owner->rendezvous_concurrent_mapped(index_point, target_proc,
-            concurrent_color, concurrent_precondition.interpreted);
+        if (must_epoch_task)
+        {
+#ifdef DEBUG_LEGION
+          assert(is_origin_mapped());
+#endif
+          must_epoch->rendezvous_concurrent_mapped(
+              concurrent_precondition.interpreted);
+        }
+        else
+          slice_owner->rendezvous_concurrent_mapped(index_point, target_proc,
+              concurrent_color, concurrent_precondition.interpreted);
       }
       return true;
     }
@@ -8017,7 +8142,8 @@ namespace Legion {
       //    tasks so that we can establish an ordering of concurrent index
       //    space task launches that use overlapping processors.
       const OrderConcurrentLaunchArgs args(this, target_processors.front(),
-          start, impl->is_concurrent() ? selected_variant : 0);
+          start, (impl->is_concurrent() || 
+            must_epoch_task) ? selected_variant : 0);
       RtEvent precondition;
       if (start.exists())
         precondition = Runtime::protect_event(start);
@@ -8874,7 +9000,7 @@ namespace Legion {
     {
       // Have to launch a task to do this in case they need to rendezvous
       defer_perform_mapping(RtEvent::NO_RT_EVENT,
-          NULL/*must epoch*/, NULL/*prior args*/, 0/*invocation count*/);
+          NULL/*must epoch*/, 0/*invocation count*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10189,6 +10315,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::initialize_concurrent_group(Color color,
+                                                RtUserEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch_task);
+      assert(concurrent_groups.find(color) == concurrent_groups.end());
+#endif
+      ConcurrentGroup &group = concurrent_groups[color];
+      group.precondition.interpreted = precondition;
+      // These don't matter since we're not going to to use them for
+      // the concurrent must epoch launch
+      group.group_points = 0;
+      group.color_points = 0;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::concurrent_allreduce(Color color, SliceTask *slice,
         AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
         VariantID vid, bool poisoned)
@@ -10220,6 +10363,18 @@ namespace Legion {
       }
       if (done)
       {
+        if (must_epoch_task)
+        {
+#ifdef DEBUG_LEGION
+          assert(color == 0);
+#endif
+          // Send this off to the must epoch operation to continue
+          // the allreduce for these slices
+          must_epoch->concurrent_allreduce(finder->second.slice_tasks,
+              launch_space->get_volume(), finder->second.lamport_clock,
+              finder->second.poisoned);
+          return;
+        }
         if (finder->second.variant > 0)
         {
           // Check to see if this variant needs a task barrier
@@ -11874,14 +12029,27 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_DISTRIBUTE_CALL);
       update_target_processor();
-      if (target_proc.exists() && (target_proc != current_proc))
+      if (is_origin_mapped())
       {
-        runtime->send_task(this);
-        // The runtime will deactivate this task
-        // after it has been sent
-        return false;
+        if (!runtime->is_local(target_proc))
+        {
+          runtime->send_task(this);
+          return false;
+        }
+        else
+          return true;
       }
-      return true;
+      else
+      {
+        if (target_proc.exists() && (target_proc != current_proc))
+        {
+          runtime->send_task(this);
+          // The runtime will deactivate this task
+          // after it has been sent
+          return false;
+        }
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12247,8 +12415,6 @@ namespace Legion {
                                                         derez, parent_ctx);
         }
       }
-      else // Set the first mapping to false since we know things are mapped
-        first_mapping = false;
       if (implicit_profiler != NULL)
         implicit_profiler->register_operation(this);
       // Return true to add this to the ready queue
@@ -13117,7 +13283,7 @@ namespace Legion {
       local_copy.swap(finder->second.point_tasks);
       for (std::vector<std::pair<PointTask*,ProcessorManager*> >::const_iterator
             it = local_copy.begin(); it != local_copy.end(); it++)
-        if (it->first->check_concurrent_variant(vid))
+        if (must_epoch_task || it->first->check_concurrent_variant(vid))
           it->second->finalize_concurrent_task_order(it->first,
               lamport_clock, poisoned);
     }

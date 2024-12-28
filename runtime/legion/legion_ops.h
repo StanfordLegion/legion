@@ -2687,62 +2687,6 @@ namespace Legion {
         std::vector<unsigned> req_indexes;
       };
     public:
-      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
-      public:
-        MustEpochIndivArgs(Processor p, IndividualTask *t, MustEpochOp *o)
-          : LgTaskArgs<MustEpochIndivArgs>(o->get_unique_op_id()),
-            current_proc(p), task(t) { }
-      public:
-        const Processor current_proc;
-        IndividualTask *const task;
-      };
-      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
-      public:
-        MustEpochIndexArgs(Processor p, IndexTask *t, MustEpochOp *o)
-          : LgTaskArgs<MustEpochIndexArgs>(o->get_unique_op_id()),
-            current_proc(p), task(t) { }
-      public:
-        const Processor current_proc;
-        IndexTask *const task;
-      };
-      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
-      public:
-        MustEpochMapArgs(MustEpochOp *o)
-          : LgTaskArgs<MustEpochMapArgs>(o->get_unique_op_id()),
-            owner(o), task(NULL) { }
-      public:
-        MustEpochOp *const owner;
-        SingleTask *task;
-      };
-      struct MustEpochDistributorArgs : 
-        public LgTaskArgs<MustEpochDistributorArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
-      public:
-        MustEpochDistributorArgs(MustEpochOp *o)
-          : LgTaskArgs<MustEpochDistributorArgs>(o->get_unique_op_id()),
-            task(NULL) { }
-      public:
-        TaskOp *task;
-      };
-      struct MustEpochLauncherArgs : 
-        public LgTaskArgs<MustEpochLauncherArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
-      public:
-        MustEpochLauncherArgs(MustEpochOp *o)
-          : LgTaskArgs<MustEpochLauncherArgs>(o->get_unique_op_id()),
-            task(NULL) { }
-      public:
-        TaskOp *task;
-      };
-    public:
       MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
@@ -2781,6 +2725,7 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
     public:
@@ -2794,6 +2739,7 @@ namespace Legion {
                              unsigned src_index, unsigned src_idx,
                              unsigned dst_index, unsigned dst_idx,
                              DependenceType dtype);
+      void record_mapped_event(const DomainPoint &point, RtEvent mapped);
       void must_epoch_map_task_callback(SingleTask *task, 
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
@@ -2819,6 +2765,16 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
+      void rendezvous_concurrent_mapped(RtEvent precondition);
+      virtual void finalize_concurrent_mapped(void);
+    public:
+      void concurrent_allreduce(IndividualTask *task, AddressSpaceID space,
+          uint64_t lamport_clock, bool poisoned);
+      void concurrent_allreduce(
+          std::vector<std::pair<SliceTask*,AddressSpaceID> > &slice_tasks,
+          size_t total_points, uint64_t lamport_clock, bool poisoned);
+      virtual void finish_concurrent_allreduce(void);
+    public:
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
     public:
@@ -2832,56 +2788,47 @@ namespace Legion {
       TaskOp* find_task_by_index(int index);
     protected:
       static bool single_task_sorter(const Task *t1, const Task *t2);
-    public:
-      static void trigger_tasks(MustEpochOp *owner,
-                         const std::vector<IndividualTask*> &indiv_tasks,
-                         std::vector<bool> &indiv_triggered,
-                         const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered);
-      static void handle_trigger_individual(const void *args);
-      static void handle_trigger_index(const void *args);
     protected:
       // Have a virtual function that we can override to for doing the
       // mapping and distribution of the point tasks, we'll override
       // this for control replication
-      virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
-                                      std::set<ApEvent> &tasks_complete);
-      // Make this virtual so we can override it for control replication
-      void map_tasks(void);
-    public:
-      void record_mapped_event(const DomainPoint &point, RtEvent mapped);
-      static void handle_map_task(const void *args);
+      virtual RtEvent map_and_distribute(void);
     protected:
-      void distribute_tasks(void);
       IndexSpace compute_launch_space(const MustEpochLauncher &launcher,
           Provenance *provenance);
-    public:
-      static void handle_distribute_task(const void *args);
-      static void handle_launch_task(const void *args);
     protected:
       std::vector<IndividualTask*>        indiv_tasks;
-      std::vector<bool>                   indiv_triggered;
       std::vector<IndexTask*>             index_tasks;
-      std::vector<bool>                   index_triggered;
     protected:
       // The component slices for distribution
       std::set<SliceTask*>         slice_tasks;
       // The actual base operations
       // Use a deque to keep everything in order
       std::vector<SingleTask*>     single_tasks;
+      std::atomic<unsigned>        remaining_single_tasks; 
+      RtUserEvent                  single_tasks_ready;
+      std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       Mapper::MapMustEpochInput    input;
       Mapper::MapMustEpochOutput   output;
+    protected:
+      // For the barrier before doing the lamport all-reduce
+      RtUserEvent concurrent_mapped;
+      size_t remaining_concurrent_mapped;
+      std::vector<RtEvent> concurrent_preconditions;
+    protected:
+      // For doing the lamport clock all-reduce
+      size_t remaining_concurrent_points;
+      uint64_t concurrent_lamport_clock;
+      bool concurrent_poisoned;
+      std::vector<std::pair<IndividualTask*,AddressSpaceID> > concurrent_tasks;
+      std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
     protected:
       FutureMap result_map;
       unsigned remaining_resource_returns;
       unsigned remaining_subop_completes;
       unsigned remaining_subop_commits;
     protected:
-      // Used to know if we successfully triggered everything
-      // and therefore have all of the single tasks and a
-      // valid set of constraints.
-      bool triggering_complete;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
       // Track the physical instances that we've acquired
@@ -2894,7 +2841,6 @@ namespace Legion {
         unsigned/*op idx*/,unsigned/*req idx*/> > > internal_dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
-      std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
     protected:

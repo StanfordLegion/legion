@@ -15227,6 +15227,17 @@ namespace Legion {
               runtime->handle_individual_remote_commit(derez);
               break;
             }
+          case INDIVIDUAL_CONCURRENT_REQUEST:
+            {
+              runtime->handle_individual_concurrent_request(derez,
+                                              remote_address_space);
+              break;
+            }
+          case INDIVIDUAL_CONCURRENT_RESPONSE:
+            {
+              runtime->handle_individual_concurrent_response(derez);
+              break;
+            }
           case SLICE_REMOTE_MAPPED:
             {
               runtime->handle_slice_remote_mapped(derez, remote_address_space);
@@ -25230,6 +25241,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_individual_concurrent_allreduce_request(Processor target,
+                                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          INDIVIDUAL_CONCURRENT_REQUEST, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_individual_concurrent_allreduce_response(
+        AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          INDIVIDUAL_CONCURRENT_RESPONSE, rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_mapped(Processor target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -27856,6 +27885,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualTask::process_unpack_remote_commit(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_individual_concurrent_request(Deserializer &derez,
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::handle_concurrent_request(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_individual_concurrent_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndividualTask::handle_concurrent_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -32358,6 +32402,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProcessorManager* Runtime::find_processor_manager(Processor proc) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder =
+        proc_managers.find(proc);
+#ifdef DEBUG_LEGION
+      assert(finder != proc_managers.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_visible_memory(Processor proc, Memory memory)
     //--------------------------------------------------------------------------
     {
@@ -35635,31 +35691,6 @@ namespace Legion {
         case LG_DEFER_MAPPER_SCHEDULER_TASK_ID:
           {
             ProcessorManager::handle_defer_mapper(args);
-            break;
-          }
-        case LG_MUST_INDIV_ID:
-          {
-            MustEpochOp::handle_trigger_individual(args);
-            break;
-          }
-        case LG_MUST_INDEX_ID:
-          {
-            MustEpochOp::handle_trigger_index(args);
-            break;
-          }
-        case LG_MUST_MAP_ID:
-          {
-            MustEpochOp::handle_map_task(args);
-            break;
-          }
-        case LG_MUST_DIST_ID:
-          {
-            MustEpochOp::handle_distribute_task(args);
-            break;
-          }
-        case LG_MUST_LAUNCH_ID:
-          {
-            MustEpochOp::handle_launch_task(args);
             break;
           }
         case LG_CONTRIBUTE_COLLECTIVE_ID:

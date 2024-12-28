@@ -3437,6 +3437,10 @@ namespace Legion {
       void send_individual_remote_mapped(Processor target, Serializer &rez);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
+      void send_individual_concurrent_allreduce_request(Processor target,
+                                                        Serializer &rez);
+      void send_individual_concurrent_allreduce_response(AddressSpaceID target,
+                                                         Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
@@ -3876,6 +3880,9 @@ namespace Legion {
       void handle_individual_remote_mapped(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
+      void handle_individual_concurrent_request(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_individual_concurrent_response(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
@@ -4505,6 +4512,7 @@ namespace Legion {
         { return (uid % total_address_spaces); } 
     public:
       bool is_local(Processor proc) const;
+      ProcessorManager* find_processor_manager(Processor proc) const;
       bool is_visible_memory(Processor proc, Memory mem);
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
       Memory find_local_memory(Processor proc, Memory::Kind mem_kind);
@@ -6414,6 +6422,10 @@ namespace Legion {
           return TASK_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_COMMIT:
           return TASK_VIRTUAL_CHANNEL;
+        case INDIVIDUAL_CONCURRENT_REQUEST:
+          break;
+        case INDIVIDUAL_CONCURRENT_RESPONSE:
+          break;
         case SLICE_REMOTE_MAPPED:
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_REMOTE_COMPLETE:
