@@ -5640,7 +5640,8 @@ namespace Legion {
         InnerContext *inner_ctx = new InnerContext(runtime, this, 
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
-            inline_task,concurrent_task || parent_ctx->is_concurrent_context());
+            inline_task, false/*implicit*/,
+            concurrent_task || parent_ctx->is_concurrent_context());
         configure_execution_context(inner_ctx);
         inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
         return inner_ctx;
@@ -12208,6 +12209,7 @@ namespace Legion {
 #endif
       bool trigger_mapped = false;
       bool trigger_children_commit = false;
+      std::vector<Color> concurrent_colors;
       if (to_send.size() == points.size())
       {
         Serializer rez;
@@ -12249,6 +12251,34 @@ namespace Legion {
           else
             it++;
         }
+        if (concurrent_task)
+        {
+          if (is_remote() && (concurrent_points == points.size()))
+            send_rendezvous_concurrent_mapped();
+          // Decrement the group point counts of the points that
+          // were sent away
+          ConcurrentColoringFunctor *functor =
+            runtime->find_concurrent_coloring_functor(concurrent_functor);
+          for (std::vector<PointTask*>::const_iterator it =
+                to_send.begin(); it != to_send.end(); it++)
+          {
+            Color color = functor->color((*it)->index_point, index_domain);
+            std::map<Color,ConcurrentGroup>::iterator finder =
+              concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+            assert(finder != concurrent_groups.end());
+            assert(finder->second.group_points > 0);
+            assert(finder->second.point_tasks.size() < 
+                finder->second.group_points);
+#endif
+            finder->second.group_points--;
+            // See if we have any concurrent mapping to trigger
+            if ((finder->second.group_points > 0) &&
+                (finder->second.point_tasks.size() == 
+                 finder->second.group_points))
+              concurrent_colors.push_back(color);
+          }
+        }
 #ifdef DEBUG_LEGION
         assert(to_send.size() <= num_unmapped_points);
         assert(to_send.size() <= num_uncommitted_points);
@@ -12257,6 +12287,35 @@ namespace Legion {
         trigger_mapped = (num_unmapped_points == 0);
         num_uncommitted_points -= to_send.size();
         trigger_children_commit = (num_uncommitted_points == 0);
+      }
+      for (std::vector<Color>::const_iterator it =
+            concurrent_colors.begin(); it != concurrent_colors.end(); it++)
+      {
+        std::map<Color,ConcurrentGroup>::iterator finder =
+          concurrent_groups.find(*it);
+#ifdef DEBUG_LEGION
+        assert(finder != concurrent_groups.end());
+#endif
+        if (is_remote())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(index_owner);
+            rez.serialize(this);
+            rez.serialize(finder->first);
+            rez.serialize(finder->second.group_points);
+            rez.serialize(finder->second.lamport_clock);
+            rez.serialize(finder->second.variant);
+            rez.serialize(finder->second.poisoned);
+          }
+          runtime->send_slice_concurrent_allreduce_request(orig_proc, rez);
+        }
+        else
+          index_owner->concurrent_allreduce(finder->first, this,
+              runtime->address_space, finder->second.group_points,
+              finder->second.lamport_clock, finder->second.variant,
+              finder->second.poisoned);
       }
       if (trigger_mapped)
         trigger_slice_mapped();
@@ -12409,6 +12468,23 @@ namespace Legion {
           LegionSpy::log_slice_point(get_unique_id(), 
                                      point->get_unique_id(),
                                      point->index_point);
+      }
+      if (concurrent_task)
+      {
+        // Update the concurrent groups based on the points
+        ConcurrentColoringFunctor *functor =
+            runtime->find_concurrent_coloring_functor(concurrent_functor);
+        for (std::vector<PointTask*>::const_iterator it =
+              points.begin(); it != points.end(); it++)
+        {
+          Color color = functor->color((*it)->index_point, index_domain);
+          std::map<Color,ConcurrentGroup>::iterator finder =
+                concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+          assert(finder != concurrent_groups.end());
+#endif
+          finder->second.group_points++;
+        }
       }
       if (num_points == 0)
       {
@@ -13132,46 +13208,55 @@ namespace Legion {
         assert(concurrent_points < points.size());
 #endif
         if (++concurrent_points == points.size())
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(index_owner);
-            // Count how many colors have "interesting" results
-            size_t num_colors = 0;
-            for (std::map<Color,ConcurrentGroup>::const_iterator it =
-                  concurrent_groups.begin(); it !=
-                  concurrent_groups.end(); it++)
-              if (!it->second.preconditions.empty())
-                num_colors++;
-            rez.serialize(num_colors);
-            for (std::map<Color,ConcurrentGroup>::const_iterator it =
-                  concurrent_groups.begin(); it !=
-                  concurrent_groups.end(); it++)
-            {
-              if (it->second.processors.empty())
-                continue;
-              rez.serialize(it->first);
-              if (it->second.preconditions.empty())
-                rez.serialize(RtEvent::NO_RT_EVENT);
-              else
-                rez.serialize(Runtime::merge_events(it->second.preconditions));
-              rez.serialize<size_t>(it->second.processors.size());
-              for (std::map<Processor,DomainPoint>::const_iterator pit =
-                    it->second.processors.begin(); pit !=
-                    it->second.processors.end(); pit++)
-              {
-                rez.serialize(pit->first);
-                rez.serialize(pit->second);
-              }
-            }
-          }
-          runtime->send_slice_rendezvous_concurrent_mapped(orig_proc, rez);
-        }
+          send_rendezvous_concurrent_mapped();
       }
       else
         index_owner->rendezvous_concurrent_mapped(point, target, color,
                                                   precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::send_rendezvous_concurrent_mapped(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_remote());
+      assert(concurrent_task);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        // Count how many colors have "interesting" results
+        size_t num_colors = 0;
+        for (std::map<Color,ConcurrentGroup>::const_iterator it =
+              concurrent_groups.begin(); it !=
+              concurrent_groups.end(); it++)
+          if (!it->second.preconditions.empty())
+            num_colors++;
+        rez.serialize(num_colors);
+        for (std::map<Color,ConcurrentGroup>::const_iterator it =
+              concurrent_groups.begin(); it !=
+              concurrent_groups.end(); it++)
+        {
+          if (it->second.processors.empty())
+            continue;
+          rez.serialize(it->first);
+          if (it->second.preconditions.empty())
+            rez.serialize(RtEvent::NO_RT_EVENT);
+          else
+            rez.serialize(Runtime::merge_events(it->second.preconditions));
+          rez.serialize<size_t>(it->second.processors.size());
+          for (std::map<Processor,DomainPoint>::const_iterator pit =
+                it->second.processors.begin(); pit !=
+                it->second.processors.end(); pit++)
+          {
+            rez.serialize(pit->first);
+            rez.serialize(pit->second);
+          }
+        }
+      }
+      runtime->send_slice_rendezvous_concurrent_mapped(orig_proc, rez);
     }
 
     //--------------------------------------------------------------------------

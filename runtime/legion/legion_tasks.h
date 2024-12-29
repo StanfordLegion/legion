@@ -1501,6 +1501,7 @@ namespace Legion {
       void finish_concurrent_allreduce(Color color, uint64_t lamport_clock,
           bool poisoned, VariantID vid, RtBarrier concurrent_task_barrier);
     protected:
+      void send_rendezvous_concurrent_mapped(void);
       void trigger_slice_mapped(void);
       void forward_completion_effects(void);
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
