@@ -14339,7 +14339,7 @@ namespace Legion {
       index_space_tasks.clear();
       single_tasks_ready = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_mapped = RtUserEvent::NO_RT_USER_EVENT;
-      triggered_mapped_events.store(0);
+      remaining_mapped_events.store(0);
       remaining_concurrent_mapped = 0;
       remaining_single_tasks.store(0);
       remaining_resource_returns = 0;
@@ -14656,6 +14656,7 @@ namespace Legion {
             single_tasks.begin(); it != single_tasks.end(); it++)
         mapped_events.emplace(std::make_pair((*it)->index_point,
               Runtime::create_rt_user_event()));
+      remaining_mapped_events.store(single_tasks.size());
       remaining_collective_unbound_points = single_tasks.size();
       remaining_concurrent_mapped = single_tasks.size();
       remaining_concurrent_points = single_tasks.size();
@@ -14696,7 +14697,11 @@ namespace Legion {
 #endif
       // No need for a lock since this data structure is read-only here
       Runtime::trigger_event(mapped_events[point], mapped);
-      if ((triggered_mapped_events.fetch_add(1)+1) == mapped_events.size())
+      const unsigned remaining = remaining_mapped_events.fetch_sub(1);
+#ifdef DEBUG_LEGION
+      assert(remaining > 0);
+#endif
+      if (remaining == 1)
       {
         std::vector<RtEvent> preconditions;
         preconditions.reserve(mapped_events.size());

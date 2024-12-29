@@ -7908,7 +7908,7 @@ namespace Legion {
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_point_mapped(mapped_precondition);
+      slice_owner->record_point_mapped(mapped_precondition, true/*shard off*/);
       SingleTask::shard_off(mapped_precondition);
     }
 
@@ -12943,7 +12943,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_point_mapped(RtEvent child_mapped)
+    void SliceTask::record_point_mapped(RtEvent child_mapped, bool shard_off)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -12961,8 +12961,8 @@ namespace Legion {
       if (needs_trigger)
       {
         trigger_slice_mapped();
-        if (is_origin_mapped() && !is_remote() && !is_replaying() &&
-            distribute_task())
+        if (!shard_off && is_origin_mapped() && !is_remote() &&
+            !is_replaying() && distribute_task())
           launch_task();
       }
     }

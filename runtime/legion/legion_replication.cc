@@ -5458,6 +5458,7 @@ namespace Legion {
       }
       else
       {
+        remaining_mapped_events.store(shard_single_tasks.size());
         remaining_collective_unbound_points = shard_single_tasks.size();
         remaining_concurrent_mapped = shard_single_tasks.size();
         remaining_concurrent_points = shard_single_tasks.size();
@@ -5770,20 +5771,6 @@ namespace Legion {
       }
       else
         return launch_domain;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplMustEpochOp::count_shard_local_points(IndexSpaceNode *domain)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock here, the shard_single_tasks shouldn't be
-      // changing anymore when we get here
-      size_t result = 0;
-      for (std::set<SingleTask*>::const_iterator it =
-            shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
-        if (domain->contains_point((*it)->index_point))
-          result++;
-      return result;
     }
 
     /////////////////////////////////////////////////////////////

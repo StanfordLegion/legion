@@ -1481,7 +1481,7 @@ namespace Legion {
     public:
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_point_mapped(RtEvent child_mapped);
+      void record_point_mapped(RtEvent child_mapped, bool shard_off = false);
       void record_point_complete(ApEvent child_effects);
       void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);

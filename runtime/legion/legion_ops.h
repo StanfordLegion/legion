@@ -2810,7 +2810,7 @@ namespace Legion {
       std::vector<SingleTask*>     single_tasks;
       std::atomic<unsigned>        remaining_single_tasks; 
       RtUserEvent                  single_tasks_ready;
-      std::atomic<unsigned>        triggered_mapped_events;
+      std::atomic<unsigned>        remaining_mapped_events;
       std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       Mapper::MapMustEpochInput    input;
