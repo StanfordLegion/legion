@@ -1465,7 +1465,8 @@ namespace Legion {
       analyze_region_requirements(launch_space,
                                   analysis_sharding_function,
                                   sharding_space);
-      if (concurrent_task || !check_collective_regions.empty())
+      if ((concurrent_task && !must_epoch_task) ||
+          !check_collective_regions.empty())
       {
         // Create the collective exchange ID in case we need it
         collective_exchange_id = repl_ctx->get_next_collective_index(
@@ -1477,7 +1478,7 @@ namespace Legion {
           create_collective_rendezvous(
               logical_regions[*it].parent.get_tree_id(), *it);
       }
-      if (concurrent_task)
+      if (concurrent_task && !must_epoch_task)
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -1915,6 +1916,15 @@ namespace Legion {
         VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
+      if (must_epoch_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(color == 0);
+#endif
+        must_epoch->concurrent_allreduce(slice, slice_space, points,
+            lamport_clock, poisoned);
+        return;
+      }
       bool done = false;
       std::map<Color,ConcurrentGroup>::iterator finder =
         concurrent_groups.find(color);
@@ -5109,6 +5119,8 @@ namespace Legion {
       mapping_broadcast = NULL;
       mapping_exchange = NULL;
       concurrent_exchange = NULL;
+      collective_exchange = NULL;
+      collective_exchange_id = 0;
       dependence_exchange_id = 0;
       completion_exchange_id = 0;
       concurrent_mapped_barrier = RtBarrier::NO_RT_BARRIER;
@@ -5128,6 +5140,8 @@ namespace Legion {
         delete mapping_broadcast;
       if (mapping_exchange != NULL)
         delete mapping_exchange;
+      if (collective_exchange != NULL)
+        delete collective_exchange;
       if (concurrent_exchange != NULL)
         delete concurrent_exchange;
 #ifdef DEBUG_LEGION
@@ -5146,13 +5160,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
       assert(repl_ctx != NULL);
-      assert(concurrent_mapped_barrier.exists());
       assert(!concurrent_mapped.exists());
+      assert(!concurrent_mapped_barrier.exists());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       // This is a bit dumb, but we do it to make the types work out
       concurrent_mapped = Runtime::create_rt_user_event();
+      concurrent_mapped_barrier =
+        repl_ctx->get_next_must_epoch_mapped_barrier();
       Runtime::trigger_event(concurrent_mapped, concurrent_mapped_barrier);
       Provenance *provenance = get_provenance();
       // Initialize operations for everything in the launcher
@@ -5203,7 +5219,7 @@ namespace Legion {
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
 #endif
         index_tasks[idx] = task;
-        index_tasks[idx]->initialize_concurrent_group(0/*color*/,
+        index_tasks[idx]->initialize_must_epoch_concurrent_group(0/*color*/,
             concurrent_mapped);
       }
     }
@@ -5430,11 +5446,19 @@ namespace Legion {
       // Update the remaining concurrent points
       if (shard_single_tasks.empty())
       {
+        // Still need to participate in things even if we have no local points
         finalize_concurrent_mapped();
         finish_concurrent_allreduce();
+        collective_exchange =
+            new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                repl_ctx, collective_exchange_id);
+        collective_exchange->async_all_reduce(collective_lamport_clock);
+        AutoLock o_lock(op_lock);
+        commit_preconditions.insert(collective_exchange->get_done_event());
       }
       else
       {
+        remaining_collective_unbound_points = shard_single_tasks.size();
         remaining_concurrent_mapped = shard_single_tasks.size();
         remaining_concurrent_points = shard_single_tasks.size();
       }
@@ -5563,6 +5587,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t ReplMustEpochOp::collective_lamport_allreduce(
+        uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      {
+        AutoLock o_lock(op_lock);
+        if (collective_lamport_clock < lamport_clock)
+          collective_lamport_clock = lamport_clock;
+#ifdef DEBUG_LEGION
+        assert(remaining_collective_unbound_points > 0);
+#endif
+        if (--remaining_collective_unbound_points > 0)
+        {
+          if (need_result)
+          {
+            if (collective_exchange == NULL)
+              collective_exchange =
+                new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                    repl_ctx, collective_exchange_id);
+            o_lock.release();
+            collective_exchange->get_done_event().wait();
+            return collective_exchange->get_result();
+          }
+          else
+            return collective_lamport_clock; 
+        }
+        // Otherwise we're going to fall through and do the allreduce
+        if (collective_exchange == NULL)
+        {
+          collective_exchange =
+              new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                  repl_ctx, collective_exchange_id);
+          commit_preconditions.insert(
+                collective_exchange->get_done_event());
+        }
+      }
+      collective_exchange->async_all_reduce(collective_lamport_clock);
+      if (need_result)
+      {
+        collective_exchange->get_done_event().wait();
+        return collective_exchange->get_result();
+      }
+      else
+        return collective_lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMustEpochOp::finalize_concurrent_mapped(void)
     //--------------------------------------------------------------------------
     {
@@ -5663,6 +5740,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(mapping_collective_id == 0);
+      assert(collective_exchange_id == 0);
       assert(mapping_broadcast == NULL);
       assert(mapping_exchange == NULL);
 #endif
@@ -5674,8 +5752,9 @@ namespace Legion {
         ctx->get_next_collective_index(COLLECTIVE_LOC_70);
       completion_exchange_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_73);
-      concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_69, ctx);
-      concurrent_mapped_barrier = ctx->get_next_must_epoch_mapped_barrier();
+      collective_exchange_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_106);
+      concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_69, ctx); 
       resource_return_barrier = ctx->get_next_resource_return_barrier();
     }
 

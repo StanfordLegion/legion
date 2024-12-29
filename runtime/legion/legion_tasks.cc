@@ -1609,8 +1609,8 @@ namespace Legion {
               "in concurrent index space task launches or must epoch launches.",
               local_mapper->get_mapper_name(),
               get_task_name(), get_unique_id(), impl->get_name())
-      else if (concurrent_task && !impl->is_concurrent() && is_index_space &&
-          (index_domain.get_volume() > 1))
+      else if (concurrent_task && !must_epoch_task && !impl->is_concurrent() &&
+                is_index_space && (index_domain.get_volume() > 1))
         REPORT_LEGION_WARNING(LEGION_WARNING_UNUSED_CONCURRENCY,
             "Mapper %s selected non-concurrent task variant %s for "
             "task %s (UID %lld) which was launched as a concurrent index "
@@ -3069,6 +3069,22 @@ namespace Legion {
         else
           runtime->find_visible_memories(target_proc, visible_memories);
       }
+      bool free_acquired = false;
+      std::map<PhysicalManager*,unsigned> *acquired = NULL;
+      if (this->must_epoch != NULL)
+      {
+        acquired = new std::map<PhysicalManager*,unsigned>(
+                              *get_acquired_instances_ref());
+        free_acquired = true;
+        // Merge the must epoch owners acquired instances too 
+        // if we need to check for all our instances being acquired
+        std::map<PhysicalManager*,unsigned> *epoch_acquired = 
+          this->must_epoch->get_acquired_instances_ref();
+        if (epoch_acquired != NULL)
+          acquired->insert(epoch_acquired->begin(), epoch_acquired->end());
+      }
+      else
+        acquired = get_acquired_instances_ref();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Skip any NO_ACCESS or empty privilege field regions
@@ -3079,26 +3095,6 @@ namespace Legion {
         RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
-        bool free_acquired = false;
-        std::map<PhysicalManager*,unsigned> *acquired = NULL;
-        // Get the acquired instances only if we are checking
-        if (!runtime->unsafe_mapper)
-        {
-          if (this->must_epoch != NULL)
-          {
-            acquired = new std::map<PhysicalManager*,unsigned>(
-                                  *get_acquired_instances_ref());
-            free_acquired = true;
-            // Merge the must epoch owners acquired instances too 
-            // if we need to check for all our instances being acquired
-            std::map<PhysicalManager*,unsigned> *epoch_acquired = 
-              this->must_epoch->get_acquired_instances_ref();
-            if (epoch_acquired != NULL)
-              acquired->insert(epoch_acquired->begin(), epoch_acquired->end());
-          }
-          else
-            acquired = get_acquired_instances_ref();
-        }
         // Convert any sources first
         if (!output.source_instances[idx].empty())
           runtime->forest->physical_convert_sources(this, regions[idx],
@@ -3106,9 +3102,7 @@ namespace Legion {
         int composite_idx = 
           runtime->forest->physical_convert_mapping(this, regions[idx],
                 output.chosen_instances[idx], result, bad_tree, missing_fields,
-                acquired, unacquired, !runtime->unsafe_mapper);
-        if (free_acquired)
-          delete acquired;
+                acquired, unacquired, !runtime->unsafe_mapper); 
         if (bad_tree > 0)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' on "
@@ -3144,12 +3138,10 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,unsigned> *acquired_instances = 
-            get_acquired_instances_ref();
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 unacquired.begin(); it != unacquired.end(); it++)
           {
-            if (acquired_instances->find(*it) == acquired_instances->end())
+            if (acquired->find(*it) == acquired->end())
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from 'map_task' "
                             "invocation on mapper %s. Mapper selected "
@@ -3280,6 +3272,8 @@ namespace Legion {
           }
         }
       }
+      if (free_acquired)
+        delete acquired;
 
       if (!output_regions.empty())
       {
@@ -7162,6 +7156,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t IndividualTask::order_collectively_mapped_unbounded_pools(
+        uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch_task);
+      assert(is_origin_mapped());
+#endif
+      return must_epoch->collective_lamport_allreduce(
+          lamport_clock, need_result);
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent IndividualTask::order_concurrent_launch(ApEvent start,
                                                     VariantImpl *impl)
     //--------------------------------------------------------------------------
@@ -8118,8 +8125,17 @@ namespace Legion {
                                        uint64_t lamport_clock, bool need_result)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->collective_lamport_allreduce(
-          lamport_clock, need_result);
+      if (must_epoch_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_origin_mapped());
+#endif
+        return must_epoch->collective_lamport_allreduce(
+            lamport_clock, need_result);
+      }
+      else
+        return slice_owner->collective_lamport_allreduce(
+            lamport_clock, need_result);
     }
 
     //--------------------------------------------------------------------------
@@ -10315,8 +10331,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::initialize_concurrent_group(Color color,
-                                                RtUserEvent precondition)
+    void IndexTask::initialize_must_epoch_concurrent_group(Color color,
+                                                       RtUserEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10325,10 +10341,6 @@ namespace Legion {
 #endif
       ConcurrentGroup &group = concurrent_groups[color];
       group.precondition.interpreted = precondition;
-      // These don't matter since we're not going to to use them for
-      // the concurrent must epoch launch
-      group.group_points = 0;
-      group.color_points = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -10337,6 +10349,15 @@ namespace Legion {
         VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
+      if (must_epoch_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(color == 0);
+#endif
+        must_epoch->concurrent_allreduce(slice, slice_space, points,
+            lamport_clock, poisoned);
+        return;
+      }
       bool done = false;
       std::map<Color,ConcurrentGroup>::iterator finder =
         concurrent_groups.find(color);
@@ -10363,18 +10384,6 @@ namespace Legion {
       }
       if (done)
       {
-        if (must_epoch_task)
-        {
-#ifdef DEBUG_LEGION
-          assert(color == 0);
-#endif
-          // Send this off to the must epoch operation to continue
-          // the allreduce for these slices
-          must_epoch->concurrent_allreduce(finder->second.slice_tasks,
-              launch_space->get_volume(), finder->second.lamport_clock,
-              finder->second.poisoned);
-          return;
-        }
         if (finder->second.variant > 0)
         {
           // Check to see if this variant needs a task barrier
@@ -12729,6 +12738,26 @@ namespace Legion {
       // Update the no access regions
       for (unsigned idx = 0; idx < num_points; idx++)
         points[idx]->complete_point_projection();
+      if (concurrent_task)
+      {
+        // Set the counts back to zero for all the groups and then
+        // count how many local points we're going to be expecting here
+        for (std::map<Color,ConcurrentGroup>::iterator it =
+              concurrent_groups.begin(); it != concurrent_groups.end(); it++)
+          it->second.group_points = 0;
+        ConcurrentColoringFunctor *functor =
+            runtime->find_concurrent_coloring_functor(concurrent_functor);
+        for (unsigned idx = 0; idx < num_points; idx++)
+        {
+          Color color = functor->color(points[idx]->index_point, index_domain);
+          std::map<Color,ConcurrentGroup>::iterator finder =
+            concurrent_groups.find(color);
+#ifdef DEBUG_LEGION
+          assert(finder != concurrent_groups.end());
+#endif
+          finder->second.group_points++;
+        }
+      }
       // Mark how many points we have
       num_unmapped_points = num_points;
       num_uncompleted_points.store(num_points);
@@ -12857,7 +12886,7 @@ namespace Legion {
       {
         trigger_slice_mapped();
         if (is_origin_mapped() && !is_remote() && !is_replaying() &&
-            (must_epoch == NULL) && distribute_task())
+            distribute_task())
           launch_task();
       }
     }
@@ -13099,7 +13128,6 @@ namespace Legion {
           finder->second.processors.find(target);
         if (proc_finder != finder->second.processors.end())
           report_concurrent_mapping_failure(target, point, proc_finder->second);
-        finder->second.group_points++;
 #ifdef DEBUG_LEGION
         assert(concurrent_points < points.size());
 #endif
@@ -13142,14 +13170,8 @@ namespace Legion {
         }
       }
       else
-      {
-        {
-          AutoLock o_lock(op_lock);
-          finder->second.group_points++;
-        }
         index_owner->rendezvous_concurrent_mapped(point, target, color,
                                                   precondition);
-      }
     }
 
     //--------------------------------------------------------------------------

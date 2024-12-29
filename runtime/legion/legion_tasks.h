@@ -858,6 +858,8 @@ namespace Legion {
       virtual bool is_top_level_task(void) const { return top_level_task; }
     public:
       void set_concurrent_postcondition(RtEvent postcondition);
+      virtual uint64_t order_collectively_mapped_unbounded_pools(
+          uint64_t lamport_clock, bool need_result);
       virtual ApEvent order_concurrent_launch(ApEvent start, VariantImpl *impl);
       virtual void concurrent_allreduce(ProcessorManager *manager, 
           uint64_t lamport_clock, VariantID vid, bool poisoned);
@@ -1325,8 +1327,6 @@ namespace Legion {
       virtual void finalize_concurrent_mapped(void);
       virtual void initialize_concurrent_group(Color color, size_t local,
           size_t global, RtBarrier barrier, const std::vector<ShardID> &shards);
-      virtual void initialize_concurrent_group(Color color,
-          RtUserEvent precondition);
       virtual void concurrent_allreduce(Color color, SliceTask *slice,
           AddressSpaceID slice_space, size_t points, uint64_t lamport_clock,
           VariantID vid, bool poisoned);
@@ -1340,6 +1340,8 @@ namespace Legion {
                                                  RtEvent point_mapped);
     public:
       void record_origin_mapped_slice(SliceTask *local_slice);
+      void initialize_must_epoch_concurrent_group(Color color,
+          RtUserEvent precondition);
     protected:
       // Virtual so can be overridden by ReplIndexTask
       virtual void create_future_instances(std::vector<Memory> &target_mems);

@@ -2539,6 +2539,9 @@ namespace Legion {
               std::map<IndexPartition,unsigned> &created_partitions,
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
+    public:
+      virtual uint64_t collective_lamport_allreduce(
+          uint64_t lamport_clock, bool need_result);
       virtual void finalize_concurrent_mapped(void);
       virtual void finish_concurrent_allreduce(void);
     public:
@@ -2555,6 +2558,8 @@ namespace Legion {
       bool collective_map_must_epoch_call;
       MustEpochMappingBroadcast *mapping_broadcast;
       MustEpochMappingExchange *mapping_exchange;
+      CollectiveID collective_exchange_id;
+      AllReduceCollective<MaxReduction<uint64_t>,false> *collective_exchange;
       ConcurrentAllreduce *concurrent_exchange;
       CollectiveID dependence_exchange_id;
       CollectiveID completion_exchange_id;

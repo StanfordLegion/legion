@@ -2765,13 +2765,16 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
+      virtual uint64_t collective_lamport_allreduce(
+          uint64_t lamport_clock, bool need_result);
+    public:
       void rendezvous_concurrent_mapped(RtEvent precondition);
       virtual void finalize_concurrent_mapped(void);
     public:
       void concurrent_allreduce(IndividualTask *task, AddressSpaceID space,
           uint64_t lamport_clock, bool poisoned);
       void concurrent_allreduce(
-          std::vector<std::pair<SliceTask*,AddressSpaceID> > &slice_tasks,
+          SliceTask *slice, AddressSpaceID source,
           size_t total_points, uint64_t lamport_clock, bool poisoned);
       virtual void finish_concurrent_allreduce(void);
     public:
@@ -2807,10 +2810,15 @@ namespace Legion {
       std::vector<SingleTask*>     single_tasks;
       std::atomic<unsigned>        remaining_single_tasks; 
       RtUserEvent                  single_tasks_ready;
+      std::atomic<unsigned>        triggered_mapped_events;
       std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       Mapper::MapMustEpochInput    input;
       Mapper::MapMustEpochOutput   output;
+    protected:
+      size_t remaining_collective_unbound_points;
+      uint64_t collective_lamport_clock;
+      RtUserEvent collective_lamport_clock_ready;
     protected:
       // For the barrier before doing the lamport all-reduce
       RtUserEvent concurrent_mapped;

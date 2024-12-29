@@ -1452,7 +1452,7 @@ namespace Legion {
             if (to_release == NULL)
               to_release = 
                 new std::vector<std::pair<PhysicalManager*,unsigned> >();
-            to_release->push_back(std::make_pair(it->first, it->second));
+            to_release->emplace_back(std::make_pair(it->first, it->second));
             std::map<PhysicalManager*,unsigned>::iterator to_delete = it++;
             acquired_instances.erase(to_delete);
           }
@@ -1468,7 +1468,7 @@ namespace Legion {
         else
           return perform;
       }
-      for (std::map<PhysicalManager*,unsigned>::iterator it = 
+      for (std::map<PhysicalManager*,unsigned>::iterator it =
             acquired_instances.begin(); it != acquired_instances.end(); )
       {
         size_t instance_size = it->first->get_instance_size();
@@ -14295,7 +14295,7 @@ namespace Legion {
                                 launch_space, provenance, false/*track*/);
         index_tasks[idx]->set_must_epoch(this, 
             indiv_tasks.size() + idx, true/*register*/);
-        index_tasks[idx]->initialize_concurrent_group(0/*color*/,
+        index_tasks[idx]->initialize_must_epoch_concurrent_group(0/*color*/,
             concurrent_mapped);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, NULL);
@@ -14339,12 +14339,16 @@ namespace Legion {
       index_space_tasks.clear();
       single_tasks_ready = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_mapped = RtUserEvent::NO_RT_USER_EVENT;
+      triggered_mapped_events.store(0);
       remaining_concurrent_mapped = 0;
       remaining_single_tasks.store(0);
       remaining_resource_returns = 0;
       remaining_concurrent_points = 0;
       concurrent_lamport_clock = 0;
       concurrent_poisoned = false;
+      remaining_collective_unbound_points = 0;
+      collective_lamport_clock = 0;
+      collective_lamport_clock_ready = RtUserEvent::NO_RT_USER_EVENT;
       // Set to 1 to include the triggers we get for our operation
       remaining_subop_completes = 0;
       remaining_subop_commits = 1;
@@ -14623,12 +14627,7 @@ namespace Legion {
         }
       }
       // Map and distribute all our tasks
-      RtEvent all_mapped = map_and_distribute();
-      // Mark that we are done mapping and executing this operation
-      if (!acquired_instances.empty())
-        all_mapped = 
-          release_nonempty_acquired_instances(all_mapped, acquired_instances);
-      complete_mapping(all_mapped);
+      complete_mapping(map_and_distribute());
     }
 
     //--------------------------------------------------------------------------
@@ -14657,6 +14656,7 @@ namespace Legion {
             single_tasks.begin(); it != single_tasks.end(); it++)
         mapped_events.emplace(std::make_pair((*it)->index_point,
               Runtime::create_rt_user_event()));
+      remaining_collective_unbound_points = single_tasks.size();
       remaining_concurrent_mapped = single_tasks.size();
       remaining_concurrent_points = single_tasks.size();
       remaining_resource_returns = indiv_tasks.size() + slice_tasks.size();
@@ -14696,6 +14696,16 @@ namespace Legion {
 #endif
       // No need for a lock since this data structure is read-only here
       Runtime::trigger_event(mapped_events[point], mapped);
+      if ((triggered_mapped_events.fetch_add(1)+1) == mapped_events.size())
+      {
+        std::vector<RtEvent> preconditions;
+        preconditions.reserve(mapped_events.size());
+        for (std::map<DomainPoint,RtUserEvent>::const_iterator it =
+              mapped_events.begin(); it != mapped_events.end(); it++)
+          preconditions.push_back(it->second);
+        release_nonempty_acquired_instances(
+            Runtime::merge_events(preconditions), acquired_instances);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14741,6 +14751,32 @@ namespace Legion {
       // If we get here then we can finally do the return to the parent context
       // because we've received resources from all of our constituent operations
       return_resources(parent_ctx, context_index, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    uint64_t MustEpochOp::collective_lamport_allreduce(
+        uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (collective_lamport_clock < lamport_clock)
+        collective_lamport_clock = lamport_clock;
+#ifdef DEBUG_LEGION
+      assert(remaining_collective_unbound_points > 0);
+#endif
+      if (--remaining_collective_unbound_points > 0)
+      {
+        if (need_result)
+        {
+          if (!collective_lamport_clock_ready.exists())
+            collective_lamport_clock_ready = Runtime::create_rt_user_event();
+          o_lock.release();
+          collective_lamport_clock_ready.wait();
+        }
+      }
+      else if (collective_lamport_clock_ready.exists())
+        Runtime::trigger_event(collective_lamport_clock_ready);
+      return collective_lamport_clock;
     }
 
     //--------------------------------------------------------------------------
@@ -14797,7 +14833,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MustEpochOp::concurrent_allreduce(
-          std::vector<std::pair<SliceTask*,AddressSpaceID> > &slice_tasks,
+          SliceTask *slice, AddressSpaceID source,
           size_t total_points, uint64_t lamport_clock, bool poisoned)
     //--------------------------------------------------------------------------
     {
@@ -14808,11 +14844,7 @@ namespace Legion {
           concurrent_poisoned = true;
         if (concurrent_lamport_clock < lamport_clock)
           concurrent_lamport_clock = lamport_clock;
-        if (concurrent_slices.empty())
-          concurrent_slices.swap(slice_tasks);
-        else
-          concurrent_slices.insert(concurrent_slices.end(),
-              slice_tasks.begin(), slice_tasks.end());
+        concurrent_slices.emplace_back(std::make_pair(slice, source));
 #ifdef DEBUG_LEGION
         assert(total_points <= remaining_concurrent_points);
 #endif

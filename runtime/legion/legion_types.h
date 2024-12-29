@@ -2009,6 +2009,7 @@ namespace Legion {
       COLLECTIVE_LOC_103 = 103,
       COLLECTIVE_LOC_104 = 104,
       COLLECTIVE_LOC_105 = 105,
+      COLLECTIVE_LOC_106 = 106,
     };
 
     // legion_types.h
