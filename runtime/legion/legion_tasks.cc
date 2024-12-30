@@ -324,54 +324,14 @@ namespace Legion {
     bool TaskOp::is_forward_progress_task(void) const
     //--------------------------------------------------------------------------
     {
-      if (!is_index_space)
-        return false;
-      if (forward_progress_cached)
-        return is_forward_progress;
       // A forward progress task is any task that needs to have some or all
       // of its point tasks mapped in order to avoid blocking the mapping
-      // of other point tasks. This includes dependent index space task 
-      // launches, index space task launches with collective mapping region
-      // requirements, or concurrent index space task launches.
-      is_forward_progress = false;
-      if (!concurrent_task && check_collective_regions.empty())
-      {
-        for (std::vector<RegionRequirement>::const_iterator it =
-              regions.begin(); it != regions.end(); it++)
-        {
-          if (IS_COLLECTIVE(*it))
-          {
-            is_forward_progress = true;
-            break;
-          }
-          // If we're not writing then there are no intra-space dependences
-          if (!IS_WRITE(*it))
-            continue;
-          if (it->handle_type == LEGION_SINGULAR_PROJECTION)
-            continue;
-          if (it->projection == 0)
-          {
-            if (it->handle_type == LEGION_REGION_PROJECTION)
-            {
-              is_forward_progress = true;
-              break;
-            }
-            else
-              continue;
-          }
-          ProjectionFunction *function = 
-            runtime->find_projection_function(it->projection);
-          if (function->is_invertible)
-          {
-            is_forward_progress = true;
-            break;
-          }
-        }
-      }
-      else
-        is_forward_progress = true;
-      forward_progress_cached = true;
-      return is_forward_progress;
+      // of other point tasks. This includes index space task launches with 
+      // collective mapping region requirements, or concurrent index space 
+      // task launches. Dependent index space task launches used to have
+      // this property but no longer now that we fixed them so that we
+      // enqueue the points in the ready queue in dependence order
+      return (concurrent_task || !check_collective_regions.empty());
     }
 
     //--------------------------------------------------------------------------
@@ -402,7 +362,6 @@ namespace Legion {
       elide_future_return = false;
       replicate = false; 
       local_cached = false;
-      forward_progress_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
       mapper = NULL;

@@ -309,9 +309,6 @@ namespace Legion {
     private:
       mutable bool is_local;
       mutable bool local_cached;
-    private:
-      mutable bool is_forward_progress;
-      mutable bool forward_progress_cached;
     protected:
       bool children_commit;
     protected:
