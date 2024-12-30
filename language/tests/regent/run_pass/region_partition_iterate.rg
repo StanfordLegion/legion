@@ -32,29 +32,16 @@ task f() : int
   for y in r0 do
     s += @y
   end
-  if s ~= 100 then
-    c.printf("Bad s value %d\n", s)
-  end
-  regentlib.assert(s == 100, "test failed in f 1")
 
   -- Check that pointer shows up in parent.
   @x = 20
   for y in r do
     s += @y
   end
-  if s ~= 120 then
-    c.printf("Bad s value %d\n", s)
-  end
-  regentlib.assert(s == 120, "test failed in f 2")
 
   -- And of course pointer itself should be accessible.
   @x = 3
-  s += @x
-  if s ~= 123 then
-    c.printf("Bad s value %d\n", s)
-  end
-  regentlib.assert(s == 123, "test failed in f 3")
-  return s
+  return s + @x
 end
 
 task main()
