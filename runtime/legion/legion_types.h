@@ -459,6 +459,7 @@ namespace Legion {
       LG_DEFER_MUST_EPOCH_RETURN_TASK_ID,
       LG_DEFER_DELETION_COMMIT_TASK_ID,
       LG_YIELD_TASK_ID,
+      LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID,
       // this marks the beginning of task IDs tracked by the shutdown algorithm
       LG_BEGIN_SHUTDOWN_TASK_IDS,
       LG_RETRY_SHUTDOWN_TASK_ID = LG_BEGIN_SHUTDOWN_TASK_IDS,
@@ -560,6 +561,7 @@ namespace Legion {
         "Defer Must Epoch Return Resources",                      \
         "Defer Deletion Commit",                                  \
         "Yield",                                                  \
+        "Auto Trace Find Repeats",                                \
         "Retry Shutdown",                                         \
         "Remote Message",                                         \
       };
@@ -2010,6 +2012,7 @@ namespace Legion {
       COLLECTIVE_LOC_104 = 104,
       COLLECTIVE_LOC_105 = 105,
       COLLECTIVE_LOC_106 = 106,
+      COLLECTIVE_LOC_107 = 107,
     };
 
     // legion_types.h
@@ -2139,6 +2142,9 @@ namespace Legion {
     class RemoteContext;
     class LeafContext;
 
+    // legion_auto_trace.h
+    class TraceHashHelper;
+
     // legion_trace.h
     class LogicalTrace;
     class TraceBeginOp;
@@ -2167,6 +2173,9 @@ namespace Legion {
     class ReleaseReplay;
     class BarrierArrival;
     class BarrierAdvance;
+
+    // legion_auto_trace.h
+    class TraceRecognizer;
 
     // region_tree.h
     class RegionTreeForest;
@@ -2511,6 +2520,7 @@ namespace Legion {
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
     friend class Internal::ReplicateContext;                \
+    friend class Internal::TraceHashHelper;                 \
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
     friend class Internal::MustEpochMappingExchange;        \
@@ -2533,8 +2543,8 @@ namespace Legion {
     extern Realm::Logger log_garbage;          \
     extern Realm::Logger log_spy;              \
     extern Realm::Logger log_shutdown;         \
-    extern Realm::Logger log_tracing;
-
+    extern Realm::Logger log_tracing;          \
+    extern Realm::Logger log_auto_trace;
   }; // Internal namespace
 
   // Typedefs that are needed everywhere

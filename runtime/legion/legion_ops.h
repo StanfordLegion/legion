@@ -403,7 +403,7 @@ namespace Legion {
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
       inline LogicalTrace* get_trace(void) const { return trace; }
-      inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
+      inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; }
       inline Provenance* get_provenance(void) const 
         { return provenance; }
     public:
@@ -497,6 +497,10 @@ namespace Legion {
       virtual bool is_predicated_op(void) const { return false; }
       // Determine if this operation is a tracing fence
       virtual bool is_tracing_fence(void) const { return false; }
+      // Record the trace hash for this operation
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
+      static void hash_requirement(Murmur3Hasher &hasher, 
+                                   const RegionRequirement &req);
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
       virtual void select_sources(const unsigned index, PhysicalManager *target,
@@ -1188,6 +1192,8 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
+      virtual bool record_trace_hash(TraceRecognizer &recognizer,
+                                     uint64_t opidx) override;
     };
 
     /**
@@ -1417,6 +1423,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete);
       virtual void trigger_commit(void);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
@@ -1785,12 +1792,14 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { exec_fence = (fence_kind == EXECUTION_FENCE); return exec_fence; }
+      FenceKind get_fence_kind(void) { return fence_kind; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual void trigger_complete(ApEvent complete);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
       virtual void perform_measurement(void);
@@ -2315,6 +2324,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       virtual void predicate_false(void);
     public:
@@ -2420,6 +2430,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       virtual void predicate_false(void);
     public:
@@ -3600,6 +3611,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent effects_done);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       // This is a helper method for ReplFillOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
@@ -3772,6 +3784,7 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -4225,6 +4238,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_execution(void);
       virtual void trigger_replay(void);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);

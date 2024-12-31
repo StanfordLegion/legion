@@ -5754,7 +5754,7 @@ namespace Legion {
       completion_exchange_id =
         ctx->get_next_collective_index(COLLECTIVE_LOC_73);
       collective_exchange_id =
-        ctx->get_next_collective_index(COLLECTIVE_LOC_106);
+        ctx->get_next_collective_index(COLLECTIVE_LOC_107);
       concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_69, ctx); 
       resource_return_barrier = ctx->get_next_resource_return_barrier();
     }
@@ -8740,6 +8740,14 @@ namespace Legion {
         ReplTraceOp::trigger_mapping();
     } 
 
+    //--------------------------------------------------------------------------
+    bool ReplTraceCompleteOp::record_trace_hash(TraceRecognizer &recognizer,
+                                                uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
 #if 0
     /////////////////////////////////////////////////////////////
     // ReplTraceReplayOp
@@ -9235,6 +9243,14 @@ namespace Legion {
         ReplTraceOp::trigger_mapping();
     } 
 
+    //--------------------------------------------------------------------------
+    bool ReplTraceBeginOp::record_trace_hash(TraceRecognizer &recognizer,
+                                             uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
     /////////////////////////////////////////////////////////////
     // ReplTraceRecurrentOp
     /////////////////////////////////////////////////////////////
@@ -9463,7 +9479,15 @@ namespace Legion {
       }
       else
         ReplTraceOp::trigger_mapping();
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplTraceRecurrentOp::record_trace_hash(TraceRecognizer &recognizer,
+                                                 uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
 
     /////////////////////////////////////////////////////////////
     // Shard Mapping
@@ -9562,6 +9586,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, DistributedID id, 
                                CollectiveMapping *mapping, unsigned local,
+                               const Mapper::ContextConfigOutput &config,
                                bool top, bool iso, bool cr, const Domain &dom,
                                std::vector<DomainPoint> &&shards,
                                std::vector<DomainPoint> &&sorted,
@@ -9575,6 +9600,7 @@ namespace Legion {
         original_task(original), local_constituents(local),
         remote_constituents((mapping == NULL) ? 0 : 
             mapping->count_children(owner_space, local_space)),
+        context_configuration(config),
         top_level_task(top), isomorphic_points(iso), control_replicated(cr),
         address_spaces(NULL), local_startup_complete(0),
         remote_startup_complete(0), local_mapping_complete(0),
@@ -9776,6 +9802,8 @@ namespace Legion {
 #endif
       for (unsigned idx = 0; idx < total_shards; idx++)
         rez.serialize(shard_mapping[idx]);
+      if (control_replicated)
+        rez.serialize(context_configuration);
     }
 
     //--------------------------------------------------------------------------
@@ -12124,8 +12152,12 @@ namespace Legion {
         if (target_processors[idx].address_space() == runtime->address_space)
           local_shards++;
       }
+      Mapper::ContextConfigOutput context_configuration;
+      if (control_replicated)
+        derez.deserialize(context_configuration);
       ShardManager *manager =
-       new ShardManager(runtime, repl_id, mapping, local_shards, top_level_task,
+       new ShardManager(runtime, repl_id, mapping, local_shards, 
+                context_configuration, top_level_task,
                 isomorphic_points, control_replicated, shard_domain,
                 std::move(shard_points), std::move(sorted_points),
                 std::move(shard_lookup), NULL/*original*/,
@@ -14135,6 +14167,7 @@ namespace Legion {
     template class AllReduceCollective<ProdReduction<bool>,false>;
     template class AllReduceCollective<MaxReduction<uint32_t>,false>;
     template class AllReduceCollective<MaxReduction<uint64_t>,false>;
+    template class AllReduceCollective<MinReduction<unsigned>,false>;
 
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast
