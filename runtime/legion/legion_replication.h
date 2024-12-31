@@ -3105,6 +3105,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     protected:
       bool has_blocking_call;
       bool remove_trace_reference;
@@ -3206,6 +3207,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     };
 
     class ReplRecurrentOp : public ReplTraceOp, public RecurrentOp {
@@ -3241,7 +3243,8 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void); 
+      virtual void trigger_mapping(void);
+      virtual bool record_trace_hash(TraceRecognizer &identifier, uint64_t idx);
     protected:
       LogicalTrace *previous; 
       bool has_blocking_call;
@@ -3303,6 +3306,7 @@ namespace Legion {
     public:
       ShardManager(Runtime *rt, DistributedID did,
                    CollectiveMapping *mapping, unsigned local_count,
+                   const Mapper::ContextConfigOutput &config,
                    bool top, bool isomorphic_points, bool cr,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
@@ -3556,6 +3560,8 @@ namespace Legion {
       SingleTask *const original_task;
       const unsigned local_constituents;
       const unsigned remote_constituents;
+      // Only valid if control replicated
+      const Mapper::ContextConfigOutput context_configuration;
       const bool top_level_task;
       const bool isomorphic_points;
       const bool control_replicated; 
