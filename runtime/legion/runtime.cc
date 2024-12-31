@@ -20,6 +20,7 @@
 #include "legion/legion_trace.h"
 #include "legion/legion_utilities.h"
 #include "legion/region_tree.h"
+#include "legion/legion_auto_trace.h"
 #include "legion/legion_spy.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
@@ -76,6 +77,7 @@ namespace Legion {
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");
     Realm::Logger log_tracing("tracing");
+    Realm::Logger log_auto_trace("auto_trace");
     namespace LegionSpy {
       Realm::Logger log_spy("legion_spy");
     };
@@ -4915,7 +4917,22 @@ namespace Legion {
       {
         RtEvent wait_on = get_sharding_function_ready();
         if (wait_on.exists() && !wait_on.has_triggered())
+        {
+          // This is a bit unfortunate but should be a pretty rare
+          // situation so we just need to make it correct right now
+          // Index tasks and other operations going through the pipeline
+          // don't pick their sharding functor until they start going
+          // through the pipeline, so we need to tell auto-tracing to
+          // not buffer the producer of this future map to avoid a hang.
+          // This doesn't apply to invalidating traces though since we're
+          // not actually blocking waiting on a result computed by the
+          // trace so we set the flag saying this doesn't invalidate 
+          // the trace replay.
+          if (!internal)
+            context->record_blocking_call(blocking_index,
+                false/*invalidate trace*/);
           wait_on.wait();
+        }
       }
       Domain domain = shard_domain->get_tight_domain();
       const ShardID owner_shard = 
@@ -7461,11 +7478,13 @@ namespace Legion {
       Domain shard_domain;
       if (isomorphic_points)
         shard_domain = Domain(DomainPoint(0),DomainPoint(total_shards-1));
+      Mapper::ContextConfigOutput configuration;
+      implicit_top->configure_execution_context(configuration);
       // The shard manager will take ownership of this
       ShardManager *manager = new ShardManager(runtime, repl_context,
-          collective_mapping, shards_per_address_space, true/*top level*/,
-          isomorphic_points, true/*control replicated*/, shard_domain, 
-          std::move(points), std::move(sorted_points),
+          collective_mapping, shards_per_address_space, configuration,
+          true/*top level*/, isomorphic_points, true/*control replicated*/,
+          shard_domain, std::move(points), std::move(sorted_points),
           std::move(shard_lookup), implicit_top);
       shard_manager = manager;
       implicit_top->set_shard_manager(manager);
@@ -19679,10 +19698,14 @@ namespace Legion {
         program_order_execution(config.program_order_execution),
         dump_physical_traces(config.dump_physical_traces),
         no_tracing(config.no_tracing),
-        no_physical_tracing(config.no_physical_tracing),
+        no_physical_tracing(config.no_physical_tracing || no_tracing ||
+                            program_order_execution),
+        no_auto_tracing(config.no_auto_tracing || no_tracing || 
+                        program_order_execution),
         no_trace_optimization(config.no_trace_optimization),
         no_fence_elision(config.no_fence_elision),
         no_transitive_reduction(config.no_transitive_reduction),
+        inline_transitive_reduction(config.inline_transitive_reduction),
         replay_on_cpus(config.replay_on_cpus),
         verify_partitions(config.verify_partitions),
         runtime_warnings(config.runtime_warnings),
@@ -19902,9 +19925,11 @@ namespace Legion {
         dump_physical_traces(rhs.dump_physical_traces),
         no_tracing(rhs.no_tracing),
         no_physical_tracing(rhs.no_physical_tracing),
+        no_auto_tracing(rhs.no_auto_tracing),
         no_trace_optimization(rhs.no_trace_optimization),
         no_fence_elision(rhs.no_fence_elision),
         no_transitive_reduction(rhs.no_transitive_reduction),
+        inline_transitive_reduction(rhs.inline_transitive_reduction),
         replay_on_cpus(rhs.replay_on_cpus),
         verify_partitions(rhs.verify_partitions),
         runtime_warnings(rhs.runtime_warnings),
@@ -33731,12 +33756,16 @@ namespace Legion {
         .add_option_bool("-lg:no_tracing",config.no_tracing, !filter)
         .add_option_bool("-lg:no_physical_tracing",
                          config.no_physical_tracing, !filter)
+        .add_option_bool("-lg:no_auto_tracing",
+                         config.no_auto_tracing, !filter)
         .add_option_bool("-lg:no_trace_optimization",
                          config.no_trace_optimization, !filter)
         .add_option_bool("-lg:no_fence_elision",
                          config.no_fence_elision, !filter)
         .add_option_bool("-lg:no_transitive_reduction",
                          config.no_transitive_reduction, !filter)
+        .add_option_bool("-lg:inline_transitive_reduction",
+                         config.inline_transitive_reduction, !filter)
         .add_option_bool("-lg:replay_on_cpus",
                          config.replay_on_cpus, !filter)
         .add_option_bool("-lg:disjointness",
@@ -34010,7 +34039,7 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = new TopLevelContext(this, proxy, 
+      TopLevelContext *top_context = new TopLevelContext(this, proxy,
           0/*id*/, get_unique_implicit_top_level_task_id(), 0/*did*/, mapping);
       // Add a reference to the top level context
       top_context->add_base_gc_ref(RUNTIME_REF);
@@ -34147,8 +34176,6 @@ namespace Legion {
 #endif
       InnerContext *execution_context = local_task->create_implicit_context();
       execution_context->begin_task(proxy);
-      // We still need to configure the context here 
-      local_task->configure_execution_context(execution_context);
       return execution_context;
     }
 
@@ -35957,6 +35984,11 @@ namespace Legion {
           }
         case LG_YIELD_TASK_ID:
           break; // nothing to do here
+        case LG_AUTO_TRACE_PROCESS_REPEATS_TASK_ID:
+          {
+            TraceRecognizer::find_repeats(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

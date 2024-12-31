@@ -2737,11 +2737,14 @@ namespace Legion {
             safe_control_replication(0),
             program_order_execution(false),
             dump_physical_traces(false),
+            enable_automatic_tracing(false),
             no_tracing(false),
             no_physical_tracing(false),
+            no_auto_tracing(false),
             no_trace_optimization(false),
             no_fence_elision(false),
             no_transitive_reduction(false),
+            inline_transitive_reduction(false),
             replay_on_cpus(false),
             verify_partitions(false),
             runtime_warnings(false),
@@ -2798,11 +2801,14 @@ namespace Legion {
       public:
         bool program_order_execution;
         bool dump_physical_traces;
+        bool enable_automatic_tracing;
         bool no_tracing;
         bool no_physical_tracing;
+        bool no_auto_tracing;
         bool no_trace_optimization;
         bool no_fence_elision;
         bool no_transitive_reduction;
+        bool inline_transitive_reduction;
         bool replay_on_cpus;
         bool verify_partitions;
         bool runtime_warnings;
@@ -2926,9 +2932,11 @@ namespace Legion {
       const bool dump_physical_traces;
       const bool no_tracing;
       const bool no_physical_tracing;
+      const bool no_auto_tracing;
       const bool no_trace_optimization;
       const bool no_fence_elision;
       const bool no_transitive_reduction;
+      const bool inline_transitive_reduction;
       const bool replay_on_cpus;
       const bool verify_partitions;
       const bool runtime_warnings;
@@ -2986,8 +2994,7 @@ namespace Legion {
           bool deduplicate, size_t dedup_tag);
       void broadcast_startup_barrier(RtBarrier startup_barrier);
       void finalize_runtime(std::vector<RtEvent> &shutdown_events);
-      ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
-                                 TaskID tid,
+      ApEvent launch_mapper_task(Mapper *mapper, Processor proc, TaskID tid,
                                  const UntypedBuffer &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:

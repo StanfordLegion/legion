@@ -616,6 +616,23 @@ namespace Legion {
       inline void hash(const T &value);
       inline void hash(const void *value, size_t size);
       inline void finalize(uint64_t hash[2]);
+      struct Hash {
+        uint64_t x = 0;
+        uint64_t y = 0;
+        inline bool operator!=(const Hash& rhs) const {
+          return std::tie(x, y) != std::tie(rhs.x, rhs.y);
+        }
+        inline bool operator==(const Hash& rhs) const {
+          return std::tie(x, y) == std::tie(rhs.x, rhs.y);
+        }
+        inline bool operator<(const Hash& rhs) const {
+          return std::tie(x, y) < std::tie(rhs.x, rhs.y);
+        }
+        inline bool operator!(void) const {
+          return (x == 0) && (y == 0);
+        }
+      };
+      inline void finalize(Hash& hash);
     private:
       inline uint64_t rotl64(uint64_t x, uint8_t r);
       inline uint64_t fmix64(uint64_t k);
@@ -1995,7 +2012,7 @@ namespace Legion {
         case  1: k1 ^= ((uint64_t)blocks[ 0]) << 0;
                  k1 *= c1; k1  = rotl64(k1,31); k1 *= c2; h1 ^= k1;
       }
-      
+
       // finalization
       len += bytes;
 
@@ -2012,6 +2029,16 @@ namespace Legion {
 
       hash[0] = h1;
       hash[1] = h2;
+    }
+
+    //-------------------------------------------------------------------------
+    inline void Murmur3Hasher::finalize(Hash& hash)
+    //-------------------------------------------------------------------------
+    {
+      uint64_t temp[2];
+      finalize(temp);
+      hash.x = temp[0];
+      hash.y = temp[1];
     }
 
     //-------------------------------------------------------------------------
