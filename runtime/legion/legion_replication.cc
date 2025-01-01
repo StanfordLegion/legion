@@ -4762,7 +4762,7 @@ namespace Legion {
               ApUserEvent to_trigger;
               find_remote_targets(preconditions, to_trigger);
               if (to_trigger.exists())
-                Runtime::trigger_event(NULL, to_trigger,
+                Runtime::trigger_event_untraced(to_trigger,
                     scatter->get_done_event());
             }
             if (preconditions.empty())
@@ -4925,14 +4925,14 @@ namespace Legion {
         if (thunk->is_image())
         {
           if (to_trigger.exists())
-            Runtime::trigger_event(NULL, to_trigger, collective_done);
+            Runtime::trigger_event_untraced(to_trigger, collective_done);
           return collective_done;
         }
         else
         {
           const ApEvent result = scatter->get_done_event();
           if (to_trigger.exists())
-            Runtime::trigger_event(NULL, to_trigger, result);
+            Runtime::trigger_event_untraced(to_trigger, result);
           return result;
         }
       }
@@ -10934,7 +10934,8 @@ namespace Legion {
           if (all_shard_effects.exists())
             original_task->record_completion_effect(all_shard_effects);
           if (all_shards_complete.exists())
-            Runtime::trigger_event(NULL, all_shards_complete,all_shard_effects);
+            Runtime::trigger_event_untraced(all_shards_complete,
+                all_shard_effects);
           original_task->complete_execution();
         }
       }
@@ -12309,7 +12310,7 @@ namespace Legion {
       ApEvent complete = 
         manager->trigger_task_complete(false/*local*/, all_shards_done);
       if (all_shards_complete.exists())
-        Runtime::trigger_event(NULL, all_shards_complete, complete);
+        Runtime::trigger_event_untraced(all_shards_complete, complete);
     }
 
     //--------------------------------------------------------------------------
@@ -13714,7 +13715,8 @@ namespace Legion {
           instance_ready = instance->copy_from(pending.instance, op, 
              Runtime::merge_events(NULL, instance_ready, pending.precondition));
           if (pending.postcondition.exists())
-            Runtime::trigger_event(NULL, pending.postcondition, instance_ready);
+            Runtime::trigger_event_untraced(pending.postcondition,
+                instance_ready);
           delete pending.instance;
         }
         else
@@ -13725,7 +13727,7 @@ namespace Legion {
       assert(finished.exists());
 #endif
       // Trigger the finish event for the collective
-      Runtime::trigger_event(NULL, finished, instance_ready);
+      Runtime::trigger_event_untraced(finished, instance_ready);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -13737,7 +13739,7 @@ namespace Legion {
       assert(finished.exists());
 #endif
       // Clean up the finished event we aren't going to trigger
-      Runtime::trigger_event(NULL, finished);
+      Runtime::trigger_event_untraced(finished);
       // elide the collective for the base class
       AllGatherCollective<false>::elide_collective(); 
     }
@@ -13833,7 +13835,7 @@ namespace Legion {
           op, redop_id, redop, false/*exclusive*/, 
           Runtime::merge_events(NULL, instance_ready, it->second.precondition));
         if (it->second.postcondition.exists())
-          Runtime::trigger_event(NULL, it->second.postcondition, post);
+          Runtime::trigger_event_untraced(it->second.postcondition, post);
         delete it->second.instance;
         if (post.exists())
           postconditions.push_back(post);
@@ -13888,7 +13890,7 @@ namespace Legion {
         write_event = instance->copy_from(source, op, pre);
         ApUserEvent post;
         derez.deserialize(post);
-        Runtime::trigger_event(NULL, post, write_event);
+        Runtime::trigger_event_untraced(post, write_event);
       }
       else
         write_event = instance->copy_from(source, op, ApEvent::NO_AP_EVENT);
@@ -13905,7 +13907,7 @@ namespace Legion {
           read_events.push_back(write_event);
         write_event = Runtime::merge_events(NULL, read_events);
       }
-      Runtime::trigger_event(NULL, finished, write_event);
+      Runtime::trigger_event_untraced(finished, write_event);
       return postcondition;
     }
 
@@ -13913,7 +13915,7 @@ namespace Legion {
     void FutureBroadcastCollective::elide_collective(void)
     //--------------------------------------------------------------------------
     {
-      Runtime::trigger_event(NULL, finished);
+      Runtime::trigger_event_untraced(finished);
       BroadcastCollective::elide_collective();
     }
 
@@ -14810,14 +14812,14 @@ namespace Legion {
       }
       ApEvent done;
       derez.deserialize(done);
-      Runtime::trigger_event(NULL, done_event, done);
+      Runtime::trigger_event_untraced(done_event, done);
     }
 
     //--------------------------------------------------------------------------
     void DeppartResultScatter::broadcast_results(ApEvent done)
     //--------------------------------------------------------------------------
     {
-      Runtime::trigger_event(NULL, done_event, done);
+      Runtime::trigger_event_untraced(done_event, done);
       perform_collective_async();
     }
 
