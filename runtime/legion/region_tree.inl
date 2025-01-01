@@ -477,7 +477,7 @@ namespace Legion {
               (result == precondition))
           {
             ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-            Runtime::trigger_event(NULL, new_result, precondition);
+            Runtime::trigger_event_untraced(new_result, precondition);
             result = new_result;
           }
         }
@@ -486,7 +486,7 @@ namespace Legion {
       if (!result.exists())
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
@@ -584,7 +584,7 @@ namespace Legion {
               (result == precondition))
           {
             ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-            Runtime::trigger_event(NULL, new_result, precondition);
+            Runtime::trigger_event_untraced(new_result, precondition);
             result = new_result;
           }
         }
@@ -604,7 +604,7 @@ namespace Legion {
       if (!result.exists())
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
@@ -2067,7 +2067,7 @@ namespace Legion {
           Realm::IndexSpace<DIM,T>::compute_union(
               spaces, this->realm_index_space, requests, precondition));
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, this->realm_index_space_ready);
+        Runtime::trigger_event_untraced(to_trigger, this->realm_index_space_ready);
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
@@ -2218,7 +2218,7 @@ namespace Legion {
           Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, this->realm_index_space, requests, precondition));
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, this->realm_index_space_ready);
+        Runtime::trigger_event_untraced(to_trigger, this->realm_index_space_ready);
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
       const RtEvent valid_event(this->realm_index_space.make_valid());
@@ -2378,7 +2378,8 @@ namespace Legion {
             Realm::IndexSpace<DIM,T>::compute_difference(lhs_space, rhs_space, 
                               this->realm_index_space, requests, precondition));
         if (to_trigger.exists())
-          Runtime::trigger_event(NULL,to_trigger,this->realm_index_space_ready);
+          Runtime::trigger_event_untraced(to_trigger,
+              this->realm_index_space_ready);
         // Then launch the tighten call for it too since we know we're
         // going to want this eventually
         const RtEvent valid_event(this->realm_index_space.make_valid());
@@ -3209,7 +3210,7 @@ namespace Legion {
                               provenance, ready, new_expr_id,
                               collective_mapping, true/*add root reference*/);
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger);
+        Runtime::trigger_event_untraced(to_trigger);
       return result;
     }
 
@@ -3379,7 +3380,7 @@ namespace Legion {
       if (set_realm_index_space(result_space, result))
         assert(false); // should never hit this
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
       return result;
     }
 
@@ -3445,7 +3446,7 @@ namespace Legion {
       if (set_realm_index_space(result_space, result))
         assert(false); // should never hit this
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
       return result;
     }
 
@@ -3511,7 +3512,7 @@ namespace Legion {
       // Destroy the tempory rhs space once the computation is done
       rhs_space.destroy(result);
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
       return result;
     } 
 
@@ -3916,12 +3917,12 @@ namespace Legion {
         if (!result.exists() || (result == ready))
         {
           ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, new_result);
+          Runtime::trigger_event_untraced(new_result);
           result = new_result;
         }
 #endif
         if (to_trigger.exists())
-          Runtime::trigger_event(NULL, to_trigger, result);
+          Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
         LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                                       ready, result, DEP_PART_EQUAL);
@@ -3974,7 +3975,7 @@ namespace Legion {
         if (!done_events.empty())
           result = Runtime::merge_events(NULL, done_events);
         if (to_trigger.exists())
-          Runtime::trigger_event(NULL, to_trigger, result);
+          Runtime::trigger_event_untraced(to_trigger, result);
         return result;
       }
     }
@@ -4027,12 +4028,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                                     precondition, result, DEP_PART_UNIONS);
@@ -4099,12 +4100,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
           precondition, result, DEP_PART_INTERSECTIONS);
@@ -4181,12 +4182,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                       precondition, result, DEP_PART_INTERSECTIONS);
@@ -4254,12 +4255,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                         precondition, result, DEP_PART_DIFFERENCES);
@@ -4361,7 +4362,7 @@ namespace Legion {
           delete child;
       }
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger);
+        Runtime::trigger_event_untraced(to_trigger);
       // Our only precondition is that the parent index space is computed
       return parent_ready;
     }
@@ -4512,7 +4513,7 @@ namespace Legion {
       if (!result_events.empty())
         result = Runtime::merge_events(NULL, result_events);
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
       return result;
     }
 
@@ -4604,12 +4605,12 @@ namespace Legion {
       if (!result.exists() || (result == ready))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id, ready,
                                     result, DEP_PART_WEIGHTS);
@@ -4738,12 +4739,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                                     precondition, result, DEP_PART_BY_FIELD);
@@ -4873,7 +4874,7 @@ namespace Legion {
         if (!result.exists() || (result == precondition))
         {
           ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, new_result);
+          Runtime::trigger_event_untraced(new_result);
           result = new_result;
         }
 #endif
@@ -4892,7 +4893,7 @@ namespace Legion {
       if (!results.empty())
         result = Runtime::merge_events(NULL, results);
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
       return result;
     }
 #endif // defined(DEFINE_NTNT_TEMPLATES)
@@ -4997,7 +4998,7 @@ namespace Legion {
         if (!result.exists() || (result == precondition))
         {
           ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, new_result);
+          Runtime::trigger_event_untraced(new_result);
           result = new_result;
         }
 #endif
@@ -5016,7 +5017,7 @@ namespace Legion {
       if (!results.empty())
         result = Runtime::merge_events(NULL, results);
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
       return result;
     }
 #endif // defined(DEFINE_NTNT_TEMPLATES)
@@ -5181,12 +5182,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                                     precondition, result, DEP_PART_BY_PREIMAGE);
@@ -5380,12 +5381,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                     precondition, result, DEP_PART_BY_PREIMAGE_RANGE);
@@ -5489,12 +5490,12 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger, result);
+        Runtime::trigger_event_untraced(to_trigger, result);
 #ifdef LEGION_SPY
       LegionSpy::log_deppart_events(op->get_unique_op_id(), expr_id,
                                     precondition, result, DEP_PART_ASSOCIATION);
@@ -10564,7 +10565,7 @@ namespace Legion {
           {
             DeferCopyAcrossArgs args(this, op, pred_guard, copy_precondition,
                 src_indirect_precondition, dst_indirect_precondition,
-                trace_info, replay, recurrent_replay, stage);
+                replay, recurrent_replay, stage);
             prev_done = runtime->issue_runtime_meta_task(args,
                 LG_LATENCY_DEFERRED_PRIORITY, defer);
             return args.done_event;
@@ -10671,7 +10672,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         ApUserEvent new_last_copy = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_last_copy);
+        Runtime::trigger_event_untraced(new_last_copy);
         last_copy = new_last_copy;
         LegionSpy::log_indirect_events(op->get_unique_op_id(), expr->expr_id,
                 unique_indirections_identifier, copy_precondition, last_copy);
@@ -10751,7 +10752,7 @@ namespace Legion {
       if (!last_copy.exists())
       {
         ApUserEvent new_last_copy = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_last_copy);
+        Runtime::trigger_event_untraced(new_last_copy);
         last_copy = new_last_copy;
       }
 #endif
@@ -10954,7 +10955,7 @@ namespace Legion {
       if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, new_result);
+        Runtime::trigger_event_untraced(new_result);
         result = new_result;
       }
 #endif

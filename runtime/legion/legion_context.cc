@@ -1429,8 +1429,6 @@ namespace Legion {
         total_children_count(0), next_blocking_index(0),
         total_tunable_count(0), outstanding_prepipeline_tasks(0),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
-        distribute_task_comp_queue(CompletionQueue::NO_QUEUE),
-        launch_task_comp_queue(CompletionQueue::NO_QUEUE),
         trigger_execution_comp_queue(CompletionQueue::NO_QUEUE),
         deferred_execution_comp_queue(CompletionQueue::NO_QUEUE),
         deferred_mapped_comp_queue(CompletionQueue::NO_QUEUE),
@@ -1486,10 +1484,6 @@ namespace Legion {
       runtime->free_region_tree_context(tree_context);
       if (enqueue_task_comp_queue.exists())
         enqueue_task_comp_queue.destroy();
-      if (distribute_task_comp_queue.exists())
-        distribute_task_comp_queue.destroy();
-      if (launch_task_comp_queue.exists())
-        launch_task_comp_queue.destroy();
       if (trigger_execution_comp_queue.exists())
         trigger_execution_comp_queue.destroy();
       if (deferred_execution_comp_queue.exists())
@@ -8823,11 +8817,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_to_task_queue(TaskOp *task, RtEvent ready)
+    void InnerContext::add_to_task_queue(SingleTask *task, RtEvent ready)
     //--------------------------------------------------------------------------
     {
-      add_to_queue<TaskOp*,DeferredEnqueueTaskArgs,false/*has bounds*/>(
-          QueueEntry<TaskOp*>(task, ready), enqueue_task_lock,
+      add_to_queue<SingleTask*,DeferredEnqueueTaskArgs,false/*has bounds*/>(
+          QueueEntry<SingleTask*>(task, ready), enqueue_task_lock,
           enqueue_task_queue, enqueue_task_comp_queue);
     }
 
@@ -8837,11 +8831,11 @@ namespace Legion {
                                                   long long performed)
     //--------------------------------------------------------------------------
     {
-      std::vector<TaskOp*> to_perform;
-      TaskOp *next = process_queue<TaskOp*>(enqueue_task_lock, precondition,
-          enqueue_task_queue, enqueue_task_comp_queue,
+      std::vector<SingleTask*> to_perform;
+      SingleTask *next = process_queue<SingleTask*>(enqueue_task_lock,
+          precondition, enqueue_task_queue, enqueue_task_comp_queue,
           to_perform, previous_fevent, performed);
-      for (std::vector<TaskOp*>::const_iterator it =
+      for (std::vector<SingleTask*>::const_iterator it =
             to_perform.begin(); it != to_perform.end(); it++)
       {
         implicit_provenance = (*it)->get_unique_op_id();
@@ -8850,79 +8844,6 @@ namespace Legion {
       if (next != NULL)
       {
         DeferredEnqueueTaskArgs args(next, this, precondition, performed);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_WORK_PRIORITY, precondition);
-        return false;
-      }
-      else
-        return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::add_to_distribute_task_queue(TaskOp *task, RtEvent ready)
-    //--------------------------------------------------------------------------
-    {
-      add_to_queue<TaskOp*,DeferredDistributeTaskArgs,false/*has bounds*/>(
-          QueueEntry<TaskOp*>(task, ready), distribute_task_lock,
-          distribute_task_queue, distribute_task_comp_queue);
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::process_distribute_task_queue(RtEvent precondition,
-                                                     LgEvent previous_fevent,
-                                                     long long performed)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<TaskOp*> to_perform;
-      TaskOp *next = process_queue<TaskOp*>(distribute_task_lock, precondition,
-                distribute_task_queue, distribute_task_comp_queue,
-                to_perform, previous_fevent, performed);
-      for (std::vector<TaskOp*>::const_iterator it =
-            to_perform.begin(); it != to_perform.end(); it++)
-      {
-        implicit_provenance = (*it)->get_unique_op_id();
-        if ((*it)->distribute_task())
-          (*it)->launch_task();
-      }
-      if (next != NULL)
-      {
-        DeferredDistributeTaskArgs args(next, this, precondition, performed);
-        runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_WORK_PRIORITY, precondition);
-        return false;
-      }
-      else
-        return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::add_to_launch_task_queue(TaskOp *task, RtEvent ready)
-    //--------------------------------------------------------------------------
-    {
-      add_to_queue<TaskOp*,DeferredLaunchTaskArgs,false/*has bounds*/>(
-          QueueEntry<TaskOp*>(task, ready), launch_task_lock,
-          launch_task_queue, launch_task_comp_queue);
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::process_launch_task_queue(RtEvent precondition,
-                                                 LgEvent previous_fevent,
-                                                 long long performed)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<TaskOp*> to_perform;
-      TaskOp *next = process_queue<TaskOp*>(launch_task_lock, precondition,
-                    launch_task_queue, launch_task_comp_queue,
-                    to_perform, previous_fevent, performed);
-      for (std::vector<TaskOp*>::const_iterator it =
-            to_perform.begin(); it != to_perform.end(); it++)
-      {
-        implicit_provenance = (*it)->get_unique_op_id();
-        (*it)->launch_task();
-      }
-      if (next != NULL)
-      {
-        DeferredLaunchTaskArgs args(next, this, precondition, performed);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_WORK_PRIORITY, precondition);
         return false;
@@ -12429,30 +12350,6 @@ namespace Legion {
       const DeferredEnqueueTaskArgs *dargs = 
         (const DeferredEnqueueTaskArgs*)args;
       if (dargs->context->process_enqueue_task_queue(
-            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
-          dargs->context->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->context;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_distribute_task_queue(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferredDistributeTaskArgs *dargs = 
-        (const DeferredDistributeTaskArgs*)args;
-      if (dargs->context->process_distribute_task_queue(
-            dargs->precondition, dargs->previous_fevent, dargs->performed) &&
-          dargs->context->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->context;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_launch_task_queue(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferredLaunchTaskArgs *dargs = 
-        (const DeferredLaunchTaskArgs*)args;
-      if (dargs->context->process_launch_task_queue(
             dargs->precondition, dargs->previous_fevent, dargs->performed) &&
           dargs->context->remove_base_resource_ref(META_TASK_REF))
         delete dargs->context;

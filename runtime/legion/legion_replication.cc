@@ -1559,7 +1559,8 @@ namespace Legion {
       analyze_region_requirements(launch_space,
                                   analysis_sharding_function,
                                   sharding_space);
-      if (concurrent_task || !check_collective_regions.empty())
+      if ((concurrent_task && !must_epoch_task) ||
+          !check_collective_regions.empty())
       {
         // Create the collective exchange ID in case we need it
         collective_exchange_id = repl_ctx->get_next_collective_index(
@@ -1571,7 +1572,7 @@ namespace Legion {
           create_collective_rendezvous(
               logical_regions[*it].parent.get_tree_id(), *it);
       }
-      if (concurrent_task)
+      if (concurrent_task && !must_epoch_task)
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -1874,7 +1875,7 @@ namespace Legion {
       }
       if (!runtime->unsafe_mapper)
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_76);
-      if (concurrent_task)
+      if (concurrent_task && !must_epoch_task)
       {
         concurrent_mapping_rendezvous = new ConcurrentMappingRendezvous(this,
               COLLECTIVE_LOC_104, ctx, concurrent_groups);
@@ -1923,6 +1924,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(concurrent_task);
+      assert(!must_epoch_task);
       assert(concurrent_mapping_rendezvous != NULL);
 #endif
       concurrent_mapping_rendezvous->perform_rendezvous();
@@ -1967,7 +1969,7 @@ namespace Legion {
 #endif
         // Create the max allreduce collective
         it->second.exchange = new ConcurrentAllreduce(repl_ctx,
-            finder->second, it->first, it->second);
+            finder->second, it->first, it->second.shards);
         if (!it->second.preconditions.empty())
           Runtime::trigger_event(it->second.precondition.interpreted,
               Runtime::merge_events(it->second.preconditions));
@@ -1999,7 +2001,7 @@ namespace Legion {
 #endif
       finder->second.shards = shards;
       finder->second.exchange = new ConcurrentAllreduce(repl_ctx,
-          id_finder->second, color, finder->second);
+          id_finder->second, color, finder->second.shards);
     }
 
     //--------------------------------------------------------------------------
@@ -2008,6 +2010,15 @@ namespace Legion {
         VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
     {
+      if (must_epoch_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(color == 0);
+#endif
+        must_epoch->concurrent_allreduce(slice, slice_space, points,
+            lamport_clock, poisoned);
+        return;
+      }
       bool done = false;
       std::map<Color,ConcurrentGroup>::iterator finder =
         concurrent_groups.find(color);
@@ -2055,7 +2066,7 @@ namespace Legion {
                 runtime->create_rt_barrier(finder->second.color_points); 
           }
         }
-        finder->second.exchange->perform_collective_async();
+        finder->second.exchange->perform_concurrent_allreduce(finder->second);
       }
     }
 
@@ -4939,7 +4950,7 @@ namespace Legion {
               ApUserEvent to_trigger;
               find_remote_targets(preconditions, to_trigger);
               if (to_trigger.exists())
-                Runtime::trigger_event(NULL, to_trigger,
+                Runtime::trigger_event_untraced(to_trigger,
                     scatter->get_done_event());
             }
             if (preconditions.empty())
@@ -5102,14 +5113,14 @@ namespace Legion {
         if (thunk->is_image())
         {
           if (to_trigger.exists())
-            Runtime::trigger_event(NULL, to_trigger, collective_done);
+            Runtime::trigger_event_untraced(to_trigger, collective_done);
           return collective_done;
         }
         else
         {
           const ApEvent result = scatter->get_done_event();
           if (to_trigger.exists())
-            Runtime::trigger_event(NULL, to_trigger, result);
+            Runtime::trigger_event_untraced(to_trigger, result);
           return result;
         }
       }
@@ -5284,8 +5295,12 @@ namespace Legion {
       collective_map_must_epoch_call = false;
       mapping_broadcast = NULL;
       mapping_exchange = NULL;
-      dependence_exchange = NULL;
-      completion_exchange = NULL;
+      concurrent_exchange = NULL;
+      collective_exchange = NULL;
+      collective_exchange_id = 0;
+      dependence_exchange_id = 0;
+      completion_exchange_id = 0;
+      concurrent_mapped_barrier = RtBarrier::NO_RT_BARRIER;
       resource_return_barrier = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -5302,10 +5317,10 @@ namespace Legion {
         delete mapping_broadcast;
       if (mapping_exchange != NULL)
         delete mapping_exchange;
-      if (dependence_exchange != NULL)
-        delete dependence_exchange;
-      if (completion_exchange != NULL)
-        delete completion_exchange;
+      if (collective_exchange != NULL)
+        delete collective_exchange;
+      if (concurrent_exchange != NULL)
+        delete concurrent_exchange;
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -5322,9 +5337,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
       assert(repl_ctx != NULL);
+      assert(!concurrent_mapped.exists());
+      assert(!concurrent_mapped_barrier.exists());
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
+      // This is a bit dumb, but we do it to make the types work out
+      concurrent_mapped = Runtime::create_rt_user_event();
+      concurrent_mapped_barrier =
+        repl_ctx->get_next_must_epoch_mapped_barrier();
+      Runtime::trigger_event(concurrent_mapped, concurrent_mapped_barrier);
       Provenance *provenance = get_provenance();
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
@@ -5351,8 +5373,8 @@ namespace Legion {
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
 #endif
         indiv_tasks[idx] = task;
+        indiv_tasks[idx]->set_concurrent_postcondition(concurrent_mapped);
       }
-      indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
       for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
       {
@@ -5374,8 +5396,9 @@ namespace Legion {
                                       0/*owner shard*/, COLLECTIVE_LOC_59));
 #endif
         index_tasks[idx] = task;
+        index_tasks[idx]->initialize_must_epoch_concurrent_group(0/*color*/,
+            concurrent_mapped);
       }
-      index_triggered.resize(index_tasks.size(), false);
     }
 
     //--------------------------------------------------------------------------
@@ -5508,40 +5531,155 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::map_and_distribute(std::set<RtEvent> &tasks_mapped,
-                                             std::set<ApEvent> &tasks_complete)
+    RtEvent ReplMustEpochOp::map_and_distribute(void)
     //--------------------------------------------------------------------------
     {
-      // We have to exchange mapping and completion events with all the
-      // other shards as well
-      std::set<RtEvent> local_tasks_mapped;
-      std::set<ApEvent> local_tasks_complete;
+#ifdef DEBUG_LEGION
+      assert(single_tasks.size() == mapping_dependences.size());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      for (std::set<SingleTask*>::const_iterator it = 
+            shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
+        mapped_events.emplace(std::make_pair((*it)->index_point,
+              Runtime::create_rt_user_event()));
+      // Exchange these to get them in flight
+      MustEpochDependenceExchange dependence_exchange(
+          dependence_exchange_id, repl_ctx, mapped_events);
+      dependence_exchange.perform_collective_async();
+
+      std::vector<RtEvent> tasks_all_mapped;
+      std::vector<ApEvent> tasks_all_complete;
+      tasks_all_mapped.reserve(indiv_tasks.size() + index_tasks.size());
+      tasks_all_complete.reserve(indiv_tasks.size() + index_tasks.size());
+      // Once all the tasks have been initialized we can defer
+      // our all mapped event on all their all mapped events
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
-        local_tasks_mapped.insert((*it)->get_mapped_event());
-        local_tasks_complete.insert((*it)->get_completion_event());
+        tasks_all_mapped.push_back((*it)->get_mapped_event());
+        tasks_all_complete.push_back((*it)->get_completion_event());
+        if (shard_single_tasks.find(*it) != shard_single_tasks.end())
+          remaining_resource_returns++;
       }
       for (std::vector<IndexTask*>::const_iterator it = 
             index_tasks.begin(); it != index_tasks.end(); it++)
       {
-        local_tasks_mapped.insert((*it)->get_mapped_event());
-        local_tasks_complete.insert((*it)->get_completion_event());
+        tasks_all_mapped.push_back((*it)->get_mapped_event());
+        tasks_all_complete.push_back((*it)->get_completion_event());
       }
-      // Perform the mapping
-      map_replicate_tasks();
-      mapping_dependences.clear();
-      RtEvent local_mapped = Runtime::merge_events(local_tasks_mapped);
-      tasks_mapped.insert(local_mapped);
-      ApEvent local_complete = Runtime::merge_events(NULL,local_tasks_complete);
-      tasks_complete.insert(local_complete);
+      // Start the exchange for the mapped and completion events
+      MustEpochCompletionExchange completion_exchange(
+          completion_exchange_id, repl_ctx, 
+          tasks_all_mapped, tasks_all_complete);
+      completion_exchange.perform_collective_async(); 
+      // Need to count remaining resource returns for slices too
+      for (std::set<SliceTask*>::const_iterator it =
+            slice_tasks.begin(); it != slice_tasks.end(); it++)
+      {
+        // Check to see if we either do or not own this slice
+        // We currently do not support mixed slices for which
+        // we only own some of the points
+        bool contains_any = false;
+        bool contains_all = true;
+        for (std::vector<PointTask*>::const_iterator pit =
+              (*it)->points.begin(); pit != (*it)->points.end(); pit++)
+        {
+          if (shard_single_tasks.find(*pit) != shard_single_tasks.end())
+            contains_any = true;
+          else if (contains_all)
+          {
+            contains_all = false;
+            if (contains_any) // At this point we have all the answers
+              break;
+          }
+        }
+        if (!contains_any)
+          continue;
+        if (!contains_all)
+        {
+          Processor mapper_proc = parent_ctx->get_executing_processor();
+          MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
+          REPORT_LEGION_FATAL(ERROR_INVALID_MAPPER_OUTPUT,
+                              "Mapper %s specified a slice for a must epoch "
+                              "launch in control replicated task %s "
+                              "(UID %lld) for which not all the points "
+                              "mapped to the same shard. Legion does not "
+                              "currently support this use case. Please "
+                              "specify slices and a sharding function to "
+                              "ensure that all the points in a slice are "
+                              "owned by the same shard",
+                              mapper->get_mapper_name(),
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id())
+        }
+        remaining_resource_returns++;
+      }
+      // Trigger this if we're not expecting to see any returns
+      if (remaining_resource_returns == 0)
+        runtime->phase_barrier_arrive(resource_return_barrier, 1/*count*/);
+      // Update the remaining concurrent points
+      if (shard_single_tasks.empty())
+      {
+        // Still need to participate in things even if we have no local points
+        finalize_concurrent_mapped();
+        finish_concurrent_allreduce();
+        collective_exchange =
+            new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                repl_ctx, collective_exchange_id);
+        collective_exchange->async_all_reduce(collective_lamport_clock);
+        AutoLock o_lock(op_lock);
+        commit_preconditions.insert(collective_exchange->get_done_event());
+      }
+      else
+      {
+        remaining_mapped_events.store(shard_single_tasks.size());
+        remaining_collective_unbound_points = shard_single_tasks.size();
+        remaining_concurrent_mapped = shard_single_tasks.size();
+        remaining_concurrent_points = shard_single_tasks.size();
+      }
+      // Wait for the point-wise exchange to be done and then launch
+      // of all our local single tasks
+      dependence_exchange.perform_collective_wait();
+      // For correctness we still have to abide by the mapping dependences
+      // computed on the individual tasks while we are mapping them
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+      {
+        // Check to see if it is one of the ones that we own
+        if (shard_single_tasks.find(single_tasks[idx]) == 
+            shard_single_tasks.end())
+        {
+          // We don't own this point
+          // We still need to do some work for individual tasks
+          // to exchange versioning information, but no such 
+          // work is necessary for point tasks
+          SingleTask *task = single_tasks[idx];
+          task->shard_off(mapped_events[task->index_point]);
+          continue;
+        }
+        // Figure out our preconditions
+        std::set<RtEvent> preconditions;
+        for (std::set<unsigned>::const_iterator it = 
+              mapping_dependences[idx].begin(); it != 
+              mapping_dependences[idx].end(); it++)
+        {
 #ifdef DEBUG_LEGION
-      assert(completion_exchange != NULL);
+          assert((*it) < idx);
 #endif
-      completion_exchange->exchange_must_epoch_completion(
-          local_mapped, local_complete, tasks_mapped, tasks_complete);
-      // Then we can distribute the tasks
-      distribute_replicate_tasks();
+          preconditions.insert(mapped_events[single_tasks[*it]->index_point]);
+        }
+        RtEvent precondition;
+        if (!preconditions.empty())
+          precondition = Runtime::merge_events(preconditions);
+        if (precondition.exists() && !precondition.has_triggered())
+          single_tasks[idx]->defer_perform_mapping(precondition, this);
+        else if (single_tasks[idx]->perform_mapping(this) &&
+            single_tasks[idx]->distribute_task())
+          single_tasks[idx]->launch_task();
+      }
+      return completion_exchange.finish_exchange(this);
     }
 
     //--------------------------------------------------------------------------
@@ -5627,6 +5765,78 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t ReplMustEpochOp::collective_lamport_allreduce(
+        uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      {
+        AutoLock o_lock(op_lock);
+        if (collective_lamport_clock < lamport_clock)
+          collective_lamport_clock = lamport_clock;
+#ifdef DEBUG_LEGION
+        assert(remaining_collective_unbound_points > 0);
+#endif
+        if (--remaining_collective_unbound_points > 0)
+        {
+          if (need_result)
+          {
+            if (collective_exchange == NULL)
+              collective_exchange =
+                new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                    repl_ctx, collective_exchange_id);
+            o_lock.release();
+            collective_exchange->get_done_event().wait();
+            return collective_exchange->get_result();
+          }
+          else
+            return collective_lamport_clock; 
+        }
+        // Otherwise we're going to fall through and do the allreduce
+        if (collective_exchange == NULL)
+        {
+          collective_exchange =
+              new AllReduceCollective<MaxReduction<uint64_t>,false>(
+                  repl_ctx, collective_exchange_id);
+          commit_preconditions.insert(
+                collective_exchange->get_done_event());
+        }
+      }
+      collective_exchange->async_all_reduce(collective_lamport_clock);
+      if (need_result)
+      {
+        collective_exchange->get_done_event().wait();
+        return collective_exchange->get_result();
+      }
+      else
+        return collective_lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMustEpochOp::finalize_concurrent_mapped(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(concurrent_mapped_barrier.exists());
+#endif
+      runtime->phase_barrier_arrive(concurrent_mapped_barrier,
+          1/*count*/, Runtime::merge_events(concurrent_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMustEpochOp::finish_concurrent_allreduce(void)
+    //--------------------------------------------------------------------------
+    {
+      concurrent_exchange->perform_concurrent_allreduce(concurrent_tasks,
+          concurrent_slices, concurrent_lamport_clock, concurrent_poisoned);
+    }
+
+    //--------------------------------------------------------------------------
     bool ReplMustEpochOp::has_return_resources(void) const
     //--------------------------------------------------------------------------
     {
@@ -5703,201 +5913,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::map_replicate_tasks(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(dependence_exchange != NULL);
-      assert(single_tasks.size() == mapping_dependences.size());
-#endif
-      std::vector<RtEvent> local_mapped_events;
-      local_mapped_events.reserve(shard_single_tasks.size());
-      for (std::set<SingleTask*>::const_iterator it = 
-            shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
-      {
-        const RtUserEvent mapped = Runtime::create_rt_user_event();
-        mapped_events[(*it)->index_point] = mapped;
-        local_mapped_events.push_back(mapped);
-      }
-      // Now exchange completion events for the point tasks we own
-      // and end up with a set of the completion event for each task
-      // First compute the set of mapped events for the points that we own
-      dependence_exchange->exchange_must_epoch_dependences(mapped_events);
-
-      MustEpochMapArgs args(const_cast<ReplMustEpochOp*>(this));
-      // For correctness we still have to abide by the mapping dependences
-      // computed on the individual tasks while we are mapping them
-      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-      {
-        // Check to see if it is one of the ones that we own
-        if (shard_single_tasks.find(single_tasks[idx]) == 
-            shard_single_tasks.end())
-        {
-          // We don't own this point
-          // We still need to do some work for individual tasks
-          // to exchange versioning information, but no such 
-          // work is necessary for point tasks
-          SingleTask *task = single_tasks[idx];
-          task->shard_off(mapped_events[task->index_point]);
-          continue;
-        }
-        // Figure out our preconditions
-        std::set<RtEvent> preconditions;
-        for (std::set<unsigned>::const_iterator it = 
-              mapping_dependences[idx].begin(); it != 
-              mapping_dependences[idx].end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert((*it) < idx);
-#endif
-          preconditions.insert(mapped_events[single_tasks[*it]->index_point]);
-        }
-        args.task = single_tasks[idx];
-        RtEvent done;
-        if (!preconditions.empty())
-        {
-          RtEvent precondition = Runtime::merge_events(preconditions);
-          runtime->issue_runtime_meta_task(args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
-        }
-        else
-          runtime->issue_runtime_meta_task(args, 
-                      LG_THROUGHPUT_DEFERRED_PRIORITY);
-      }
-      // Now we have to wait for all our mapping operations to be done
-      if (!local_mapped_events.empty())
-      {
-        RtEvent mapped_event = Runtime::merge_events(local_mapped_events);
-        mapped_event.wait();
-      }
-      mapped_events.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplMustEpochOp::distribute_replicate_tasks(void)
-    //--------------------------------------------------------------------------
-    {
-      // We only want to distribute the points that are owned by our shard
-      ReplMustEpochOp *owner = const_cast<ReplMustEpochOp*>(this);
-      MustEpochDistributorArgs dist_args(owner);
-      MustEpochLauncherArgs launch_args(owner);
-      std::set<RtEvent> wait_events;
-      // Count how many resource returns we expect to see as part of this
-      for (std::vector<IndividualTask*>::const_iterator it = 
-            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
-      {
-        // Skip any points that we do not own on this shard
-        if (shard_single_tasks.find(*it) == shard_single_tasks.end())
-          continue;
-        remaining_resource_returns++;
-        if (!runtime->is_local((*it)->target_proc))
-        {
-          dist_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-        else
-        {
-          launch_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(launch_args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      for (std::set<SliceTask*>::const_iterator it = 
-            slice_tasks.begin(); it != slice_tasks.end(); it++)
-      {
-        // Check to see if we either do or not own this slice
-        // We currently do not support mixed slices for which
-        // we only own some of the points
-        bool contains_any = false;
-        bool contains_all = true;
-        for (std::vector<PointTask*>::const_iterator pit = 
-              (*it)->points.begin(); pit != (*it)->points.end(); pit++)
-        {
-          if (shard_single_tasks.find(*pit) != shard_single_tasks.end())
-            contains_any = true;
-          else if (contains_all)
-          {
-            contains_all = false;
-            if (contains_any) // At this point we have all the answers
-              break;
-          }
-        }
-        if (!contains_any)
-          continue;
-        if (!contains_all)
-        {
-          Processor mapper_proc = parent_ctx->get_executing_processor();
-          MapperManager *mapper = runtime->find_mapper(mapper_proc, map_id);
-          REPORT_LEGION_FATAL(ERROR_INVALID_MAPPER_OUTPUT,
-                              "Mapper %s specified a slice for a must epoch "
-                              "launch in control replicated task %s "
-                              "(UID %lld) for which not all the points "
-                              "mapped to the same shard. Legion does not "
-                              "currently support this use case. Please "
-                              "specify slices and a sharding function to "
-                              "ensure that all the points in a slice are "
-                              "owned by the same shard", 
-                              mapper->get_mapper_name(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id())
-        }
-        remaining_resource_returns++;
-        (*it)->update_target_processor();
-        if (!runtime->is_local((*it)->target_proc))
-        {
-          dist_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-        else
-        {
-          launch_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(launch_args,
-                 LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      // Trigger this if we're not expecting to see any returns
-      if (remaining_resource_returns == 0)
-        runtime->phase_barrier_arrive(resource_return_barrier, 1/*count*/);
-      if (!wait_events.empty())
-      {
-        RtEvent dist_event = Runtime::merge_events(wait_events);
-        dist_event.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void ReplMustEpochOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mapping_collective_id == 0);
+      assert(collective_exchange_id == 0);
       assert(mapping_broadcast == NULL);
       assert(mapping_exchange == NULL);
-      assert(dependence_exchange == NULL);
-      assert(completion_exchange == NULL);
 #endif
       // We can't actually make a collective for the mapping yet because we 
       // don't know if we are going to broadcast or exchange so we just get
       // a collective ID that we will use later 
       mapping_collective_id = ctx->get_next_collective_index(COLLECTIVE_LOC_58);
-      dependence_exchange = 
-        new MustEpochDependenceExchange(ctx, COLLECTIVE_LOC_70);
-      completion_exchange = 
-        new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
+      dependence_exchange_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_70);
+      completion_exchange_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_73);
+      collective_exchange_id =
+        ctx->get_next_collective_index(COLLECTIVE_LOC_107);
+      concurrent_exchange = new ConcurrentAllreduce(COLLECTIVE_LOC_69, ctx); 
       resource_return_barrier = ctx->get_next_resource_return_barrier();
     }
 
@@ -5913,20 +5948,6 @@ namespace Legion {
       }
       else
         return launch_domain;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t ReplMustEpochOp::count_shard_local_points(IndexSpaceNode *domain)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock here, the shard_single_tasks shouldn't be
-      // changing anymore when we get here
-      size_t result = 0;
-      for (std::set<SingleTask*>::const_iterator it =
-            shard_single_tasks.begin(); it != shard_single_tasks.end(); it++)
-        if (domain->contains_point((*it)->index_point))
-          result++;
-      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -11161,7 +11182,8 @@ namespace Legion {
           if (all_shard_effects.exists())
             original_task->record_completion_effect(all_shard_effects);
           if (all_shards_complete.exists())
-            Runtime::trigger_event(NULL, all_shards_complete,all_shard_effects);
+            Runtime::trigger_event_untraced(all_shards_complete,
+                all_shard_effects);
           original_task->complete_execution();
         }
       }
@@ -12579,7 +12601,7 @@ namespace Legion {
       ApEvent complete = 
         manager->trigger_task_complete(false/*local*/, all_shards_done);
       if (all_shards_complete.exists())
-        Runtime::trigger_event(NULL, all_shards_complete, complete);
+        Runtime::trigger_event_untraced(all_shards_complete, complete);
     }
 
     //--------------------------------------------------------------------------
@@ -13995,7 +14017,8 @@ namespace Legion {
           instance_ready = instance->copy_from(pending.instance, op, 
              Runtime::merge_events(NULL, instance_ready, pending.precondition));
           if (pending.postcondition.exists())
-            Runtime::trigger_event(NULL, pending.postcondition, instance_ready);
+            Runtime::trigger_event_untraced(pending.postcondition,
+                instance_ready);
           delete pending.instance;
         }
         else
@@ -14006,7 +14029,7 @@ namespace Legion {
       assert(finished.exists());
 #endif
       // Trigger the finish event for the collective
-      Runtime::trigger_event(NULL, finished, instance_ready);
+      Runtime::trigger_event_untraced(finished, instance_ready);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -14018,7 +14041,7 @@ namespace Legion {
       assert(finished.exists());
 #endif
       // Clean up the finished event we aren't going to trigger
-      Runtime::trigger_event(NULL, finished);
+      Runtime::trigger_event_untraced(finished);
       // elide the collective for the base class
       AllGatherCollective<false>::elide_collective(); 
     }
@@ -14114,7 +14137,7 @@ namespace Legion {
           op, redop_id, redop, false/*exclusive*/, 
           Runtime::merge_events(NULL, instance_ready, it->second.precondition));
         if (it->second.postcondition.exists())
-          Runtime::trigger_event(NULL, it->second.postcondition, post);
+          Runtime::trigger_event_untraced(it->second.postcondition, post);
         delete it->second.instance;
         if (post.exists())
           postconditions.push_back(post);
@@ -14169,7 +14192,7 @@ namespace Legion {
         write_event = instance->copy_from(source, op, pre);
         ApUserEvent post;
         derez.deserialize(post);
-        Runtime::trigger_event(NULL, post, write_event);
+        Runtime::trigger_event_untraced(post, write_event);
       }
       else
         write_event = instance->copy_from(source, op, ApEvent::NO_AP_EVENT);
@@ -14186,7 +14209,7 @@ namespace Legion {
           read_events.push_back(write_event);
         write_event = Runtime::merge_events(NULL, read_events);
       }
-      Runtime::trigger_event(NULL, finished, write_event);
+      Runtime::trigger_event_untraced(finished, write_event);
       return postcondition;
     }
 
@@ -14194,7 +14217,7 @@ namespace Legion {
     void FutureBroadcastCollective::elide_collective(void)
     //--------------------------------------------------------------------------
     {
-      Runtime::trigger_event(NULL, finished);
+      Runtime::trigger_event_untraced(finished);
       BroadcastCollective::elide_collective();
     }
 
@@ -15091,14 +15114,14 @@ namespace Legion {
       }
       ApEvent done;
       derez.deserialize(done);
-      Runtime::trigger_event(NULL, done_event, done);
+      Runtime::trigger_event_untraced(done_event, done);
     }
 
     //--------------------------------------------------------------------------
     void DeppartResultScatter::broadcast_results(ApEvent done)
     //--------------------------------------------------------------------------
     {
-      Runtime::trigger_event(NULL, done_event, done);
+      Runtime::trigger_event_untraced(done_event, done);
       perform_collective_async();
     }
 
@@ -15802,20 +15825,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochDependenceExchange::MustEpochDependenceExchange(
-                             ReplicateContext *ctx, CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx)
+        CollectiveID id, ReplicateContext *ctx, 
+        std::map<DomainPoint,RtUserEvent> &events)
+      : AllGatherCollective(ctx, id), mapped_events(events)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochDependenceExchange::MustEpochDependenceExchange(
-                                         const MustEpochDependenceExchange &rhs)
-      : AllGatherCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -15825,23 +15839,13 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    MustEpochDependenceExchange& MustEpochDependenceExchange::operator=(
-                                         const MustEpochDependenceExchange &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochDependenceExchange::pack_collective_stage(ShardID target,
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(mapping_dependences.size());
+      rez.serialize<size_t>(mapped_events.size());
       for (std::map<DomainPoint,RtUserEvent>::const_iterator it = 
-            mapping_dependences.begin(); it != mapping_dependences.end(); it++)
+            mapped_events.begin(); it != mapped_events.end(); it++)
       {
         rez.serialize(it->first);
         rez.serialize(it->second);
@@ -15859,24 +15863,8 @@ namespace Legion {
       {
         DomainPoint point;
         derez.deserialize(point);
-        derez.deserialize(mapping_dependences[point]);
+        derez.deserialize(mapped_events[point]);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochDependenceExchange::exchange_must_epoch_dependences(
-                               std::map<DomainPoint,RtUserEvent> &mapped_events)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock c_lock(collective_lock);
-        for (std::map<DomainPoint,RtUserEvent>::const_iterator it = 
-              mapped_events.begin(); it != mapped_events.end(); it++)
-          mapping_dependences.insert(*it);
-      }
-      perform_collective_sync();
-      // No need to hold the lock after the collective is complete
-      mapped_events.swap(mapping_dependences);
     }
 
     /////////////////////////////////////////////////////////////
@@ -15885,20 +15873,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochCompletionExchange::MustEpochCompletionExchange(
-                             ReplicateContext *ctx, CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx)
+        CollectiveID id, ReplicateContext *ctx,
+        std::vector<RtEvent> &local_mapped,std::vector<ApEvent> &local_complete)
+      : AllGatherCollective(ctx, id), local_mapped_events(local_mapped),
+        local_complete_events(local_complete)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    MustEpochCompletionExchange::MustEpochCompletionExchange(
-                                         const MustEpochCompletionExchange &rhs)
-      : AllGatherCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -15908,28 +15888,32 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    MustEpochCompletionExchange& MustEpochCompletionExchange::operator=(
-                                         const MustEpochCompletionExchange &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochCompletionExchange::pack_collective_stage(ShardID target,
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(tasks_mapped.size());
-      for (std::set<RtEvent>::const_iterator it = 
-            tasks_mapped.begin(); it != tasks_mapped.end(); it++)
-        rez.serialize(*it);
-      rez.serialize<size_t>(tasks_complete.size());
-      for (std::set<ApEvent>::const_iterator it = 
-            tasks_complete.begin(); it != tasks_complete.end(); it++)
-        rez.serialize(*it);
+      if (local_mapped_events.size() > 1)
+      {
+        RtEvent next_local = Runtime::merge_events(local_mapped_events);
+        local_mapped_events.clear();
+        if (next_local.exists())
+          local_mapped_events.push_back(next_local);
+      }
+      if (local_complete_events.size() > 1)
+      {
+        ApEvent next_local = Runtime::merge_events(NULL, local_complete_events);
+        local_complete_events.clear();
+        if (next_local.exists())
+          local_complete_events.push_back(next_local);
+      }
+      if (local_mapped_events.empty())
+        rez.serialize(RtEvent::NO_RT_EVENT);
+      else
+        rez.serialize(local_mapped_events.back());
+      if (local_complete_events.empty())
+        rez.serialize(ApEvent::NO_AP_EVENT);
+      else
+        rez.serialize(local_complete_events.back());
     }
 
     //--------------------------------------------------------------------------
@@ -15937,40 +15921,24 @@ namespace Legion {
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
-      size_t num_mapped;
-      derez.deserialize(num_mapped);
-      for (unsigned idx = 0; idx < num_mapped; idx++)
-      {
-        RtEvent mapped;
-        derez.deserialize(mapped);
-        tasks_mapped.insert(mapped);
-      }
-      size_t num_complete;
-      derez.deserialize(num_complete);
-      for (unsigned idx = 0; idx < num_complete; idx++)
-      {
-        ApEvent complete;
-        derez.deserialize(complete);
-        tasks_complete.insert(complete);
-      }
+      RtEvent remote_mapped;
+      derez.deserialize(remote_mapped);
+      if (remote_mapped.exists())
+        local_mapped_events.push_back(remote_mapped);
+      ApEvent remote_complete;
+      derez.deserialize(remote_complete);
+      if (!remote_complete.exists())
+        local_complete_events.push_back(remote_complete);
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochCompletionExchange::exchange_must_epoch_completion(
-                                RtEvent mapped, ApEvent complete,
-                                std::set<RtEvent> &all_mapped,
-                                std::set<ApEvent> &all_complete)
+    RtEvent MustEpochCompletionExchange::finish_exchange(ReplMustEpochOp *op)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock c_lock(collective_lock);
-        tasks_mapped.insert(mapped);
-        tasks_complete.insert(complete);
-      }
-      perform_collective_sync();
-      // No need to hold the lock after the collective is complete
-      all_mapped.swap(tasks_mapped);
-      all_complete.swap(tasks_complete);
+      perform_collective_wait();
+      if (!local_complete_events.empty())
+        op->record_completion_effects(local_complete_events);
+      return Runtime::merge_events(local_mapped_events);
     }
 
     /////////////////////////////////////////////////////////////
@@ -17812,8 +17780,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcurrentAllreduce::ConcurrentAllreduce(ReplicateContext *ctx,
-        CollectiveID id, Color c, MultiTask::ConcurrentGroup &g)
-      : AllGatherCollective<false>(ctx, id, g.shards), color(c), group(g)
+        CollectiveID id, Color c, const std::vector<ShardID> &shards)
+      : AllGatherCollective<false>(ctx, id, shards), color(c)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentAllreduce::ConcurrentAllreduce(CollectiveIndexLocation loc,
+                                             ReplicateContext *ctx)
+      : AllGatherCollective<false>(loc, ctx), color(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -17825,14 +17801,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ConcurrentAllreduce::perform_concurrent_allreduce(
+                                              MultiTask::ConcurrentGroup &group)
+    //--------------------------------------------------------------------------
+    {
+      slice_tasks.swap(group.slice_tasks);
+      task_barrier = group.task_barrier;
+      lamport_clock = group.lamport_clock;
+      variant = group.variant;
+      poisoned = group.poisoned;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentAllreduce::perform_concurrent_allreduce(
+          std::vector<std::pair<IndividualTask*,AddressSpaceID> > &single,
+          std::vector<std::pair<SliceTask*,AddressSpace> > &slices,
+          uint64_t clock, bool poison)
+    //--------------------------------------------------------------------------
+    {
+      single_tasks.swap(single);
+      slice_tasks.swap(slices);
+      lamport_clock = clock;
+      variant = 0;
+      poisoned = poison;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
     void ConcurrentAllreduce::pack_collective_stage(ShardID target, 
                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(group.task_barrier);
-      rez.serialize(group.lamport_clock);
-      rez.serialize(group.variant);
-      rez.serialize<bool>(group.poisoned);
+      rez.serialize(task_barrier);
+      rez.serialize(lamport_clock);
+      rez.serialize(variant);
+      rez.serialize<bool>(poisoned);
     }
 
     //--------------------------------------------------------------------------
@@ -17842,20 +17846,20 @@ namespace Legion {
     {
       RtBarrier barrier;
       derez.deserialize(barrier);
-      if (!group.task_barrier.exists() && barrier.exists())
-        group.task_barrier = barrier;
-      uint64_t lamport_clock;
-      derez.deserialize(lamport_clock);
-      if (group.lamport_clock < lamport_clock)
-        group.lamport_clock = lamport_clock;
+      if (!task_barrier.exists() && barrier.exists())
+        task_barrier = barrier;
+      uint64_t clock;
+      derez.deserialize(clock);
+      if (lamport_clock < clock)
+        lamport_clock = clock;
       VariantID vid;
       derez.deserialize(vid);
-      if (group.variant != vid)
-        group.variant = std::min(group.variant, vid);
-      bool poisoned;
-      derez.deserialize<bool>(poisoned);
-      if (poisoned)
-        group.poisoned= true;
+      if (variant != vid)
+        variant = std::min(variant, vid);
+      bool poison;
+      derez.deserialize<bool>(poison);
+      if (poison)
+        poisoned= true;
     }
 
     //--------------------------------------------------------------------------
@@ -17863,8 +17867,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime;
+      // Pull these onto the stack in order to avoid a race with the caller
+      // cleaning up this object
+      std::vector<std::pair<IndividualTask*,AddressSpaceID> > local_tasks;
+      local_tasks.swap(single_tasks);
+      std::vector<std::pair<SliceTask*,AddressSpace> > local_slices;
+      local_slices.swap(slice_tasks);
+      for (std::vector<std::pair<IndividualTask*,
+            AddressSpaceID> >::const_iterator it =
+            local_tasks.begin(); it != local_tasks.end(); it++)
+      {
+        if (it->second != runtime->address_space)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->first);
+            rez.serialize(lamport_clock);
+            rez.serialize(poisoned);
+          }
+          runtime->send_individual_concurrent_allreduce_response(
+              it->second, rez);
+        }
+        else
+          it->first->finish_concurrent_allreduce(lamport_clock, poisoned);
+      }
       for (std::vector<std::pair<SliceTask*,AddressSpaceID> >::const_iterator
-            it = group.slice_tasks.begin(); it != group.slice_tasks.end(); it++)
+            it = local_slices.begin(); it != local_slices.end(); it++)
       {
         if (it->second != runtime->address_space)
         {
@@ -17873,17 +17902,16 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(it->first);
             rez.serialize(color);
-            rez.serialize(group.task_barrier);
-            rez.serialize(group.lamport_clock);
-            rez.serialize(group.variant);
-            rez.serialize(group.poisoned);
+            rez.serialize(task_barrier);
+            rez.serialize(lamport_clock);
+            rez.serialize(variant);
+            rez.serialize(poisoned);
           }
           runtime->send_slice_concurrent_allreduce_response(it->second, rez);
         }
         else
           it->first->finish_concurrent_allreduce(color,
-              group.lamport_clock, group.poisoned,
-              group.variant, group.task_barrier);
+              lamport_clock, poisoned, variant, task_barrier);
       }
       return RtEvent::NO_RT_EVENT;
     }

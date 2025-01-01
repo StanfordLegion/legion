@@ -98,7 +98,7 @@ namespace Legion {
       // If we had a to_trigger event we can trigger it now since we added
       // our own references to the sparsity map at this point to keep it alive
       if (to_trigger.exists())
-        Runtime::trigger_event(NULL, to_trigger);
+        Runtime::trigger_event_untraced(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -2423,7 +2423,8 @@ namespace Legion {
       if (!local_preconditions.empty())
         local_precondition = 
           Runtime::merge_events(&trace_info, local_preconditions);
-      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      Runtime::trigger_event(local_pre, local_precondition, trace_info,
+          map_applied_events);
       // Easy out if we're not moving anything
       if (copy_expr->is_empty())
         return local_pre;
@@ -2563,7 +2564,8 @@ namespace Legion {
       if (!local_preconditions.empty())
         local_precondition =
           Runtime::merge_events(&trace_info, local_preconditions);
-      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      Runtime::trigger_event(local_pre, local_precondition, trace_info,
+          map_applied_events);
       // Easy out if we're not going to move anything
       if (copy_expr->is_empty())
         return local_pre;
@@ -2716,7 +2718,8 @@ namespace Legion {
       if (!local_preconditions.empty())
         local_precondition = 
           Runtime::merge_events(&trace_info, local_preconditions);
-      Runtime::trigger_event(&trace_info, local_pre, local_precondition);
+      Runtime::trigger_event(local_pre, local_precondition, trace_info,
+          map_applied_events);
       // Quick out if there is nothing we're going to copy
       if (copy_expr->is_empty())
         return local_pre;
@@ -6271,13 +6274,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyAcrossExecutor::DeferCopyAcrossArgs::DeferCopyAcrossArgs(
         CopyAcrossExecutor *e, Operation *o, PredEvent g, ApEvent copy_pre,
-        ApEvent src_pre, ApEvent dst_pre, const PhysicalTraceInfo &info,
-        bool repl, bool recurrent, unsigned s)
+        ApEvent src_pre, ApEvent dst_pre, bool repl, bool recurrent, unsigned s)
       : LgTaskArgs<DeferCopyAcrossArgs>(o->get_unique_op_id()),
-        executor(e), op(o), trace_info(new PhysicalTraceInfo(info)), guard(g),
-        copy_precondition(copy_pre), src_indirect_precondition(src_pre),
-        dst_indirect_precondition(dst_pre), 
-        done_event(Runtime::create_ap_user_event(trace_info)),
+        executor(e), op(o), guard(g), copy_precondition(copy_pre),
+        src_indirect_precondition(src_pre), dst_indirect_precondition(dst_pre), 
+        done_event(Runtime::create_ap_user_event(NULL)),
         stage(s+1), replay(repl), recurrent_replay(recurrent)
     //--------------------------------------------------------------------------
     {
@@ -6290,14 +6291,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferCopyAcrossArgs *dargs = (const DeferCopyAcrossArgs*)args;
-      Runtime::trigger_event(dargs->trace_info, dargs->done_event,
-          dargs->executor->execute(dargs->op, dargs->guard, 
-            dargs->copy_precondition, dargs->src_indirect_precondition, 
-            dargs->dst_indirect_precondition, *dargs->trace_info,
+      // Dummy trace info since we can't be tracing if we're here
+      const PhysicalTraceInfo trace_info(dargs->op, -1U);
+      Runtime::trigger_event_untraced(dargs->done_event,
+          dargs->executor->execute(dargs->op, dargs->guard,
+            dargs->copy_precondition, dargs->src_indirect_precondition,
+            dargs->dst_indirect_precondition, trace_info,
             dargs->replay, dargs->recurrent_replay, dargs->stage));
       if (dargs->executor->remove_reference())
         delete dargs->executor;
-      delete dargs->trace_info;
     }
 
     /////////////////////////////////////////////////////////////

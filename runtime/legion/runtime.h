@@ -1333,7 +1333,7 @@ namespace Legion {
                                  const std::vector<MapperID> &thieves);
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
-      void add_to_ready_queue(TaskOp *op);
+      void add_to_ready_queue(SingleTask *task);
     public:
       inline bool is_visible_memory(Memory memory) const
         { return (visible_memories.find(memory) != visible_memories.end()); }
@@ -1414,7 +1414,7 @@ namespace Legion {
         MapperState(void)
           : queue_guard(false) { }
       public:
-        std::list<TaskOp*> ready_queue;
+        std::list<SingleTask*> ready_queue;
         RtEvent deferral_event;
         RtUserEvent queue_waiter;
         bool queue_guard;
@@ -2137,7 +2137,7 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager &rhs) = delete;
     public:
-      inline void send_message(MessageKind message, Serializer &rez, bool flush,
+      void send_message(MessageKind message, Serializer &rez, bool flush,
                         bool response = false,
                         RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       void receive_message(const void *args, size_t arglen);
@@ -3352,8 +3352,9 @@ namespace Legion {
       void send_message(MessageKind message, AddressSpaceID space,
           Serializer &rez, bool flush = true, bool response = false);
       void send_startup_barrier(AddressSpaceID target, Serializer &rez);
-      void send_task(TaskOp *task);
-      void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
+      void send_task(IndividualTask *task);
+      void send_task(SliceTask *task);
+      void send_tasks(Processor target, std::vector<SingleTask*> &tasks);
       void send_steal_request(const std::multimap<Processor,MapperID> &targets,
                               Processor thief);
       void send_advertisements(const std::set<Processor> &targets,
@@ -3447,6 +3448,10 @@ namespace Legion {
       void send_individual_remote_mapped(Processor target, Serializer &rez);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
+      void send_individual_concurrent_allreduce_request(Processor target,
+                                                        Serializer &rez);
+      void send_individual_concurrent_allreduce_response(AddressSpaceID target,
+                                                         Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
       void send_slice_remote_complete(Processor target, Serializer &rez);
       void send_slice_remote_commit(Processor target, Serializer &rez);
@@ -3895,6 +3900,9 @@ namespace Legion {
       void handle_individual_remote_mapped(Deserializer &derez);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
+      void handle_individual_concurrent_request(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_individual_concurrent_response(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
@@ -4277,7 +4285,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void add_to_ready_queue(Processor p, TaskOp *task_op);
+      void add_to_ready_queue(Processor p, SingleTask *task);
     public:
       inline Processor find_local_group(void) { return local_group; }
       inline Processor find_utility_group(void) { return utility_group; }
@@ -4528,6 +4536,7 @@ namespace Legion {
         { return (uid % total_address_spaces); } 
     public:
       bool is_local(Processor proc) const;
+      ProcessorManager* find_processor_manager(Processor proc) const;
       bool is_visible_memory(Processor proc, Memory mem);
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
       Memory find_local_memory(Processor proc, Memory::Kind mem_kind);
@@ -5183,8 +5192,11 @@ namespace Legion {
       static inline RtEvent merge_events(const std::vector<RtEvent> &events);
     public:
       static inline ApUserEvent create_ap_user_event(const TraceInfo *info);
-      static inline void trigger_event(const TraceInfo *info, 
-          ApUserEvent to_trigger, ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline void trigger_event(ApUserEvent to_trigger,
+          ApEvent precondition, const TraceInfo &info,
+          std::set<RtEvent> &applied_events);
+      static inline void trigger_event_untraced(ApUserEvent to_trigger,
+          ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
     public:
       static inline RtUserEvent create_rt_user_event(void);
@@ -5789,7 +5801,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::trigger_event(const TraceInfo *info,
+    /*static*/ inline void Runtime::trigger_event_untraced(
                                    ApUserEvent to_trigger, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -5804,8 +5816,26 @@ namespace Legion {
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_trigger_event(to_trigger, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(ApUserEvent to_trigger,
+        ApEvent precondition, const TraceInfo &info, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_trigger(to_trigger, precondition);
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger(precondition);
+#ifdef LEGION_SPY
+      LegionSpy::log_ap_user_event_trigger(to_trigger);
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, to_trigger);
+#endif
+      if (info.recording)
+        info.record_trigger_event(to_trigger, precondition, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -6437,6 +6467,10 @@ namespace Legion {
           return TASK_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_COMMIT:
           return TASK_VIRTUAL_CHANNEL;
+        case INDIVIDUAL_CONCURRENT_REQUEST:
+          break;
+        case INDIVIDUAL_CONCURRENT_RESPONSE:
+          break;
         case SLICE_REMOTE_MAPPED:
           return TASK_VIRTUAL_CHANNEL;
         case SLICE_REMOTE_COMPLETE:

@@ -1007,12 +1007,10 @@ namespace Legion {
       public:
         DeferCopyAcrossArgs(CopyAcrossExecutor *e, Operation *o, 
             PredEvent guard, ApEvent copy_pre, ApEvent src_pre,
-            ApEvent dst_pre, const PhysicalTraceInfo &info,
-            bool replay, bool recurrent, unsigned stage);
+            ApEvent dst_pre, bool replay, bool recurrent, unsigned stage);
       public:
         CopyAcrossExecutor *const executor;
         Operation *const op;
-        PhysicalTraceInfo *const trace_info;
         const PredEvent guard;
         const ApEvent copy_precondition;
         const ApEvent src_indirect_precondition;

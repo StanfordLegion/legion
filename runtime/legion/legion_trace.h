@@ -1036,12 +1036,14 @@ namespace Legion {
       void initialize_concurrent_groups(IndexTask *task);
     public:
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
-                          const TraceLocalID &tlid, bool register_memo);
+                          const TraceLocalID &tlid, bool register_memo,
+                          std::set<RtEvent> &applied_events);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid);
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                        const TraceLocalID &tlid);
+                                        const TraceLocalID &tlid,
+                                        std::set<RtEvent> &applied);
     public:
       virtual void record_merge_events(ApEvent &lhs, ApEvent rhs,
                                        const TraceLocalID &tlid);
@@ -1407,7 +1409,8 @@ namespace Legion {
       virtual void finish_replay(FenceOp *op,std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                        const TraceLocalID &tlid);
+                                        const TraceLocalID &tlid,
+                                        std::set<RtEvent> &applied);
       using PhysicalTemplate::record_merge_events;
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::set<ApEvent>& rhs,
