@@ -5175,8 +5175,11 @@ namespace Legion {
       static inline RtEvent merge_events(const std::vector<RtEvent> &events);
     public:
       static inline ApUserEvent create_ap_user_event(const TraceInfo *info);
-      static inline void trigger_event(const TraceInfo *info, 
-          ApUserEvent to_trigger, ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline void trigger_event(ApUserEvent to_trigger,
+          ApEvent precondition, const TraceInfo &info,
+          std::set<RtEvent> &applied_events);
+      static inline void trigger_event_untraced(ApUserEvent to_trigger,
+          ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
     public:
       static inline RtUserEvent create_rt_user_event(void);
@@ -5781,7 +5784,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline void Runtime::trigger_event(const TraceInfo *info,
+    /*static*/ inline void Runtime::trigger_event_untraced(
                                    ApUserEvent to_trigger, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -5796,8 +5799,26 @@ namespace Legion {
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
 #endif
-      if ((info != NULL) && info->recording)
-        info->record_trigger_event(to_trigger, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(ApUserEvent to_trigger,
+        ApEvent precondition, const TraceInfo &info, std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      // Record trigger event timing first since it might be expensive
+      // to actually propagate the triggered event
+      if (implicit_profiler != NULL)
+        implicit_profiler->record_event_trigger(to_trigger, precondition);
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger(precondition);
+#ifdef LEGION_SPY
+      LegionSpy::log_ap_user_event_trigger(to_trigger);
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, to_trigger);
+#endif
+      if (info.recording)
+        info.record_trigger_event(to_trigger, precondition, applied);
     }
 
     //--------------------------------------------------------------------------

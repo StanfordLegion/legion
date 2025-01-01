@@ -944,7 +944,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(it->second.read_events.empty());
 #endif
-          Runtime::trigger_event(NULL, it->second.remote_postcondition,
+          Runtime::trigger_event_untraced(it->second.remote_postcondition,
               it->second.ready_event);
           delete it->second.instance;
         }
@@ -2016,7 +2016,7 @@ namespace Legion {
           if (!it->second.instance->defer_deletion(ApEvent::NO_AP_EVENT))
             delete it->second.instance;
           if (it->second.inst_ready.exists())
-            Runtime::trigger_event(NULL, it->second.inst_ready);
+            Runtime::trigger_event_untraced(it->second.inst_ready);
         }
         pending_instances.clear();
       }
@@ -2051,7 +2051,7 @@ namespace Legion {
         // user event that we need to trigger
         ApUserEvent to_trigger;
         to_trigger.id = future_complete.id;
-        Runtime::trigger_event(NULL, to_trigger, complete);
+        Runtime::trigger_event_untraced(to_trigger, complete);
       }
       else
         future_complete = complete;
@@ -2090,7 +2090,7 @@ namespace Legion {
         {
           // If we do then we just trigger any events that we need to
           if (it->second.inst_ready.exists())
-            Runtime::trigger_event(NULL, it->second.inst_ready,
+            Runtime::trigger_event_untraced(it->second.inst_ready,
                 finder->second.ready_event);
           // Delete the instance we had made since it can't have escaped
           // yet and therefore we can replace it with the new instance
@@ -2101,7 +2101,7 @@ namespace Legion {
         ApEvent inst_ready =
           record_instance(it->second.instance, it->second.creator_uid);
         if (it->second.inst_ready.exists())
-          Runtime::trigger_event(NULL, it->second.inst_ready, inst_ready);
+          Runtime::trigger_event_untraced(it->second.inst_ready, inst_ready);
       }
       pending_instances.clear();
     }
@@ -2226,7 +2226,7 @@ namespace Legion {
       {
         // This is a remote instance that we don't own so once we're
         // done with the copy we can clean it up
-        Runtime::trigger_event(NULL, tracker.remote_postcondition, ready_event);
+        Runtime::trigger_event_untraced(tracker.remote_postcondition, ready_event);
         delete tracker.instance;
         instances.erase(source);
       }
@@ -2498,9 +2498,9 @@ namespace Legion {
               // Issue the copy to the pending instance
               ApEvent ready = pending->second.instance->copy_from(instance,
                     pending->second.creator_uid, precondition);
-              Runtime::trigger_event(NULL, postcondition, ready);
+              Runtime::trigger_event_untraced(postcondition, ready);
               if (pending->second.inst_ready.exists())
-                Runtime::trigger_event(NULL, pending->second.inst_ready, ready);
+                Runtime::trigger_event_untraced(pending->second.inst_ready, ready);
               instances.emplace(std::make_pair(pending->second.instance->memory,
                     FutureInstanceTracker(pending->second.instance, ready)));
 #ifdef DEBUG_LEGION
@@ -2520,7 +2520,7 @@ namespace Legion {
         to_trigger.id = future_complete.id;
         ApEvent precondition;
         derez.deserialize(precondition);
-        Runtime::trigger_event(NULL, to_trigger, precondition);
+        Runtime::trigger_event_untraced(to_trigger, precondition);
       }
       else
         derez.deserialize(future_complete);
@@ -5256,7 +5256,7 @@ namespace Legion {
       assert(termination_event.exists());
 #endif
       // trigger the termination event conditional upon the ready event
-      Runtime::trigger_event(NULL, termination_event, ready_event);
+      Runtime::trigger_event_untraced(termination_event, ready_event);
 #ifdef LEGION_SPY
       // This is a really mind-bending corner case so be prepared 
       // If we're doing a trace replay and we actually end up replaying a 
@@ -8350,7 +8350,7 @@ namespace Legion {
         // Trigger the ready event with the precondition to keep
         // tools like Legion Spy happy even though we know that
         // the precondition event has already triggered
-        Runtime::trigger_event(NULL, finder->second.ready, 
+        Runtime::trigger_event_untraced(finder->second.ready, 
             finder->second.precondition);
         concurrent_tasks.erase(finder);
         ready_concurrent_tasks--;

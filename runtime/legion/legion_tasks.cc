@@ -2715,7 +2715,7 @@ namespace Legion {
       {
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
             orig_proc.address_space(), get_trace_local_id(), tpl,
-            0/*did*/, 0/*tid*/, map_applied_conditions);
+            0/*did*/, 0/*tid*/);
         remote_trace_recorder->add_recorder_reference();
 #ifdef DEBUG_LEGION
         assert(!single_task_termination.exists());
@@ -4282,7 +4282,8 @@ namespace Legion {
       // If we'r recording then record the replay map task
       if (is_recording())
         trace_info.record_replay_mapping(single_task_termination,
-            TASK_OP_KIND, (get_task_kind() != INDIVIDUAL_TASK_KIND));
+            TASK_OP_KIND, (get_task_kind() != INDIVIDUAL_TASK_KIND),
+            map_applied_conditions);
       ApEvent init_precondition = compute_sync_precondition(trace_info);
       // After we've got our results, apply the state to the region tree
       size_t region_count = get_region_count();
@@ -5246,7 +5247,7 @@ namespace Legion {
 #endif
             // Trigger the user event when the region is 
             // actually ready to be used
-            Runtime::trigger_event(NULL, unmap_events[idx],
+            Runtime::trigger_event_untraced(unmap_events[idx],
                                    region_preconditions[idx]);
           }
           else
@@ -5437,11 +5438,12 @@ namespace Legion {
         }
         // Protect the single task termination from the poison
         if (chain_task_termination.exists())
-          Runtime::trigger_event(NULL, chain_task_termination,
+          Runtime::trigger_event_untraced(chain_task_termination,
               Runtime::ignorefaults(task_launch_event));
       }
       else if (chain_task_termination.exists())
-        Runtime::trigger_event(NULL, chain_task_termination, task_launch_event);
+        Runtime::trigger_event_untraced(chain_task_termination,
+            task_launch_event);
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
@@ -5721,7 +5723,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (single_task_termination.exists())
-        Runtime::trigger_event(NULL, single_task_termination,termination_event);
+        Runtime::trigger_event_untraced(single_task_termination,
+            termination_event);
       else // happens with implicit top-level tasks
         record_completion_effect(termination_event);
     } 

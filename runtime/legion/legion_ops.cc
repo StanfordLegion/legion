@@ -2139,7 +2139,7 @@ namespace Legion {
           if (completion_event.pending.exists())
           {
             ApUserEvent to_trigger = completion_event.pending;
-            Runtime::trigger_event(NULL, to_trigger, effects);
+            Runtime::trigger_event_untraced(to_trigger, effects);
             completion_event.effects = to_trigger;
           }
           else
@@ -2164,7 +2164,7 @@ namespace Legion {
           if (completion_event.pending.exists())
           {
             ApUserEvent to_trigger = completion_event.pending;
-            Runtime::trigger_event(NULL, to_trigger, effects);
+            Runtime::trigger_event_untraced(to_trigger, effects);
             completion_event.effects = to_trigger;
           }
           else
@@ -4875,7 +4875,7 @@ namespace Legion {
       // Map operations do not wait for the unmapping to be considered complete
       record_completion_effect(map_complete_event);
       // We can trigger the ready event now that we know its precondition
-      Runtime::trigger_event(NULL, ready_event, map_complete_event);
+      Runtime::trigger_event_untraced(ready_event, map_complete_event);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       RtEvent mapping_applied;
@@ -7279,7 +7279,8 @@ namespace Legion {
         if (!copy_post.exists())
           copy_post = execution_fence_event;
       }
-      Runtime::trigger_event(&trace_info, local_postcondition, copy_post);
+      Runtime::trigger_event(local_postcondition, copy_post, trace_info,
+                             applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&src_requirements[index], index);
       dump_physical_state(&dst_requirements[index], 
@@ -8918,15 +8919,17 @@ namespace Legion {
         {
           exchange.local_preconditions.insert(local_pre);
           if (exchange.local_preconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_pre, 
-              Runtime::merge_events(&trace_info, exchange.local_preconditions));
+            Runtime::trigger_event(exchange.collective_pre, 
+              Runtime::merge_events(&trace_info, exchange.local_preconditions),
+              trace_info, map_applied_conditions);
         }
         if (exchange.local_postconditions.size() < points.size())
         {
           exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_post, 
-             Runtime::merge_events(&trace_info, exchange.local_postconditions));
+            Runtime::trigger_event(exchange.collective_post, 
+             Runtime::merge_events(&trace_info, exchange.local_postconditions),
+             trace_info, map_applied_conditions);
         }
 #ifdef DEBUG_LEGION
         assert(copies[index].src_indirect_records.size() < points.size());
@@ -8955,15 +8958,17 @@ namespace Legion {
         {
           exchange.local_preconditions.insert(local_pre);
           if (exchange.local_preconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_pre,
-              Runtime::merge_events(&trace_info, exchange.local_preconditions));
+            Runtime::trigger_event(exchange.collective_pre,
+              Runtime::merge_events(&trace_info, exchange.local_preconditions),
+              trace_info, map_applied_conditions);
         }
         if (exchange.local_postconditions.size() < points.size())
         {
           exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_post,
-             Runtime::merge_events(&trace_info, exchange.local_postconditions));
+            Runtime::trigger_event(exchange.collective_post,
+             Runtime::merge_events(&trace_info, exchange.local_postconditions),
+             trace_info, map_applied_conditions);
         }
 #ifdef DEBUG_LEGION
         assert(copies[index].dst_indirect_records.size() < points.size());
@@ -11332,7 +11337,8 @@ namespace Legion {
                                               false/*check collective*/,
                                               true/*record valid*/,
                                               false/*check initialized*/);
-      Runtime::trigger_event(&trace_info, close_event, instances_ready);
+      Runtime::trigger_event(close_event, instances_ready,
+          trace_info, map_applied_conditions);
       record_completion_effect(close_event);
       log_mapping_decision(0/*idx*/, requirement, target_instances);
       // No need to apply our mapping because we are done!
@@ -12188,7 +12194,8 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      Runtime::trigger_event(&trace_info, acquire_post, acquire_complete);
+      Runtime::trigger_event(acquire_post, acquire_complete,
+          trace_info, map_applied_conditions);
       record_completion_effect(acquire_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
@@ -12993,7 +13000,8 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      Runtime::trigger_event(&trace_info, release_post, release_complete);
+      Runtime::trigger_event(release_post, release_complete,
+          trace_info, map_applied_conditions);
       record_completion_effect(release_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
@@ -16798,7 +16806,8 @@ namespace Legion {
                                                 record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                    instances_ready, mapped_instances, trace_info, index_point);
-      Runtime::trigger_event(&trace_info, part_done, done_event);
+      Runtime::trigger_event(part_done, done_event, trace_info,
+          map_applied_conditions);
       record_completion_effect(part_done);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event, part_done);
@@ -16868,10 +16877,11 @@ namespace Legion {
           const FieldID fid = *(requirement.privilege_fields.begin());
           ApEvent done_event = thunk->perform(this, runtime->forest, fid,
               Runtime::merge_events(&info, index_preconditions), instances);
-          Runtime::trigger_event(&info, intermediate_index_event, done_event);
+          Runtime::trigger_event(intermediate_index_event, done_event, info,
+              map_applied_conditions);
         }
         if (to_trigger.exists())
-          Runtime::trigger_event(NULL, to_trigger, intermediate_index_event);
+          Runtime::trigger_event_untraced(to_trigger, intermediate_index_event);
         return intermediate_index_event;
       }
       else
@@ -16898,7 +16908,7 @@ namespace Legion {
         ApEvent result = thunk->perform(this, runtime->forest, fid,
                               instances_ready, instances);
         if (to_trigger.exists())
-          Runtime::trigger_event(NULL, to_trigger, result);
+          Runtime::trigger_event_untraced(to_trigger, result);
         return result;
       }
     }
@@ -20003,7 +20013,8 @@ namespace Legion {
                                                          map_applied_conditions,
                                                          restricted);
       log_mapping_decision(0/*idx*/, requirement, external_instances);
-      Runtime::trigger_event(&trace_info, attach_post, attach_event);
+      Runtime::trigger_event(attach_post, attach_event, trace_info,
+                             map_applied_conditions);
       record_completion_effect(attach_post);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
@@ -21306,7 +21317,8 @@ namespace Legion {
                                          version_info, references, detach_post,
                                          trace_info, map_applied_conditions,
                                          filter_precondition, flush);
-      Runtime::trigger_event(&trace_info, detach_post, detach_event);
+      Runtime::trigger_event(detach_post, detach_event, trace_info,
+                             map_applied_conditions);
       record_completion_effect(detach_post);
       log_mapping_decision(0/*idx*/, requirement, references);
 #ifdef LEGION_SPY
