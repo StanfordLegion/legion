@@ -964,7 +964,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
-        Runtime::trigger_event(NULL,use_event,fetch_metadata(instance,u_event));
+        Runtime::trigger_event_untraced(use_event,
+            fetch_metadata(instance,u_event));
       }
       else // add a resource reference to remove once this manager is set
         add_base_valid_ref(PENDING_UNBOUND_REF);
@@ -3509,8 +3510,8 @@ namespace Legion {
         if (is_owner() && has_remote_instances())
           broadcast_manager_update();
 
-        Runtime::trigger_event(
-            NULL, use_event, fetch_metadata(instance, producer_event));
+        Runtime::trigger_event_untraced(
+            use_event, fetch_metadata(instance, producer_event));
       }
       return remove_base_valid_ref(PENDING_UNBOUND_REF);
     }
