@@ -8549,6 +8549,17 @@ namespace Legion {
                                     const std::vector<DomainPoint> &dependences)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should have been caught by the caller
+      assert(!dependences.empty());
+#endif
+      if (dependences.size() == 1)
+      {
+#ifdef DEBUG_LEGION
+        assert(dependences.back() == index_point);
+#endif
+        return;
+      }
       if (concurrent_task)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
             "Concurrent index space task %s (UID %lld) has intra-index-space "
