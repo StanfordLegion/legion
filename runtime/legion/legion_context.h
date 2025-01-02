@@ -777,42 +777,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
       public:
-        DeferredEnqueueTaskArgs(TaskOp *t, InnerContext *ctx, 
+        DeferredEnqueueTaskArgs(SingleTask *t, InnerContext *ctx, 
                                 RtEvent pre, long long perf)
           : LgTaskArgs<DeferredEnqueueTaskArgs>(t->get_unique_op_id()),
             context(ctx), precondition(pre), 
-            previous_fevent(implicit_fevent), performed(perf) { }
-      public:
-        InnerContext *const context;
-        const RtEvent precondition;
-        const LgEvent previous_fevent;
-        const long long performed;
-      };
-      struct DeferredDistributeTaskArgs : 
-        public LgTaskArgs<DeferredDistributeTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_DISTRIBUTE_TASK_ID;
-      public:
-        DeferredDistributeTaskArgs(TaskOp *op, InnerContext *ctx,
-                                   RtEvent pre, long long perf)
-          : LgTaskArgs<DeferredDistributeTaskArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre),
-            previous_fevent(implicit_fevent), performed(perf) { }
-      public:
-        InnerContext *const context;
-        const RtEvent precondition;
-        const LgEvent previous_fevent;
-        const long long performed;
-      };
-      struct DeferredLaunchTaskArgs :
-        public LgTaskArgs<DeferredLaunchTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_LAUNCH_TASK_ID;
-      public:
-        DeferredLaunchTaskArgs(TaskOp *op, InnerContext *ctx,
-                               RtEvent pre, long long perf)
-          : LgTaskArgs<DeferredLaunchTaskArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre),
             previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
@@ -1589,17 +1557,9 @@ namespace Legion {
       void add_to_ready_queue(Operation *op);
       bool process_ready_queue(void);
     public:
-      void add_to_task_queue(TaskOp *op, RtEvent ready);
+      void add_to_task_queue(SingleTask *task, RtEvent ready);
       bool process_enqueue_task_queue(RtEvent precondition, LgEvent fevent,
                                       long long performed);
-    public:
-      void add_to_distribute_task_queue(TaskOp *op, RtEvent ready);
-      bool process_distribute_task_queue(RtEvent precondition, LgEvent fevent,
-                                         long long performed);
-    public:
-      void add_to_launch_task_queue(TaskOp *op, RtEvent ready);
-      bool process_launch_task_queue(RtEvent precondition, LgEvent fevent,
-                                     long long performed);
     public:
       void add_to_trigger_execution_queue(Operation *op, RtEvent ready);
       bool process_trigger_execution_queue(RtEvent precondition,
@@ -1806,7 +1766,6 @@ namespace Legion {
       static void handle_dependence_stage(const void *args);
       static void handle_ready_queue(const void *args);
       static void handle_enqueue_task_queue(const void *args);
-      static void handle_distribute_task_queue(const void *args);
       static void handle_launch_task_queue(const void *args);
       static void handle_trigger_execution_queue(const void *args);
       static void handle_deferred_execution_queue(const void *args);
@@ -1978,16 +1937,8 @@ namespace Legion {
       std::deque<Operation*>                          ready_queue;
     protected:
       mutable LocalLock                               enqueue_task_lock;
-      std::list<QueueEntry<TaskOp*> >                 enqueue_task_queue;
+      std::list<QueueEntry<SingleTask*> >             enqueue_task_queue;
       CompletionQueue                                 enqueue_task_comp_queue;
-    protected:
-      mutable LocalLock                               distribute_task_lock;
-      std::list<QueueEntry<TaskOp*> >                 distribute_task_queue;
-      CompletionQueue                                distribute_task_comp_queue;
-    protected:
-      mutable LocalLock                               launch_task_lock;
-      std::list<QueueEntry<TaskOp*> >                 launch_task_queue;
-      CompletionQueue                                 launch_task_comp_queue;
     protected:
       mutable LocalLock                               trigger_execution_lock;
       std::list<QueueEntry<Operation*> >              trigger_execution_queue;
@@ -3077,6 +3028,8 @@ namespace Legion {
         { return mapping_fence_barrier.next(this); }
       inline ApBarrier get_next_execution_fence_barrier(void)
         { return execution_fence_barrier.next(this); }
+      inline RtBarrier get_next_must_epoch_mapped_barrier(void)
+        { return must_epoch_mapped_barrier.next(this); }
       inline RtBarrier get_next_resource_return_barrier(void)
         { return resource_return_barrier.next(this); }
       inline RtBarrier get_next_summary_fence_barrier(void)
@@ -3291,6 +3244,7 @@ namespace Legion {
       RtReplBar attach_resource_barrier;
       ApLogicalBar detach_effects_barrier;
       RtLogicalBar mapping_fence_barrier;
+      RtReplBar must_epoch_mapped_barrier;
       RtReplBar resource_return_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
