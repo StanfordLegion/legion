@@ -3503,7 +3503,6 @@ namespace Legion {
       DomainPoint shard_point;
       Domain shard_domain;
       DistributedID repl_id;
-      std::map<ShardingID,ShardingFunction*> sharding_functions;
     };
 
     /**
