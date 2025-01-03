@@ -25675,10 +25675,17 @@ namespace Legion {
       task_local_instances.erase(finder);
       std::map<Memory,MemoryPool*>::const_iterator pool_finder =
         memory_pools.find(instance.get_location());
-#ifdef DEBUG_LEGION
-      assert(pool_finder != memory_pools.end());
-#endif
-      pool_finder->second->free_instance(instance, precondition);
+      if (pool_finder == memory_pools.end())
+      {
+        // This case occurs when the user has taken the unsafe path in
+        // the instance creation code above and needs to delete this
+        // instance that is not associated with any pool
+        MemoryManager *manager = 
+          runtime->find_memory_manager(instance.get_location());
+        manager->free_task_local_instance(instance, precondition);
+      }
+      else
+        pool_finder->second->free_instance(instance, precondition);
     }
 
     //--------------------------------------------------------------------------
