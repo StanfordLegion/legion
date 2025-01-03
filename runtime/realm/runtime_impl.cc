@@ -2967,16 +2967,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
         Network::single_network = 0;
 
-        // clean up all the module configs
-        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
-            it != module_configs.end(); it++) {
-          delete(it->second);
-          it->second = nullptr;
-        }
-
-        // dlclose all dynamic module handles
-        module_registrar.unload_module_sofiles();
-
         delete[] nodes;
         delete local_event_free_list;
         delete local_barrier_free_list;
@@ -2997,6 +2987,18 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         Network::shared_peers.clear();
 
         NodeSetBitmask::free_allocations();
+
+        // clean up all the module configs only after cleaning pu the local state in
+        // case some of them might still need to refer to it during deletion
+        // e.g. the sparsity map impl class
+        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
+            it != module_configs.end(); it++) {
+          delete(it->second);
+          it->second = nullptr;
+        }
+
+        // dlclose all dynamic module handles
+        module_registrar.unload_module_sofiles();
       }
 
       if (!Threading::cleanup())
