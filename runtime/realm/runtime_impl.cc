@@ -2967,8 +2967,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
         Network::single_network = 0;
 
-        
-
         delete[] nodes;
         delete local_event_free_list;
         delete local_barrier_free_list;
