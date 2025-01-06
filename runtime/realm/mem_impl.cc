@@ -1081,9 +1081,9 @@ namespace Realm {
       // Finish setting up the new instances with the results
       if(offsets_valid) {
         for(unsigned idx = 0; idx < num_insts; idx++) {
-          new_insts[idx]->notify_allocation(
-              (idx < allocated) ? ALLOC_INSTANT_SUCCESS : ALLOC_INSTANT_FAILURE,
-              offsets[idx], TimeLimit::responsive());
+          new_insts[idx]->notify_allocation((idx < allocated) ? ALLOC_INSTANT_SUCCESS
+                                                              : ALLOC_INSTANT_FAILURE,
+                                            offsets[idx], TimeLimit::responsive());
         }
       }
       if(!successful_allocs.empty()) {
@@ -1650,8 +1650,8 @@ namespace Realm {
   {
     if(!redistrict_tags.empty()) {
       std::vector<size_t> offsets(redistrict_tags.size(), 0);
-      allocator.split_range(inst->me, redistrict_tags,
-          redistrict_sizes, redistrict_alignments, offsets);
+      allocator.split_range(inst->me, redistrict_tags, redistrict_sizes,
+                            redistrict_alignments, offsets);
     } else {
       allocator.deallocate(inst->me, missing_ok);
     }
