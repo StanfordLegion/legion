@@ -1081,11 +1081,9 @@ namespace Realm {
       // Finish setting up the new instances with the results
       if(offsets_valid) {
         for(unsigned idx = 0; idx < num_insts; idx++) {
-          new_insts[idx]->notify_allocation(
-              (idx < allocated)
-                  ? (triggered ? ALLOC_INSTANT_SUCCESS : ALLOC_EVENTUAL_SUCCESS)
-                  : (triggered ? ALLOC_INSTANT_FAILURE : ALLOC_EVENTUAL_FAILURE),
-              offsets[idx], TimeLimit::responsive());
+          new_insts[idx]->notify_allocation((idx < allocated) ? ALLOC_INSTANT_SUCCESS
+                                                              : ALLOC_INSTANT_FAILURE,
+                                            offsets[idx], TimeLimit::responsive());
         }
       }
       if(!successful_allocs.empty()) {
@@ -1633,25 +1631,27 @@ namespace Realm {
   void LocalManagedMemory::PendingRelease::record_redistrict(
       const std::vector<RegionInstanceImpl *> &insts)
   {
-    assert(redistrict_insts.empty());
-    redistrict_insts = insts;
+    assert(redistrict_tags.empty());
+    // Need to pull these local because the insts might already have been
+    // created and destroyed before we get around to doing the pending release
+    const size_t num_insts = insts.size();
+    redistrict_tags.resize(num_insts);
+    redistrict_sizes.resize(num_insts);
+    redistrict_alignments.resize(num_insts);
+    for(size_t i = 0; i < num_insts; i++) {
+      redistrict_tags[i] = insts[i]->me;
+      redistrict_sizes[i] = insts[i]->metadata.layout->bytes_used;
+      redistrict_alignments[i] = insts[i]->metadata.layout->alignment_reqd;
+    }
   }
 
   void LocalManagedMemory::PendingRelease::release(RangeAllocator &allocator,
                                                    bool missing_ok)
   {
-    if(!redistrict_insts.empty()) {
-      const size_t num_insts = redistrict_insts.size();
-      std::vector<RegionInstance> tags(num_insts);
-      std::vector<size_t> sizes(num_insts);
-      std::vector<size_t> alignments(num_insts);
-      for(size_t i = 0; i < num_insts; i++) {
-        sizes[i] = redistrict_insts[i]->metadata.layout->bytes_used;
-        alignments[i] = redistrict_insts[i]->metadata.layout->alignment_reqd;
-        tags[i] = redistrict_insts[i]->me;
-      }
-      std::vector<size_t> offsets(num_insts, 0);
-      allocator.split_range(inst->me, tags, sizes, alignments, offsets);
+    if(!redistrict_tags.empty()) {
+      std::vector<size_t> offsets(redistrict_tags.size(), 0);
+      allocator.split_range(inst->me, redistrict_tags, redistrict_sizes,
+                            redistrict_alignments, offsets);
     } else {
       allocator.deallocate(inst->me, missing_ok);
     }

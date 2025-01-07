@@ -342,7 +342,9 @@ namespace Realm {
       };
       struct PendingRelease {
 	RegionInstanceImpl *inst;
-        std::vector<RegionInstanceImpl *> redistrict_insts;
+        std::vector<RegionInstance> redistrict_tags;
+        std::vector<size_t> redistrict_sizes;
+        std::vector<size_t> redistrict_alignments;
         bool is_ready;
         unsigned seqid;
 
