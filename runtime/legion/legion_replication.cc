@@ -1278,27 +1278,6 @@ namespace Legion {
             ConcurrentGroup &group = concurrent_groups[0];
             group.precondition.interpreted = Runtime::create_rt_user_event();
             group.color_points = launch_space->get_volume();
-            if (is_recording())
-            {
-              // See if we're the shard that owns the first point in the
-              // launch, if we are then we're the one to make the barrier
-              Domain launch_domain = launch_space->get_tight_domain();
-              Domain sharding_domain;
-              if (sharding_space.exists())
-                runtime->forest->find_domain(sharding_space, sharding_domain);
-              else
-                sharding_domain = launch_domain;
-              Domain::DomainPointIterator itr(launch_domain);
-              ShardID first_nonempty_shard = 
-                sharding_function->find_owner(*itr, sharding_domain);
-              if (first_nonempty_shard == repl_ctx->owner_shard->shard_id)
-              {
-                const RtBarrier barrier =
-                  runtime->create_rt_barrier(group.color_points);
-                concurrent_mapping_rendezvous->set_trace_barrier(
-                    0, barrier, group.color_points);
-              }
-            }
           }
           else
           {
@@ -1312,58 +1291,6 @@ namespace Legion {
               if (concurrent_groups.find(color) == concurrent_groups.end())
                 concurrent_groups[color].precondition.interpreted =
                   Runtime::create_rt_user_event();
-            }
-            if (is_recording())
-            {
-              // Iterate the whole index domain and find all the points
-              // that map to colors that we have on this shard so we can
-              // count how many arrivals there are and determine if we're
-              // the lowest shard to have a point with this color in which
-              // case we're also going to make the barrier for this color
-              Domain launch_domain = launch_space->get_tight_domain();
-              Domain sharding_domain;
-              if (sharding_space.exists())
-                runtime->forest->find_domain(sharding_space, sharding_domain);
-              else
-                sharding_domain = launch_domain;
-              for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-              {
-                Color color = functor->color(*itr, index_domain);
-                std::map<Color,ConcurrentGroup>::iterator finder =
-                  concurrent_groups.find(color);
-                // Not one of our local colors then we don't care about it
-                if (finder == concurrent_groups.end())
-                  continue;
-                finder->second.color_points++;
-                // Compute the shard for this point
-                ShardID color_shard = 
-                  sharding_function->find_owner(*itr, sharding_domain);
-                if (!std::binary_search(finder->second.shards.begin(),
-                      finder->second.shards.end(), color_shard))
-                {
-                  finder->second.shards.push_back(color_shard);
-                  std::sort(finder->second.shards.begin(),
-                      finder->second.shards.end());
-                }
-              }
-              // See if our local shards is the smallest shard and make and
-              // record the barrier if we are
-              for (std::map<Color,ConcurrentGroup>::const_iterator it =
-                    concurrent_groups.begin(); it != 
-                    concurrent_groups.end(); it++)
-              {
-#ifdef DEBUG_LEGION
-                assert(!it->second.shards.empty());
-#endif
-                if (it->second.shards.front() == 
-                    repl_ctx->owner_shard->shard_id)
-                {
-                  const RtBarrier barrier = runtime->create_rt_barrier(
-                      it->second.color_points);
-                  concurrent_mapping_rendezvous->set_trace_barrier(
-                      it->first, barrier, it->second.color_points);
-                }
-              }
             }
           }
         }
@@ -1832,7 +1759,93 @@ namespace Legion {
       assert(concurrent_task);
       assert(!must_epoch_task);
       assert(concurrent_mapping_rendezvous != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      if (is_recording())
+      {
+        if (concurrent_functor == 0)
+        {
+          // The built-in concurrent coloring functor makes this easy
+          // since it always maps all the points to the same color
+          // See if we're the shard that owns the first point in the
+          // launch, if we are then we're the one to make the barrier
+          Domain launch_domain = launch_space->get_tight_domain();
+          Domain sharding_domain;
+          if (sharding_space.exists())
+            runtime->forest->find_domain(sharding_space, sharding_domain);
+          else
+            sharding_domain = launch_domain;
+          Domain::DomainPointIterator itr(launch_domain);
+          ShardID first_nonempty_shard = 
+            sharding_function->find_owner(*itr, sharding_domain);
+          if (first_nonempty_shard == repl_ctx->owner_shard->shard_id)
+          {
+            ConcurrentGroup &group = concurrent_groups[0];
+            const RtBarrier barrier =
+              runtime->create_rt_barrier(group.color_points);
+            concurrent_mapping_rendezvous->set_trace_barrier(
+                0, barrier, group.color_points);
+          }
+        }
+        else
+        {
+          // Not the built-in functor so we actually need to some work
+          ConcurrentColoringFunctor *functor =
+            runtime->find_concurrent_coloring_functor(concurrent_functor);
+          // Iterate the whole index domain and find all the points
+          // that map to colors that we have on this shard so we can
+          // count how many arrivals there are and determine if we're
+          // the lowest shard to have a point with this color in which
+          // case we're also going to make the barrier for this color
+          Domain launch_domain = launch_space->get_tight_domain();
+          Domain sharding_domain;
+          if (sharding_space.exists())
+            runtime->forest->find_domain(sharding_space, sharding_domain);
+          else
+            sharding_domain = launch_domain;
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            Color color = functor->color(*itr, index_domain);
+            std::map<Color,ConcurrentGroup>::iterator finder =
+              concurrent_groups.find(color);
+            // Not one of our local colors then we don't care about it
+            if (finder == concurrent_groups.end())
+              continue;
+            finder->second.color_points++;
+            // Compute the shard for this point
+            ShardID color_shard = 
+              sharding_function->find_owner(*itr, sharding_domain);
+            if (!std::binary_search(finder->second.shards.begin(),
+                  finder->second.shards.end(), color_shard))
+            {
+              finder->second.shards.push_back(color_shard);
+              std::sort(finder->second.shards.begin(),
+                  finder->second.shards.end());
+            }
+          }
+          // See if our local shards is the smallest shard and make and
+          // record the barrier if we are
+          for (std::map<Color,ConcurrentGroup>::const_iterator it =
+                concurrent_groups.begin(); it != 
+                concurrent_groups.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(!it->second.shards.empty());
+#endif
+            if (it->second.shards.front() == 
+                repl_ctx->owner_shard->shard_id)
+            {
+              const RtBarrier barrier = runtime->create_rt_barrier(
+                  it->second.color_points);
+              concurrent_mapping_rendezvous->set_trace_barrier(
+                  it->first, barrier, it->second.color_points);
+            }
+          }
+        }
+      }
       concurrent_mapping_rendezvous->perform_rendezvous();
     }
 
