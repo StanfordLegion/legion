@@ -10441,11 +10441,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->second.precondition.interpreted.exists());
 #endif
+        it->second.color_points = it->second.group_points;
         if (is_recording())
         {
           // Create and record the barrier with the right number of arrivals
           // for this concurrent group for later iterations
-          it->second.color_points = it->second.group_points;
           const RtBarrier barrier = 
             runtime->create_rt_barrier(it->second.color_points);
           it->second.shards.resize(1, 0);
