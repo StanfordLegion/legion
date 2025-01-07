@@ -146,6 +146,8 @@ void concurrent_task(const Task *task,
   // If we don't have a concurrent launch where all the point
   // tasks are running together then this can hang
   pb.wait();
+  // Unrelated but since we asked for it we can do a 
+  // concurrent task barrier
 }
 
 void div_concurrent_task(const Task *task,
@@ -224,6 +226,7 @@ int main(int argc, char **argv)
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
     registrar.set_concurrent();
+    registrar.concurrent_barrier = true;
     Runtime::preregister_task_variant<concurrent_task>(registrar, "concurrent_task");
   }
 
