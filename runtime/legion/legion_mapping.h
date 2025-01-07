@@ -1688,19 +1688,34 @@ namespace Legion {
        * of the window for the Legion's automatic tracing functionality to
        * consider when looking for traces. Note that this can be larger than
        * the window size to look for traces that span more than one window.
+       * This parameter also places an implicit upper bound on the size of
+       * the maximum trace that can be inferred. The maximum trace size that
+       * can be found is auto_tracing_batchsize/2. This can be further 
+       * tightened using auto_tracing_max_trace_length.
        *
        * The 'auto_tracing_multi_scale_factor' specifies the ruler function
        * that should be used for looking for traces that occur in a subset
-       * of the batchsize window of operations/tasks.
+       * of the batchsize window of operations/tasks. There is a trade-off
+       * with this parameter. The smaller you make the more rapidly you will
+       * discover small traces and be able to replay them quickly, but the
+       * longer it will take to identify larger traces that might be more
+       * efficient at replaying things.
        *
        * The 'auto_tracing_min_trace_length' specifies the minimum length
        * trace that can be found by automatic tracing.
        *
        * The 'auto_tracing_max_trace_length' specifies the maximum length
-       * trace that can be found by automatic tracing.
+       * trace that can be found by automatic tracing. This parameter only
+       * matters if is < auto_tracing_batchsize/2 as that sets an implicit
+       * bound on the maximum trace size that can be found.
        *
        * The 'auto_tracing_visit_threshold' specifies how many times a trace
-       * needs to be observed before it becomes eligible for replay
+       * needs to be observed before it becomes eligible for replay. The
+       * tradeoff here is that a smaller value may lead to finding and
+       * replaying traces sooner, but those traces might be local maximas,
+       * while a larger value will cause you to wait longer to start replaying
+       * traces but could lead to finding more robust traces that are going
+       * to be replayed for the duration of the application.
        */
       struct ContextConfigOutput {
         unsigned                                max_window_size; // = 1024
@@ -1712,7 +1727,7 @@ namespace Legion {
         unsigned                                max_templates_per_trace; // = 16
         bool                                    mutable_priority; // = false
         bool                                    auto_tracing_enabled; // = true
-        unsigned                                auto_tracing_batchsize; // = 100 
+        unsigned                                auto_tracing_batchsize; // = 2000
         unsigned                                auto_tracing_multi_scale_factor; // = 100
         unsigned                                auto_tracing_min_trace_length; // = 5
         unsigned                                auto_tracing_max_trace_length; // = UINT_MAX
