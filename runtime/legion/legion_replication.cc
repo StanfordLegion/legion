@@ -1825,23 +1825,23 @@ namespace Legion {
               std::sort(finder->second.shards.begin(),
                   finder->second.shards.end());
             }
-            // See if our local shards is the smallest shard and make and
-            // record the barrier if we are
-            for (std::map<Color,ConcurrentGroup>::const_iterator it =
-                  concurrent_groups.begin(); it != 
-                  concurrent_groups.end(); it++)
-            {
+          }
+          // See if our local shards is the smallest shard and make and
+          // record the barrier if we are
+          for (std::map<Color,ConcurrentGroup>::const_iterator it =
+                concurrent_groups.begin(); it != 
+                concurrent_groups.end(); it++)
+          {
 #ifdef DEBUG_LEGION
-              assert(!it->second.shards.empty());
+            assert(!it->second.shards.empty());
 #endif
-              if (it->second.shards.front() == 
-                  repl_ctx->owner_shard->shard_id)
-              {
-                const RtBarrier barrier = runtime->create_rt_barrier(
-                    it->second.color_points);
-                concurrent_mapping_rendezvous->set_trace_barrier(
-                    it->first, barrier, it->second.color_points);
-              }
+            if (it->second.shards.front() == 
+                repl_ctx->owner_shard->shard_id)
+            {
+              const RtBarrier barrier = runtime->create_rt_barrier(
+                  it->second.color_points);
+              concurrent_mapping_rendezvous->set_trace_barrier(
+                  it->first, barrier, it->second.color_points);
             }
           }
         }
