@@ -1069,6 +1069,13 @@ namespace Realm {
             // but we still need to do it to know how many of the new instances
             // can be allocated
             future_allocator = current_allocator;
+            // Need to apply any pending releases here too
+            for(std::deque<PendingRelease>::iterator it = pending_releases.begin();
+                it != pending_releases.end(); ++it) {
+              // shouldn't have any ready ones here
+              assert(!it->is_ready);
+              it->release(future_allocator, true /*missing ok*/);
+            }
           }
           allocated = future_allocator.split_range(old_inst->me, tags, sizes, alignments,
                                                    offsets);
