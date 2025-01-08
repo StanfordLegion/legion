@@ -12606,8 +12606,8 @@ namespace Legion {
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       configuration.mutable_priority = false;
       configuration.auto_tracing_enabled = false;
-      configuration.auto_tracing_batchsize = 0;
-      configuration.auto_tracing_multi_scale_factor = 0;
+      configuration.auto_tracing_window_size = 0;
+      configuration.auto_tracing_ruler_function = 0;
       configuration.auto_tracing_min_trace_length = 0;
       configuration.auto_tracing_max_trace_length = 0;
       configuration.auto_tracing_visit_threshold = 0;
@@ -22963,8 +22963,8 @@ namespace Legion {
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       configuration.mutable_priority = false;
       configuration.auto_tracing_enabled = false;
-      configuration.auto_tracing_batchsize = 0;
-      configuration.auto_tracing_multi_scale_factor = 0;
+      configuration.auto_tracing_window_size = 0;
+      configuration.auto_tracing_ruler_function = 0;
       configuration.auto_tracing_min_trace_length = 0;
       configuration.auto_tracing_max_trace_length = 0;
       configuration.auto_tracing_visit_threshold = 0;
