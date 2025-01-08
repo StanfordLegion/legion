@@ -1684,30 +1684,34 @@ namespace Legion {
        * the sequence of operations and sub-tasks launched by this task. This
        * defaults to true and can be disabled by setting the flag to 'false'.
        *
-       * The `auto_tracing_batchsize` parameter specifies the maximum size
+       * The `auto_tracing_window_size` parameter specifies the size
        * of the window for the Legion's automatic tracing functionality to
-       * consider when looking for traces. Note that this can be larger than
-       * the window size to look for traces that span more than one window.
-       * This parameter also places an implicit upper bound on the size of
-       * the maximum trace that can be inferred. The maximum trace size that
-       * can be found is auto_tracing_batchsize/2. This can be further 
-       * tightened using auto_tracing_max_trace_length.
+       * consider when looking for repeated sequences of tasks/operations.
+       * Note that this can be (but doesn't have to be) larger than the 
+       * window size for the context to look for traces that span more 
+       * than one window's worth of sub-tasks/operations.
        *
-       * The 'auto_tracing_multi_scale_factor' specifies the ruler function
+       * The 'auto_tracing_ruler_function' specifies the ruler function
+       * ( https://en.wikipedia.org/wiki/Ruler_function )
        * that should be used for looking for traces that occur in a subset
-       * of the batchsize window of operations/tasks. There is a trade-off
-       * with this parameter. The smaller you make the more rapidly you will
+       * of the auto tracing window of operations/tasks. There is a trade-off
+       * with this parameter. The smaller you make it the more rapidly you will
        * discover small traces and be able to replay them quickly, but the
        * longer it will take to identify larger traces that might be more
-       * efficient at replaying things.
+       * efficient at replaying. Making the multi-scale factor smaller will 
+       * also result in higher overhead for checking for automatic traces 
+       * in the window when traces are not being replayed.
        *
        * The 'auto_tracing_min_trace_length' specifies the minimum length
        * trace that can be found by automatic tracing.
        *
        * The 'auto_tracing_max_trace_length' specifies the maximum length
-       * trace that can be found by automatic tracing. This parameter only
-       * matters if is < auto_tracing_batchsize/2 as that sets an implicit
-       * bound on the maximum trace size that can be found.
+       * trace that can be found by automatic tracing. This value is always
+       * bounded above by the auto_tracing_window_size since we cannot find
+       * any traces larger than the window size. If this value is less than
+       * the auto tracing window size and a sequence of repeated tasks/ops
+       * is found larger than this value, then Legion will break the sequence
+       * into traces of this size and replay them consecutively.
        *
        * The 'auto_tracing_visit_threshold' specifies how many times a trace
        * needs to be observed before it becomes eligible for replay. The
@@ -1727,8 +1731,8 @@ namespace Legion {
         unsigned                                max_templates_per_trace; // = 16
         bool                                    mutable_priority; // = false
         bool                                    auto_tracing_enabled; // = true
-        unsigned                                auto_tracing_batchsize; // = 2000
-        unsigned                                auto_tracing_multi_scale_factor; // = 100
+        unsigned                                auto_tracing_window_size; // = 1000
+        unsigned                                auto_tracing_ruler_function; // = 100
         unsigned                                auto_tracing_min_trace_length; // = 5
         unsigned                                auto_tracing_max_trace_length; // = UINT_MAX
         unsigned                                auto_tracing_visit_threshold; // = 10
