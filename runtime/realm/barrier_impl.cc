@@ -388,10 +388,11 @@ namespace Realm {
   BarrierImpl::BarrierImpl(void)
     : barrier_comm(std::make_unique<BarrierCommunicator>())
     , external_waiter_condvar(external_waiter_mutex)
-    , broadcast_radix(4)
   {
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "barrier_broadcast_radix", broadcast_radix));
   }
 
   BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm, int _broadcast_radix)

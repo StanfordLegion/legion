@@ -83,7 +83,7 @@ TEST_F(BarrierTest, LocalArrive)
   const NodeID owner = 0;
   const EventImpl::gen_t arrival_gen = 1;
   bool poisoned = false;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
@@ -105,7 +105,7 @@ TEST_F(BarrierTest, DISABLED_LocalArriveOnTriggered)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t arrival_gen = 1;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
@@ -126,7 +126,7 @@ TEST_F(BarrierTest, LocalArriveTriggerOneWaiter)
   const EventImpl::gen_t arrival_gen = 1;
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
@@ -149,7 +149,7 @@ TEST_F(BarrierTest, LocalArriveWithoutWaiterTrigger)
   const EventImpl::gen_t arrival_gen = 1;
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
@@ -173,7 +173,7 @@ TEST_F(BarrierTest, LocalArriveTriggerBothWaiters)
   const EventImpl::gen_t arrival_gen = 1;
   DeferredOperation waiter_one;
   DeferredOperation waiter_two;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
@@ -194,7 +194,7 @@ TEST_F(BarrierTest, LocalArriveFutureGen)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t arrival_gen = 2;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
@@ -212,7 +212,7 @@ TEST_F(BarrierTest, LocalOutOfOrderArrive)
   const NodeID owner = 0;
   const EventImpl::gen_t arrival_gen = 2;
   const int delta = -1;
-  BarrierImpl barrier;
+  BarrierImpl barrier(barrier_comm);
 
   barrier.init(ID::make_barrier(owner, 0, 0), owner);
   barrier.base_arrival_count = 2;
