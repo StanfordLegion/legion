@@ -93,7 +93,7 @@ TEST_F(BarrierTest, LocalArrive)
                          TimeLimit::responsive());
   bool ok = barrier.has_triggered(arrival_gen, poisoned);
 
-  EXPECT_EQ(barrier_comm->sent_trigger_count, 0);
+  EXPECT_EQ(barrier_comm->sent_adjust_arrivals, 0);
   EXPECT_EQ(barrier.generation.load(), arrival_gen);
   EXPECT_TRUE(ok);
   EXPECT_FALSE(poisoned);
