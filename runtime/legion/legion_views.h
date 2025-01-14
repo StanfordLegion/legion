@@ -1514,23 +1514,28 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_ISSUE_FILL_TASK_ID;
       public:
-        DeferIssueFill(FillView *view, Operation *op, 
+        DeferIssueFill(FillView *view, Operation *op,
                        IndexSpaceExpression *fill_expr,
+                       IndividualView *dst_view,
+                       const FieldMask &fill_mask,
                        const PhysicalTraceInfo &trace_info,
                        const std::vector<CopySrcDstField> &dst_fields,
                        PhysicalManager *manager, ApEvent precondition,
                        PredEvent pred_guard, CollectiveKind collective,
-                       bool fill_restrict);
+                       bool fill_restrict, std::set<RtEvent> &applied);
       public:
         FillView *const view;
         Operation *const op;
         IndexSpaceExpression *const fill_expr;
+        IndividualView *const dst_view;
+        const FieldMask *const fill_mask;
         PhysicalTraceInfo *const trace_info;
         std::vector<CopySrcDstField> *const dst_fields;
         PhysicalManager *const manager;
         const ApEvent precondition;
         const PredEvent pred_guard;
         const CollectiveKind collective;
+        const RtUserEvent applied;
         const ApUserEvent done;
         const bool fill_restricted;
       };
@@ -1572,6 +1577,7 @@ namespace Legion {
       bool matches(const void *value, size_t size);
       bool set_value(const void *value, size_t size);
       ApEvent issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
+                         IndividualView *dst_view, const FieldMask &fill_mask,
                          const PhysicalTraceInfo &trace_info,
                          const std::vector<CopySrcDstField> &dst_fields,
                          std::set<RtEvent> &applied_events,

@@ -260,7 +260,7 @@ namespace Legion {
       derez.deserialize(applied_event);
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
@@ -279,7 +279,7 @@ namespace Legion {
                                              registered_events, applied_events,
                                              trace_info, source);
       if (ready_event.exists())
-        Runtime::trigger_event(&trace_info, ready_event, pre);
+        Runtime::trigger_event(ready_event, pre, trace_info, applied_events);
       if (!registered_events.empty())
         Runtime::trigger_event(registered_event,
             Runtime::merge_events(registered_events));
@@ -1543,6 +1543,7 @@ namespace Legion {
       else
         manager->compute_copy_offsets(fill_mask, dst_fields); 
       const ApEvent result = fill_view->issue_fill(op, fill_expression,
+                                                   this, fill_mask,
                                                    trace_info, dst_fields,
                                                    applied_events,
                                                    manager,
@@ -1555,12 +1556,6 @@ namespace Legion {
         add_copy_user(false/*reading*/, 0/*redop*/, result, 
           fill_mask, fill_expression, op->get_unique_op_id(),
           index, recorded_events, trace_info.recording, runtime->address_space);
-      if (trace_info.recording)
-      {
-        const UniqueInst dst_inst(this);
-        trace_info.record_fill_inst(result, fill_expression, dst_inst,
-                        fill_mask, applied_events, (get_redop() > 0));
-      }
       return result;
     }
 
@@ -2808,8 +2803,8 @@ namespace Legion {
                   finder->second.remote_ready_events.begin(); it !=
                   finder->second.remote_ready_events.end(); it++)
             {
-              Runtime::trigger_event(it->second, it->first, 
-                                finder->second.ready_event);
+              Runtime::trigger_event(it->first, finder->second.ready_event,
+                  *it->second, applied_events);
               delete it->second;
             }
             finder->second.remote_ready_events.clear();
@@ -2888,7 +2883,7 @@ namespace Legion {
             op_ctx_index, index, match_space, term_event, target, 
             NULL/*analysis*/, 0/*no collective arrivals*/, local_registered,
             local_applied, *result_info, runtime->address_space, symbolic);
-        Runtime::trigger_event(result_info, result, ready);
+        Runtime::trigger_event(result, ready, *result_info, local_applied);
         if (!local_registered.empty())
           Runtime::trigger_event(registered,
               Runtime::merge_events(local_registered));
@@ -2958,8 +2953,8 @@ namespace Legion {
           finder->second.remote_ready_events[remote_ready_event] =
             new PhysicalTraceInfo(trace_info);
         else
-          Runtime::trigger_event(&trace_info, remote_ready_event, 
-                                 finder->second.ready_event);
+          Runtime::trigger_event(remote_ready_event, 
+              finder->second.ready_event, trace_info, applied_events);
 #ifdef DEBUG_LEGION
         assert(finder->second.remaining_remote_arrivals > 0);
 #endif
@@ -3024,8 +3019,8 @@ namespace Legion {
             NULL/*no analysis mapping*/, 0/*no collective arrivals*/,
             registered_events, applied_events, *to_perform.trace_info,
             runtime->address_space, to_perform.symbolic);
-        Runtime::trigger_event(to_perform.trace_info, 
-                      to_perform.ready_event, ready);
+        Runtime::trigger_event(to_perform.ready_event, ready,
+            *to_perform.trace_info, applied_events);
         if (!registered_events.empty())
           Runtime::trigger_event(to_perform.registered,
               Runtime::merge_events(registered_events));
@@ -3067,7 +3062,7 @@ namespace Legion {
       derez.deserialize(origin);
       std::set<RtEvent> applied_events;
       PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       size_t num_spaces;
       derez.deserialize(num_spaces);
 #ifdef DEBUG_LEGION
@@ -3326,7 +3321,7 @@ namespace Legion {
       derez.deserialize(applied);
       std::set<RtEvent> applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       // This blocks the virtual channel, but keeps queries in-order 
       // with respect to updates from the same node which is necessary
@@ -3336,7 +3331,7 @@ namespace Legion {
       IndividualView *inst_view = view->as_individual_view();
       const ApEvent pre = inst_view->find_copy_preconditions(reading, redop,
           copy_mask, copy_expr, op_id, index, applied_events, trace_info);
-      Runtime::trigger_event(&trace_info, to_trigger, pre);
+      Runtime::trigger_event(to_trigger, pre, trace_info, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
@@ -3892,6 +3887,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent FillView::issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
+                                 IndividualView *dst_view, 
+                                 const FieldMask &fill_mask,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  std::set<RtEvent> &applied_events,
@@ -3910,23 +3907,17 @@ namespace Legion {
         {
           if (!value_ready.exists())
             value_ready = Runtime::create_rt_user_event();
-          DeferIssueFill args(this, op, fill_expr, trace_info, dst_fields,
-           manager, precondition, pred_guard, collective_kind, fill_restricted);
-          const RtEvent issued = runtime->issue_runtime_meta_task(args,
+          DeferIssueFill args(this, op, fill_expr, dst_view, fill_mask,
+              trace_info, dst_fields, manager, precondition, pred_guard,
+              collective_kind, fill_restricted, applied_events);
+          runtime->issue_runtime_meta_task(args,
               LG_LATENCY_DEFERRED_PRIORITY, value_ready);
-          // If we're recording this, then this needs to be a precondition
-          // for mapping since the trace needs to have all the instructions
-          // before we can consider it mapped
-          // Note! This couples mapping back to the execution since it means
-          // we need to wait for the future value before being mapped
-          if (trace_info.recording)
-            applied_events.insert(issued);
           return args.done;
         }
       }
       // If we get here the that means we have a value and can issue
       // the fill from this fill view
-      return fill_expr->issue_fill(op, trace_info, dst_fields,
+      ApEvent result = fill_expr->issue_fill(op, trace_info, dst_fields,
                                    value.load(), value_size.load(),
 #ifdef LEGION_SPY
                                    fill_op_uid,
@@ -3936,28 +3927,42 @@ namespace Legion {
                                    precondition, pred_guard,
                                    manager->get_unique_event(),
                                    collective_kind, fill_restricted);
+      if (trace_info.recording)
+      {
+        const UniqueInst dst_inst(dst_view);
+        trace_info.record_fill_inst(result, fill_expr, dst_inst,
+            fill_mask, applied_events, (dst_view->get_redop() > 0));
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
     FillView::DeferIssueFill::DeferIssueFill(FillView *v, Operation *o,
                                        IndexSpaceExpression *expr,
+                                       IndividualView *dst_v,
+                                       const FieldMask &mask,
                                        const PhysicalTraceInfo &info,
                                        const std::vector<CopySrcDstField> &dst,
                                        PhysicalManager *man, ApEvent pre,
                                        PredEvent guard, CollectiveKind collect,
-                                       bool fill_restrict)
+                                       bool fill_restrict,
+                                       std::set<RtEvent> &applied_events)
       : LgTaskArgs<DeferIssueFill>(o->get_unique_op_id()),
-        view(v), op(o), fill_expr(expr),
+        view(v), op(o), fill_expr(expr), dst_view(dst_v),
+        fill_mask(new FieldMask(mask)),
         trace_info(new PhysicalTraceInfo(info)),
         dst_fields(new std::vector<CopySrcDstField>(dst)),
         manager(man), precondition(pre), pred_guard(guard),
-        collective(collect), done(Runtime::create_ap_user_event(&info)),
+        collective(collect), applied(Runtime::create_rt_user_event()),
+        done(Runtime::create_ap_user_event(&info)),
         fill_restricted(fill_restrict)
     //--------------------------------------------------------------------------
     {
       view->add_base_resource_ref(META_TASK_REF);
+      dst_view->add_base_resource_ref(META_TASK_REF);
       fill_expr->add_base_expression_reference(META_TASK_REF);
       manager->add_base_resource_ref(META_TASK_REF);
+      applied_events.insert(applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3965,19 +3970,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferIssueFill *dargs = (const DeferIssueFill*)args;
-      std::set<RtEvent> dummy_applied;
+      std::set<RtEvent> applied_events;
       const ApEvent result = dargs->view->issue_fill(dargs->op,dargs->fill_expr,
-          *(dargs->trace_info), *(dargs->dst_fields), dummy_applied,
-          dargs->manager, dargs->precondition, dargs->pred_guard,
+          dargs->dst_view, *(dargs->fill_mask), *(dargs->trace_info), 
+          *(dargs->dst_fields), applied_events, dargs->manager, 
+          dargs->precondition, dargs->pred_guard,
           dargs->collective, dargs->fill_restricted);
-#ifdef DEBUG_LEGION
-      assert(dummy_applied.empty());
-#endif
-      Runtime::trigger_event(dargs->trace_info, dargs->done, result);
+      Runtime::trigger_event(dargs->done, result, 
+          *(dargs->trace_info), applied_events);
+      Runtime::trigger_event(dargs->applied,
+          Runtime::merge_events(applied_events));
+      delete dargs->fill_mask;
       delete dargs->trace_info;
       delete dargs->dst_fields;
       if (dargs->view->remove_base_resource_ref(META_TASK_REF))
         delete dargs->view;
+      if (dargs->dst_view->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->dst_view;
       if (dargs->fill_expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->fill_expr;
       if (dargs->manager->remove_base_resource_ref(META_TASK_REF))
@@ -5184,10 +5193,12 @@ namespace Legion {
           // Tracing copy-optimization will eliminate this when
           // the trace gets optimized
           if (all_done.exists())
-            Runtime::trigger_event(&trace_info, all_done, all_bar);
+            Runtime::trigger_event(all_done, all_bar,
+                trace_info, applied_events);
           if (source_view->get_redop() > 0)
           {
-            Runtime::trigger_event(&trace_info, copy_done, all_bar);
+            Runtime::trigger_event(copy_done, all_bar,
+                trace_info, applied_events);
 #ifdef DEBUG_LEGION
             copy_done = ApUserEvent::NO_AP_USER_EVENT;
 #endif
@@ -5229,7 +5240,8 @@ namespace Legion {
                 ApBarrier copy_bar;
                 ShardID sid =
                   trace_info.record_barrier_creation(copy_bar, 1/*arrivals*/);
-                Runtime::trigger_event(&trace_info, copy_done, copy_bar);
+                Runtime::trigger_event(copy_done, copy_bar,
+                    trace_info, applied_events);
                 rez.serialize(copy_bar);
                 rez.serialize(sid);
               }
@@ -5323,7 +5335,7 @@ namespace Legion {
           owner_shard = trace_info.record_barrier_creation(all_bar, arrivals);
           // Tracing copy-optimization will eliminate this when
           // the trace gets optimized
-          Runtime::trigger_event(&trace_info, all_done, all_bar);
+          Runtime::trigger_event(all_done, all_bar, trace_info, applied_events);
         }
         // Case 2 and 3 (all-reduce): Broadcast out the point-wise command
         if (origin != local_space)
@@ -5537,7 +5549,8 @@ namespace Legion {
             owner_shard = trace_info.record_barrier_creation(all_bar, arrivals);
             // Tracing copy-optimization will eliminate this when
             // the trace gets optimized
-            Runtime::trigger_event(&trace_info, all_done, all_bar);
+            Runtime::trigger_event(all_done, all_bar,
+                trace_info, applied_events);
           }
         }
         std::vector<AddressSpaceID> children;
@@ -5592,7 +5605,7 @@ namespace Legion {
       derez.deserialize(copy_mask);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -5617,12 +5630,12 @@ namespace Legion {
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
       else
         Runtime::trigger_event(recorded);
+      if (all_done.exists())
+        Runtime::trigger_event(all_done, done, trace_info, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(applied);
-      if (all_done.exists())
-        Runtime::trigger_event(&trace_info, all_done, done);
       if (op != NULL)
         delete op;
     }
@@ -6606,7 +6619,7 @@ namespace Legion {
         runtime->find_or_request_instance_manager(did, manager_ready);
       std::set<RtEvent> applied_events;
       RemoteCollectiveAnalysis *analysis = 
-        RemoteCollectiveAnalysis::unpack(derez, runtime, applied_events);
+        RemoteCollectiveAnalysis::unpack(derez, runtime);
       analysis->add_reference();
       RtUserEvent applied;
       derez.deserialize(applied);
@@ -7120,7 +7133,8 @@ namespace Legion {
             local_views[idx]->get_manager(), NULL/*analysis mapping*/,
             0/*no collective arrivals*/, registered_events, applied_events,
             *trace_info, runtime->address_space, symbolic);
-        Runtime::trigger_event(trace_info, ready_events[idx], ready);
+        Runtime::trigger_event(ready_events[idx], ready,
+            *trace_info, applied_events);
         // Also unregister the collective analyses
         local_views[idx]->unregister_collective_analysis(this, op_ctx_index,
                                                          index, match_space);
@@ -7282,6 +7296,7 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         local_manager->compute_copy_offsets(fill_mask, dst_fields);
         const ApEvent result = fill_view->issue_fill(op, fill_expression,
+                                                     local_view, fill_mask,
                                                      inst_info, dst_fields,
                                                      applied_events,
                                                      local_manager,
@@ -7297,12 +7312,6 @@ namespace Legion {
               fill_mask, fill_expression, op_id, index,
               recorded_events, inst_info.recording, runtime->address_space);
         }
-        if (inst_info.recording)
-        {
-          const UniqueInst dst_inst(local_view);
-          inst_info.record_fill_inst(result, fill_expression, dst_inst, 
-                         fill_mask, applied_events, (get_redop() > 0));
-        }
       }
       // Use the trace info for doing the trigger if necessary
       if (!ready_events.empty())
@@ -7310,11 +7319,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(ready_event.exists());
 #endif
-        Runtime::trigger_event(&trace_info, ready_event,
-            Runtime::merge_events(&local_info, ready_events));
+        Runtime::trigger_event(ready_event,
+            Runtime::merge_events(&local_info, ready_events),
+            trace_info, applied_events);
       }
       else if (ready_event.exists())
-        Runtime::trigger_event(&trace_info, ready_event);
+        Runtime::trigger_event(ready_event, ApEvent::NO_AP_EVENT,
+            trace_info, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -7353,7 +7364,7 @@ namespace Legion {
       derez.deserialize(fill_mask);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -7559,7 +7570,7 @@ namespace Legion {
       DistributedID src_inst_did;
       derez.deserialize(src_inst_did);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       CollectiveKind collective_kind;
       derez.deserialize(collective_kind);
       RtUserEvent recorded, applied;
@@ -7583,7 +7594,7 @@ namespace Legion {
           dst_inst, dst_unique_event, src_inst_did, trace_info,
           recorded_events, applied_events, collective_kind);
 
-      Runtime::trigger_event(&trace_info, ready, result);
+      Runtime::trigger_event(ready, result, trace_info, applied_events);
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
       else
@@ -7682,7 +7693,7 @@ namespace Legion {
         local_info.record_copy_insts(copy_post, copy_expression,
           src_inst, dst_inst, copy_mask, copy_mask, 0/*redop*/, applied_events);
       }
-      Runtime::trigger_event(&trace_info, copy_done, copy_post);
+      Runtime::trigger_event(copy_done, copy_post, trace_info, applied_events);
       // Always record the writer to ensure later reads catch it
       local_view->add_copy_user(false/*reading*/, 0/*redop*/, copy_post,
           copy_mask, copy_expression, op_id, index, recorded_events,
@@ -7694,7 +7705,8 @@ namespace Legion {
       if (children.empty() && (instances.size() == 1))
       {
         if (all_done.exists())
-          Runtime::trigger_event(&trace_info, all_done, copy_post);
+          Runtime::trigger_event(all_done, copy_post,
+              trace_info, applied_events);
         return;
       }
       perform_local_broadcast(local_view, local_fields, children,
@@ -7825,11 +7837,9 @@ namespace Legion {
       }
       else if (all_done.exists())
       {
-        if (!done_events.empty())
-          Runtime::trigger_event(&local_info, all_done,
-              Runtime::merge_events(&local_info, done_events));
-        else
-          Runtime::trigger_event(&local_info, all_done);
+        Runtime::trigger_event(all_done,
+            Runtime::merge_events(&local_info, done_events),
+            local_info, applied_events);
       }
     }
 
@@ -8493,7 +8503,7 @@ namespace Legion {
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -8594,7 +8604,8 @@ namespace Legion {
         // so there's no need for us to do this
         const ApUserEvent local_precondition =
           Runtime::create_ap_user_event(&trace_info);
-        Runtime::trigger_event(&trace_info, local_precondition, precondition);
+        Runtime::trigger_event(local_precondition, precondition,
+            trace_info, applied_events);
         precondition = local_precondition;
       }
       for (std::vector<AddressSpaceID>::const_iterator it =
@@ -8734,11 +8745,9 @@ namespace Legion {
         if (!local_done_events.empty())
           reduce_events.insert(reduce_events.end(),
               local_done_events.begin(), local_done_events.end());
-        if (!reduce_events.empty())
-          Runtime::trigger_event(&local_info, reduce_done, 
-              Runtime::merge_events(&local_info, reduce_events));
-        else
-          Runtime::trigger_event(&local_info, reduce_done);
+        Runtime::trigger_event(reduce_done, 
+            Runtime::merge_events(&local_info, reduce_events),
+            local_info, applied_events);
       }
     }
 
@@ -8785,7 +8794,7 @@ namespace Legion {
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -9108,15 +9117,13 @@ namespace Legion {
           runtime->phase_barrier_arrive(all_bar, 1/*count*/, arrival);
           trace_info.record_barrier_arrival(all_bar, arrival, 1/*count*/,
                                             applied_events, owner_shard);
-          Runtime::trigger_event(&trace_info, all_done, all_bar);
+          Runtime::trigger_event(all_done, all_bar, trace_info, applied_events);
         }
         else
         {
-          if (!all_done_events.empty())
-            Runtime::trigger_event(&trace_info, all_done,
-                Runtime::merge_events(&trace_info, all_done_events));
-          else
-            Runtime::trigger_event(&trace_info, all_done);
+          Runtime::trigger_event(all_done,
+              Runtime::merge_events(&trace_info, all_done_events),
+              trace_info, applied_events);
         }
       }
     }
@@ -9153,7 +9160,7 @@ namespace Legion {
       derez.deserialize(src_inst_did);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -9442,11 +9449,9 @@ namespace Legion {
       }
       else if (all_done.exists())
       {
-        if (!done_events.empty())
-          Runtime::trigger_event(&local_info, all_done,
-              Runtime::merge_events(&local_info, done_events));
-        else
-          Runtime::trigger_event(&local_info, all_done);
+        Runtime::trigger_event(all_done,
+            Runtime::merge_events(&local_info, done_events),
+            local_info, applied_events);
       }
     }
 
@@ -9490,7 +9495,7 @@ namespace Legion {
       derez.deserialize(src_inst_did_op);
       std::set<RtEvent> recorded_events, applied_events;
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -9886,7 +9891,7 @@ namespace Legion {
           precondition, predicate_guard, local_manager->get_unique_event(),
           dst_unique_event, collective_kind, false/*copy restricted*/);
       // Trigger the output
-      Runtime::trigger_event(&trace_info, result, reduce_post);
+      Runtime::trigger_event(result, reduce_post, trace_info, applied_events);
       // Save the result, note that this reading of this final reduction
       // always dominates any incoming reductions so we don't need to 
       // record them separately
@@ -10179,7 +10184,7 @@ namespace Legion {
       LgEvent dst_unique_event;
       derez.deserialize(dst_unique_event);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -10393,7 +10398,7 @@ namespace Legion {
       LgEvent dst_unique_event;
       derez.deserialize(dst_unique_event);
       PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       RtUserEvent recorded, applied;
       derez.deserialize(recorded);
       derez.deserialize(applied);
@@ -10428,7 +10433,7 @@ namespace Legion {
           op, index, copy_mask, dst_mask, dst_inst, dst_unique_event,
           trace_info, recorded_events, applied_events, origin);
 
-      Runtime::trigger_event(&trace_info, ready, result);
+      Runtime::trigger_event(ready, result, trace_info, applied_events);
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
       else
@@ -11468,7 +11473,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(it->src_postcondition.exists());
 #endif
-            Runtime::trigger_event(&trace_info, it->src_postcondition, post);
+            Runtime::trigger_event(it->src_postcondition, post,
+                trace_info, applied_events);
           }
           if (post.exists())
             dst_events.push_back(post);
@@ -11545,8 +11551,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(src_postcondition.exists());
 #endif
-        Runtime::trigger_event(finder->second.trace_info, 
-                               src_postcondition, copy_post);
+        Runtime::trigger_event(src_postcondition, copy_post,
+            *finder->second.trace_info, finder->second.applied_events);
       }
       RtUserEvent applied;
       ApUserEvent to_trigger;
@@ -11581,7 +11587,8 @@ namespace Legion {
         else // Need a copy of this
           trace_info = new PhysicalTraceInfo(*(finder->second.trace_info));
       }
-      Runtime::trigger_event(trace_info, to_trigger, copy_post); 
+      Runtime::trigger_event(to_trigger, copy_post,
+          *trace_info, applied_events); 
       if (applied.exists())
       {
         if (!applied_events.empty())

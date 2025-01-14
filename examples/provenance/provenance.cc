@@ -90,7 +90,7 @@ void top_level_task(const Task *task,
   Rect<1> elem_rect(0,num_elements-1);
   // IndexSpace is = runtime->create_index_space(ctx, elem_rect, 0, "Element IndexSpace");
   Domain elem_domain = Domain(elem_rect);
-  Future bound_future = Future::from_value<Domain>(elem_domain);
+  Future bound_future = Future::from_domain(elem_domain, true/*take ownership*/);
 
   // human part + empty machine part ["stuff", {}]
   std::string is_prov = "[\"Element IndexSpace:" + std::to_string(__LINE__) + "\", {}]";
@@ -174,7 +174,7 @@ void top_level_task(const Task *task,
   
   Rect<1> color_bounds(0,num_subregions-1);
   Domain color_domain = Domain(color_bounds);
-  Future color_future = Future::from_value<Domain>(color_domain); 
+  Future color_future = Future::from_domain(color_domain, true/*take ownership*/); 
   std::string color_is_prov = "Color IndexSpace:" + std::to_string(__LINE__);
   IndexSpace color_is = runtime->create_index_space(ctx, 1, color_future, 0, color_is_prov.c_str());
 
@@ -323,7 +323,7 @@ void check_task(const Task *task,
 
   Rect<1> color_bounds(0,3);
   Domain color_domain = Domain(color_bounds);
-  Future color_future = Future::from_value<Domain>(color_domain); 
+  Future color_future = Future::from_domain(color_domain, true/*take ownership*/);
   IndexSpace color_is = runtime->create_index_space(ctx, 1, color_future, 0, "GPU Color IndexSpace");
   ArgumentMap arg_map;
   IndexLauncher gpu_launcher(GPU_TASK_ID, color_is, TaskArgument(NULL, 0), arg_map);
