@@ -3639,8 +3639,8 @@ namespace Legion {
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
       context_configuration.auto_tracing_enabled = !runtime->no_auto_tracing;
-      context_configuration.auto_tracing_batchsize = 100;
-      context_configuration.auto_tracing_multi_scale_factor = 100;
+      context_configuration.auto_tracing_window_size = 1000;
+      context_configuration.auto_tracing_ruler_function = 100;
       context_configuration.auto_tracing_min_trace_length = 5;
       context_configuration.auto_tracing_max_trace_length = UINT_MAX;
       context_configuration.auto_tracing_visit_threshold = 10;
@@ -10555,11 +10555,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->second.precondition.interpreted.exists());
 #endif
+        it->second.color_points = it->second.group_points;
         if (is_recording())
         {
           // Create and record the barrier with the right number of arrivals
           // for this concurrent group for later iterations
-          it->second.color_points = it->second.group_points;
           const RtBarrier barrier = 
             runtime->create_rt_barrier(it->second.color_points);
           it->second.shards.resize(1, 0);

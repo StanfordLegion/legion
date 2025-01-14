@@ -1543,6 +1543,7 @@ namespace Legion {
       else
         manager->compute_copy_offsets(fill_mask, dst_fields); 
       const ApEvent result = fill_view->issue_fill(op, fill_expression,
+                                                   this, fill_mask,
                                                    trace_info, dst_fields,
                                                    applied_events,
                                                    manager,
@@ -1555,12 +1556,6 @@ namespace Legion {
         add_copy_user(false/*reading*/, 0/*redop*/, result, 
           fill_mask, fill_expression, op->get_unique_op_id(),
           index, recorded_events, trace_info.recording, runtime->address_space);
-      if (trace_info.recording)
-      {
-        const UniqueInst dst_inst(this);
-        trace_info.record_fill_inst(result, fill_expression, dst_inst,
-                        fill_mask, applied_events, (get_redop() > 0));
-      }
       return result;
     }
 
@@ -3892,6 +3887,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent FillView::issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
+                                 IndividualView *dst_view, 
+                                 const FieldMask &fill_mask,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  std::set<RtEvent> &applied_events,
@@ -3910,9 +3907,9 @@ namespace Legion {
         {
           if (!value_ready.exists())
             value_ready = Runtime::create_rt_user_event();
-          DeferIssueFill args(this, op, fill_expr, trace_info, dst_fields,
-              manager, precondition, pred_guard, collective_kind,
-              fill_restricted, applied_events);
+          DeferIssueFill args(this, op, fill_expr, dst_view, fill_mask,
+              trace_info, dst_fields, manager, precondition, pred_guard,
+              collective_kind, fill_restricted, applied_events);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_DEFERRED_PRIORITY, value_ready);
           return args.done;
@@ -3920,7 +3917,7 @@ namespace Legion {
       }
       // If we get here the that means we have a value and can issue
       // the fill from this fill view
-      return fill_expr->issue_fill(op, trace_info, dst_fields,
+      ApEvent result = fill_expr->issue_fill(op, trace_info, dst_fields,
                                    value.load(), value_size.load(),
 #ifdef LEGION_SPY
                                    fill_op_uid,
@@ -3930,11 +3927,20 @@ namespace Legion {
                                    precondition, pred_guard,
                                    manager->get_unique_event(),
                                    collective_kind, fill_restricted);
+      if (trace_info.recording)
+      {
+        const UniqueInst dst_inst(dst_view);
+        trace_info.record_fill_inst(result, fill_expr, dst_inst,
+            fill_mask, applied_events, (dst_view->get_redop() > 0));
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
     FillView::DeferIssueFill::DeferIssueFill(FillView *v, Operation *o,
                                        IndexSpaceExpression *expr,
+                                       IndividualView *dst_v,
+                                       const FieldMask &mask,
                                        const PhysicalTraceInfo &info,
                                        const std::vector<CopySrcDstField> &dst,
                                        PhysicalManager *man, ApEvent pre,
@@ -3942,7 +3948,8 @@ namespace Legion {
                                        bool fill_restrict,
                                        std::set<RtEvent> &applied_events)
       : LgTaskArgs<DeferIssueFill>(o->get_unique_op_id()),
-        view(v), op(o), fill_expr(expr),
+        view(v), op(o), fill_expr(expr), dst_view(dst_v),
+        fill_mask(new FieldMask(mask)),
         trace_info(new PhysicalTraceInfo(info)),
         dst_fields(new std::vector<CopySrcDstField>(dst)),
         manager(man), precondition(pre), pred_guard(guard),
@@ -3952,6 +3959,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       view->add_base_resource_ref(META_TASK_REF);
+      dst_view->add_base_resource_ref(META_TASK_REF);
       fill_expr->add_base_expression_reference(META_TASK_REF);
       manager->add_base_resource_ref(META_TASK_REF);
       applied_events.insert(applied);
@@ -3964,17 +3972,21 @@ namespace Legion {
       const DeferIssueFill *dargs = (const DeferIssueFill*)args;
       std::set<RtEvent> applied_events;
       const ApEvent result = dargs->view->issue_fill(dargs->op,dargs->fill_expr,
-          *(dargs->trace_info), *(dargs->dst_fields), applied_events,
-          dargs->manager, dargs->precondition, dargs->pred_guard,
+          dargs->dst_view, *(dargs->fill_mask), *(dargs->trace_info), 
+          *(dargs->dst_fields), applied_events, dargs->manager, 
+          dargs->precondition, dargs->pred_guard,
           dargs->collective, dargs->fill_restricted);
       Runtime::trigger_event(dargs->done, result, 
           *(dargs->trace_info), applied_events);
       Runtime::trigger_event(dargs->applied,
           Runtime::merge_events(applied_events));
+      delete dargs->fill_mask;
       delete dargs->trace_info;
       delete dargs->dst_fields;
       if (dargs->view->remove_base_resource_ref(META_TASK_REF))
         delete dargs->view;
+      if (dargs->dst_view->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->dst_view;
       if (dargs->fill_expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->fill_expr;
       if (dargs->manager->remove_base_resource_ref(META_TASK_REF))
@@ -7284,6 +7296,7 @@ namespace Legion {
         std::vector<CopySrcDstField> dst_fields;
         local_manager->compute_copy_offsets(fill_mask, dst_fields);
         const ApEvent result = fill_view->issue_fill(op, fill_expression,
+                                                     local_view, fill_mask,
                                                      inst_info, dst_fields,
                                                      applied_events,
                                                      local_manager,
@@ -7298,12 +7311,6 @@ namespace Legion {
           local_view->add_copy_user(false/*reading*/, 0/*redop*/, result,
               fill_mask, fill_expression, op_id, index,
               recorded_events, inst_info.recording, runtime->address_space);
-        }
-        if (inst_info.recording)
-        {
-          const UniqueInst dst_inst(local_view);
-          inst_info.record_fill_inst(result, fill_expression, dst_inst, 
-                         fill_mask, applied_events, (get_redop() > 0));
         }
       }
       // Use the trace info for doing the trigger if necessary

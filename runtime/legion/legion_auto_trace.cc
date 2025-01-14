@@ -677,8 +677,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TraceRecognizer::TraceRecognizer(InnerContext *ctx,
                                      const Mapper::ContextConfigOutput &config)
-      : context(ctx), batchsize(config.auto_tracing_batchsize),
-        multi_scale_factor(config.auto_tracing_multi_scale_factor),
+      : context(ctx), 
+        // Double the window size for the batch size since we need to have a
+        // batch size that is double to detect repeats as long as the window
+        batchsize(2*config.auto_tracing_window_size),
+        multi_scale_factor(config.auto_tracing_ruler_function),
         min_trace_length(config.auto_tracing_min_trace_length),
         max_trace_length(config.auto_tracing_max_trace_length),
         watcher(ctx, config), unique_hash_value(0), wait_interval(1)

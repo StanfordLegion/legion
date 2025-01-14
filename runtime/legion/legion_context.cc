@@ -12729,8 +12729,8 @@ namespace Legion {
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       configuration.mutable_priority = false;
       configuration.auto_tracing_enabled = false;
-      configuration.auto_tracing_batchsize = 0;
-      configuration.auto_tracing_multi_scale_factor = 0;
+      configuration.auto_tracing_window_size = 0;
+      configuration.auto_tracing_ruler_function = 0;
       configuration.auto_tracing_min_trace_length = 0;
       configuration.auto_tracing_max_trace_length = 0;
       configuration.auto_tracing_visit_threshold = 0;
@@ -23086,8 +23086,8 @@ namespace Legion {
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       configuration.mutable_priority = false;
       configuration.auto_tracing_enabled = false;
-      configuration.auto_tracing_batchsize = 0;
-      configuration.auto_tracing_multi_scale_factor = 0;
+      configuration.auto_tracing_window_size = 0;
+      configuration.auto_tracing_ruler_function = 0;
       configuration.auto_tracing_min_trace_length = 0;
       configuration.auto_tracing_max_trace_length = 0;
       configuration.auto_tracing_visit_threshold = 0;
@@ -25798,10 +25798,17 @@ namespace Legion {
       task_local_instances.erase(finder);
       std::map<Memory,MemoryPool*>::const_iterator pool_finder =
         memory_pools.find(instance.get_location());
-#ifdef DEBUG_LEGION
-      assert(pool_finder != memory_pools.end());
-#endif
-      pool_finder->second->free_instance(instance, precondition);
+      if (pool_finder == memory_pools.end())
+      {
+        // This case occurs when the user has taken the unsafe path in
+        // the instance creation code above and needs to delete this
+        // instance that is not associated with any pool
+        MemoryManager *manager = 
+          runtime->find_memory_manager(instance.get_location());
+        manager->free_task_local_instance(instance, precondition);
+      }
+      else
+        pool_finder->second->free_instance(instance, precondition);
     }
 
     //--------------------------------------------------------------------------
