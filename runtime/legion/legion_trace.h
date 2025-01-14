@@ -83,43 +83,14 @@ namespace Legion {
         RegionTreeNode *node;
 #endif
       };
-      struct TracePointWisePrevOpInfo : public LegionHeapify<TracePointWisePrevOpInfo> {
-      public:
-        TracePointWisePrevOpInfo(ProjectionSummary *shard_proj,
-            Domain &index_domain,
-            IndexSpaceNode *launch_space,
-            unsigned op_idx,
-            GenerationID prev_op_gen, size_t ctx_index,
-#ifdef LEGION_SPY
-            unsigned dep_type,
-#endif
-            unsigned region_idx)
-          : shard_proj(shard_proj),
-            index_domain(index_domain),
-            launch_space(launch_space),
-          op_idx(op_idx),
-          prev_op_gen(prev_op_gen),
-          ctx_index(ctx_index),
-#ifdef LEGION_SPY
-          dep_type(dep_type),
-#endif
-          region_idx(region_idx)
-      {}
-      public:
-        ProjectionSummary *shard_proj;
-        Domain index_domain;
-        IndexSpaceNode *launch_space;
-        unsigned op_idx;
-        GenerationID prev_op_gen;
-        size_t ctx_index;
-#ifdef LEGION_SPY
-        unsigned dep_type;
-#endif
-        unsigned region_idx;
-      };
       struct OperationInfo {
       public:
         LegionVector<DependenceRecord> dependences;
+        // Note that in this data structure the "context_index"
+        // field of PointwiseDependence data structure is actually the
+        // relative offset in the trace of the prior operation
+        std::map<unsigned,
+          std::vector<PointwiseDependence> > pointwise_dependences;
         LegionVector<CloseInfo> closes;
         // Only need this during trace capture
         // It records dependences for internal operations (that are not merge
@@ -128,9 +99,6 @@ namespace Legion {
         // them on when later things depende on them. This data structure is
         // cleared after we're done with the trace recording
         std::map<unsigned,LegionVector<DependenceRecord> > internal_dependences;
-        std::map<unsigned,bool> connect_to_next_points;
-        std::map<unsigned,bool> connect_to_prev_points;
-        std::map<unsigned,TracePointWisePrevOpInfo> prev_ops;
       };
       struct VerificationInfo {
       public:
@@ -202,20 +170,6 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype,
                                     const FieldMask &dependent_mask);
-      void set_next_point_wise_user(Operation *next_op,
-          GenerationID next_gen, GenerationID source_gen,
-          unsigned region_idx, Operation *source);
-      void set_prev_point_wise_user(Operation *prev_op,
-          GenerationID prev_gen, uint64_t prev_ctx_index,
-          ProjectionSummary *shard_proj,
-          unsigned region_idx,
-#ifdef LEGION_SPY
-          unsigned dep_type,
-#endif
-          unsigned prev_region_idx,
-          Domain index_domain, IndexSpaceNode *launch_space,
-          Operation *source);
-      void set_point_wise_dependences(size_t index, Operation *op);
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }

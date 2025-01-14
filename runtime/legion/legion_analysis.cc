@@ -103,25 +103,16 @@ namespace Legion {
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
                              ProjectionSummary *p, unsigned internal)
       : Collectable(), usage(u), op(o), ctx_index(op->get_context_index()),
+        uid(o->get_unique_op_id()),
         internal_idx(internal), idx(id), gen(o->get_generation()),
-        shard_proj(p)
-#ifdef LEGION_SPY
-        , uid(o->get_unique_op_id())
-#endif
+        shard_proj(p), pointwise_analyzable(op->is_pointwise_analyzable() &&
+            (shard_proj != NULL) && shard_proj->projection->is_invertible)
     //--------------------------------------------------------------------------
     {
       if (op != NULL)
         op->add_mapping_reference(gen);
       if (shard_proj != NULL)
         shard_proj->add_reference();
-
-      point_wise_analysable = op->point_wise_analysable();
-      has_collective = op->has_collective();
-
-      launch_space = op->get_launch_space();
-      if (launch_space != NULL)
-        launch_space->add_base_valid_ref(CONTEXT_REF);
-      op_kind = op->get_operation_kind();
     }
 
     //--------------------------------------------------------------------------
@@ -132,10 +123,6 @@ namespace Legion {
         op->remove_mapping_reference(gen);
       if ((shard_proj != NULL) && shard_proj->remove_reference())
         delete shard_proj;
-
-      if (launch_space != NULL &&
-          launch_space->remove_base_valid_ref(CONTEXT_REF))
-        delete launch_space;
     }
 
     //--------------------------------------------------------------------------
@@ -160,6 +147,241 @@ namespace Legion {
 #endif
       if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Pointwise Dependence
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(void)
+      : context_index(0), unique_id(0), kind(Operation::LAST_OP_KIND),
+        region_index(0), domain(NULL), projection(NULL), sharding(NULL),
+        sharding_id(0), sharding_domain(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(const LogicalUser &user)
+      : context_index(user.ctx_index), unique_id(user.uid),
+        kind(user.op->get_operation_kind()), region_index(user.idx),
+        domain(user.shard_proj->domain),
+        projection(user.shard_proj->projection),
+        sharding((user.shard_proj->sharding == NULL) ? NULL :
+            user.shard_proj->sharding->functor),
+        sharding_id((user.shard_proj->sharding == NULL) ? 0 : 
+            user.shard_proj->sharding->sharding_id),
+        sharding_domain(user.shard_proj->sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(const PointwiseDependence &rhs)
+      : context_index(rhs.context_index), unique_id(rhs.unique_id),
+        kind(rhs.kind), region_index(rhs.region_index), domain(rhs.domain),
+        projection(rhs.projection), sharding(rhs.sharding),
+        sharding_id(rhs.sharding_id), sharding_domain(rhs.sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      if (domain != NULL)
+        domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+#ifdef LEGION_SPY
+      dtype = rhs.dtype;
+      dependence_mask = rhs.dependence_mask;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(PointwiseDependence &&rhs)
+      : context_index(rhs.context_index), unique_id(rhs.unique_id),
+        kind(rhs.kind), region_index(rhs.region_index), domain(rhs.domain),
+        projection(rhs.projection), sharding(rhs.sharding),
+        sharding_id(rhs.sharding_id), sharding_domain(rhs.sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      // Move references to ourselves
+      rhs.domain = NULL;
+      rhs.sharding_domain = NULL;
+#ifdef LEGION_SPY
+      dtype = rhs.dtype;
+      dependence_mask = rhs.dependence_mask;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::~PointwiseDependence(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence& PointwiseDependence::operator=(
+                                                 const PointwiseDependence &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+      context_index = rhs.context_index;
+      unique_id = rhs.unique_id;
+      kind = rhs.kind;
+      region_index = rhs.region_index;
+      domain = rhs.domain;
+      projection = rhs.projection;
+      sharding = rhs.sharding;
+      sharding_id = rhs.sharding_id;
+      sharding_domain = rhs.sharding_domain;
+#ifdef LEGION_SPY
+      dtype = rhs.dtype;
+      dependence_mask = rhs.dependence_mask;
+#endif
+      if (domain != NULL)
+        domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence& PointwiseDependence::operator=(
+                                                      PointwiseDependence &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+      context_index = rhs.context_index;
+      unique_id = rhs.unique_id;
+      kind = rhs.kind;
+      region_index = rhs.region_index;
+      domain = rhs.domain;
+      projection = rhs.projection;
+      sharding = rhs.sharding;
+      sharding_id = rhs.sharding_id;
+      sharding_domain = rhs.sharding_domain;
+#ifdef LEGION_SPY
+      dtype = rhs.dtype;
+      dependence_mask = rhs.dependence_mask;
+#endif
+      // Just move over the references
+      rhs.domain = NULL;
+      rhs.sharding_domain = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointwiseDependence::matches(const LogicalUser &user,
+        DependenceType dep_type, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(user.shard_proj != NULL);
+#endif
+      if (context_index != user.ctx_index)
+        return false;
+      if (region_index != user.idx)
+        return false;
+#ifdef LEGION_SPY
+      if (dtype != dep_type)
+        return false;
+      dependence_mask |= mask;
+#endif
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseDependence::find_dependences(const RegionRequirement &req,
+        const std::vector<std::pair<LogicalRegion,DomainPoint> > &points,
+        std::map<LogicalRegion,std::vector<DomainPoint> > &dependences) const
+    //--------------------------------------------------------------------------
+    {
+      projection->find_inversions(kind, unique_id, region_index, req,
+          domain, points, dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseDependence::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(context_index);
+      rez.serialize(unique_id);
+      rez.serialize(kind);
+      rez.serialize(region_index);
+      rez.serialize(domain->handle);
+      rez.serialize(projection->projection_id);
+      rez.serialize(sharding_id);
+      if (sharding_domain != NULL)
+        rez.serialize(sharding_domain->handle);
+      else
+        rez.serialize(IndexSpace::NO_SPACE);
+#ifdef LEGION_SPY
+      rez.serialize(dtype);
+      rez.serialize(dependence_mask);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseDependence::deserialize(Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+      derez.deserialize(context_index);
+      derez.deserialize(unique_id);
+      derez.deserialize(kind);
+      derez.deserialize(region_index);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      domain = runtime->forest->get_node(handle); 
+      domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      ProjectionID pid;
+      derez.deserialize(pid);
+      projection = runtime->find_projection_function(pid);
+      derez.deserialize(sharding_id);
+      sharding = runtime->find_sharding_functor(sharding_id);
+      derez.deserialize(handle);
+      if (handle.exists())
+      {
+        sharding_domain = runtime->forest->get_node(handle);
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+      }
+      else
+        sharding_domain = NULL;
+#ifdef LEGION_SPY
+      derez.deserialize(dtype);
+      derez.deserialize(dependence_mask);
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -2850,6 +3072,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ProjectionRegion::pointwise(const ProjectionNode *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      const ProjectionRegion *rhs = 
+        dynamic_cast<const ProjectionRegion*>(other);
+      assert(rhs != NULL);
+      assert(region == rhs->region);
+      return has_pointwise(rhs);
+#else
+      return has_pointwise(static_cast<const ProjectionRegion*>(other));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void ProjectionRegion::extract_shard_summaries(bool supports_name_based,
         ShardID local_shard, size_t total_shards,
         std::map<LogicalRegion,RegionSummary> &region_summaries,
@@ -2948,6 +3185,43 @@ namespace Legion {
           return true;
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::has_pointwise(const ProjectionRegion *other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other->shard_users.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(!other->local_children.empty());
+#endif
+        if (!shard_users.empty())
+          return false;
+        for (std::unordered_map<LegionColor,
+              ProjectionPartition*>::const_iterator it =
+              other->local_children.begin(); it !=
+              other->local_children.end(); it++)
+        {
+          std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            finder = local_children.find(it->first);
+          if (finder == local_children.end())
+            return false;
+          if (!finder->second->has_pointwise(it->second))
+            return false;
+        }
+        return true;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        // Would violate name-based analysis
+        assert(other->local_children.empty());
+#endif
+        // If we don't have any other local children then we can do 
+        // pointwise analysis regardless of where the shards are
+        return local_children.empty(); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3059,6 +3333,21 @@ namespace Legion {
 #else
       return has_interference(static_cast<ProjectionPartition*>(other),
                               local_shard, dominates);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::pointwise(const ProjectionNode *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      const ProjectionPartition *rhs =
+        dynamic_cast<const ProjectionPartition*>(other);
+      assert(rhs != NULL);
+      assert(partition == rhs->partition);
+      return has_pointwise(rhs);
+#else
+      return has_pointwise(static_cast<const ProjectionPartition*>(other));
 #endif
     }
 
@@ -3206,6 +3495,29 @@ namespace Legion {
         }
         return false;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::has_pointwise(
+                                         const ProjectionPartition *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Should be disjoint or would violate name-based-self-analysis
+      assert(partition->row_source->is_disjoint(false/*from app*/));
+#endif
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            it = other->local_children.begin(); 
+            it != other->local_children.end(); it++)
+      {
+        std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+          finder = local_children.find(it->first);
+        if (finder == local_children.end())
+          return false;
+        if (!finder->second->has_pointwise(it->second))
+          return false;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4617,6 +4929,7 @@ namespace Legion {
       assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
       assert(interfering_shards.empty());
+      assert(pointwise_dependences.empty());
 #endif
     }
 
@@ -4886,6 +5199,19 @@ namespace Legion {
           finder++;
         }
       }
+      if (summary->can_perform_name_based_self_analysis())
+      {
+        std::unordered_map<ProjectionSummary*,
+          std::unordered_map<ProjectionSummary*,bool> >::iterator finder =
+            pointwise_dependences.find(summary);
+        if (finder != pointwise_dependences.end())
+        {
+          for (std::unordered_map<ProjectionSummary*,bool>::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+            pointwise_dependences[it->first].erase(summary);
+          pointwise_dependences.erase(finder);
+        }
+      }
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,
           std::pair<bool,bool> > >::iterator finder =
@@ -4937,6 +5263,83 @@ namespace Legion {
       interfering_shards[one][two] = std::make_pair(result, dominates);
       interfering_shards[two][one] = std::make_pair(result, dominates);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalState::record_pointwise_dependence(LogicalAnalysis &analysis,
+        const LogicalUser &prev, const LogicalUser &next)
+    //--------------------------------------------------------------------------
+    {
+      if (!prev.pointwise_analyzable)
+        return false;
+      if (!next.pointwise_analyzable)
+        return false;
+      ProjectionSummary *one = prev.shard_proj;
+      ProjectionSummary *two = next.shard_proj;
+#ifdef DEBUG_LEGION
+      assert(one != NULL);
+      assert(two != NULL);
+      assert(one->owner == this);
+      assert(two->owner == this);
+#endif
+      // In order to do pointwise analysis then each of them have to support
+      // name based self-analysis meaning all the points are accessing
+      // disjoint data and all the accesses are at the leaves
+      if (!one->can_perform_name_based_self_analysis())
+        return false;
+      if (!two->can_perform_name_based_self_analysis())
+        return false;
+      // If they're the same summary then we can do pointiwse analysis
+      if (one == two)
+        return true;
+      // Before we do the local analysis, see if we can find the result
+      // in the cache from a prior computation
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,bool> >::const_iterator
+          one_finder = pointwise_dependences.find(one);
+      if (one_finder != pointwise_dependences.end())
+      {
+        std::unordered_map<ProjectionSummary*,bool>::const_iterator
+          two_finder = one_finder->second.find(two);
+        if (two_finder != one_finder->second.end())
+          return two_finder->second;
+      }
+      // If they are different summaries, but are using the same projection
+      // function and the launch space of the second one is a (non-strict)
+      // subset of the launch domain for the first one then we can also
+      // perform point-wise dependence analysis
+      if ((one->projection == two->projection) &&
+          ((one->args == two->args) || ((one->arglen == two->arglen) &&
+            (std::memcmp(one->args, two->args, one->arglen) == 0))))
+      {
+        if (one->domain == two->domain)
+        {
+          // If they both have the same domain then this is easy
+          pointwise_dependences[one][two] = true;
+          pointwise_dependences[two][one] = true;
+          return true;
+        }
+        else
+        {
+          const bool result = one->domain->dominates(two->domain);
+          pointwise_dependences[one][two] = result;
+          // Keep the data structure symmetric for when we go to
+          // prune out projection summaries
+          pointwise_dependences[two][one] =
+            two->domain->dominates(one->domain);
+          return result;
+        }
+      }
+      // If we get here, do the more expensive check to see if we can do
+      // point-wise analysis locally between the two summaries in our
+      // local address space and then all-reduce the result between any
+      // shards to see if they are all local and then save the result
+      // in the cache for future cases.
+      const std::pair<bool,bool> result =
+        analysis.context->has_pointwise_dependence(one, two);
+      pointwise_dependences[one][two] = result.first;
+      pointwise_dependences[two][one] = result.second;
+      return result.first;
     }
 
     //--------------------------------------------------------------------------

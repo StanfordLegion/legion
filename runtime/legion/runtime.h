@@ -2518,8 +2518,9 @@ namespace Legion {
       virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
       virtual void record_intra_space_dependences(unsigned idx,
                                const std::vector<DomainPoint> &region_deps) = 0;
-      virtual void record_point_wise_dependence(LogicalRegion lr, unsigned region_idx) = 0;
-      virtual const Mappable* as_mappable(void) const = 0;
+      virtual void record_pointwise_dependence(uint64_t previous_context_index,
+          const DomainPoint &previous_point, ShardID shard_id) = 0;
+      virtual const Operation* as_operation(void) const = 0;
     }; 
 
     /**
@@ -2541,12 +2542,24 @@ namespace Legion {
                        const Domain &launch_domain, const DomainPoint &point);
       void project_points(const RegionRequirement &req, unsigned idx,
                           Runtime *runtime, const Domain &launch_domain,
-                          const std::vector<PointTask*> &point_tasks);
+                          const std::vector<PointTask*> &point_tasks,
+                          const std::vector<PointwiseDependence> *pointwise,
+                          const size_t total_shards);
       // Generalized and annonymized
-      void project_points(Operation *op, unsigned idx, 
-                          const RegionRequirement &req, 
+      void project_points(Operation *op, unsigned idx,
+                          const RegionRequirement &req,
                           Runtime *runtime, const Domain &launch_domain,
-                          const std::vector<ProjectionPoint*> &points);
+                          const std::vector<ProjectionPoint*> &points,
+                          const std::vector<PointwiseDependence> *pointwise,
+                          const size_t total_shards);
+      // Find inversions for pointwise dependence analysis
+      // TODO: fix this in grandrefactor where we can change op_kind back
+      // to an OpKind type
+      void find_inversions(unsigned op_kind, UniqueID uid,
+          unsigned region_index, const RegionRequirement &req,
+          IndexSpaceNode *domain, 
+          const std::vector<std::pair<LogicalRegion,DomainPoint> > &regions,
+          std::map<LogicalRegion,std::vector<DomainPoint> > &dependences);
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(LogicalRegion upper_bound,
@@ -2565,16 +2578,19 @@ namespace Legion {
       void check_projection_partition_result(LogicalPartition upper_bound,
                                           Operation *op, unsigned idx,
                                           LogicalRegion result,
-                                          Runtime *runtime) const;
+                                          Runtime *runtime) const; 
       // Checking for inversion
-      void check_inversion(const Task *task, unsigned idx,
+      void check_inversion(const ProjectionPoint *point, unsigned idx,
                            const std::vector<DomainPoint> &ordered_points);
-      void check_containment(const Task *task, unsigned idx,
+      void check_containment(const ProjectionPoint *point, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
-      void check_inversion(const Mappable *mappable, unsigned idx,
+      // TODO: fix this in grandrefactor where we can change op_kind back
+      // to an OpKind type
+      void check_inversion(unsigned op_kind, UniqueID uid, unsigned idx,
                            const std::vector<DomainPoint> &ordered_points);
-      void check_containment(const Mappable *mappable, unsigned idx,
-                             const std::vector<DomainPoint> &ordered_points);
+      void check_containment(unsigned op_kind, UniqueID uid, 
+          unsigned idx, const DomainPoint &point,
+          const std::vector<DomainPoint> &ordered_points);
     public:
       bool is_complete(RegionTreeNode *node, Operation *op, 
                        unsigned index, IndexSpaceNode *projection_space) const;
@@ -3467,14 +3483,6 @@ namespace Legion {
                                                     Serializer &rez);
       void send_slice_find_intra_space_dependence(Processor target, 
                                                   Serializer &rez);
-      void send_slice_record_intra_space_dependence(Processor target,
-                                                    Serializer &rez);
-      void send_slice_find_point_wise_dependence(Processor target,
-                                                 Serializer &rez);
-      void send_slice_record_point_wise_dependence(Processor target,
-                                                    Serializer &rez);
-      void send_slice_add_point_to_completed_list(Processor target,
-                                                    Serializer &rez);
       void send_slice_remote_rendezvous(Processor target, Serializer &rez);
       void send_slice_remote_versioning_rendezvous(Processor target_proc,
                                                    Serializer &rez);
@@ -3602,11 +3610,6 @@ namespace Legion {
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_equivalence_set_notification(
                                         AddressSpaceID target, Serializer &rez);
-      void send_control_replicate_intra_space_dependence(AddressSpaceID target,
-                                                         Serializer &rez);
-      void send_control_replicate_point_wise_dependence(
-                                         AddressSpaceID target,
-                                         Serializer &rez);
       void send_control_replicate_broadcast_update(AddressSpaceID target,
                                                    Serializer &rez);
       void send_control_replicate_created_regions(AddressSpaceID target,
@@ -3628,6 +3631,8 @@ namespace Legion {
       void send_control_replicate_implicit_rendezvous(AddressSpaceID target,
                                                       Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
+                                                       Serializer &rez);
+      void send_control_replicate_pointwise_dependence(AddressSpaceID target,
                                                        Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
@@ -3673,6 +3678,8 @@ namespace Legion {
                                                      Serializer &rez);
       void send_remote_context_refine_equivalence_sets(AddressSpaceID target,
                                                        Serializer &rez);
+      void send_remote_context_pointwise_dependence(AddressSpaceID target,
+                                                    Serializer &rez);
       void send_remote_context_find_trace_local_sets_request(
                                                   AddressSpaceID target,
                                                   Serializer &rez);
@@ -3915,10 +3922,6 @@ namespace Legion {
                                                      AddressSpaceID source);
       void handle_slice_concurrent_allreduce_response(Deserializer &derez);
       void handle_slice_find_intra_dependence(Deserializer &derez);
-      void handle_slice_record_intra_dependence(Deserializer &derez);
-      void handle_slice_find_point_wise_dependence(Deserializer &derez);
-      void handle_slice_record_point_wise_dependence(Deserializer &derez);
-      void handle_slice_add_point_to_completed_list(Deserializer &derez);
       void handle_slice_remote_collective_rendezvous(Deserializer &derez,
                                                      AddressSpaceID source);
       void handle_slice_remote_collective_versioning_rendezvous(
@@ -4061,6 +4064,7 @@ namespace Legion {
                                                       Deserializer &derez);
       void handle_remote_context_refine_equivalence_sets(
                                                       Deserializer &derez);
+      void handle_remote_context_pointwise_dependence(Deserializer &derez);
       void handle_remote_context_find_trace_local_sets_request(
           Deserializer &derez, AddressSpaceID source);
       void handle_remote_context_find_trace_local_sets_response(
@@ -4156,8 +4160,6 @@ namespace Legion {
                                                            Deserializer &derez);
       void handle_control_replicate_equivalence_set_notification(
                                                            Deserializer &derez);
-      void handle_control_replicate_intra_space_dependence(Deserializer &derez);
-      void handle_control_replicate_point_wise_dependence(Deserializer &derez);
       void handle_control_replicate_broadcast_update(Deserializer &derez);
       void handle_control_replicate_created_regions(Deserializer &derez);
       void handle_control_replicate_trace_event_request(Deserializer &derez,
@@ -4174,6 +4176,7 @@ namespace Legion {
                                                     AddressSpaceID source);
       void handle_control_replicate_implicit_rendezvous(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
+      void handle_control_replicate_pointwise_dependence(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -6489,14 +6492,6 @@ namespace Legion {
           break;
         case SLICE_FIND_INTRA_DEP:
           break;
-        case SLICE_RECORD_INTRA_DEP:
-          break;
-        case SLICE_FIND_POINT_WISE_DEP:
-          break;
-        case SLICE_RECORD_POINT_WISE_DEP:
-          break;
-        case SLICE_ADD_POINT_TO_COMPLETED_LIST:
-          break;
         case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
           break;
         case SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS:
@@ -6668,10 +6663,6 @@ namespace Legion {
           break;
         case SEND_REPL_EQUIVALENCE_SET_NOTIFICATION:
           break;
-        case SEND_REPL_INTRA_SPACE_DEP:
-          break;
-        case SEND_REPL_POINT_WISE_DEP:
-          break;
         case SEND_REPL_BROADCAST_UPDATE:
           break;
         case SEND_REPL_CREATED_REGIONS:
@@ -6693,6 +6684,8 @@ namespace Legion {
         case SEND_REPL_IMPLICIT_RENDEZVOUS:
           break;
         case SEND_REPL_FIND_COLLECTIVE_VIEW:
+          break;
+        case SEND_REPL_POINTWISE_DEPENDENCE:
           break;
         case SEND_MAPPER_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;
@@ -6739,6 +6732,8 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
           break;
         case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
+          break;
+        case SEND_REMOTE_CONTEXT_POINTWISE_DEPENDENCE:
           break;
         case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST:
           break;
@@ -6978,6 +6973,7 @@ namespace Legion {
         case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
         case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
         case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
+        case SEND_CONTROL_REPLICATION_POINTWISE_ALLREDUCE:
         case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
           break;
         case SEND_PROFILER_EVENT_TRIGGER:

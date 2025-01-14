@@ -1728,6 +1728,29 @@ namespace Legion {
     };
 
     /**
+     * \class PointwiseAllreduce
+     * This class performs an all-reduce on a pair of booleans to wtih
+     * an and-allreduce on each entry for supporting pointwise analysis.
+     */
+    class PointwiseAllreduce : public AllGatherCollective<false> {
+    public:
+      PointwiseAllreduce(ReplicateContext *ctx, CollectiveID id,
+          std::pair<bool,bool> &local);
+      PointwiseAllreduce(const PointwiseAllreduce &rhs) = delete;
+      virtual ~PointwiseAllreduce(void);
+    public:
+      PointwiseAllreduce& operator=(const PointwiseAllreduce &rhs) = delete;
+    public:
+      virtual MessageKind get_message_kind(void) const
+        { return SEND_CONTROL_REPLICATION_POINTWISE_ALLREDUCE; }
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    private:
+      std::pair<bool,bool> &local;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1995,10 +2018,6 @@ namespace Legion {
       template<typename ... Args>
       ReplPointWiseAnalysable(Runtime *rt, Args&& ... args)
         : OP(rt, std::forward<Args>(args) ...) { }
-    public:
-      virtual RtEvent find_point_wise_dependence(DomainPoint point,
-          LogicalRegion lr,
-          unsigned region_idx);
     };
 
     /**
@@ -2046,13 +2065,8 @@ namespace Legion {
           size_t points, bool need_result);
       void select_sharding_function(ReplicateContext *repl_ctx);
     public:
-      // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
-      virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 const DomainPoint &next,
-                                                 RtEvent point_mapped);
-    public:
-      virtual void clear_context_maps(void);
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
     public:
       // Output regions
       virtual void record_output_registered(RtEvent registered);
@@ -2239,8 +2253,6 @@ namespace Legion {
       CreateCollectiveFillView *collective;
       CollectiveID collective_id;
       DistributedID fresh_did;
-    public:
-      virtual void clear_context_maps(void);
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2349,9 +2361,6 @@ namespace Legion {
       virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
-      virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 const DomainPoint &next,
-                                                 RtEvent point_mapped);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
@@ -2363,8 +2372,6 @@ namespace Legion {
       std::vector<IndirectRecordExchange*> src_collectives;
       std::vector<IndirectRecordExchange*> dst_collectives;
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
-    public:
-      virtual void clear_context_maps(void);
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2836,8 +2843,6 @@ namespace Legion {
       IndexAttachExchange *collective;
       ShardParticipantsExchange *participants;
       ShardingFunction *sharding_function;
-    public:
-      virtual void clear_context_maps(void);
     };
 
     /**
@@ -2911,8 +2916,6 @@ namespace Legion {
       ShardingFunction *sharding_function;
       ShardParticipantsExchange *participants;
       ApBarrier effects_barrier;
-    public:
-      virtual void clear_context_maps(void);
     };
 
     /**
@@ -3393,6 +3396,9 @@ namespace Legion {
             CollectiveViewCreatorBase::CollectiveRendezvous> &rendezvous);
       void rendezvous_check_virtual_mappings(ShardID shard,
           MapperManager *mapper, const std::vector<bool> &virtual_mappings);
+      RtEvent find_pointwise_dependence(uint64_t context_index,
+          const DomainPoint &point, ShardID shard,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
     public:
       EquivalenceSet* get_initial_equivalence_set(unsigned idx,
               LogicalRegion region, InnerContext *context, bool first_shard);
@@ -3467,12 +3473,6 @@ namespace Legion {
       void send_refine_equivalence_sets(ShardID target, Serializer &rez);
       void handle_refine_equivalence_sets(Deserializer &derez);
     public:
-      void send_intra_space_dependence(ShardID target, Serializer &rez);
-      void handle_intra_space_dependence(Deserializer &derez);
-    public:
-      void send_point_wise_dependence(ShardID target, Serializer &rez);
-      void handle_point_wise_dependence(Deserializer &derez);
-    public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
     public:
@@ -3538,10 +3538,6 @@ namespace Legion {
                                                  Runtime *runtime);
       static void handle_equivalence_set_notification(Deserializer &derez, 
                                                       Runtime *rt);
-      static void handle_intra_space_dependence(Deserializer &derez, 
-                                                Runtime *rt);
-      static void handle_point_wise_dependence(Deserializer &derez,
-                                                Runtime *rt);
       static void handle_broadcast_update(Deserializer &derez, Runtime *rt);
       static void handle_created_regions(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
@@ -3556,6 +3552,7 @@ namespace Legion {
       static void handle_find_trace_local_sets(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
       static void handle_find_collective_view(Deserializer &derez, Runtime *rt);
+      static void handle_pointwise_dependence(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid, 
                                                bool skip_check = false);

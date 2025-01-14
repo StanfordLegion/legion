@@ -1349,22 +1349,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    bool Operation::point_wise_analysable(void)
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::analyze_point_wise_dependence(const LogicalUser &prev,
-        const LogicalUser &user, LogicalAnalysis &logical_analysis,
-        DependenceType dtype)
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
     unsigned Operation::get_output_offset() const
     {
       return LogicalAnalysis::NO_OUTPUT_OFFSET;
@@ -2749,107 +2733,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::record_point_wise_dependence_completed_points_prev_task(
-        ProjectionSummary *shard_proj, uint64_t context_index)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::add_point_to_completed_list(
-        DomainPoint point, unsigned region_idx, RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::record_point_wise_dependence(
-        DomainPoint point, unsigned region_idx,
-        RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::record_point_wise_dependence(
-        LogicalRegion lr, unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent Operation::find_point_wise_dependence(
-        DomainPoint point, LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::set_prev_point_wise_user(
-        Operation *prev_op,
-        GenerationID prev_gen, uint64_t prev_ctx_index,
-        ProjectionSummary *shard_proj,
-        unsigned region_idx,
-#ifdef LEGION_SPY
-        unsigned dtype,
-#endif
-        unsigned prev_region_idx,
-        Domain index_domain, IndexSpaceNode *launch_space)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::set_next_point_wise_user(
-        Operation *next_op,
-        GenerationID next_gen, GenerationID user_gen,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::has_collective(void)
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::prev_point_wise_user_set(unsigned region_req_idx)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::need_forward_progress(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode* Operation::get_launch_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
                               const FieldMaskSet<ReplicatedView> &collectives,
                               std::vector<MappingInstance> &input_valid,
@@ -3002,6 +2885,32 @@ namespace Legion {
       else
         Provenance::serialize_null(rez);
       rez.serialize<bool>(tracing);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::is_pointwise_analyzable(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::register_pointwise_dependence(unsigned idx,
+        const LogicalUser &previous, DependenceType dtype, 
+        const FieldMask &dependent_mask)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      std::abort();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Operation::find_pointwise_dependence(
+          const DomainPoint &point, GenerationID gen, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      std::abort();
     }
 
 #ifdef DEBUG_LEGION
@@ -4229,380 +4138,6 @@ namespace Legion {
     }
 
     // Explicit instantiations
-    template class SinglePointWiseAnalysable<TaskOp>;
-    template class SinglePointWiseAnalysable<CopyOp>;
-
-    /////////////////////////////////////////////////////////////
-    // SinglePointWiseAnalysable
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void SinglePointWiseAnalysable<OP>::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      OP::activate();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void SinglePointWiseAnalysable<OP>::deactivate(bool freeop)
-    //--------------------------------------------------------------------------
-    {
-      OP::deactivate(freeop);
-      point_wise_mapping_dependences.clear();
-    }
-
-    // Explicit instantiations
-    template class PointWiseAnalysable<CollectiveViewCreator<TaskOp> >;
-
-    /////////////////////////////////////////////////////////////
-    // PointWiseAnalysable
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void PointWiseAnalysable<OP>::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      OP::activate();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void PointWiseAnalysable<OP>::deactivate(bool freeop)
-    //--------------------------------------------------------------------------
-    {
-      if (!this->runtime->disable_point_wise_analysis)
-        clear_context_maps();
-
-      OP::deactivate(freeop);
-
-      if (!this->runtime->disable_point_wise_analysis)
-      {
-        point_wise_dependences.clear();
-        connect_to_prev_points.clear();
-        connect_to_next_points.clear();
-
-        pending_point_wise_dependences.clear();
-        prev_index_tasks.clear();
-        completed_point_list.clear();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::prev_point_wise_user_set(
-        unsigned region_req_idx)
-    //--------------------------------------------------------------------------
-    {
-      return prev_index_tasks.find(region_req_idx)
-          != prev_index_tasks.end();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::set_prev_point_wise_user(
-        Operation *prev_op,
-        GenerationID prev_gen, uint64_t prev_ctx_index,
-        ProjectionSummary *shard_proj,
-        unsigned region_idx,
-#ifdef LEGION_SPY
-        unsigned dep_type,
-#endif
-        unsigned prev_region_idx,
-        Domain index_domain, IndexSpaceNode *launch_space)
-    //--------------------------------------------------------------------------
-    {
-      if ((this->trace != NULL) && this->trace->is_recording())
-      {
-        this->trace->set_prev_point_wise_user(prev_op, prev_gen,
-            prev_ctx_index, shard_proj, region_idx,
-#ifdef LEGION_SPY
-            dep_type,
-#endif
-            prev_region_idx, index_domain, launch_space, this);
-      }
-      AutoLock o_lock(this->op_lock);
-      prev_index_tasks.insert({
-                              region_idx,
-                              PointWisePrevOpInfo(
-                                  shard_proj->projection,
-                                  shard_proj->sharding,
-                                  shard_proj->sharding_domain,
-                                  index_domain,
-                                  launch_space,
-                                  prev_op, prev_gen, prev_ctx_index,
-#ifdef LEGION_SPY
-                                  dep_type,
-#endif
-                                  prev_region_idx)
-                              });
-      set_connect_to_prev_point(region_idx);
-      return true;
-
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void PointWiseAnalysable<OP>::record_point_wise_dependence_completed_points_prev_task(
-        ProjectionSummary *shard_proj, uint64_t context_index)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<DomainPoint> prev_index_task_points;
-
-      Domain local_domain;
-      IndexSpace shard_space;
-
-      // Compute the local index space of points for this shard
-      if (shard_proj->sharding != NULL)
-      {
-        shard_space = shard_proj->sharding->find_shard_space(
-              this->get_context()->get_shard_id(),
-              shard_proj->domain,
-              shard_proj->sharding_domain->handle,
-              this->get_provenance());
-        if (shard_space.exists())
-        {
-          this->runtime->forest->find_domain(shard_space, local_domain);
-        }
-        else return;
-      }
-      else
-        local_domain = shard_proj->domain->get_tight_domain();
-
-      for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
-      {
-        prev_index_task_points.push_back((*dpi));
-      }
-
-      assert(!prev_index_task_points.empty());
-
-      for(std::vector<DomainPoint>::iterator it =
-          prev_index_task_points.begin(); it !=
-          prev_index_task_points.end(); it++)
-      {
-        this->get_context()->record_point_wise_dependence(context_index,
-            (*it), RtEvent::NO_RT_EVENT);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void PointWiseAnalysable<OP>::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::set_next_point_wise_user(
-        Operation *next_op,
-        GenerationID next_gen, GenerationID user_gen,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      if ((this->get_trace() != NULL) && this->get_trace()->is_recording())
-      {
-        this->get_trace()->set_next_point_wise_user(next_op, next_gen,
-            user_gen, region_idx, this);
-      }
-
-      AutoLock o_lock(this->op_lock);
-
-      if (user_gen < this->gen)
-      {
-        return false;
-      }
-
-      if (!completed_point_list.empty())
-      {
-        for(std::vector<std::pair<DomainPoint,RtEvent>>::iterator it =
-            completed_point_list.begin(); it !=
-            completed_point_list.end(); it++)
-        {
-          this->get_context()->record_point_wise_dependence(
-              this->get_context_index(),
-              (*it).first, (*it).second);
-        }
-      }
-
-      set_connect_to_next_point(region_idx);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void PointWiseAnalysable<OP>::add_point_to_completed_list(
-        DomainPoint point, unsigned region_idx, RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(this->op_lock);
-      if (!should_connect_to_next_point(region_idx))
-      {
-        completed_point_list.push_back(std::make_pair(point, point_mapped));
-      }
-      else
-      {
-        record_point_wise_dependence(point, region_idx, point_mapped);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    void PointWiseAnalysable<OP>::record_point_wise_dependence(
-        DomainPoint point, unsigned region_idx, RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      this->parent_ctx->record_point_wise_dependence(
-          this->context_index,
-          point,
-          point_mapped);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    RtEvent PointWiseAnalysable<OP>::find_point_wise_dependence(
-        DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(this->op_lock);
-
-      if (should_connect_to_prev_point(region_idx))
-      {
-        // Find prev index task our owner index task depend on
-        std::map<unsigned, PointWisePrevOpInfo>::iterator finder =
-          prev_index_tasks.find(region_idx);
-        assert(finder != prev_index_tasks.end());
-
-#ifndef LEGION_SPY
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-#endif
-
-        const RegionRequirement &req =
-          this->get_requirement(region_idx);
-        std::vector<DomainPoint> previous_index_task_points;
-
-        Domain index_domain = finder->second.launch_space->get_tight_domain();
-
-        get_points(req, finder->second.projection,
-            lr, index_domain,
-            previous_index_task_points);
-
-        if (previous_index_task_points.size() > 1)
-        {
-          assert(false);
-        }
-        assert(!previous_index_task_points.empty());
-
-#ifdef LEGION_SPY
-        LegionSpy::log_mapping_point_wise_dependence(
-            this->get_context()->get_unique_id(),
-            LEGION_DISTRIBUTED_ID_FILTER(0),
-            finder->second.ctx_index, previous_index_task_points[0],
-            finder->second.region_idx, 0,
-            this->context_index, point,
-            region_idx, 0,
-            finder->second.dep_type);
-
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-#endif
-
-        return this->parent_ctx->find_point_wise_dependence(
-            finder->second.ctx_index,
-            previous_index_task_points[0]);
-      }
-
-      assert(false);
-      return RtUserEvent::NO_RT_USER_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::need_forward_progress(void)
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::point_wise_analysable(void)
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    bool PointWiseAnalysable<OP>::analyze_point_wise_dependence(
-          const LogicalUser &prev, const LogicalUser &user,
-          LogicalAnalysis &logical_analysis, DependenceType dtype)
-    //--------------------------------------------------------------------------
-    {
-      bool point_wise_analysable = false;
-      if (prev.point_wise_analysable &&
-          user.point_wise_analysable)
-      {
-        if (prev.has_collective ||
-            user.has_collective)
-        {
-          logical_analysis.bail_point_wise_analysis = true;
-        }
-        if (user.op->
-            prev_point_wise_user_set(user.idx))
-        {
-          // We bail if we have more than one ancestor for now
-          logical_analysis.bail_point_wise_analysis = true;
-        }
-        if (!logical_analysis.bail_point_wise_analysis) {
-          if(!prev.shard_proj->is_disjoint() ||
-              !prev.shard_proj->can_perform_name_based_self_analysis()) {
-            logical_analysis.bail_point_wise_analysis = true;
-          }
-          else if ((user.shard_proj->projection->projection_id !=
-                prev.shard_proj->projection->projection_id) ||
-              !user.shard_proj->projection->is_functional ||
-              (!user.shard_proj->projection->is_invertible &&
-               user.shard_proj->projection->projection_id != 0))
-          {
-            logical_analysis.bail_point_wise_analysis = true;
-          }
-          else
-          {
-            bool parent_dominates =
-              prev.shard_proj->domain->dominates(user.shard_proj->domain);
-            if(parent_dominates)
-            {
-              point_wise_analysable = true;
-              if(!prev.op->set_next_point_wise_user(
-                  user.op, user.gen, prev.gen, prev.idx))
-              {
-                user.op->record_point_wise_dependence_completed_points_prev_task(
-                    prev.shard_proj, prev.ctx_index);
-              }
-              user.op->set_prev_point_wise_user(
-                  prev.op, prev.gen, prev.ctx_index, prev.shard_proj,
-                  user.idx,
-#ifdef LEGION_SPY
-                  dtype,
-#endif
-                  prev.idx, prev.index_domain, prev.launch_space);
-            }
-          }
-        }
-      }
-      return point_wise_analysable;
-    }
-
-    // Explicit instantiations
     template class CollectiveViewCreator<Operation>;
     template class CollectiveViewCreator<MapOp>;
     template class CollectiveViewCreator<AttachOp>;
@@ -4612,6 +4147,61 @@ namespace Legion {
     template class CollectiveViewCreator<DependentPartitionOp>;
     template class CollectiveViewCreator<TaskOp>;
     template class CollectiveViewCreator<CollectiveHelperOp>;
+
+    /////////////////////////////////////////////////////////////
+    // PointwiseAnalyzable
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointwiseAnalyzable<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointwiseAnalyzable<OP>::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      pointwise_dependences.clear();
+      OP::deactivate(freeop);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool PointwiseAnalyzable<OP>::is_pointwise_analyzable(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !this->runtime->disable_point_wise_analysis;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointwiseAnalyzable<OP>::register_pointwise_dependence(unsigned idx,
+          const LogicalUser &previous, DependenceType dtype,
+          const FieldMask &dependent_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(previous.shard_proj != NULL);
+#endif
+      std::vector<PointwiseDependence> &dependences = 
+        pointwise_dependences[idx];
+      for (std::vector<PointwiseDependence>::iterator it =
+            dependences.begin(); it != dependences.end(); it++)
+        if (it->matches(previous, dtype, dependent_mask))
+          return;
+      dependences.emplace_back(PointwiseDependence(previous));
+#ifdef LEGION_SPY
+      dependences.back().dtype = dtype; 
+      dependences.back().dependent_mask = dependent_mask;
+#endif
+    }
+
+    // Explicit instantiations
+    template class PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >;
 
     ///////////////////////////////////////////////////////////// 
     // External Op 
@@ -8680,7 +8270,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(Runtime *rt)
-      : PointWiseAnalysable<CopyOp>(rt)
+      : PointwiseAnalyzable<CopyOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -8688,7 +8278,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-      : PointWiseAnalysable<CopyOp>(rhs)
+      : PointwiseAnalyzable<CopyOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8927,24 +8517,13 @@ namespace Legion {
       if (runtime->check_privileges)
         perform_type_checking();
       initialize_copies_with_launcher(launcher);
-
-      if (!runtime->disable_point_wise_analysis)
-      {
-        size_t region_count = get_region_count();
-        connect_to_prev_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-          connect_to_prev_points[idx] = false;
-        connect_to_next_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-          connect_to_next_points[idx] = false;
-      }
     }
 
     //--------------------------------------------------------------------------
     void IndexCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<CopyOp>::activate();
+      PointwiseAnalyzable<CopyOp>::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -8957,7 +8536,7 @@ namespace Legion {
     void IndexCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<CopyOp>::deactivate(false/*free*/);
+      PointwiseAnalyzable<CopyOp>::deactivate(false/*free*/);
       // We can deactivate all of our point operations
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -8966,8 +8545,7 @@ namespace Legion {
       collective_exchanges.clear();
       commit_preconditions.clear();
       interfering_requirements.clear();
-      intra_space_dependences.clear();
-      pending_intra_space_dependences.clear();
+      pending_pointwise_dependences.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return this operation to the runtime
@@ -9262,26 +8840,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
-      unsigned point_idx = 0;
-      points.resize(num_points);
-      for (Domain::DomainPointIterator itr(launch_domain); 
-            itr; itr++, point_idx++)
+      std::vector<PointCopyOp*> temp_points;
+      temp_points.reserve(num_points);
+      for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
       {
         PointCopyOp *point = runtime->get_available_point_copy_op();
         point->initialize(this, itr.p);
-        points[point_idx] = point;
+        temp_points.push_back(point);
       }
       // Perform the projections
-      std::vector<ProjectionPoint*> projection_points(points.begin(),
-                                                      points.end());
+      std::vector<ProjectionPoint*> projection_points(temp_points.begin(),
+                                                      temp_points.end());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (src_requirements[idx].handle_type == LEGION_SINGULAR_PROJECTION)
           continue;
         ProjectionFunction *function = 
           runtime->find_projection_function(src_requirements[idx].projection);
+        std::map<unsigned,std::vector<PointwiseDependence> >::const_iterator
+          finder = pointwise_dependences.find(idx);
         function->project_points(this, idx, src_requirements[idx],
-                                 runtime, index_domain, projection_points);
+            runtime, index_domain, projection_points, 
+            (finder == pointwise_dependences.end()) ? NULL : &finder->second,
+            parent_ctx->get_total_shards());
       }
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -9290,9 +8871,12 @@ namespace Legion {
           continue;
         ProjectionFunction *function = 
           runtime->find_projection_function(dst_requirements[idx].projection);
-        function->project_points(this, offset + idx, 
-                                 dst_requirements[idx], runtime, 
-                                 index_domain, projection_points);
+        std::map<unsigned,std::vector<PointwiseDependence> >::const_iterator
+          finder = pointwise_dependences.find(offset + idx);
+        function->project_points(this, offset + idx, dst_requirements[idx],
+            runtime, index_domain, projection_points,
+            (finder == pointwise_dependences.end()) ? NULL : &finder->second,
+            parent_ctx->get_total_shards());
       }
       offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
@@ -9305,9 +8889,13 @@ namespace Legion {
           ProjectionFunction *function = 
             runtime->find_projection_function(
                 src_indirect_requirements[idx].projection);
+          std::map<unsigned,std::vector<PointwiseDependence> >::const_iterator
+            finder = pointwise_dependences.find(offset + idx);
           function->project_points(this, offset + idx,
-                                   src_indirect_requirements[idx], runtime,
-                                   index_domain, projection_points);
+              src_indirect_requirements[idx], runtime,
+              index_domain, projection_points,
+              (finder == pointwise_dependences.end()) ? NULL : &finder->second,
+              parent_ctx->get_total_shards());
         }
         offset += src_indirect_requirements.size();
       }
@@ -9321,18 +8909,101 @@ namespace Legion {
           ProjectionFunction *function = 
             runtime->find_projection_function(
                 dst_indirect_requirements[idx].projection);
+          std::map<unsigned,std::vector<PointwiseDependence> >::const_iterator
+            finder = pointwise_dependences.find(offset + idx);
           function->project_points(this, offset + idx,
-                                   dst_indirect_requirements[idx], runtime,
-                                   index_domain, projection_points);
+              dst_indirect_requirements[idx], runtime,
+              index_domain, projection_points,
+              (finder == pointwise_dependences.end()) ? NULL : &finder->second,
+              parent_ctx->get_total_shards());
         }
       }
       if (runtime->legion_spy_enabled)
       {
-        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-              it != points.end(); it++) 
+        for (std::vector<PointCopyOp*>::const_iterator it = 
+              temp_points.begin(); it != temp_points.end(); it++) 
           (*it)->log_copy_requirements();
       }
+      // Need the lock to avoid racing with the pointwise dependence analysis 
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(points.empty());
+#endif
+      points.swap(temp_points);
+      for (std::map<DomainPoint,RtUserEvent>::const_iterator pit =
+            pending_pointwise_dependences.begin(); pit !=
+            pending_pointwise_dependences.end(); pit++)
+      {
+        PointCopyOp *point = NULL; 
+        for (std::vector<PointCopyOp*>::const_iterator it =
+              points.begin(); it != points.end(); it++)
+        {
+          if (pit->first != (*it)->index_point)
+            continue;
+          point = *it;
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(point != NULL);
+#endif
+        Runtime::trigger_event(pit->second, point->get_mapped_event());
+      }
     } 
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexCopyOp::find_pointwise_dependence(const DomainPoint &point,
+        GenerationID needed_gen, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(needed_gen <= gen);
+#endif
+      if ((needed_gen < gen) || mapped)
+      {
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger);
+          return to_trigger;
+        }
+        else
+          return RtEvent::NO_RT_EVENT;
+      }
+      if (points.empty())
+      {
+        std::map<DomainPoint,RtUserEvent>::const_iterator finder =
+          pending_pointwise_dependences.find(point);
+        if (finder != pending_pointwise_dependences.end())
+        {
+          if (to_trigger.exists())
+          {
+            Runtime::trigger_event(to_trigger, finder->second);
+            return to_trigger;
+          }
+          else
+            return finder->second;
+        }
+        if (!to_trigger.exists())
+          to_trigger = Runtime::create_rt_user_event();
+        pending_pointwise_dependences.emplace(std::make_pair(point,to_trigger));
+        return to_trigger;
+      }
+      for (std::vector<PointCopyOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (point != (*it)->index_point)
+          continue;
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger, (*it)->get_mapped_event());
+          return to_trigger;
+        }
+        else
+          return (*it)->get_mapped_event();
+      }
+      // Should never get here, if we do that means we couldn't find the point
+      std::abort();
+    }
 
     //--------------------------------------------------------------------------
     void IndexCopyOp::handle_point_commit(RtEvent point_committed)
@@ -9762,75 +9433,17 @@ namespace Legion {
     RtEvent IndexCopyOp::find_intra_space_dependence(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      // Check to see if we already have it
-      std::map<DomainPoint,RtEvent>::const_iterator finder = 
-        intra_space_dependences.find(point);
-      if (finder != intra_space_dependences.end())
-        return finder->second;
-      // Otherwise make a temporary one and record it for now
-      const RtUserEvent pending_event = Runtime::create_rt_user_event();
-      intra_space_dependences[point] = pending_event;
-      pending_intra_space_dependences[point] = pending_event;
-      return pending_event;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::record_intra_space_dependence(const DomainPoint &point,
-                                                    const DomainPoint &next,
-                                                    RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      std::map<DomainPoint,RtEvent>::iterator finder = 
-        intra_space_dependences.find(point);
-      if (finder != intra_space_dependences.end())
-      {
 #ifdef DEBUG_LEGION
-        assert(finder->second != point_mapped);
+      assert(!points.empty());
 #endif
-        std::map<DomainPoint,RtUserEvent>::iterator pending_finder = 
-          pending_intra_space_dependences.find(point);
-#ifdef DEBUG_LEGION
-        assert(pending_finder != pending_intra_space_dependences.end());
-#endif
-        Runtime::trigger_event(pending_finder->second, point_mapped);
-        pending_intra_space_dependences.erase(pending_finder);
-        finder->second = point_mapped;
-      }
-      else
-        intra_space_dependences[point] = point_mapped;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
+      for (std::vector<PointCopyOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
       {
-        need_to_clear |= should_connect_to_next_point(i);
+        if (point != (*it)->index_point)
+          continue;
+        return (*it)->get_mapped_event();
       }
-      AutoLock o_lock(op_lock);
-      if (need_to_clear)
-      {
-        Domain local_domain = launch_space->get_tight_domain();
-        std::vector<DomainPoint> points;
-
-        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
-        {
-          points.push_back((*dpi));
-        }
-        parent_ctx->clear_map(context_index, points);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode* IndexCopyOp::get_launch_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return launch_space;
+      std::abort();
     }
 
     /////////////////////////////////////////////////////////////
@@ -9839,7 +9452,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointCopyOp::PointCopyOp(Runtime *rt)
-      : SinglePointWiseAnalysable<CopyOp>(rt)
+      : CopyOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -9847,7 +9460,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointCopyOp::PointCopyOp(const PointCopyOp &rhs)
-      : SinglePointWiseAnalysable<CopyOp>(rhs)
+      : CopyOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9925,7 +9538,7 @@ namespace Legion {
     void PointCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<CopyOp>::activate();
+      CopyOp::activate();
       owner = NULL;
     }
 
@@ -9933,8 +9546,8 @@ namespace Legion {
     void PointCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<CopyOp>::deactivate(false/*free*/);
-      intra_space_mapping_dependences.clear();
+      CopyOp::deactivate(false/*free*/);
+      pointwise_mapping_dependences.clear();
       if (freeop)
         runtime->free_point_copy_op(this);
     }
@@ -9978,15 +9591,9 @@ namespace Legion {
     {
       // Perform the version analysis
       std::set<RtEvent> preconditions;
-      if (!intra_space_mapping_dependences.empty())
-        preconditions.swap(intra_space_mapping_dependences);
-      if (!point_wise_mapping_dependences.empty())
-      {
-        const RtEvent ready =
-          Runtime::merge_events(point_wise_mapping_dependences);
-        point_wise_mapping_dependences.clear();
-        preconditions.insert(ready);
-      }
+      if (!pointwise_mapping_dependences.empty())
+        preconditions.insert(pointwise_mapping_dependences.begin(),
+            pointwise_mapping_dependences.end());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
             src_requirements[idx], copies[idx].src->version, preconditions);
@@ -10171,7 +9778,8 @@ namespace Legion {
           {
             const DomainPoint &prev = dependences[idx-1];
             const RtEvent pre = owner->find_intra_space_dependence(prev);
-            intra_space_mapping_dependences.insert(pre);
+            if (pre.exists())
+              pointwise_mapping_dependences.push_back(pre);
             if (runtime->legion_spy_enabled)
             {
               // We know we only need a dependence on the previous point but
@@ -10182,12 +9790,6 @@ namespace Legion {
                                                       dependences[idx2]);
             }
           }
-          // If we're not the last dependence, then send our mapping event
-          // so that others can record a dependence on us
-          if (idx < (dependences.size()-1))
-            owner->record_intra_space_dependence(index_point,
-                                                 dependences[idx+1],
-                                                 get_mapped_event());
           return;
         }
       }
@@ -10196,35 +9798,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointCopyOp::record_point_wise_dependence(LogicalRegion lr,
-        unsigned region_idx)
+    void PointCopyOp::record_pointwise_dependence(
+        uint64_t previous_context_index, 
+        const DomainPoint &previous_point, ShardID shard)
     //--------------------------------------------------------------------------
     {
-      if (owner->should_connect_to_prev_point(region_idx))
-      {
-        RtEvent pre = owner->find_point_wise_dependence(
-            get_domain_point(),
-            lr, region_idx);
-        if (!std::binary_search(point_wise_mapping_dependences.begin(),
-                  point_wise_mapping_dependences.end(), pre))
-        {
-          point_wise_mapping_dependences.push_back(pre);
-          std::sort(point_wise_mapping_dependences.begin(),
-                    point_wise_mapping_dependences.end());
-        }
-      }
-
-      if (owner->should_connect_to_next_point(region_idx))
-      {
-        owner->record_point_wise_dependence(get_domain_point(),
-            region_idx, get_mapped_event());
-      }
-      else
-      {
-        owner->add_point_to_completed_list(get_domain_point(),
-            region_idx,
-            get_mapped_event());
-      }
+      const RtEvent pre = parent_ctx->find_pointwise_dependence(
+          previous_context_index, previous_point, shard);
+      if (pre.exists())
+        pointwise_mapping_dependences.push_back(pre);
     }
 
     //--------------------------------------------------------------------------
@@ -17302,7 +16884,8 @@ namespace Legion {
         std::vector<ProjectionPoint*> projection_points(points.begin(),
                                                         points.end());
         function->project_points(this, 0/*idx*/, requirement,
-                                 runtime, index_domain, projection_points);
+            runtime, index_domain, projection_points, NULL/*no pointwise*/,
+            parent_ctx->get_total_shards());
         // No need to check the validity of the points, we know they are good
         if (runtime->legion_spy_enabled)
         {
@@ -18495,11 +18078,13 @@ namespace Legion {
       assert(false);
     }
 
-    void PointDepPartOp::record_point_wise_dependence(
-        LogicalRegion lr, unsigned region_idx)
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::record_pointwise_dependence(
+       uint64_t previous_context_index, const DomainPoint &point, ShardID shard)
+    //--------------------------------------------------------------------------
     {
-      // We call it for all ProjoectionPoint(s).
-      // Do nothing in this case.
+      // Should never get here because we don't support pointwise analysis
+      assert(false);
     }
 
     /////////////////////////////////////////////////////////////
@@ -19221,7 +18806,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(Runtime *rt)
-      : PointWiseAnalysable<FillOp>(rt)
+      : PointwiseAnalyzable<FillOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -19229,7 +18814,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
-      : PointWiseAnalysable<FillOp>(rhs)
+      : PointwiseAnalyzable<FillOp>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -19326,24 +18911,13 @@ namespace Legion {
           LegionSpy::log_future_use(unique_op_id, future.impl->did); 
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
-
-      if (!runtime->disable_point_wise_analysis)
-      {
-        size_t region_count = get_region_count();
-        connect_to_prev_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-          connect_to_prev_points[idx] = false;
-        connect_to_next_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-          connect_to_next_points[idx] = false;
-      }
     }
 
     //--------------------------------------------------------------------------
     void IndexFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<FillOp>::activate();
+      PointwiseAnalyzable<FillOp>::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -19356,12 +18930,13 @@ namespace Legion {
     void IndexFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<FillOp>::deactivate(false/*free*/);
+      PointwiseAnalyzable<FillOp>::deactivate(false/*free*/);
       // We can deactivate our point operations
       for (std::vector<PointFillOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
+      pending_pointwise_dependences.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return the operation to the runtime
@@ -19533,29 +19108,109 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
-      unsigned point_idx = 0;
-      points.resize(num_points);
-      for (Domain::DomainPointIterator itr(launch_domain); 
-            itr; itr++, point_idx++)
+      std::vector<PointFillOp*> temp_points;
+      temp_points.reserve(num_points);
+      for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
       {
         PointFillOp *point = runtime->get_available_point_fill_op();
         point->initialize(this, itr.p);
-        points[point_idx] = point;
+        temp_points.push_back(point);
       }
       // Now we have to do the projection
       ProjectionFunction *function = 
         runtime->find_projection_function(requirement.projection);
-      std::vector<ProjectionPoint*> projection_points(points.begin(),
-                                                      points.end());
-      function->project_points(this, 0/*idx*/, requirement,
-                               runtime, index_domain, projection_points);
+      std::vector<ProjectionPoint*> projection_points(temp_points.begin(),
+                                                      temp_points.end());
+      function->project_points(this, 0/*idx*/, requirement, runtime, 
+          index_domain, projection_points, pointwise_dependences.empty() ?
+          NULL : &pointwise_dependences.begin()->second,
+          parent_ctx->get_total_shards());
       if (runtime->legion_spy_enabled)
       {
-        for (std::vector<PointFillOp*>::const_iterator it = points.begin();
-              it != points.end(); it++)
+        for (std::vector<PointFillOp*>::const_iterator it = 
+              temp_points.begin(); it != temp_points.end(); it++)
           (*it)->log_fill_requirement();
       }
-      
+      // Need the lock to avoid races with the pointwise dependence analysis
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(points.empty());
+#endif
+      points.swap(temp_points);
+      // See if we have any pending pointwise dependences to trigger
+      for (std::map<DomainPoint,RtUserEvent>::const_iterator pit =
+            pending_pointwise_dependences.begin(); pit !=
+            pending_pointwise_dependences.end(); pit++)
+      {
+        PointFillOp *point = NULL; 
+        for (std::vector<PointFillOp*>::const_iterator it =
+              points.begin(); it != points.end(); it++)
+        {
+          if (pit->first != (*it)->index_point)
+            continue;
+          point = *it;
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(point != NULL);
+#endif
+        Runtime::trigger_event(pit->second, point->get_mapped_event());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexFillOp::find_pointwise_dependence(const DomainPoint &point,
+        GenerationID needed_gen, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(needed_gen <= gen);
+#endif
+      if ((needed_gen < gen) || mapped)
+      {
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger);
+          return to_trigger;
+        }
+        else
+          return RtEvent::NO_RT_EVENT;
+      }
+      if (points.empty())
+      {
+        std::map<DomainPoint,RtUserEvent>::const_iterator finder =
+          pending_pointwise_dependences.find(point);
+        if (finder != pending_pointwise_dependences.end())
+        {
+          if (to_trigger.exists())
+          {
+            Runtime::trigger_event(to_trigger, finder->second);
+            return to_trigger;
+          }
+          else
+            return finder->second;
+        }
+        if (!to_trigger.exists())
+          to_trigger = Runtime::create_rt_user_event();
+        pending_pointwise_dependences.emplace(std::make_pair(point,to_trigger));
+        return to_trigger;
+      }
+      for (std::vector<PointFillOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (point != (*it)->index_point)
+          continue;
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger, (*it)->get_mapped_event());
+          return to_trigger;
+        }
+        else
+          return (*it)->get_mapped_event();
+      }
+      // Should never get here, if we do that means we couldn't find the point
+      std::abort();
     }
 
     //--------------------------------------------------------------------------
@@ -19752,46 +19407,13 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void IndexFillOp::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        IndexSpaceNode *local_points = this->get_shard_points();
-        Domain local_domain = local_points->get_tight_domain();
-
-        std::vector<DomainPoint> points;
-
-        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
-        {
-          points.push_back((*dpi));
-        }
-        this->parent_ctx->clear_map(this->context_index, points);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode* IndexFillOp::get_launch_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return launch_space;
-    }
-
     ///////////////////////////////////////////////////////////// 
     // Point Fill Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     PointFillOp::PointFillOp(Runtime *rt)
-      : SinglePointWiseAnalysable<FillOp>(rt)
+      : FillOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -19799,7 +19421,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointFillOp::PointFillOp(const PointFillOp &rhs)
-      : SinglePointWiseAnalysable<FillOp>(rhs)
+      : FillOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -19867,7 +19489,7 @@ namespace Legion {
     void PointFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<FillOp>::activate();
+      FillOp::activate();
       owner = NULL;
     }
 
@@ -19875,7 +19497,8 @@ namespace Legion {
     void PointFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<FillOp>::deactivate(false/*free*/);
+      FillOp::deactivate(false/*free*/);
+      pointwise_mapping_dependences.clear();
       if (freeop)
         runtime->free_point_fill_op(this);
     }
@@ -19919,13 +19542,9 @@ namespace Legion {
     {
       // Perform the version info
       std::set<RtEvent> preconditions;
-      if (!point_wise_mapping_dependences.empty())
-      {
-        preconditions.insert(
-            Runtime::merge_events(
-              point_wise_mapping_dependences));
-        point_wise_mapping_dependences.clear();
-      }
+      if (!pointwise_mapping_dependences.empty())
+        preconditions.insert(pointwise_mapping_dependences.begin(),
+            pointwise_mapping_dependences.end());
       if (view_ready.exists())
         preconditions.insert(view_ready);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
@@ -20004,35 +19623,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::record_point_wise_dependence(LogicalRegion lr,
-        unsigned region_idx)
+    void PointFillOp::record_pointwise_dependence(
+        uint64_t previous_context_index,
+        const DomainPoint &previous_point, ShardID shard)
     //--------------------------------------------------------------------------
     {
-      if (owner->should_connect_to_prev_point(region_idx))
-      {
-        RtEvent pre = owner->find_point_wise_dependence(
-            get_domain_point(),
-            lr, region_idx);
-        if (!std::binary_search(point_wise_mapping_dependences.begin(),
-                  point_wise_mapping_dependences.end(), pre))
-        {
-          point_wise_mapping_dependences.push_back(pre);
-          std::sort(point_wise_mapping_dependences.begin(),
-                    point_wise_mapping_dependences.end());
-        }
-      }
-
-      if (owner->should_connect_to_next_point(region_idx))
-      {
-        owner->record_point_wise_dependence(get_domain_point(),
-            region_idx, get_mapped_event());
-      }
-      else
-      {
-        owner->add_point_to_completed_list(get_domain_point(),
-            region_idx,
-            get_mapped_event());
-      }
+      const RtEvent pre = parent_ctx->find_pointwise_dependence(
+          previous_context_index, previous_point, shard);
+      if (pre.exists())
+        pointwise_mapping_dependences.push_back(pre);
     }
 
     //--------------------------------------------------------------------------
@@ -20978,7 +20577,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexAttachOp::IndexAttachOp(Runtime *rt)
-      : PointWiseAnalysable<CollectiveViewCreator<Operation> >(rt)
+      : PointwiseAnalyzable<CollectiveViewCreator<Operation> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -20993,7 +20592,7 @@ namespace Legion {
     void IndexAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<CollectiveViewCreator<Operation> >::activate();
+      PointwiseAnalyzable<CollectiveViewCreator<Operation> >::activate();
       launch_space = NULL;
       points_completed.store(0);
       points_committed = 0;
@@ -21004,7 +20603,7 @@ namespace Legion {
     void IndexAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<CollectiveViewCreator<Operation> >::deactivate(false/*free*/);
+      PointwiseAnalyzable<CollectiveViewCreator<Operation> >::deactivate(false/*free*/);
       resources = ExternalResources();
       // We can deactivate all of our point operations
       for (std::vector<PointAttachOp*>::const_iterator it =
@@ -21088,17 +20687,6 @@ namespace Legion {
           runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       resources = ExternalResources(result);
-
-      if (!runtime->disable_point_wise_analysis)
-      {
-        size_t region_count = get_region_count();
-        connect_to_prev_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-          connect_to_prev_points[idx] = false;
-        connect_to_next_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-          connect_to_next_points[idx] = false;
-      }
       return resources;
     }
 
@@ -21151,10 +20739,83 @@ namespace Legion {
     void IndexAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < points.size(); idx++)
+      if (!pointwise_dependences.empty())
       {
-        map_applied_conditions.insert(points[idx]->get_mapped_event());
-        points[idx]->trigger_ready();
+        std::vector<std::pair<LogicalRegion,DomainPoint> > 
+          regions(points.size());
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          regions[idx].first = points[idx]->requirement.region;
+          regions[idx].second = points[idx]->index_point;
+        }
+#ifdef DEBUG_LEGION
+        assert(pointwise_dependences.size() == 1);
+        assert(pointwise_dependences.begin()->first == 0);
+#endif
+        std::vector<std::vector<RtEvent> > preconditions(points.size());
+        for (std::vector<PointwiseDependence>::const_iterator pit =
+              pointwise_dependences.begin()->second.begin(); pit !=
+              pointwise_dependences.begin()->second.end(); pit++)
+        {
+          std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
+          pit->find_dependences(requirement, regions, dependences);
+          if (pit->sharding != NULL)
+          {
+            const Domain launch_domain =
+              pit->sharding_domain->get_tight_domain();
+            for (unsigned idx = 0; idx < points.size(); idx++)
+            {
+              std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+                finder = dependences.find(regions[idx].first);
+#ifdef DEBUG_LEGION
+              assert(finder != dependences.end());
+#endif
+              for (std::vector<DomainPoint>::const_iterator it =
+                    finder->second.begin(); it != finder->second.end(); it++)
+              {
+                ShardID shard = pit->sharding->shard(
+                    *it, launch_domain, parent_ctx->get_total_shards());
+                RtEvent precondition = parent_ctx->find_pointwise_dependence(
+                    pit->context_index, *it, shard);
+                if (precondition.exists())
+                  preconditions[idx].push_back(precondition);
+              }
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < points.size(); idx++)
+            {
+              std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+                finder = dependences.find(regions[idx].first);
+#ifdef DEBUG_LEGION
+              assert(finder != dependences.end());
+#endif
+              for (std::vector<DomainPoint>::const_iterator it =
+                    finder->second.begin(); it != finder->second.end(); it++)
+              {
+                RtEvent precondition = parent_ctx->find_pointwise_dependence(
+                    pit->context_index, *it, 0/*shard*/);
+                if (precondition.exists())
+                  preconditions[idx].push_back(precondition);
+              }
+            }
+          }
+        }
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          map_applied_conditions.insert(points[idx]->get_mapped_event());
+          points[idx]->enqueue_ready_operation(
+              Runtime::merge_events(preconditions[idx]));
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          map_applied_conditions.insert(points[idx]->get_mapped_event());
+          points[idx]->trigger_ready();
+        }
       }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
@@ -21489,28 +21150,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachOp::clear_context_maps(void)
+    RtEvent IndexAttachOp::find_pointwise_dependence(const DomainPoint &point,
+        GenerationID needed_gen, RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(needed_gen <= gen);
+#endif
+      if ((needed_gen < gen) || mapped)
       {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        std::vector<DomainPoint> points;
-
-        for (std::vector<PointAttachOp*>::const_iterator pit =
-              this->points.begin(); pit != this->points.end(); pit++)
+        if (to_trigger.exists())
         {
-          points.push_back((*pit)->index_point);
+          Runtime::trigger_event(to_trigger);
+          return to_trigger;
         }
-
-        this->parent_ctx->clear_map(this->context_index, points);
+        else
+          return RtEvent::NO_RT_EVENT;
       }
+#ifdef DEBUG_LEGION
+      assert(!points.empty());
+#endif
+      for (std::vector<PointAttachOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (point != (*it)->index_point)
+          continue;
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger, (*it)->get_mapped_event());
+          return to_trigger;
+        }
+        else
+          return (*it)->get_mapped_event();
+      }
+      // Should never get here, if we do that means we couldn't find the point
+      std::abort();
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -21519,14 +21194,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointAttachOp::PointAttachOp(Runtime *rt)
-      : SinglePointWiseAnalysable<AttachOp>(rt)
+      : AttachOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PointAttachOp::PointAttachOp(const PointAttachOp &rhs)
-      : SinglePointWiseAnalysable<AttachOp>(rhs)
+      : AttachOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -21552,7 +21227,7 @@ namespace Legion {
     void PointAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<AttachOp>::activate();
+      AttachOp::activate();
       owner = NULL;
     }
 
@@ -21560,7 +21235,7 @@ namespace Legion {
     void PointAttachOp::deactivate(bool freeop) 
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<AttachOp>::deactivate(false/*free*/);
+      AttachOp::deactivate(false/*free*/);
       if (freeop)
         runtime->free_point_attach_op(this);
     }
@@ -21790,38 +21465,6 @@ namespace Legion {
     {
       return owner->rendezvous_collective_versioning_analysis(index, handle,
           tracker, runtime->address_space, mask, parent_req_index);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointAttachOp::record_point_wise_dependence(LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      if (owner->should_connect_to_prev_point(region_idx))
-      {
-        RtEvent pre = owner->find_point_wise_dependence(
-            index_point,
-            lr, region_idx);
-        if (!std::binary_search(point_wise_mapping_dependences.begin(),
-                  point_wise_mapping_dependences.end(), pre))
-        {
-          point_wise_mapping_dependences.push_back(pre);
-          std::sort(point_wise_mapping_dependences.begin(),
-                    point_wise_mapping_dependences.end());
-        }
-      }
-
-      if (owner->should_connect_to_next_point(region_idx))
-      {
-        owner->record_point_wise_dependence(index_point,
-            region_idx, get_mapped_event());
-      }
-      else
-      {
-        owner->add_point_to_completed_list(index_point,
-            region_idx,
-            get_mapped_event());
-      }
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -22171,7 +21814,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexDetachOp::IndexDetachOp(Runtime *rt)
-      : PointWiseAnalysable<CollectiveViewCreator<Operation> >(rt)
+      : PointwiseAnalyzable<CollectiveViewCreator<Operation> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -22186,7 +21829,7 @@ namespace Legion {
     void IndexDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<CollectiveViewCreator<Operation> >::activate();
+      PointwiseAnalyzable<CollectiveViewCreator<Operation> >::activate();
       launch_space = NULL;
       points_completed.store(0);
       points_committed = 0;
@@ -22198,7 +21841,7 @@ namespace Legion {
     void IndexDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PointWiseAnalysable<CollectiveViewCreator<Operation> >::deactivate(false/*free*/);
+      PointwiseAnalyzable<CollectiveViewCreator<Operation> >::deactivate(false/*free*/);
       resources = ExternalResources();
       // We can deactivate all of our point operations
       for (std::vector<PointDetachOp*>::const_iterator it =
@@ -22279,18 +21922,6 @@ namespace Legion {
                                         unique_op_id, unordered);
         runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
-
-      if (!runtime->disable_point_wise_analysis)
-      {
-        size_t region_count = get_region_count();
-        connect_to_prev_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_prev_points.size(); idx++)
-          connect_to_prev_points[idx] = false;
-        connect_to_next_points.resize(region_count);
-        for (unsigned idx = 0; idx < connect_to_next_points.size(); idx++)
-          connect_to_next_points[idx] = false;
-      }
-
       return result;
     }
 
@@ -22323,10 +21954,83 @@ namespace Legion {
     void IndexDetachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < points.size(); idx++)
+      if (!pointwise_dependences.empty())
       {
-        map_applied_conditions.insert(points[idx]->get_mapped_event());
-        points[idx]->trigger_ready();
+        std::vector<std::pair<LogicalRegion,DomainPoint> > 
+          regions(points.size());
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          regions[idx].first = points[idx]->requirement.region;
+          regions[idx].second = points[idx]->index_point;
+        }
+#ifdef DEBUG_LEGION
+        assert(pointwise_dependences.size() == 1);
+        assert(pointwise_dependences.begin()->first == 0);
+#endif
+        std::vector<std::vector<RtEvent> > preconditions(points.size());
+        for (std::vector<PointwiseDependence>::const_iterator pit =
+              pointwise_dependences.begin()->second.begin(); pit !=
+              pointwise_dependences.begin()->second.end(); pit++)
+        {
+          std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
+          pit->find_dependences(requirement, regions, dependences);
+          if (pit->sharding != NULL)
+          {
+            const Domain launch_domain =
+              pit->sharding_domain->get_tight_domain();
+            for (unsigned idx = 0; idx < points.size(); idx++)
+            {
+              std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+                finder = dependences.find(regions[idx].first);
+#ifdef DEBUG_LEGION
+              assert(finder != dependences.end());
+#endif
+              for (std::vector<DomainPoint>::const_iterator it =
+                    finder->second.begin(); it != finder->second.end(); it++)
+              {
+                ShardID shard = pit->sharding->shard(
+                    *it, launch_domain, parent_ctx->get_total_shards());
+                RtEvent precondition = parent_ctx->find_pointwise_dependence(
+                    pit->context_index, *it, shard);
+                if (precondition.exists())
+                  preconditions[idx].push_back(precondition);
+              }
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < points.size(); idx++)
+            {
+              std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+                finder = dependences.find(regions[idx].first);
+#ifdef DEBUG_LEGION
+              assert(finder != dependences.end());
+#endif
+              for (std::vector<DomainPoint>::const_iterator it =
+                    finder->second.begin(); it != finder->second.end(); it++)
+              {
+                RtEvent precondition = parent_ctx->find_pointwise_dependence(
+                    pit->context_index, *it, 0/*shard*/);
+                if (precondition.exists())
+                  preconditions[idx].push_back(precondition);
+              }
+            }
+          }
+        }
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          map_applied_conditions.insert(points[idx]->get_mapped_event());
+          points[idx]->enqueue_ready_operation(
+              Runtime::merge_events(preconditions[idx]));
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          map_applied_conditions.insert(points[idx]->get_mapped_event());
+          points[idx]->trigger_ready();
+        }
       }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
@@ -22458,30 +22162,43 @@ namespace Legion {
       return points.size();
     }
 
-
     //--------------------------------------------------------------------------
-    void IndexDetachOp::clear_context_maps(void)
+    RtEvent IndexDetachOp::find_pointwise_dependence(const DomainPoint &point,
+        GenerationID needed_gen, RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(needed_gen <= gen);
+#endif
+      if ((needed_gen < gen) || mapped)
       {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        std::vector<DomainPoint> points;
-
-        for (std::vector<PointDetachOp*>::const_iterator pit =
-              this->points.begin(); pit != this->points.end(); pit++)
+        if (to_trigger.exists())
         {
-          points.push_back((*pit)->index_point);
+          Runtime::trigger_event(to_trigger);
+          return to_trigger;
         }
-
-        this->parent_ctx->clear_map(this->context_index, points);
+        else
+          return RtEvent::NO_RT_EVENT;
       }
+#ifdef DEBUG_LEGION
+      assert(!points.empty());
+#endif
+      for (std::vector<PointDetachOp*>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (point != (*it)->index_point)
+          continue;
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger, (*it)->get_mapped_event());
+          return to_trigger;
+        }
+        else
+          return (*it)->get_mapped_event();
+      }
+      // Should never get here, if we do that means we couldn't find the point
+      std::abort();
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -22490,14 +22207,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PointDetachOp::PointDetachOp(Runtime *rt)
-      : SinglePointWiseAnalysable<DetachOp>(rt)
+      : DetachOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PointDetachOp::PointDetachOp(const PointDetachOp &rhs)
-      : SinglePointWiseAnalysable<DetachOp>(rhs)
+      : DetachOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -22523,7 +22240,7 @@ namespace Legion {
     void PointDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<DetachOp>::activate();
+      DetachOp::activate();
       owner = NULL;
     }
 
@@ -22531,7 +22248,7 @@ namespace Legion {
     void PointDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      SinglePointWiseAnalysable<DetachOp>::deactivate(false/*free*/);
+      DetachOp::deactivate(false/*free*/);
       if (freeop)
         runtime->free_point_detach_op(this);
     }
@@ -22626,38 +22343,6 @@ namespace Legion {
     {
       return owner->rendezvous_collective_versioning_analysis(index, handle,
           tracker, runtime->address_space, mask, parent_req_index);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointDetachOp::record_point_wise_dependence(LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-    {
-      if (owner->should_connect_to_prev_point(region_idx))
-      {
-        RtEvent pre = owner->find_point_wise_dependence(
-            index_point,
-            lr, region_idx);
-        if (!std::binary_search(point_wise_mapping_dependences.begin(),
-                  point_wise_mapping_dependences.end(), pre))
-        {
-          point_wise_mapping_dependences.push_back(pre);
-          std::sort(point_wise_mapping_dependences.begin(),
-                    point_wise_mapping_dependences.end());
-        }
-      }
-
-      if (owner->should_connect_to_next_point(region_idx))
-      {
-        owner->record_point_wise_dependence(index_point,
-            region_idx, get_mapped_event());
-      }
-      else
-      {
-        owner->add_point_to_completed_list(index_point,
-            region_idx,
-            get_mapped_event());
-      }
     }
 
     ///////////////////////////////////////////////////////////// 

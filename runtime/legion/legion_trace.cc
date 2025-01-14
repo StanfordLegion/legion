@@ -399,8 +399,6 @@ namespace Legion {
 
         // Check to see if the meta-data alignes
         OperationInfo &info = replay_info[index];
-        if (!context->runtime->disable_point_wise_analysis)
-          set_point_wise_dependences(index, op);
         // Add a mapping reference since ops will be registering dependences
         op->add_mapping_reference(gen);
         operations.push_back(op_info);
@@ -556,115 +554,6 @@ namespace Legion {
           return true;
       info.dependences.emplace_back(std::move(record));
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalTrace::set_next_point_wise_user(Operation *next_op,
-        GenerationID next_gen, GenerationID source_gen,
-        unsigned region_idx, Operation* source)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(recording);
-#endif
-
-      const std::pair<Operation*,GenerationID> key(source, source_gen);
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        finder = op_map.find(key);
-      if (finder == op_map.end())
-      {
-        return;
-      }
-
-      OperationInfo &info = replay_info[finder->second.second];
-      info.connect_to_next_points[region_idx] = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalTrace::set_prev_point_wise_user(Operation *prev_op,
-        GenerationID prev_gen, uint64_t prev_ctx_index,
-        ProjectionSummary *shard_proj,
-        unsigned region_idx,
-#ifdef LEGION_SPY
-        unsigned dep_type,
-#endif
-        unsigned prev_region_idx,
-        Domain index_domain, IndexSpaceNode *launch_space,
-        Operation *source)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(recording);
-#endif
-      const std::pair<Operation*,GenerationID> prev_key(prev_op, prev_gen);
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        prev_finder = op_map.find(prev_key);
-      if (prev_finder == op_map.end()) {
-        return;
-      }
-
-      const std::pair<Operation*,GenerationID> key(source, source->get_generation());
-      std::map<std::pair<Operation*,GenerationID>,std::pair<unsigned,unsigned>>::const_iterator
-        finder = op_map.find(key);
-      assert(finder != op_map.end());
-      OperationInfo &info = replay_info[finder->second.second];
-      info.prev_ops.insert({
-                              region_idx,
-                              TracePointWisePrevOpInfo(
-                                  shard_proj,
-                                  index_domain,
-                                  launch_space,
-                                  prev_finder->second.first,
-                                  prev_gen, prev_ctx_index,
-#ifdef LEGION_SPY
-                                  dep_type,
-#endif
-                                  prev_region_idx)
-                              });
-
-      info.connect_to_prev_points[region_idx] = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalTrace::set_point_wise_dependences(size_t index, Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      OperationInfo &info = replay_info[index];
-      int num_regions = op->get_region_count();
-      for (int i = 0; i < num_regions; i++)
-      {
-        std::map<unsigned,bool>::iterator next_finder =
-          info.connect_to_next_points.find(i);
-        if (next_finder != info.connect_to_next_points.end())
-        {
-          bool rc = op->set_next_point_wise_user(NULL, 0,
-              op->get_generation(), i);
-          assert(rc != false);
-        }
-        std::map<unsigned,bool>::iterator prev_finder =
-          info.connect_to_prev_points.find(i);
-        if (prev_finder != info.connect_to_prev_points.end())
-        {
-
-          std::map<unsigned,TracePointWisePrevOpInfo>::iterator prev_info_finder =
-            info.prev_ops.find(i);
-          assert(prev_info_finder != info.prev_ops.end());
-
-          OpInfo &op_info = operations[prev_info_finder->second.op_idx];
-
-          op->set_prev_point_wise_user(
-              op_info.op, op_info.gen, op_info.context_index,
-              prev_info_finder->second.shard_proj,
-              i,
-#ifdef LEGION_SPY
-              prev_info_finder->second.dep_type,
-#endif
-              prev_info_finder->second.region_idx,
-              prev_info_finder->second.index_domain,
-              prev_info_finder->second.launch_space
-              );
-        }
-      }
     }
 
     //--------------------------------------------------------------------------

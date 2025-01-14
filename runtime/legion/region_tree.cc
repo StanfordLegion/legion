@@ -16581,7 +16581,6 @@ namespace Legion {
             continue;
           }
           const FieldMask overlap = check_mask & it->second;
-          bool skip_registering_region_dependence = false;
           if (!!overlap)
           {
             if (TRACK_DOM)
@@ -16601,13 +16600,20 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
-                  if (!runtime->disable_point_wise_analysis)
+                  // Check to see if we can record a point-wise dependence
+                  // between these two operations. We can only do this if
+                  // it they are both projections and we've arrived so 
+                  // they are both projecting from the same node in the
+                  // region tree.
+                  if (arrived && state.record_pointwise_dependence(
+                        logical_analysis, prev, user))
                   {
-                    skip_registering_region_dependence =
-                      user.op->analyze_point_wise_dependence(prev, user,
-                          logical_analysis, dtype);
+                    user.op->register_pointwise_dependence(
+                        user.idx, prev, dtype, overlap);
+                    // Not actually dominating so we can't prune it out
+                    dominator_mask -= overlap;
                   }
-                  if (!skip_registering_region_dependence)
+                  else
                   {
                     // If we can validate a region record which of our
                     // predecessors regions we are validating, otherwise
