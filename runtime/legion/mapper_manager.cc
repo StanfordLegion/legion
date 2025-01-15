@@ -36,7 +36,8 @@ namespace Legion {
       : manager(man), resume(RtUserEvent::NO_RT_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), profiling_ranges(NULL),
-        start_time(0), reentrant(manager->initially_reentrant), paused(false)
+        start_time(0), reentrant(manager->initially_reentrant), paused(false),
+        runtime_call(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
