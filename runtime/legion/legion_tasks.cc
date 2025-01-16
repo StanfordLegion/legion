@@ -2950,12 +2950,15 @@ namespace Legion {
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
       // Record the future output size
-      if (future_return_size)
-        handle_future_size(*future_return_size, map_applied_conditions);
-      else if (variant_impl->has_return_type_size)
+      if (!elide_future_return)
       {
-        future_return_size = variant_impl->return_type_size;
-        handle_future_size(*future_return_size, map_applied_conditions);  
+        if (future_return_size)
+          handle_future_size(*future_return_size, map_applied_conditions);
+        else if (variant_impl->has_return_type_size)
+        {
+          future_return_size = variant_impl->return_type_size;
+          handle_future_size(*future_return_size, map_applied_conditions);  
+        }
       }
       if (is_recording() && !variant_impl->has_return_type_size)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
