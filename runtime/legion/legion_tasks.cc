@@ -2960,7 +2960,8 @@ namespace Legion {
           handle_future_size(*future_return_size, map_applied_conditions);  
         }
       }
-      if (is_recording() && !variant_impl->has_return_type_size)
+      if (is_recording() && !variant_impl->has_return_type_size &&
+          !future_return_size)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
             "Invalid mapper output from invocation of '%s' on mapper %s. "
             "Mapper selected task variant %d when mapping task %s (UID %lld) "
@@ -6808,6 +6809,8 @@ namespace Legion {
         hasher.hash<bool>(must_epoch_task);
         hasher.hash(index_domain);
       }
+      if (future_return_size)
+        hasher.hash(*future_return_size);
       return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
@@ -10288,6 +10291,10 @@ namespace Legion {
       hasher.hash<bool>(concurrent_task);
       hasher.hash<bool>(must_epoch_task);
       hasher.hash(index_domain);
+      if (future_return_size)
+        hasher.hash(*future_return_size);
+      if (reduction_future_size)
+        hasher.hash(*reduction_future_size);
       return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
