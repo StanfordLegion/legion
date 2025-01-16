@@ -240,7 +240,7 @@ namespace Realm {
                 if(in_gpu) {
                   if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                     copy_type = hipMemcpyDeviceToDevice;
-                  } else if(!out_gpu) {
+                  } else if(!out_gpu && !out_mapping) {
                     copy_type = hipMemcpyDeviceToHost;
                   } else {
                     copy_type = hipMemcpyDefault;
@@ -322,7 +322,7 @@ namespace Realm {
                   if(in_gpu) {
                     if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                       copy_type = hipMemcpyDeviceToDevice;
-                    } else if(!out_gpu) {
+                    } else if(!out_gpu && !out_mapping) {
                       copy_type = hipMemcpyDeviceToHost;
                     } else {
                       copy_type = hipMemcpyDefault;
@@ -394,10 +394,10 @@ namespace Realm {
                   //  allowing us to stop early if we hit the rate limit or a
                   //  timeout
                   hipMemcpyKind copy_type;
-                    if(in_gpu) {
+                  if(in_gpu) {
                     if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                       copy_type = hipMemcpyDeviceToDevice;
-                    } else if(!out_gpu) {
+                    } else if(!out_gpu && !out_mapping) {
                       copy_type = hipMemcpyDeviceToHost;
                     } else {
                       copy_type = hipMemcpyDefault;
