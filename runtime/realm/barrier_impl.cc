@@ -557,7 +557,6 @@ namespace Realm {
       NodeID migration_target, unsigned base_arrival_count, ReductionOpID redopid,
       const void *data, size_t datalen, bool include_notifications)
   {
-    std::cout << "TARGETS:" << broadcast_targets.size() << std::endl;
     for(const NodeID target : broadcast_targets) {
       EventImpl::gen_t trigger_gen = ordered_notifications[target].trigger_gen;
 
