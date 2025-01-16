@@ -540,6 +540,9 @@ if(Legion_USE_CUDA)
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
   target_compile_definitions(RealmStatic INTERFACE USE_CUDA)
 
+  target_include_directories(RealmRuntime PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  target_include_directories(RealmStatic PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
   set_target_cuda_standard(RealmStatic STANDARD ${Legion_CUDA_STANDARD})
@@ -555,9 +558,9 @@ if(Legion_USE_CUDA)
   endif()
   target_include_directories(realm_cuhook PRIVATE
                             ${CMAKE_CURRENT_SOURCE_DIR}
-                            ${PROJECT_BINARY_DIR}/runtime)
+                            ${PROJECT_BINARY_DIR}/runtime
+                            ${CUDAToolkit_CUPTI_INCLUDE_DIR})
   target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
-  add_dependencies(RealmRuntime realm_cuhook)
   install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
@@ -650,6 +653,9 @@ if(Legion_USE_Kokkos)
   get_property(kokkos_include_dirs
                TARGET Kokkos::kokkoscore
                PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  if(Legion_USE_CUDA)
+    list(APPEND kokkos_include_dirs ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  endif()
   list(TRANSFORM kokkos_include_dirs PREPEND "-I")
   list(APPEND kokkos_compile_options ${kokkos_include_dirs}
                                      "-I${CMAKE_CURRENT_SOURCE_DIR}"
@@ -726,11 +732,9 @@ if(REALM_USE_NVTX)
   target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
 endif()
 
-if(Legion_BACKTRACE_USE_LIBDW)
-  target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
-  target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
-  target_include_directories(RealmStatic PRIVATE ${LIBDW_INCLUDE_DIR})
-  target_link_libraries(RealmStatic PRIVATE ${LIBDW_LIBRARY})
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  target_link_libraries(RealmRuntime PRIVATE cpptrace::cpptrace)
+  target_link_libraries(RealmStatic PRIVATE cpptrace::cpptrace)
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
@@ -788,7 +792,6 @@ list(APPEND LEGION_SRC
   legion.h
   legion/bitmask.h
   legion/garbage_collection.h             legion/garbage_collection.cc
-  legion/index_space_value.h              legion/index_space_value.cc
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc

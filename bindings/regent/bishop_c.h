@@ -68,6 +68,10 @@ typedef
   void (*bishop_mapper_state_init_fn_t)(
       bishop_mapper_state_t*);
 
+typedef
+  void (*bishop_mapper_state_destroy_fn_t)(
+      bishop_mapper_state_t*);
+
 typedef unsigned int bishop_matching_state_t;
 
 typedef
@@ -87,7 +91,8 @@ register_bishop_mappers(bishop_mapper_impl_t*,
                         unsigned,
                         bishop_transition_fn_t*,
                         unsigned,
-                        bishop_mapper_state_init_fn_t);
+                        bishop_mapper_state_init_fn_t,
+                        bishop_mapper_state_destroy_fn_t);
 
 bishop_processor_list_t
 bishop_all_processors();
@@ -137,6 +142,9 @@ typedef struct bishop_instance_cache_t {
 bishop_instance_cache_t
 bishop_instance_cache_create();
 
+void
+bishop_instance_cache_destroy(bishop_instance_cache_t);
+
 legion_physical_instance_t*
 bishop_instance_cache_get_cached_instances(bishop_instance_cache_t,
                                            size_t,
@@ -148,7 +156,8 @@ bishop_instance_cache_register_instances(bishop_instance_cache_t,
                                          size_t,
                                          legion_logical_region_t,
                                          legion_memory_t,
-                                         legion_physical_instance_t*);
+                                         legion_physical_instance_t*,
+                                         size_t);
 
 typedef struct bishop_slice_cache_t {
   void *impl;
@@ -156,6 +165,9 @@ typedef struct bishop_slice_cache_t {
 
 bishop_slice_cache_t
 bishop_slice_cache_create();
+
+void
+bishop_slice_cache_destroy(bishop_slice_cache_t);
 
 bool
 bishop_slice_cache_has_cached_slices(bishop_slice_cache_t,

@@ -16,7 +16,6 @@
 #include "realm/event_impl.h"
 
 #include "realm/proc_impl.h"
-#include "realm/runtime_impl.h"
 #include "realm/logging.h"
 #include "realm/threads.h"
 #include "realm/profiling.h"
@@ -779,8 +778,12 @@ namespace Realm {
         if(first_fault && !ignore_faults) {
           log_poison.info() << "event merger early poison: after="
                             << event_impl->make_event(finish_gen);
-          event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/,
-                              TimeLimit::responsive());
+          bool free_event =
+              event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/,
+                                  TimeLimit::responsive());
+          if(free_event) {
+            get_runtime()->local_event_free_list->free_entry(event_impl);
+          }
         }
       }
       // either way we return to the caller without updating the count_needed
@@ -822,15 +825,19 @@ namespace Realm {
       if(first_fault && !ignore_faults) {
         log_poison.info() << "event merger poisoned: after="
                           << event_impl->make_event(finish_gen);
-        event_impl->trigger(finish_gen, Network::my_node_id, true /*poisoned*/,
-                            work_until);
+        bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
+                                              true /*poisoned*/, work_until);
+        if(free_event) {
+          get_runtime()->local_event_free_list->free_entry(event_impl);
+        }
       }
     }
 
     // used below, but after we're allowed to look at the object
     Event e = Event::NO_EVENT;
-    if(log_event.want_debug())
+    if(log_event.want_debug()) {
       e = event_impl->make_event(finish_gen);
+    }
 
     // once we decrement this, if we aren't the last trigger, we can't
     //  look at *this again
@@ -854,14 +861,25 @@ namespace Realm {
       }
 
       // trigger on the last input event, unless we did an early poison propagation
-      if(ignore_faults || (faults_observed.load() == 0))
-        event_impl->trigger(finish_gen, Network::my_node_id, false /*!poisoned*/,
-                            work_until);
+      if(ignore_faults || (faults_observed.load() == 0)) {
+        bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
+                                              false /*!poisoned*/, work_until);
+        if(free_event) {
+          get_runtime()->local_event_free_list->free_entry(event_impl);
+        }
+      }
 
-      // if the event was triggered early due to poison, its insertion on
-      //  the free list is delayed until we know that the event merger is
-      //  inactive (i.e. when last_trigger is true)
-      event_impl->perform_delayed_free_list_insertion();
+      {
+        AutoLock<> a(event_impl->mutex);
+        if(event_impl->free_list_insertion_delayed) {
+          event_impl->free_list_insertion_delayed = false;
+          if(event_impl->owning_processor) {
+            event_impl->owning_processor->free_genevent(event_impl);
+          } else {
+            get_runtime()->local_event_free_list->free_entry(event_impl);
+          }
+        }
+      }
     }
   }
 
@@ -878,25 +896,153 @@ namespace Realm {
 
   EventImpl::~EventImpl(void) {}
 
+  template <typename T>
+  struct ArrayOstreamHelper {
+    ArrayOstreamHelper(const T *_base, size_t _count)
+      : base(_base)
+      , count(_count)
+    {}
+
+    const T *base;
+    size_t count;
+  };
+
+  template <typename T>
+  std::ostream &operator<<(std::ostream &os, const ArrayOstreamHelper<T> &h)
+  {
+    switch(h.count) {
+    case 0:
+      return os << "0:{}";
+    case 1:
+      return os << "1:{ " << h.base[0] << " }";
+    default:
+      os << h.count << ":{ " << h.base[0];
+      for(size_t i = 1; i < h.count; i++)
+        os << ", " << h.base[i];
+      os << " }";
+      return os;
+    }
+  }
+
+  // active messages
+
+  struct EventSubscribeMessage {
+    Event event;
+    EventImpl::gen_t previous_subscribe_gen;
+
+    static void handle_message(NodeID sender, const EventSubscribeMessage &args,
+                               const void *data, size_t datalen)
+    {
+      log_event.debug() << "event subscription: node=" << sender
+                        << " event=" << args.event;
+
+      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+
+      // we may send a trigger message in response to the subscription
+      EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
+      impl->handle_remote_subscription(sender, subscribe_gen,
+                                       args.previous_subscribe_gen);
+    }
+  };
+
+  struct EventTriggerMessage {
+    Event event;
+    bool poisoned;
+
+    static void handle_message(NodeID sender, const EventTriggerMessage &args,
+                               const void *data, size_t datalen, TimeLimit work_until)
+    {
+      log_event.debug() << "remote trigger of event " << args.event << " from node "
+                        << sender;
+      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+      bool free_event = impl->trigger(ID(args.event).event_generation(), sender,
+                                      args.poisoned, work_until);
+      if(free_event) {
+        get_runtime()->local_event_free_list->free_entry(impl);
+      }
+    }
+  };
+
+  struct EventUpdateMessage {
+    Event event;
+
+    static void handle_message(NodeID sender, const EventUpdateMessage &args,
+                               const void *data, size_t datalen, TimeLimit work_until)
+    {
+      const EventImpl::gen_t *new_poisoned_gens =
+          static_cast<const EventImpl::gen_t *>(data);
+      int new_poisoned_count = datalen / sizeof(*new_poisoned_gens);
+      assert((new_poisoned_count * sizeof(*new_poisoned_gens)) ==
+             datalen); // no remainders or overflow please
+
+      log_event.debug() << "event update: event=" << args.event << " poisoned="
+                        << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens,
+                                                                new_poisoned_count);
+
+      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+      impl->process_update(ID(args.event).event_generation(), new_poisoned_gens,
+                           new_poisoned_count, work_until);
+    }
+  };
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventCommunicator
+  //
+
+  void EventCommunicator::trigger(Event event, NodeID owner, bool poisoned)
+  {
+    ActiveMessage<EventTriggerMessage> amsg(owner);
+    amsg->event = event;
+    amsg->poisoned = poisoned;
+    amsg.commit();
+  }
+
+  void EventCommunicator::update(Event event, NodeSet to_update,
+                                 span<EventImpl::gen_t> poisoned_generations)
+  {
+    for(const NodeID node : to_update) {
+      update(event, node, poisoned_generations);
+    }
+  }
+
+  void EventCommunicator::update(Event event, NodeID to_update,
+                                 span<EventImpl::gen_t> poisoned_generations)
+  {
+    ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations.data(),
+                                           poisoned_generations.size());
+    amsg->event = event;
+    amsg.commit();
+  }
+
+  void EventCommunicator::subscribe(Event event, NodeID owner,
+                                    EventImpl::gen_t previous_subscribe_gen)
+  {
+    ActiveMessage<EventSubscribeMessage> amsg(owner);
+    amsg->event = event;
+    amsg->previous_subscribe_gen = previous_subscribe_gen;
+    amsg.commit();
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class GenEventImpl
   //
 
   GenEventImpl::GenEventImpl(void)
-    : generation(0)
-    , gen_subscribed(0)
-    , num_poisoned_generations(0)
-    , merger(this)
-    , current_trigger_op(nullptr)
-    , has_external_waiters(false)
+    : merger(this)
+    , event_triggerer(&get_runtime()->event_triggerer)
+    , event_comm(std::make_unique<EventCommunicator>())
     , external_waiter_condvar(external_waiter_mutex)
-  {
-    next_free = 0;
-    poisoned_generations = 0;
-    has_local_triggers = false;
-    free_list_insertion_delayed = false;
-  }
+  {}
+
+  GenEventImpl::GenEventImpl(EventTriggerNotifier *_event_triggerer,
+                             EventCommunicator *_event_comm)
+    : merger(this)
+    , event_triggerer(_event_triggerer)
+    , event_comm(_event_comm)
+    , external_waiter_condvar(external_waiter_mutex)
+  {}
 
   GenEventImpl::~GenEventImpl(void)
   {
@@ -924,8 +1070,8 @@ namespace Realm {
       }
     }
 #endif
-    if(poisoned_generations)
-      delete[] poisoned_generations;
+
+    delete[] poisoned_generations;
   }
 
   void GenEventImpl::init(ID _me, unsigned _init_owner)
@@ -1110,38 +1256,11 @@ namespace Realm {
 
     log_event.spew() << "event created: event=" << impl->current_event();
 
-#ifdef EVENT_TRACING
-    {
-      EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-      item.event_id = impl->me.id();
-      item.event_gen = impl->me.gen;
-      item.action = EventTraceItem::ACT_CREATE;
-    }
-#endif
     return impl;
-  }
-
-  /*static*/ void GenEventImpl::free_genevent(GenEventImpl *impl)
-  {
-    // Free this entry to the global list
-    if(impl->owning_processor != nullptr) {
-      // If this genevent belongs to a processor, return it
-      impl->owning_processor->free_genevent(impl);
-    } else {
-      get_runtime()->local_event_free_list->free_entry(impl);
-    }
   }
 
   bool GenEventImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter)
   {
-#ifdef EVENT_TRACING
-    {
-      EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-      item.event_id = me->id;
-      item.event_gen = needed_gen;
-      item.action = EventTraceItem::ACT_WAIT;
-    }
-#endif
     // no early check here as the caller will generally have tried has_triggered()
     //  before allocating its EventWaiter object
 
@@ -1154,7 +1273,6 @@ namespace Realm {
       AutoLock<> a(mutex);
 
       // three cases below
-
       if(needed_gen <= generation.load()) {
         // 1) the event has triggered and any poison information is in the poisoned
         // generation list
@@ -1198,10 +1316,7 @@ namespace Realm {
     }
 
     if((subscribe_owner != -1)) {
-      ActiveMessage<EventSubscribeMessage> amsg(owner);
-      amsg->event = make_event(needed_gen);
-      amsg->previous_subscribe_gen = previous_subscribe_gen;
-      amsg.commit();
+      event_comm->subscribe(make_event(needed_gen), owner, previous_subscribe_gen);
     }
 
     if(trigger_now)
@@ -1216,8 +1331,9 @@ namespace Realm {
 
     // case 1: the event has already triggered, so nothing to remove
     // TODO: this might still be racy with delayed event waiter notification
-    if(needed_gen <= generation.load())
+    if(needed_gen <= generation.load()) {
       return false;
+    }
 
     // case 2: is it a local trigger we've also already dealt with?
     {
@@ -1233,67 +1349,49 @@ namespace Realm {
       return true;
     } else {
       bool ok = future_local_waiters[needed_gen].erase(waiter) > 0;
-      assert(ok);
-      return true;
+      return ok;
     }
   }
 
-  inline bool GenEventImpl::is_generation_poisoned(gen_t gen) const
+  bool GenEventImpl::is_generation_poisoned(gen_t gen) const
   {
     // common case: no poisoned generations
     int npg_cached = num_poisoned_generations.load_acquire();
-    if(REALM_LIKELY(npg_cached == 0))
+    if(REALM_LIKELY(npg_cached == 0)) {
       return false;
+    }
 
-    for(int i = 0; i < npg_cached; i++)
-      if(poisoned_generations[i] == gen)
+    for(int i = 0; i < npg_cached; i++) {
+      if(poisoned_generations[i] == gen) {
         return true;
+      }
+    }
     return false;
   }
 
-  ///////////////////////////////////////////////////
-  // Events
-
-  // only called for generational events
-  /*static*/ void EventSubscribeMessage::handle_message(NodeID sender,
-                                                        const EventSubscribeMessage &args,
-                                                        const void *data, size_t datalen)
+  void GenEventImpl::handle_remote_subscription(NodeID sender, gen_t subscribe_gen,
+                                                gen_t previous_subscribe_gen)
   {
-    log_event.debug() << "event subscription: node=" << sender << " event=" << args.event;
-
-    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-
-#ifdef EVENT_TRACING
-    {
-      EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-      item.event_id = args.event.id;
-      item.event_gen = args.event.gen;
-      item.action = EventTraceItem::ACT_WAIT;
-    }
-#endif
-
-    // we may send a trigger message in response to the subscription
-    EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
     EventImpl::gen_t trigger_gen = 0;
     bool subscription_recorded = false;
 
     // early-out case: if we can see the generation needed has already
     //  triggered, signal without taking the mutex
-    EventImpl::gen_t stale_gen = impl->generation.load_acquire();
+    EventImpl::gen_t stale_gen = generation.load_acquire();
     if(stale_gen >= subscribe_gen) {
       trigger_gen = stale_gen;
     } else {
-      AutoLock<> a(impl->mutex);
+      AutoLock<> a(mutex);
 
       // look at the previously-subscribed generation from the requestor - we'll send
-      //  a trigger message if anything newer has triggered
-      EventImpl::gen_t cur_gen = impl->generation.load();
-      if(cur_gen > args.previous_subscribe_gen)
+      //  a trigger message if anything nwer has triggered
+      EventImpl::gen_t cur_gen = generation.load();
+      if(cur_gen > previous_subscribe_gen)
         trigger_gen = cur_gen;
 
       // are they subscribing to the current generation?
       if(subscribe_gen == (cur_gen + 1)) {
-        impl->remote_waiters.add(sender);
+        remote_waiters.add(sender);
         subscription_recorded = true;
       } else {
         // should never get subscriptions newer than our current
@@ -1301,64 +1399,24 @@ namespace Realm {
       }
     }
 
-    if(subscription_recorded)
-      log_event.debug() << "event subscription recorded: node=" << sender
-                        << " event=" << args.event << " (> " << stale_gen << ")";
+    if(subscription_recorded) {
+      log_event.debug() << "event subscription recorded: node=" << sender;
+    }
 
     if(trigger_gen > 0) {
       log_event.debug() << "event subscription immediate trigger: node=" << sender
-                        << " event=" << args.event << " (<= " << trigger_gen << ")";
-      ID trig_id(args.event);
+                        << " trigger_gen=" << trigger_gen;
+      ID trig_id(me);
       trig_id.event_generation() = trigger_gen;
       Event triggered = trig_id.convert<Event>();
 
       // it is legal to use poisoned generation info like this because it is
       // always updated before the generation - the load_acquire above makes
       // sure we read in the correct order
-      int npg_cached = impl->num_poisoned_generations.load_acquire();
-      ActiveMessage<EventUpdateMessage> amsg(sender, impl->poisoned_generations,
-                                             npg_cached * sizeof(EventImpl::gen_t));
-      amsg->event = triggered;
-      amsg.commit();
-    }
-  }
-
-  /*static*/ void EventTriggerMessage::handle_message(NodeID sender,
-                                                      const EventTriggerMessage &args,
-                                                      const void *data, size_t datalen,
-                                                      TimeLimit work_until)
-  {
-    log_event.debug() << "remote trigger of event " << args.event << " from node "
-                      << sender;
-    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-    impl->trigger(ID(args.event).event_generation(), sender, args.poisoned, work_until);
-  }
-
-  template <typename T>
-  struct ArrayOstreamHelper {
-    ArrayOstreamHelper(const T *_base, size_t _count)
-      : base(_base)
-      , count(_count)
-    {}
-
-    const T *base;
-    size_t count;
-  };
-
-  template <typename T>
-  std::ostream &operator<<(std::ostream &os, const ArrayOstreamHelper<T> &h)
-  {
-    switch(h.count) {
-    case 0:
-      return os << "0:{}";
-    case 1:
-      return os << "1:{ " << h.base[0] << " }";
-    default:
-      os << h.count << ":{ " << h.base[0];
-      for(size_t i = 1; i < h.count; i++)
-        os << ", " << h.base[i];
-      os << " }";
-      return os;
+      const int npg_cached = num_poisoned_generations.load_acquire();
+      event_comm->update(triggered, sender,
+                         span<EventImpl::gen_t>(poisoned_generations,
+                                                npg_cached * sizeof(EventImpl::gen_t)));
     }
   }
 
@@ -1459,8 +1517,7 @@ namespace Realm {
       for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = to_wake.begin();
           it != to_wake.end(); it++) {
         bool poisoned = is_generation_poisoned(it->first);
-        get_runtime()->event_triggerer.trigger_event_waiters(it->second, poisoned,
-                                                             work_until);
+        event_triggerer->trigger_event_waiters(it->second, poisoned, work_until);
       }
     }
   }
@@ -1501,35 +1558,8 @@ namespace Realm {
     return op;
   }
 
-  /*static*/ void EventUpdateMessage::handle_message(NodeID sender,
-                                                     const EventUpdateMessage &args,
-                                                     const void *data, size_t datalen,
-                                                     TimeLimit work_until)
-  {
-    const EventImpl::gen_t *new_poisoned_gens = (const EventImpl::gen_t *)data;
-    int new_poisoned_count = datalen / sizeof(EventImpl::gen_t);
-    assert((new_poisoned_count * sizeof(EventImpl::gen_t)) ==
-           datalen); // no remainders or overflow please
-
-    log_event.debug() << "event update: event=" << args.event << " poisoned="
-                      << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens,
-                                                              new_poisoned_count);
-
-    GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-    impl->process_update(ID(args.event).event_generation(), new_poisoned_gens,
-                         new_poisoned_count, work_until);
-  }
-
   bool GenEventImpl::has_triggered(gen_t needed_gen, bool &poisoned)
   {
-#ifdef EVENT_TRACING
-    {
-      EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-      item.event_id = me.id;
-      item.event_gen = needed_gen;
-      item.action = EventTraceItem::ACT_QUERY;
-    }
-#endif
     // lock-free check
     if(needed_gen <= generation.load_acquire()) {
       // it is safe to call is_generation_poisoned after just a load_acquire
@@ -1596,10 +1626,7 @@ namespace Realm {
     }
 
     if(subscribe_needed) {
-      ActiveMessage<EventSubscribeMessage> amsg(owner);
-      amsg->event = make_event(subscribe_gen);
-      amsg->previous_subscribe_gen = previous_subscribe_gen;
-      amsg.commit();
+      event_comm->subscribe(make_event(subscribe_gen), owner, previous_subscribe_gen);
     }
   }
 
@@ -1661,21 +1688,13 @@ namespace Realm {
     return true;
   }
 
-  void GenEventImpl::trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
+  bool GenEventImpl::trigger(gen_t gen_triggered, int trigger_node, bool poisoned,
                              TimeLimit work_until)
   {
+    bool free_event = false;
     Event e = make_event(gen_triggered);
     log_event.debug() << "event triggered: event=" << e << " by node " << trigger_node
                       << " (poisoned=" << poisoned << ")";
-
-#ifdef EVENT_TRACING
-    {
-      EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-      item.event_id = me.id;
-      item.event_gen = gen_triggered;
-      item.action = EventTraceItem::ACT_TRIGGER;
-    }
-#endif
 
     EventWaiter::EventWaiterList to_wake;
 
@@ -1684,7 +1703,6 @@ namespace Realm {
 
       NodeSet to_update;
       gen_t update_gen;
-      bool free_event = false;
 
       {
         AutoLock<> a(mutex);
@@ -1750,15 +1768,10 @@ namespace Realm {
       // any remote nodes to notify?
       if(!to_update.empty()) {
         int npg_cached = num_poisoned_generations.load_acquire();
-        ActiveMessage<EventUpdateMessage> amsg(to_update, poisoned_generations,
-                                               npg_cached * sizeof(EventImpl::gen_t));
-        amsg->event = make_event(update_gen);
-        amsg.commit();
+        event_comm->update(make_event(update_gen), to_update,
+                           span<EventImpl::gen_t>(poisoned_generations,
+                                                  npg_cached * sizeof(EventImpl::gen_t)));
       }
-
-      // free event?
-      if(free_event)
-        GenEventImpl::free_genevent(this);
     } else {
       // we're triggering somebody else's event, so the first thing to do is tell them
       assert(trigger_node == (int)Network::my_node_id);
@@ -1768,10 +1781,7 @@ namespace Realm {
       // (the alternative is to not send the message until after we update local state,
       // but that adds latency for everybody else)
       assert(gen_triggered > generation.load());
-      ActiveMessage<EventTriggerMessage> amsg(owner);
-      amsg->event = make_event(gen_triggered);
-      amsg->poisoned = poisoned;
-      amsg.commit();
+      event_comm->trigger(make_event(gen_triggered), owner, poisoned);
       // we might need to subscribe to intermediate generations
       bool subscribe_needed = false;
       gen_t previous_subscribe_gen = 0;
@@ -1846,32 +1856,22 @@ namespace Realm {
       }
 
       if(subscribe_needed) {
-        ActiveMessage<EventSubscribeMessage> amsg(owner);
-        amsg->event = make_event(gen_triggered);
-        amsg->previous_subscribe_gen = previous_subscribe_gen;
-        amsg.commit();
+        event_comm->subscribe(make_event(gen_triggered), owner, previous_subscribe_gen);
       }
     }
 
     // finally, trigger any local waiters
-    if(!to_wake.empty())
-      get_runtime()->event_triggerer.trigger_event_waiters(to_wake, poisoned, work_until);
-  }
-
-  void GenEventImpl::perform_delayed_free_list_insertion(void)
-  {
-    bool free_event = false;
-
-    {
-      AutoLock<> a(mutex);
-      if(free_list_insertion_delayed) {
-        free_event = true;
-        free_list_insertion_delayed = false;
-      }
+    if(!to_wake.empty()) {
+      assert(event_triggerer != nullptr);
+      event_triggerer->trigger_event_waiters(to_wake, poisoned, work_until);
     }
 
-    if(free_event)
-      GenEventImpl::free_genevent(this);
+    if(free_event && owning_processor != nullptr) {
+      owning_processor->free_genevent(this);
+      free_event = false;
+    }
+
+    return free_event;
   }
 
   ActiveMessageHandlerReg<EventSubscribeMessage> event_subscribe_message_handler;
