@@ -14,6 +14,7 @@
  */
 
 #include <cmath>
+#include <cstring>
 #include "legion.h"
 #include "legion/runtime.h"
 #include "legion/legion_ops.h"
@@ -106,7 +107,9 @@ namespace Legion {
         uid(o->get_unique_op_id()),
         internal_idx(internal), idx(id), gen(o->get_generation()),
         shard_proj(p), pointwise_analyzable(op->is_pointwise_analyzable() &&
-            (shard_proj != NULL) && shard_proj->projection->is_invertible)
+            (shard_proj != NULL) &&
+             ((shard_proj->projection->projection_id == 0) ||
+               shard_proj->projection->is_invertible))
     //--------------------------------------------------------------------------
     {
       if (op != NULL)
