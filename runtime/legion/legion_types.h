@@ -1514,6 +1514,8 @@ namespace Legion {
       MAPPER_RETRIEVE_SEMANTIC_INFO_CALL,
       MAPPER_RETRIEVE_NAME_CALL,
       MAPPER_AUTO_LOCK_CALL,
+      MAPPER_FIND_COLLECTIVE_INSTANCES_IN_MEMORY,
+      MAPPER_FIND_COLLECTIVE_INSTANCES_NEAREST_MEMORY,
       // Old runtime call kinds
       PACK_BASE_TASK_CALL, 
       UNPACK_BASE_TASK_CALL,
@@ -1745,6 +1747,8 @@ namespace Legion {
       "MapperRuntime::retrieve_semantic_information",                 \
       "MapperRuntime::retrieve_name",                                 \
       "MapperRuntime::AutoLock",                                      \
+      "CollectiveView::find_instances_in_memory",                     \
+      "CollectiveView::find_instances_nearest_memory",                \
       "Pack Base Task",                                               \
       "Unpack Base Task",                                             \
       "Task Privilege Check",                                         \
