@@ -955,108 +955,13 @@ namespace Legion {
             LG_LATENCY_DEFERRED_PRIORITY, output_bar);
     }
 
-
-    // Explicit instantiations
-    template class ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> >;
-
-    /////////////////////////////////////////////////////////////
-    // ReplPointWiseAnalysable
-    /////////////////////////////////////////////////////////////
-
-#if 0
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    RtEvent ReplPointWiseAnalysable<OP>::find_point_wise_dependence(DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-      {
-      AutoLock o_lock(this->op_lock);
-
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(this->parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(this->parent_ctx);
-#endif
-
-      if (this->should_connect_to_prev_point(region_idx))
-      {
-        // Find prev index task
-        std::map<unsigned,PointWisePrevOpInfo>::iterator finder =
-          this->prev_index_tasks.find(region_idx);
-        assert(finder != this->prev_index_tasks.end());
-
-        // find the point of the previous index_task
-        const RegionRequirement &req = this->get_requirement(region_idx);
-        std::vector<DomainPoint> previous_index_task_points;
-
-        Domain index_domain = finder->second.launch_space->get_tight_domain();
-
-        this->get_points(req, finder->second.projection,
-            lr, index_domain,
-            previous_index_task_points);
-
-        if (previous_index_task_points.size() > 1)
-        {
-          assert(false);
-        }
-        assert(!previous_index_task_points.empty());
-
-        // find shard of the point
-        const ShardID prev_shard =
-           finder->second.sharding->find_owner(previous_index_task_points[0],
-              index_domain);
-
-#ifdef LEGION_SPY
-        LegionSpy::log_mapping_point_wise_dependence(
-            this->get_context()->get_unique_id(),
-            LEGION_DISTRIBUTED_ID_FILTER(repl_ctx->shard_manager->did),
-            finder->second.ctx_index, previous_index_task_points[0],
-            finder->second.region_idx, prev_shard,
-            this->context_index, point,
-            region_idx, this->parent_ctx->get_shard_id(),
-            finder->second.dep_type);
-#endif
-
-        if (prev_shard != this->parent_ctx->get_shard_id())
-        {
-          // send to the shard where the point is
-          const RtUserEvent pending_event = Runtime::create_rt_user_event();
-
-          // A different shard owns it so send a message to that shard
-          // requesting it to fill in the dependence
-          Serializer rez;
-          rez.serialize(repl_ctx->shard_manager->did);
-          rez.serialize(prev_shard);
-          rez.serialize(finder->second.ctx_index);
-          rez.serialize(pending_event);
-          rez.serialize(previous_index_task_points[0]);
-          repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
-          return pending_event;
-        }
-
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-
-        return this->parent_ctx->find_point_wise_dependence(
-            finder->second.ctx_index,
-            previous_index_task_points[0]);
-      }
-
-      assert(false);
-      return RtUserEvent::NO_RT_USER_EVENT;
-    }
-#endif
-
     /////////////////////////////////////////////////////////////
     // Repl Index Task
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(Runtime *rt)
-      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> >(rt)
+      : ReplCollectiveViewCreator<IndexTask>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -2851,14 +2756,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(Runtime *rt)
-      : ReplPointWiseAnalysable<IndexFillOp>(rt)
+      : IndexFillOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(const ReplIndexFillOp &rhs)
-      : ReplPointWiseAnalysable<IndexFillOp>(rhs)
+      : IndexFillOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3468,14 +3373,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(Runtime *rt)
-      : ReplPointWiseAnalysable<IndexCopyOp>(rt)
+      : IndexCopyOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(const ReplIndexCopyOp &rhs)
-      : ReplPointWiseAnalysable<IndexCopyOp>(rhs)
+      : IndexCopyOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7351,7 +7256,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexAttachOp::ReplIndexAttachOp(Runtime *rt)
-      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> >(rt)
+      : ReplCollectiveViewCreator<IndexAttachOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -7546,7 +7451,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexDetachOp::ReplIndexDetachOp(Runtime *rt)
-      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> >(rt)
+      : ReplCollectiveViewCreator<IndexDetachOp>(rt)
     //--------------------------------------------------------------------------
     {
     }

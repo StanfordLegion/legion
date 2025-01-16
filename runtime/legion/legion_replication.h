@@ -2010,22 +2010,11 @@ namespace Legion {
     };
 
     /**
-     * \class ReplPointWiseAnalysable
-     */
-    template<typename OP>
-    class ReplPointWiseAnalysable : public OP {
-    public:
-      template<typename ... Args>
-      ReplPointWiseAnalysable(Runtime *rt, Args&& ... args)
-        : OP(rt, std::forward<Args>(args) ...) { }
-    };
-
-    /**
      * \class ReplIndexTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexTask : public ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> > {
+    class ReplIndexTask : public ReplCollectiveViewCreator<IndexTask> {
     public:
       ReplIndexTask(Runtime *rt);
       ReplIndexTask(const ReplIndexTask &rhs) = delete;
@@ -2223,7 +2212,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexFillOp : public ReplPointWiseAnalysable<IndexFillOp> {
+    class ReplIndexFillOp : public IndexFillOp {
     public:
       ReplIndexFillOp(Runtime *rt);
       ReplIndexFillOp(const ReplIndexFillOp &rhs);
@@ -2333,7 +2322,7 @@ namespace Legion {
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexCopyOp : public ReplPointWiseAnalysable<IndexCopyOp> {
+    class ReplIndexCopyOp : public IndexCopyOp {
     public:
       ReplIndexCopyOp(Runtime *rt);
       ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
@@ -2820,7 +2809,7 @@ namespace Legion {
      * An index space attach operation that is aware
      * that it is executing in a control replicated context
      */
-    class ReplIndexAttachOp : public ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> > {
+    class ReplIndexAttachOp : public ReplCollectiveViewCreator<IndexAttachOp> {
     public:
       ReplIndexAttachOp(Runtime *rt);
       ReplIndexAttachOp(const ReplIndexAttachOp &rhs) = delete;
@@ -2892,7 +2881,7 @@ namespace Legion {
      * An index space detach operation that is aware
      * that it is executing in a control replicated context
      */
-    class ReplIndexDetachOp : public ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> > {
+    class ReplIndexDetachOp : public ReplCollectiveViewCreator<IndexDetachOp> {
     public:
       ReplIndexDetachOp(Runtime *rt);
       ReplIndexDetachOp(const ReplIndexDetachOp &rhs) = delete;
