@@ -23,6 +23,7 @@ endif()
 
 list(APPEND REALM_TESTS
   memcpy_channel_test.cc
+  barrier_test.cc
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
@@ -40,6 +41,12 @@ list(APPEND REALM_TESTS
   circ_queue_test.cc
   gather_scatter_test.cc
  )
+
+if(NOT WIN32)
+list(APPEND REALM_TESTS
+  backtrace_test.cc
+)
+endif()
 
 include(FetchContent)
 FetchContent_Declare(

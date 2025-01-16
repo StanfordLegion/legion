@@ -14,6 +14,7 @@ variables:
   CCACHE_BASEDIR: $CI_PROJECT_DIR
   CCACHE_DIR: $CI_PROJECT_DIR/ccache
   USE_CCACHE: "1"
+  REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
 
 cache: &global_cache
   key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
@@ -217,6 +218,9 @@ cache: &global_cache
 .legion: &legion
   TEST_REGENT: "0"
   LEGION_WARNINGS_FATAL: "1"
+
+.realm: &realm # test realm using makefile
+  TEST_REALM: "1"
 
 .ctest: &ctest
   TEST_CTEST: "1"
@@ -428,7 +432,8 @@ before_script:
       export KokkosKernels_DIR=`pwd`/kokkos-kernels/install
 
       # enable WAR for: https://github.com/kokkos/kokkos-kernels/issues/757
-      export REALM_DEFAULT_ARGS="-cuda:nongpusync 0"
+      # Keep the sparsity refcounting flag around when overwriting REALM_DEFAULT_ARGS
+      export REALM_DEFAULT_ARGS="-cuda:nongpusync 0 -ll:report_sparsity_leaks"
 
       if [[ "$USE_CUDA" -eq 1 ]]; then
         # There are warnings when compiling kokkos_interop.cc, so disable WARN_AS_ERROR
@@ -1252,10 +1257,10 @@ clang14_cxx20_release_regent:
     <<: [*clang14, *terra14, *release, *cxx20_normal, *regent]
 
 # HIP CUDA tests:
-nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion:
+nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion_realm:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *short, *shared]
+    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *realm, *short, *shared]
 
 # CUDA tests:
 nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:

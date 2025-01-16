@@ -55,7 +55,9 @@ list(APPEND REALM_TESTS
   rsrv_acquire_poisoned
   refcount_image_test
   inst_chain_redistrict
+  refcount_setops_test
   refcount_preimage_test
+  refcount_byfield_test
   )
 
 if(Legion_USE_CUDA)
@@ -84,6 +86,7 @@ if(Legion_USE_HIP)
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
   set(HIPSRC_multiaffine multiaffine_gpu.cu)
+  set(HIPSRC_test_profiling test_profiling_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)

@@ -1118,6 +1118,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_tasks.cc \
 		    $(LG_RT_DIR)/legion/legion_context.cc \
 		    $(LG_RT_DIR)/legion/legion_trace.cc \
+		    $(LG_RT_DIR)/legion/legion_auto_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_spy.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling_serializer.cc \
@@ -1132,6 +1133,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
+
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 LEGION_HIP_SRC   += $(LG_RT_DIR)/legion/legion_redop.cu
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
@@ -1226,7 +1228,6 @@ INSTALL_HEADERS += legion.h \
 		   realm/bytearray.h \
 		   realm/bytearray.inl \
 		   realm/faults.h \
-		   realm/faults.inl \
 		   realm/atomics.h \
 		   realm/atomics.inl \
 		   realm/point.h \

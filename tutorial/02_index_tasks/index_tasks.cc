@@ -42,15 +42,10 @@ void top_level_task(const Task *task,
   // See how many points to run
   const InputArgs &command_args = Runtime::get_input_args();
   for (int i = 1; i < command_args.argc; i++) {
-    if (command_args.argv[i][0] == '-') {
-      i++;
-      continue;
-    }
-
-    num_points = atoi(command_args.argv[i]);
-    assert(num_points > 0);
-    break;
+    if (!strcmp(command_args.argv[i],"-n"))
+      num_points = atoi(command_args.argv[++i]);
   }
+  assert(num_points > 0);
   printf("Running hello world redux for %d points...\n", num_points);
 
   // To aid in describing structured data, Legion supports

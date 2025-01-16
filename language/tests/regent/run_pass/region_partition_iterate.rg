@@ -18,6 +18,7 @@ local c = regentlib.c
 
 task f() : int
   var r = region(ispace(ptr, 5), int)
+  fill(r, 0)
   var x = dynamic_cast(ptr(int, r), 0)
 
   var rc = c.legion_coloring_create()

@@ -403,7 +403,7 @@ namespace Legion {
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
       inline LogicalTrace* get_trace(void) const { return trace; }
-      inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
+      inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; }
       inline Provenance* get_provenance(void) const 
         { return provenance; }
     public:
@@ -497,6 +497,10 @@ namespace Legion {
       virtual bool is_predicated_op(void) const { return false; }
       // Determine if this operation is a tracing fence
       virtual bool is_tracing_fence(void) const { return false; }
+      // Record the trace hash for this operation
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
+      static void hash_requirement(Murmur3Hasher &hasher, 
+                                   const RegionRequirement &req);
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
       virtual void select_sources(const unsigned index, PhysicalManager *target,
@@ -538,7 +542,7 @@ namespace Legion {
       // Report a profiling result for this operation
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       // To notify  
       ApEvent get_completion_event(void);
@@ -638,6 +642,7 @@ namespace Legion {
     public:
       // Support for operations that compute futures
       void compute_task_tree_coordinates(TaskTreeCoordinates &coordinates);
+      virtual ContextCoordinate get_task_tree_coordinate(void) const;
     public: // Support for mapping operations
       static void prepare_for_mapping(PhysicalManager *manager,
                                       MappingInstance &instance);
@@ -1187,6 +1192,8 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
+      virtual bool record_trace_hash(TraceRecognizer &recognizer,
+                                     uint64_t opidx) override;
     };
 
     /**
@@ -1277,7 +1284,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -1416,6 +1423,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete);
       virtual void trigger_commit(void);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre, 
@@ -1499,7 +1507,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -1713,6 +1721,8 @@ namespace Legion {
           std::vector<IndirectRecord> &records, const bool sources);
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -1782,12 +1792,14 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { exec_fence = (fence_kind == EXECUTION_FENCE); return exec_fence; }
+      FenceKind get_fence_kind(void) { return fence_kind; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent complete_event);
       virtual void trigger_complete(ApEvent complete);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     public:
       virtual void perform_measurement(void);
@@ -2162,7 +2174,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2312,6 +2324,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       virtual void predicate_false(void);
     public:
@@ -2348,7 +2361,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2417,6 +2430,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent complete);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       virtual void predicate_false(void);
     public:
@@ -2457,7 +2471,7 @@ namespace Legion {
                                bool fill, unsigned count = 1);
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -2684,62 +2698,6 @@ namespace Legion {
         std::vector<unsigned> req_indexes;
       };
     public:
-      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
-      public:
-        MustEpochIndivArgs(Processor p, IndividualTask *t, MustEpochOp *o)
-          : LgTaskArgs<MustEpochIndivArgs>(o->get_unique_op_id()),
-            current_proc(p), task(t) { }
-      public:
-        const Processor current_proc;
-        IndividualTask *const task;
-      };
-      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
-      public:
-        MustEpochIndexArgs(Processor p, IndexTask *t, MustEpochOp *o)
-          : LgTaskArgs<MustEpochIndexArgs>(o->get_unique_op_id()),
-            current_proc(p), task(t) { }
-      public:
-        const Processor current_proc;
-        IndexTask *const task;
-      };
-      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
-      public:
-        MustEpochMapArgs(MustEpochOp *o)
-          : LgTaskArgs<MustEpochMapArgs>(o->get_unique_op_id()),
-            owner(o), task(NULL) { }
-      public:
-        MustEpochOp *const owner;
-        SingleTask *task;
-      };
-      struct MustEpochDistributorArgs : 
-        public LgTaskArgs<MustEpochDistributorArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
-      public:
-        MustEpochDistributorArgs(MustEpochOp *o)
-          : LgTaskArgs<MustEpochDistributorArgs>(o->get_unique_op_id()),
-            task(NULL) { }
-      public:
-        TaskOp *task;
-      };
-      struct MustEpochLauncherArgs : 
-        public LgTaskArgs<MustEpochLauncherArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
-      public:
-        MustEpochLauncherArgs(MustEpochOp *o)
-          : LgTaskArgs<MustEpochLauncherArgs>(o->get_unique_op_id()),
-            task(NULL) { }
-      public:
-        TaskOp *task;
-      };
-    public:
       MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
@@ -2778,6 +2736,7 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
     public:
@@ -2791,6 +2750,7 @@ namespace Legion {
                              unsigned src_index, unsigned src_idx,
                              unsigned dst_index, unsigned dst_idx,
                              DependenceType dtype);
+      void record_mapped_event(const DomainPoint &point, RtEvent mapped);
       void must_epoch_map_task_callback(SingleTask *task, 
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
@@ -2816,6 +2776,19 @@ namespace Legion {
               std::vector<DeletedPartition> &deleted_partitions,
               std::set<RtEvent> &preconditions);
     public:
+      virtual uint64_t collective_lamport_allreduce(
+          uint64_t lamport_clock, bool need_result);
+    public:
+      void rendezvous_concurrent_mapped(RtEvent precondition);
+      virtual void finalize_concurrent_mapped(void);
+    public:
+      void concurrent_allreduce(IndividualTask *task, AddressSpaceID space,
+          uint64_t lamport_clock, bool poisoned);
+      void concurrent_allreduce(
+          SliceTask *slice, AddressSpaceID source,
+          size_t total_points, uint64_t lamport_clock, bool poisoned);
+      virtual void finish_concurrent_allreduce(void);
+    public:
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
     public:
@@ -2829,55 +2802,52 @@ namespace Legion {
       TaskOp* find_task_by_index(int index);
     protected:
       static bool single_task_sorter(const Task *t1, const Task *t2);
-    public:
-      static void trigger_tasks(MustEpochOp *owner,
-                         const std::vector<IndividualTask*> &indiv_tasks,
-                         std::vector<bool> &indiv_triggered,
-                         const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered);
-      static void handle_trigger_individual(const void *args);
-      static void handle_trigger_index(const void *args);
     protected:
       // Have a virtual function that we can override to for doing the
       // mapping and distribution of the point tasks, we'll override
       // this for control replication
-      virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
-                                      std::set<ApEvent> &tasks_complete);
-      // Make this virtual so we can override it for control replication
-      void map_tasks(void);
-    public:
-      void record_mapped_event(const DomainPoint &point, RtEvent mapped);
-      static void handle_map_task(const void *args);
+      virtual RtEvent map_and_distribute(void);
     protected:
-      void distribute_tasks(void);
-      void compute_launch_space(const MustEpochLauncher &launcher);
-    public:
-      static void handle_distribute_task(const void *args);
-      static void handle_launch_task(const void *args);
+      IndexSpace compute_launch_space(const MustEpochLauncher &launcher,
+          Provenance *provenance);
     protected:
       std::vector<IndividualTask*>        indiv_tasks;
-      std::vector<bool>                   indiv_triggered;
       std::vector<IndexTask*>             index_tasks;
-      std::vector<bool>                   index_triggered;
     protected:
       // The component slices for distribution
       std::set<SliceTask*>         slice_tasks;
       // The actual base operations
       // Use a deque to keep everything in order
       std::vector<SingleTask*>     single_tasks;
+      std::atomic<unsigned>        remaining_single_tasks; 
+      RtUserEvent                  single_tasks_ready;
+      std::atomic<unsigned>        remaining_mapped_events;
+      std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       Mapper::MapMustEpochInput    input;
       Mapper::MapMustEpochOutput   output;
+    protected:
+      size_t remaining_collective_unbound_points;
+      uint64_t collective_lamport_clock;
+      RtUserEvent collective_lamport_clock_ready;
+    protected:
+      // For the barrier before doing the lamport all-reduce
+      RtUserEvent concurrent_mapped;
+      size_t remaining_concurrent_mapped;
+      std::vector<RtEvent> concurrent_preconditions;
+    protected:
+      // For doing the lamport clock all-reduce
+      size_t remaining_concurrent_points;
+      uint64_t concurrent_lamport_clock;
+      bool concurrent_poisoned;
+      std::vector<std::pair<IndividualTask*,AddressSpaceID> > concurrent_tasks;
+      std::vector<std::pair<SliceTask*,AddressSpaceID> > concurrent_slices;
     protected:
       FutureMap result_map;
       unsigned remaining_resource_returns;
       unsigned remaining_subop_completes;
       unsigned remaining_subop_commits;
     protected:
-      // Used to know if we successfully triggered everything
-      // and therefore have all of the single tasks and a
-      // valid set of constraints.
-      bool triggering_complete;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
       // Track the physical instances that we've acquired
@@ -2890,7 +2860,6 @@ namespace Legion {
         unsigned/*op idx*/,unsigned/*req idx*/> > > internal_dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
-      std::map<DomainPoint,RtUserEvent> mapped_events;
     protected:
       std::map<UniqueID,RtUserEvent> slice_version_events;
     protected:
@@ -3490,7 +3459,7 @@ namespace Legion {
       // Report a profiling result for this operation
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig,
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
       virtual void handle_profiling_update(int count);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
@@ -3565,6 +3534,8 @@ namespace Legion {
       virtual PartitionKind get_partition_kind(void) const;
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3640,6 +3611,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(ApEvent effects_done);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     public:
       // This is a helper method for ReplFillOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
@@ -3758,6 +3730,8 @@ namespace Legion {
       virtual FillView* get_fill_view(void) const;
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -3810,6 +3784,7 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -3985,6 +3960,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_attach(void) const { return true; }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     protected:
       IndexAttachOp *owner;
       DomainPoint index_point;
@@ -4146,6 +4123,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx)
         { return owner->find_parent_index(idx); }
       virtual bool is_point_detach(void) const { return true; }
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     protected:
       IndexDetachOp *owner;
       DomainPoint index_point;
@@ -4259,6 +4238,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_execution(void);
       virtual void trigger_replay(void);
+      virtual bool record_trace_hash(TraceRecognizer &recognizer, uint64_t idx);
     protected:
       // These are virtual methods to override for control replication
       virtual void populate_sources(void);
@@ -4428,6 +4408,8 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const std::string_view& get_provenance_string(
           bool human = true) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4556,6 +4538,8 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const std::string_view& get_provenance_string(
           bool human = true) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4612,6 +4596,8 @@ namespace Legion {
       virtual const std::string_view& get_provenance_string(
           bool human = true) const;
       virtual PartitionKind get_partition_kind(void) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4644,12 +4630,16 @@ namespace Legion {
       virtual uint64_t get_context_index(void) const;
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez);
+    protected:
+      DomainPoint index_point;
     };
 
     /**
@@ -4670,6 +4660,8 @@ namespace Legion {
       virtual uint64_t get_context_index(void) const;
       virtual void set_context_index(uint64_t index);
       virtual int get_depth(void) const;
+      virtual ContextCoordinate get_task_tree_coordinate(void) const
+        { return ContextCoordinate(context_index, index_point); }
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4680,6 +4672,8 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual void unpack(Deserializer &derez);
+    protected:
+      DomainPoint index_point;
     };
 
     /**

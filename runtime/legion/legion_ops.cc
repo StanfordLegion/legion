@@ -19,6 +19,7 @@
 #include "legion/region_tree.h"
 #include "legion/legion_spy.h"
 #include "legion/legion_trace.h"
+#include "legion/legion_auto_trace.h"
 #include "legion/legion_context.h"
 #include "legion/legion_profiling.h"
 #include "legion/legion_instances.h"
@@ -1452,7 +1453,7 @@ namespace Legion {
             if (to_release == NULL)
               to_release = 
                 new std::vector<std::pair<PhysicalManager*,unsigned> >();
-            to_release->push_back(std::make_pair(it->first, it->second));
+            to_release->emplace_back(std::make_pair(it->first, it->second));
             std::map<PhysicalManager*,unsigned>::iterator to_delete = it++;
             acquired_instances.erase(to_delete);
           }
@@ -1468,7 +1469,7 @@ namespace Legion {
         else
           return perform;
       }
-      for (std::map<PhysicalManager*,unsigned>::iterator it = 
+      for (std::map<PhysicalManager*,unsigned>::iterator it =
             acquired_instances.begin(); it != acquired_instances.end(); )
       {
         size_t instance_size = it->first->get_instance_size();
@@ -1746,6 +1747,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Operation::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      log_auto_trace.debug() << "Encountered untraceable operation: "
+        << get_string_rep(get_operation_kind());
+      return recognizer.record_operation_untraceable(opidx);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::hash_requirement(Murmur3Hasher &hasher,
+                                                   const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      if (req.region.exists()) {
+        hasher.hash<bool>(true); // is_reg
+        hasher.hash(req.region.get_index_space().get_id());
+        hasher.hash(req.region.get_field_space().get_id());
+        hasher.hash(req.region.get_tree_id());
+      } else {
+        hasher.hash<bool>(false); // is_reg
+        hasher.hash(req.partition.get_index_partition().get_id());
+        hasher.hash(req.partition.get_field_space().get_id());
+        hasher.hash(req.partition.get_tree_id());
+      }
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+           it != req.privilege_fields.end(); it++)
+        hasher.hash(*it);
+      for (std::vector<FieldID>::const_iterator it = 
+            req.instance_fields.begin(); it != req.instance_fields.end(); it++)
+        hasher.hash(*it);
+      hasher.hash(req.privilege);
+      hasher.hash(req.prop);
+      hasher.hash(req.parent.get_index_space().get_id());
+      hasher.hash(req.parent.get_field_space().get_id());
+      hasher.hash(req.parent.get_tree_id());
+      hasher.hash(req.redop);
+      // Excluding the fields: tag and flags.
+      hasher.hash(req.handle_type);
+      hasher.hash(req.projection);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::select_sources(const unsigned index,PhysicalManager *target,
                                    const std::vector<InstanceView*> &sources,
                                    std::vector<unsigned> &ranking,
@@ -1911,7 +1955,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool Operation::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -1932,7 +1976,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx->compute_task_tree_coordinates(coords);
-      coords.push_back(ContextCoordinate(context_index, DomainPoint()));
+      coords.emplace_back(get_task_tree_coordinate());
+    }
+
+    //--------------------------------------------------------------------------
+    ContextCoordinate Operation::get_task_tree_coordinate(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ContextCoordinate(context_index, DomainPoint());
     }
 
     //--------------------------------------------------------------------------
@@ -2088,7 +2139,7 @@ namespace Legion {
           if (completion_event.pending.exists())
           {
             ApUserEvent to_trigger = completion_event.pending;
-            Runtime::trigger_event(NULL, to_trigger, effects);
+            Runtime::trigger_event_untraced(to_trigger, effects);
             completion_event.effects = to_trigger;
           }
           else
@@ -2113,7 +2164,7 @@ namespace Legion {
           if (completion_event.pending.exists())
           {
             ApUserEvent to_trigger = completion_event.pending;
-            Runtime::trigger_event(NULL, to_trigger, effects);
+            Runtime::trigger_event_untraced(to_trigger, effects);
             completion_event.effects = to_trigger;
           }
           else
@@ -4824,7 +4875,7 @@ namespace Legion {
       // Map operations do not wait for the unmapping to be considered complete
       record_completion_effect(map_complete_event);
       // We can trigger the ready event now that we know its precondition
-      Runtime::trigger_event(NULL, ready_event, map_complete_event);
+      Runtime::trigger_event_untraced(ready_event, map_complete_event);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       RtEvent mapping_applied;
@@ -5450,7 +5501,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MapOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig, 
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7228,7 +7279,8 @@ namespace Legion {
         if (!copy_post.exists())
           copy_post = execution_fence_event;
       }
-      Runtime::trigger_event(&trace_info, local_postcondition, copy_post);
+      Runtime::trigger_event(local_postcondition, copy_post, trace_info,
+                             applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&src_requirements[index], index);
       dump_physical_state(&dst_requirements[index], 
@@ -7297,6 +7349,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool CopyOp::record_trace_hash(TraceRecognizer &recognizer, uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            src_requirements.begin(); it != src_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      for (std::vector<RegionRequirement>::const_iterator it =
+            dst_requirements.begin(); it != dst_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      for (std::vector<RegionRequirement>::const_iterator it =
+            src_indirect_requirements.begin(); it != 
+            src_indirect_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            dst_indirect_requirements.begin(); it != 
+            dst_indirect_requirements.end(); it++)
+        hash_requirement(hasher, *it);
+      // Not including the fields grants, wait_barriers, arrive_barriers.
+      hasher.hash<bool>(is_index_space);
+      if (is_index_space)
+        hasher.hash(index_domain);
+      return recognizer.record_operation_hash(this, hasher, opidx);
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::finalize_copy_profiling(void)
     //--------------------------------------------------------------------------
     {
@@ -7347,7 +7426,8 @@ namespace Legion {
     {
       collective_pre = local_pre;
       collective_post = local_post;
-      records.emplace_back(IndirectRecord(runtime->forest, req, insts));
+      records.emplace_back(
+          IndirectRecord(runtime->forest, req, insts, 1/*total points*/));
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -8035,7 +8115,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool CopyOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8152,7 +8232,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_domain(index_domain);
+        index_domain = launch_space->get_tight_domain();
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -8672,10 +8752,9 @@ namespace Legion {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
       IndexSpaceNode *local_points = get_shard_points();
-      Domain launch_domain;
-      local_points->get_domain(launch_domain);
+      Domain launch_domain = local_points->get_tight_domain();
       // Now enumerate the points
-      size_t num_points = launch_domain.get_volume();
+      size_t num_points = local_points->get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
@@ -8840,21 +8919,23 @@ namespace Legion {
         {
           exchange.local_preconditions.insert(local_pre);
           if (exchange.local_preconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_pre, 
-              Runtime::merge_events(&trace_info, exchange.local_preconditions));
+            Runtime::trigger_event(exchange.collective_pre, 
+              Runtime::merge_events(&trace_info, exchange.local_preconditions),
+              trace_info, map_applied_conditions);
         }
         if (exchange.local_postconditions.size() < points.size())
         {
           exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_post, 
-             Runtime::merge_events(&trace_info, exchange.local_postconditions));
+            Runtime::trigger_event(exchange.collective_post, 
+             Runtime::merge_events(&trace_info, exchange.local_postconditions),
+             trace_info, map_applied_conditions);
         }
 #ifdef DEBUG_LEGION
         assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        copies[index].src_indirect_records.emplace_back(
-            IndirectRecord(runtime->forest, req, insts));
+        copies[index].src_indirect_records.emplace_back(IndirectRecord(
+              runtime->forest, req, insts, launch_space->get_volume()));
         exchange.src_records.push_back(&records);
         if (copies[index].src_indirect_records.size() == points.size())
           return finalize_exchange(index, true/*sources*/);
@@ -8877,21 +8958,23 @@ namespace Legion {
         {
           exchange.local_preconditions.insert(local_pre);
           if (exchange.local_preconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_pre,
-              Runtime::merge_events(&trace_info, exchange.local_preconditions));
+            Runtime::trigger_event(exchange.collective_pre,
+              Runtime::merge_events(&trace_info, exchange.local_preconditions),
+              trace_info, map_applied_conditions);
         }
         if (exchange.local_postconditions.size() < points.size())
         {
           exchange.local_postconditions.insert(local_post);
           if (exchange.local_postconditions.size() == points.size())
-            Runtime::trigger_event(&trace_info, exchange.collective_post,
-             Runtime::merge_events(&trace_info, exchange.local_postconditions));
+            Runtime::trigger_event(exchange.collective_post,
+             Runtime::merge_events(&trace_info, exchange.local_postconditions),
+             trace_info, map_applied_conditions);
         }
 #ifdef DEBUG_LEGION
         assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        copies[index].dst_indirect_records.emplace_back(
-            IndirectRecord(runtime->forest, req, insts));
+        copies[index].dst_indirect_records.emplace_back(IndirectRecord(
+              runtime->forest, req, insts, launch_space->get_volume()));
         exchange.dst_records.push_back(&records);
         if (copies[index].dst_indirect_records.size() == points.size())
           return finalize_exchange(index, false/*sources*/);
@@ -9735,6 +9818,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool FenceOp::record_trace_hash(TraceRecognizer &recognizer, uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(fence_kind);
+      return recognizer.record_operation_hash(this, hasher, opidx);
+    }
+
+    //--------------------------------------------------------------------------
     const VersionInfo& FenceOp::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
@@ -10048,12 +10141,8 @@ namespace Legion {
               // Have to request internal buffers before completing mapping
               // in case we have to make an instance as part of it
               FutureImpl *impl = futures[0].impl;
-              const RtEvent mapped = 
-                impl->request_runtime_instance(this, false/*eager*/);
-              if (mapped.exists())
-                complete_mapping(mapped);
-              else
-                complete_mapping();
+              impl->request_runtime_instance(this);
+              complete_mapping();
               const RtEvent ready = impl->find_runtime_instance_ready();
               if (ready.exists() && !ready.has_triggered())
                 parent_ctx->add_to_trigger_execution_queue(this, ready);
@@ -10074,10 +10163,7 @@ namespace Legion {
               for (unsigned idx = 0; idx < futures.size(); idx++)
               {
                 FutureImpl *impl = futures[idx].impl;
-                const RtEvent mapped =
-                  impl->request_runtime_instance(this,false/*eager*/);
-                if (mapped.exists())
-                  mapped_events.push_back(mapped);
+                impl->request_runtime_instance(this);
                 const RtEvent subscribed = impl->find_runtime_instance_ready();
                 if (subscribed.exists())
                   ready_events.push_back(subscribed);
@@ -10132,7 +10218,8 @@ namespace Legion {
                   "The type of futures for index space domains must be a "
                   "Domain.", parent_ctx->get_task_name(), 
                   parent_ctx->get_unique_id(), sizeof(Domain))
-            if (owner && index_space_node->set_domain(*domain)) 
+            if (owner && index_space_node->set_domain(*domain,
+                  ApEvent::NO_AP_EVENT, true/*take ownership*/))
               delete index_space_node;
             break;      
           }
@@ -11250,7 +11337,8 @@ namespace Legion {
                                               false/*check collective*/,
                                               true/*record valid*/,
                                               false/*check initialized*/);
-      Runtime::trigger_event(&trace_info, close_event, instances_ready);
+      Runtime::trigger_event(close_event, instances_ready,
+          trace_info, map_applied_conditions);
       record_completion_effect(close_event);
       log_mapping_decision(0/*idx*/, requirement, target_instances);
       // No need to apply our mapping because we are done!
@@ -11359,7 +11447,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool PostCloseOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12106,7 +12194,8 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      Runtime::trigger_event(&trace_info, acquire_post, acquire_complete);
+      Runtime::trigger_event(acquire_post, acquire_complete,
+          trace_info, map_applied_conditions);
       record_completion_effect(acquire_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
@@ -12172,6 +12261,21 @@ namespace Legion {
       }
       // Don't commit thisoperation until we've reported profiling information
       commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    bool AcquireOp::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(logical_region);
+      hasher.hash(parent_region);
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        hasher.hash(*it);
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -12488,7 +12592,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool AcquireOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12896,7 +13000,8 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      Runtime::trigger_event(&trace_info, release_post, release_complete);
+      Runtime::trigger_event(release_post, release_complete,
+          trace_info, map_applied_conditions);
       record_completion_effect(release_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
@@ -12962,6 +13067,21 @@ namespace Legion {
       }
       // Don't commit this operation until the profiling is done
       commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReleaseOp::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hasher.hash(logical_region);
+      hasher.hash(parent_region);
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        hasher.hash(*it);
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -13309,7 +13429,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ReleaseOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13666,8 +13786,8 @@ namespace Legion {
       // Mark that we completed mapping this operation
       if (to_predicate)
       {
-        complete_mapping(
-            future.impl->request_runtime_instance(this, false/*eager*/));
+        future.impl->request_runtime_instance(this);
+        complete_mapping();
         const RtEvent ready = future.impl->find_runtime_instance_ready();
         if (ready.exists() && !ready.has_triggered())
           parent_ctx->add_to_trigger_execution_queue(this, ready);
@@ -14210,8 +14330,9 @@ namespace Legion {
       if (!launch_space.exists())
       {
         if (!launch_domain.exists())
-          compute_launch_space(launcher);
-        launch_space = ctx->find_index_launch_space(launch_domain, provenance);
+          launch_space = compute_launch_space(launcher, provenance);
+        else
+          launch_space = ctx->find_index_launch_space(launch_domain,provenance);
       }
       if (!launch_domain.exists())
       {
@@ -14254,6 +14375,10 @@ namespace Legion {
                                         const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!concurrent_mapped.exists());
+#endif
+      concurrent_mapped = Runtime::create_rt_user_event();
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
       // appear as a single operation to the parent context in order to
@@ -14268,14 +14393,18 @@ namespace Legion {
                                           false/*top level*/,
                                           true/*must epoch*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
+        indiv_tasks[idx]->set_concurrent_postcondition(concurrent_mapped);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, NULL);
       }
-      indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
       for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
       {
+        if (launcher.index_tasks[idx].concurrent_functor != 0)
+          REPORT_LEGION_ERROR(ERROR_INVALID_CONCURRENT_ID,
+              "All index space task launches in must epoch operations "
+              "are required to use default concurrent functor (ID=0).")
         IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
         if (!launch_space.exists())
           launch_space = ctx->find_index_launch_space(
@@ -14285,10 +14414,11 @@ namespace Legion {
                                 launch_space, provenance, false/*track*/);
         index_tasks[idx]->set_must_epoch(this, 
             indiv_tasks.size() + idx, true/*register*/);
+        index_tasks[idx]->initialize_must_epoch_concurrent_group(0/*color*/,
+            concurrent_mapped);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, NULL);
       }
-      index_triggered.resize(index_tasks.size(), false);
     }
 
     //--------------------------------------------------------------------------
@@ -14326,11 +14456,21 @@ namespace Legion {
       launch_domain = Domain();
       individual_tasks.clear();
       index_space_tasks.clear();
+      single_tasks_ready = RtUserEvent::NO_RT_USER_EVENT;
+      concurrent_mapped = RtUserEvent::NO_RT_USER_EVENT;
+      remaining_mapped_events.store(0);
+      remaining_concurrent_mapped = 0;
+      remaining_single_tasks.store(0);
       remaining_resource_returns = 0;
+      remaining_concurrent_points = 0;
+      concurrent_lamport_clock = 0;
+      concurrent_poisoned = false;
+      remaining_collective_unbound_points = 0;
+      collective_lamport_clock = 0;
+      collective_lamport_clock_ready = RtUserEvent::NO_RT_USER_EVENT;
       // Set to 1 to include the triggers we get for our operation
       remaining_subop_completes = 0;
       remaining_subop_commits = 1;
-      triggering_complete = false;
     }
 
     //--------------------------------------------------------------------------
@@ -14340,11 +14480,12 @@ namespace Legion {
       Operation::deactivate(false/*free*/);
       // All the sub-operations we have will deactivate themselves
       indiv_tasks.clear();
-      indiv_triggered.clear();
       index_tasks.clear();
-      index_triggered.clear();
       slice_tasks.clear();
       single_tasks.clear();
+      concurrent_preconditions.clear();
+      concurrent_tasks.clear();
+      concurrent_slices.clear();
       // Remove our reference on the future map
       result_map = FutureMap();
       task_sets.clear();
@@ -14446,94 +14587,119 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MustEpochOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger al lthe individual and index tasks which will not actually
+      // map and run them but instead enqueue them with our must epoch op
+      // here so that we can call trigger mapping on ourselves once they
+      // have all been enumerated
+#ifdef DEBUG_LEGION
+      assert(!single_tasks_ready.exists());
+#endif
+      task_sets.resize(indiv_tasks.size()+index_tasks.size());
+      // Add a guard on the single tasks being ready
+      remaining_single_tasks.store(1);
+      const Processor current = parent_ctx->get_executing_processor();
+      for (std::vector<IndividualTask*>::const_iterator it =
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        (*it)->prepare_map_must_epoch();
+        (*it)->set_target_proc(current);
+        remaining_single_tasks.fetch_add(1);
+        (*it)->enqueue_ready_operation();
+      }
+      for (std::vector<IndexTask*>::const_iterator it =
+            index_tasks.begin(); it != index_tasks.end(); it++)
+      {
+        (*it)->prepare_map_must_epoch();
+        (*it)->set_target_proc(current);
+        remaining_single_tasks.fetch_add((*it)->index_domain.get_volume());
+        (*it)->enqueue_ready_operation();
+      }
+      // Remove the guard that we added
+      const unsigned remaining = remaining_single_tasks.fetch_sub(1); 
+      if (remaining > 1)
+      {
+        AutoLock o_lock(op_lock);
+        // Make sure we didn't lose the race
+        if (remaining_single_tasks.load() > 0)
+          single_tasks_ready = Runtime::create_rt_user_event();
+      }
+      // Enqueue this as a ready operation once all the single tasks have
+      // been enumerated for us to do the mapping
+      enqueue_ready_operation(single_tasks_ready);
+    }
+
+    //--------------------------------------------------------------------------
     void MustEpochOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // First mark that each of the tasks will be origin mapped
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        indiv_tasks[idx]->prepare_map_must_epoch();
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        index_tasks[idx]->prepare_map_must_epoch();
-      // Call trigger execution on each of our sub-operations, since they
-      // each have marked that they have a must_epoch owner, they will
-      // not actually map and launch, but instead will register all the base
-      // operations with us.  Note this step requires that we mark everything
-      // as needing to locally map in the 'initialize' method.  Check for
-      // error codes indicating failed pre-mapping.
-      if (!triggering_complete)
-      {
-        task_sets.resize(indiv_tasks.size()+index_tasks.size());
-        trigger_tasks(this, indiv_tasks, indiv_triggered, 
-                            index_tasks, index_triggered);
 #ifdef DEBUG_LEGION
-        assert(!single_tasks.empty());
+      assert(!single_tasks.empty());
 #endif 
-        // Sort the points so that they are in order for determinism
-        // across runs and for control replication
-        std::sort(single_tasks.begin(), single_tasks.end(), single_task_sorter);
-        // Then construct the inverse mapping
-        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-          single_task_map[single_tasks[idx]] = idx;
-        // Next build the set of single tasks and all their constraints.
-        // Iterate over all the recorded dependences
-        std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
-        constraints.resize(dependences.size());
-        mapping_dependences.resize(single_tasks.size());
-        // Clear the dependence map now, we'll fill it in again
-        // with a different set of points
-        dependence_map.clear();
-        unsigned constraint_idx = 0;
-        for (std::vector<DependenceRecord*>::const_iterator it = 
-              dependences.begin(); it != dependences.end(); 
-              it++, constraint_idx++)
+      // Sort the points so that they are in order for determinism
+      // across runs and for control replication
+      std::sort(single_tasks.begin(), single_tasks.end(), single_task_sorter);
+      // Then construct the inverse mapping
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+        single_task_map[single_tasks[idx]] = idx;
+      // Next build the set of single tasks and all their constraints.
+      // Iterate over all the recorded dependences
+      std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
+      constraints.resize(dependences.size());
+      mapping_dependences.resize(single_tasks.size());
+      // Clear the dependence map now, we'll fill it in again
+      // with a different set of points
+      dependence_map.clear();
+      unsigned constraint_idx = 0;
+      for (std::vector<DependenceRecord*>::const_iterator it = 
+            dependences.begin(); it != dependences.end(); 
+            it++, constraint_idx++)
+      {
+        Mapper::MappingConstraint &constraint = constraints[constraint_idx];
+#ifdef DEBUG_LEGION
+        assert((*it)->op_indexes.size() == (*it)->req_indexes.size());
+#endif
+        // Add constraints for all the different elements
+        std::set<unsigned> single_indexes;
+        for (unsigned idx = 0; idx < (*it)->op_indexes.size(); idx++)
         {
-          Mapper::MappingConstraint &constraint = constraints[constraint_idx];
-#ifdef DEBUG_LEGION
-          assert((*it)->op_indexes.size() == (*it)->req_indexes.size());
-#endif
-          // Add constraints for all the different elements
-          std::set<unsigned> single_indexes;
-          for (unsigned idx = 0; idx < (*it)->op_indexes.size(); idx++)
+          unsigned req_index = (*it)->req_indexes[idx];
+          const std::set<SingleTask*> &task_set = 
+                      task_sets[(*it)->op_indexes[idx]];
+          for (std::set<SingleTask*>::const_iterator sit = task_set.begin();
+                sit != task_set.end(); sit++)
           {
-            unsigned req_index = (*it)->req_indexes[idx];
-            const std::set<SingleTask*> &task_set = 
-                        task_sets[(*it)->op_indexes[idx]];
-            for (std::set<SingleTask*>::const_iterator sit = task_set.begin();
-                  sit != task_set.end(); sit++)
-            {
-              constraint.constrained_tasks.push_back(*sit);
-              constraint.requirement_indexes.push_back(req_index);
+            constraint.constrained_tasks.push_back(*sit);
+            constraint.requirement_indexes.push_back(req_index);
 #ifdef DEBUG_LEGION
-              assert(single_task_map.find(*sit) != single_task_map.end());
+            assert(single_task_map.find(*sit) != single_task_map.end());
 #endif
-              // Update the dependence map
-              std::pair<unsigned,unsigned> key(single_task_map[*sit],req_index);
-              dependence_map[key] = constraint_idx;
-              single_indexes.insert(key.first);
-            }
-          }
-          // Record the mapping dependences
-          for (std::set<unsigned>::const_iterator it1 = 
-                single_indexes.begin(); it1 != single_indexes.end(); it1++)
-          {
-            for (std::set<unsigned>::const_iterator it2 = 
-                  single_indexes.begin(); it2 != it1; it2++)
-            {
-              mapping_dependences[*it1].insert(*it2);
-            }
+            // Update the dependence map
+            std::pair<unsigned,unsigned> key(single_task_map[*sit],req_index);
+            dependence_map[key] = constraint_idx;
+            single_indexes.insert(key.first);
           }
         }
-        // Clear this eagerly to save space
-        for (std::vector<DependenceRecord*>::const_iterator it = 
-              dependences.begin(); it != dependences.end(); it++)
+        // Record the mapping dependences
+        for (std::set<unsigned>::const_iterator it1 = 
+              single_indexes.begin(); it1 != single_indexes.end(); it1++)
         {
-          delete (*it);
+          for (std::set<unsigned>::const_iterator it2 = 
+                single_indexes.begin(); it2 != it1; it2++)
+          {
+            mapping_dependences[*it1].insert(*it2);
+          }
         }
-        dependences.clear();
-        // Mark that we have finished building all the constraints so
-        // we don't have to redo it if we end up failing a mapping.
-        triggering_complete = true;
       }
+      // Clear this eagerly to save space
+      for (std::vector<DependenceRecord*>::const_iterator it = 
+            dependences.begin(); it != dependences.end(); it++)
+      {
+        delete (*it);
+      }
+      dependences.clear();
       // Fill in the rest of the inputs to the mapper call
       input.mapping_tag = tag;
       input.tasks.insert(input.tasks.end(), single_tasks.begin(),
@@ -14579,43 +14745,91 @@ namespace Legion {
           task->target_proc = proc;
         }
       }
-      std::set<RtEvent> tasks_all_mapped;
-      std::set<ApEvent> tasks_all_complete;
       // Map and distribute all our tasks
-      map_and_distribute(tasks_all_mapped, tasks_all_complete);
-      record_completion_effects(tasks_all_complete);
-      // Mark that we are done mapping and executing this operation
-      RtEvent all_mapped = Runtime::merge_events(tasks_all_mapped);
-      if (!acquired_instances.empty())
-        all_mapped = 
-          release_nonempty_acquired_instances(all_mapped, acquired_instances);
-      complete_mapping(all_mapped);
+      complete_mapping(map_and_distribute());
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::map_and_distribute(std::set<RtEvent> &tasks_mapped,
-                                         std::set<ApEvent> &tasks_complete)
+    RtEvent MustEpochOp::map_and_distribute(void)
     //--------------------------------------------------------------------------
     {
+      std::vector<RtEvent> tasks_all_mapped;
+      tasks_all_mapped.reserve(indiv_tasks.size() + index_tasks.size());
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
-        tasks_mapped.insert((*it)->get_mapped_event());
-        tasks_complete.insert((*it)->get_completion_event());
+        tasks_all_mapped.push_back((*it)->get_mapped_event());
+        record_completion_effect((*it)->get_completion_event());
       }
       for (std::vector<IndexTask*>::const_iterator it = 
             index_tasks.begin(); it != index_tasks.end(); it++)
       {
-        tasks_mapped.insert((*it)->get_mapped_event());
-        tasks_complete.insert((*it)->get_completion_event());
+        tasks_all_mapped.push_back((*it)->get_mapped_event());
+        record_completion_effect((*it)->get_completion_event());
       }
-      // Perform the mapping
-      map_tasks();
-      mapping_dependences.clear();
-      // Then we can distribute the tasks
-      distribute_tasks();
+      // For correctness we still have to abide by the mapping dependences
+      // computed on the individual tasks while we are mapping them
+      for (std::vector<SingleTask*>::const_iterator it =
+            single_tasks.begin(); it != single_tasks.end(); it++)
+        mapped_events.emplace(std::make_pair((*it)->index_point,
+              Runtime::create_rt_user_event()));
+      remaining_mapped_events.store(single_tasks.size());
+      remaining_collective_unbound_points = single_tasks.size();
+      remaining_concurrent_mapped = single_tasks.size();
+      remaining_concurrent_points = single_tasks.size();
+      remaining_resource_returns = indiv_tasks.size() + slice_tasks.size();
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+      {
+        // Figure out our preconditions
+        std::vector<RtEvent> preconditions;
+        for (std::set<unsigned>::const_iterator it = 
+              mapping_dependences[idx].begin(); it != 
+              mapping_dependences[idx].end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it) < idx);
+#endif
+          preconditions.push_back(
+              mapped_events[single_tasks[*it]->index_point]);
+        }
+        RtEvent precondition;
+        if (!preconditions.empty())
+          precondition = Runtime::merge_events(preconditions);
+        if (precondition.exists() && !precondition.has_triggered())
+          single_tasks[idx]->defer_perform_mapping(precondition, this);
+        else if (single_tasks[idx]->perform_mapping(this) &&
+            single_tasks[idx]->distribute_task())
+          single_tasks[idx]->launch_task();
+      }
+      return Runtime::merge_events(tasks_all_mapped);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::record_mapped_event(const DomainPoint &point,
+                                          RtEvent mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapped_events.find(point) != mapped_events.end());
+#endif
+      // No need for a lock since this data structure is read-only here
+      Runtime::trigger_event(mapped_events[point], mapped);
+      const unsigned remaining = remaining_mapped_events.fetch_sub(1);
+#ifdef DEBUG_LEGION
+      assert(remaining > 0);
+#endif
+      if (remaining == 1)
+      {
+        std::vector<RtEvent> preconditions;
+        preconditions.reserve(mapped_events.size());
+        for (std::map<DomainPoint,RtUserEvent>::const_iterator it =
+              mapped_events.begin(); it != mapped_events.end(); it++)
+          preconditions.push_back(it->second);
+        release_nonempty_acquired_instances(
+            Runtime::merge_events(preconditions), acquired_instances);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14664,201 +14878,166 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::trigger_tasks(MustEpochOp *owner,
-                         const std::vector<IndividualTask*> &indiv_tasks,
-                         std::vector<bool> &indiv_triggered,
-                         const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered)
+    uint64_t MustEpochOp::collective_lamport_allreduce(
+        uint64_t lamport_clock, bool need_result)
     //--------------------------------------------------------------------------
     {
-      const Processor current = owner->get_context()->get_executing_processor();
-      std::set<RtEvent> wait_events;
-      for (unsigned idx = 0; idx < indiv_triggered.size(); idx++)
+      AutoLock o_lock(op_lock);
+      if (collective_lamport_clock < lamport_clock)
+        collective_lamport_clock = lamport_clock;
+#ifdef DEBUG_LEGION
+      assert(remaining_collective_unbound_points > 0);
+#endif
+      if (--remaining_collective_unbound_points > 0)
       {
-        if (!indiv_triggered[idx])
+        if (need_result)
         {
-          MustEpochIndivArgs args(current, indiv_tasks[idx], owner);
-          RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(args, 
-                        LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
+          if (!collective_lamport_clock_ready.exists())
+            collective_lamport_clock_ready = Runtime::create_rt_user_event();
+          o_lock.release();
+          collective_lamport_clock_ready.wait();
         }
       }
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        if (!index_triggered[idx])
-        {
-          MustEpochIndexArgs args(current, index_tasks[idx], owner);
-          RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(args,
-                        LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      // Wait for all of the launches to be done
-      // We can safely block to free up the utility processor
-      if (!wait_events.empty())
-      {
-        RtEvent trigger_event = Runtime::merge_events(wait_events);
-        trigger_event.wait();
-      }
+      else if (collective_lamport_clock_ready.exists())
+        Runtime::trigger_event(collective_lamport_clock_ready);
+      return collective_lamport_clock;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::handle_trigger_individual(const void *args)
+    void MustEpochOp::rendezvous_concurrent_mapped(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      const MustEpochIndivArgs *indiv_args = (const MustEpochIndivArgs*)args;
-      indiv_args->task->set_target_proc(indiv_args->current_proc);
-      indiv_args->task->trigger_mapping();
+      bool done;
+      {
+        AutoLock o_lock(op_lock);
+        if (precondition.exists())
+          concurrent_preconditions.push_back(precondition);
+#ifdef DEBUG_LEGION
+        assert(remaining_concurrent_mapped > 0);
+#endif
+        done = (--remaining_concurrent_mapped == 0);
+      }
+      if (done)
+        finalize_concurrent_mapped();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::handle_trigger_index(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochIndexArgs *index_args = (const MustEpochIndexArgs*)args;
-      index_args->task->set_target_proc(index_args->current_proc);
-      index_args->task->trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::map_tasks(void)
+    void MustEpochOp::finalize_concurrent_mapped(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(single_tasks.size() == mapping_dependences.size());
+      assert(concurrent_mapped.exists());
 #endif
-      MustEpochMapArgs args(const_cast<MustEpochOp*>(this));
-      // For correctness we still have to abide by the mapping dependences
-      // computed on the individual tasks while we are mapping them
-      std::vector<RtEvent> wait_events;
-      wait_events.reserve(single_tasks.size());
-      for (std::vector<SingleTask*>::const_iterator it = 
-            single_tasks.begin(); it != single_tasks.end(); it++)
+      Runtime::trigger_event(concurrent_mapped,
+          Runtime::merge_events(concurrent_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::concurrent_allreduce(
+          IndividualTask *task, AddressSpaceID space,
+          uint64_t lamport_clock, bool poisoned)
+    //--------------------------------------------------------------------------
+    {
+      bool done;
       {
-        const RtUserEvent mapped = Runtime::create_rt_user_event();
-        mapped_events[(*it)->index_point] = mapped;
-        wait_events.push_back(mapped);
-      }
-      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-      {
-        // Figure out our preconditions
-        std::set<RtEvent> preconditions;
-        for (std::set<unsigned>::const_iterator it = 
-              mapping_dependences[idx].begin(); it != 
-              mapping_dependences[idx].end(); it++)
-        {
+        AutoLock o_lock(op_lock);
+        if (poisoned)
+          concurrent_poisoned = true;
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        concurrent_tasks.emplace_back(std::make_pair(task, space));
 #ifdef DEBUG_LEGION
-          assert((*it) < idx);
+        assert(remaining_concurrent_points > 0);
 #endif
-          preconditions.insert(mapped_events[single_tasks[*it]->index_point]);
-        }
-        args.task = single_tasks[idx];
-        if (!preconditions.empty())
-        {
-          RtEvent precondition = Runtime::merge_events(preconditions);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, precondition); 
-        }
-        else
-          runtime->issue_runtime_meta_task(args,
-                LG_THROUGHPUT_DEFERRED_PRIORITY);
+        done = (--remaining_concurrent_points == 0);
       }
-      if (!wait_events.empty())
-      {
-        RtEvent mapped_event = Runtime::merge_events(wait_events);
-        mapped_event.wait();
-      }
-      mapped_events.clear();
+      if (done)
+        finish_concurrent_allreduce();
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::record_mapped_event(const DomainPoint &point, 
-                                          RtEvent mapped)
+    void MustEpochOp::concurrent_allreduce(
+          SliceTask *slice, AddressSpaceID source,
+          size_t total_points, uint64_t lamport_clock, bool poisoned)
     //--------------------------------------------------------------------------
     {
+      bool done;
+      {
+        AutoLock o_lock(op_lock);
+        if (poisoned)
+          concurrent_poisoned = true;
+        if (concurrent_lamport_clock < lamport_clock)
+          concurrent_lamport_clock = lamport_clock;
+        concurrent_slices.emplace_back(std::make_pair(slice, source));
 #ifdef DEBUG_LEGION
-      assert(mapped_events.find(point) != mapped_events.end());
+        assert(total_points <= remaining_concurrent_points);
 #endif
-      // No need for a lock since this data structure is read-only here
-      Runtime::trigger_event(mapped_events[point], mapped);
+        remaining_concurrent_points -= total_points;
+        done = (remaining_concurrent_points == 0);
+      }
+      if (done)
+        finish_concurrent_allreduce();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::handle_map_task(const void *args)
+    void MustEpochOp::finish_concurrent_allreduce(void)
     //--------------------------------------------------------------------------
     {
-      const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
-      map_args->task->perform_mapping(map_args->owner);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::distribute_tasks(void)
-    //--------------------------------------------------------------------------
-    {
-      MustEpochOp *owner = const_cast<MustEpochOp*>(this);
-      MustEpochDistributorArgs dist_args(owner);
-      MustEpochLauncherArgs launch_args(owner);
-      std::set<RtEvent> wait_events;
-      // we expect to a call resource return for each individual and slice task
-      remaining_resource_returns = indiv_tasks.size() + slice_tasks.size();
-      for (std::vector<IndividualTask*>::const_iterator it = 
-            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      // Swap vectors onto the stack in case when we kick things off they 
+      // end up reclaiming the resources
+      std::vector<std::pair<IndividualTask*,AddressSpaceID> > local_tasks;
+      local_tasks.swap(concurrent_tasks);
+      std::vector<std::pair<SliceTask*,AddressSpaceID> > local_slices;
+      local_slices.swap(concurrent_slices);
+      for (std::vector<std::pair<IndividualTask*,
+            AddressSpaceID> >::const_iterator it =
+            local_tasks.begin(); it != local_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->target_proc))
+        if (it->second != runtime->address_space)
         {
-          dist_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->first);
+            rez.serialize(concurrent_lamport_clock);
+            rez.serialize(concurrent_poisoned);
+          }
+          runtime->send_individual_concurrent_allreduce_response(
+              it->second, rez);
         }
         else
-        {
-          launch_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(launch_args,
-                  LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
+          it->first->finish_concurrent_allreduce(
+              concurrent_lamport_clock, concurrent_poisoned);
       }
-      for (std::set<SliceTask*>::const_iterator it = 
-            slice_tasks.begin(); it != slice_tasks.end(); it++)
+      const Color color = 0; // everything is color zero here
+      const VariantID vid = 0; // dummy variant since it's only for checking
+      for (std::vector<std::pair<SliceTask*,AddressSpaceID> >::const_iterator
+            it = local_slices.begin(); it != local_slices.end(); it++)
       {
-        (*it)->update_target_processor();
-        if (!runtime->is_local((*it)->target_proc))
+        if (it->second != runtime->address_space)
         {
-          dist_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(dist_args, 
-                LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->first);
+            rez.serialize(color);
+            rez.serialize(RtBarrier::NO_RT_BARRIER);
+            rez.serialize(concurrent_lamport_clock);
+            rez.serialize(vid);
+            rez.serialize(concurrent_poisoned);
+          }
+          runtime->send_slice_concurrent_allreduce_response(it->second, rez);
         }
         else
-        {
-          launch_args.task = *it;
-          RtEvent wait = 
-            runtime->issue_runtime_meta_task(launch_args,
-                 LG_THROUGHPUT_DEFERRED_PRIORITY);
-          if (wait.exists())
-            wait_events.insert(wait);
-        }
-      }
-      if (!wait_events.empty())
-      {
-        RtEvent dist_event = Runtime::merge_events(wait_events);
-        dist_event.wait();
+          it->first->finish_concurrent_allreduce(color,
+              concurrent_lamport_clock, concurrent_poisoned,
+              vid, RtBarrier::NO_RT_BARRIER);
       }
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::compute_launch_space(const MustEpochLauncher &launcher)
+    IndexSpace MustEpochOp::compute_launch_space(
+                      const MustEpochLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       const size_t single_tasks = launcher.single_tasks.size();
@@ -14921,6 +15100,8 @@ namespace Legion {
             default:
               assert(false);
           }
+          return parent_ctx->find_index_launch_space(launch_domain,
+              provenance, true/*take ownership*/);
         }
         else // Easy case of a single index task
         {
@@ -14928,6 +15109,7 @@ namespace Legion {
           if (!launch_domain.exists())
             forest->find_domain(
                 launcher.index_tasks[0].launch_space, launch_domain);
+          return parent_ctx->find_index_launch_space(launch_domain, provenance);
         }
       }
       else
@@ -14957,31 +15139,16 @@ namespace Legion {
             default:
               assert(false);
           }
+          return parent_ctx->find_index_launch_space(launch_domain,
+              provenance, true/*take ownership*/);
         }
         else // Easy case of a single point task
         {
           DomainPoint point = launcher.single_tasks[0].point;
           launch_domain = Domain(point, point);
+          return parent_ctx->find_index_launch_space(launch_domain, provenance);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::handle_distribute_task(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochDistributorArgs *dist_args = 
-        (const MustEpochDistributorArgs*)args;
-      dist_args->task->distribute_task();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MustEpochOp::handle_launch_task(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const MustEpochLauncherArgs *launch_args = 
-        (const MustEpochLauncherArgs *)args;
-      launch_args->task->launch_task();
     }
 
     //--------------------------------------------------------------------------
@@ -15282,6 +15449,12 @@ namespace Legion {
       task_sets[index].insert(single);
       AutoLock o_lock(op_lock);
       single_tasks.push_back(single);
+      const unsigned remaining = remaining_single_tasks.fetch_sub(1);
+#ifdef DEBUG_LEGION
+      assert(remaining > 0);
+#endif
+      if ((remaining == 1) && single_tasks_ready.exists())
+        Runtime::trigger_event(single_tasks_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -15729,10 +15902,7 @@ namespace Legion {
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent mapped =
-          it->second->request_runtime_instance(this, false/*eager*/);
-        if (mapped.exists())
-          mapped_events.insert(mapped);
+        it->second->request_runtime_instance(this);
         const RtEvent ready = it->second->find_runtime_instance_ready();
         if (ready.exists())
           ready_events.insert(ready);
@@ -16538,10 +16708,9 @@ namespace Legion {
         // Need to get the launch domain in case it is different than
         // the original index domain due to control replication
         IndexSpaceNode *local_points = get_shard_points();
-        Domain launch_domain;
-        local_points->get_domain(launch_domain);
+        Domain launch_domain = local_points->get_tight_domain();
         // Now enumerate the points and kick them off
-        size_t num_points = launch_domain.get_volume();
+        size_t num_points = local_points->get_volume();
 #ifdef DEBUG_LEGION
         assert(num_points > 0);
 #endif
@@ -16637,7 +16806,8 @@ namespace Legion {
                                                 record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                    instances_ready, mapped_instances, trace_info, index_point);
-      Runtime::trigger_event(&trace_info, part_done, done_event);
+      Runtime::trigger_event(part_done, done_event, trace_info,
+          map_applied_conditions);
       record_completion_effect(part_done);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event, part_done);
@@ -16675,7 +16845,8 @@ namespace Legion {
 #endif
       IndexSpaceNode *node = runtime->forest->get_node(handle);
       Domain domain;
-      ApEvent domain_ready = node->get_domain(domain, false/*need tight*/);
+      ApUserEvent to_trigger;
+      ApEvent domain_ready = node->get_loose_domain(domain, to_trigger);
       if (is_index_space)
       {
         // Update our data structure and see if we are the ones
@@ -16706,8 +16877,11 @@ namespace Legion {
           const FieldID fid = *(requirement.privilege_fields.begin());
           ApEvent done_event = thunk->perform(this, runtime->forest, fid,
               Runtime::merge_events(&info, index_preconditions), instances);
-          Runtime::trigger_event(&info, intermediate_index_event, done_event);
+          Runtime::trigger_event(intermediate_index_event, done_event, info,
+              map_applied_conditions);
         }
+        if (to_trigger.exists())
+          Runtime::trigger_event_untraced(to_trigger, intermediate_index_event);
         return intermediate_index_event;
       }
       else
@@ -16731,8 +16905,11 @@ namespace Legion {
           else
             instances_ready = domain_ready;
         }
-        return thunk->perform(this, runtime->forest, fid,
+        ApEvent result = thunk->perform(this, runtime->forest, fid,
                               instances_ready, instances);
+        if (to_trigger.exists())
+          Runtime::trigger_event_untraced(to_trigger, result);
+        return result;
       }
     }
 
@@ -17311,7 +17488,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool DependentPartitionOp::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18177,10 +18354,7 @@ namespace Legion {
         assert(future.impl != NULL);
 #endif
         // This will make sure we have a mapping locally
-        const RtEvent buffer_ready = 
-          future.impl->request_runtime_instance(this, false/*eager*/);
-        if (buffer_ready.exists())
-          map_applied_conditions.insert(buffer_ready);
+        future.impl->request_runtime_instance(this);
       }
       if (is_recording())
         trace_info.record_complete_replay(map_applied_conditions);
@@ -18231,6 +18405,23 @@ namespace Legion {
         }
       }
       complete_operation(complete);
+    }
+
+    //--------------------------------------------------------------------------
+    bool FillOp::record_trace_hash(TraceRecognizer &recognizer, uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      hash_requirement(hasher, requirement);
+      hasher.hash<bool>(is_index_space);
+      if (is_index_space)
+        hasher.hash(index_domain);
+      if (future.exists())
+        hasher.hash(future.impl->did);
+      else
+        hasher.hash(value, value_size);
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
     
     //--------------------------------------------------------------------------
@@ -18494,7 +18685,7 @@ namespace Legion {
       launch_space = runtime->forest->get_node(launch_sp);
       add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        launch_space->get_domain(index_domain);
+        index_domain = launch_space->get_tight_domain();
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -18654,10 +18845,7 @@ namespace Legion {
         assert(future.impl != NULL);
 #endif
         // This will make sure we have a mapping locally
-        const RtEvent buffer_ready = 
-          future.impl->request_runtime_instance(this, false/*eager*/);
-        if (buffer_ready.exists())
-          map_applied_conditions.insert(buffer_ready);
+        future.impl->request_runtime_instance(this);
       }
       // Launch the points
       for (unsigned idx = 0; idx < points.size(); idx++)
@@ -18747,10 +18935,9 @@ namespace Legion {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
       IndexSpaceNode *local_points = get_shard_points();
-      Domain launch_domain;
-      local_points->get_domain(launch_domain);
+      Domain launch_domain = local_points->get_tight_domain();
       // Now enumerate the points
-      size_t num_points = launch_domain.get_volume();
+      size_t num_points = local_points->get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
@@ -19505,6 +19692,14 @@ namespace Legion {
       pack_local_remote_operation(rez);
     }
 
+    //--------------------------------------------------------------------------
+    bool DiscardOp::record_trace_hash(TraceRecognizer &recognizer,
+                                      uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      return recognizer.record_operation_noop(this);
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Attach Op 
     /////////////////////////////////////////////////////////////
@@ -19818,7 +20013,8 @@ namespace Legion {
                                                          map_applied_conditions,
                                                          restricted);
       log_mapping_decision(0/*idx*/, requirement, external_instances);
-      Runtime::trigger_event(&trace_info, attach_post, attach_event);
+      Runtime::trigger_event(attach_post, attach_event, trace_info,
+                             map_applied_conditions);
       record_completion_effect(attach_post);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
@@ -19858,6 +20054,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);      
+      const ContextCoordinate coordinate = get_task_tree_coordinate();
+      rez.serialize(coordinate.index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -21119,7 +21317,8 @@ namespace Legion {
                                          version_info, references, detach_post,
                                          trace_info, map_applied_conditions,
                                          filter_precondition, flush);
-      Runtime::trigger_event(&trace_info, detach_post, detach_event);
+      Runtime::trigger_event(detach_post, detach_event, trace_info,
+                             map_applied_conditions);
       record_completion_effect(detach_post);
       log_mapping_decision(0/*idx*/, requirement, references);
 #ifdef LEGION_SPY
@@ -21210,6 +21409,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_local_remote_operation(rez);
+      const ContextCoordinate coordinate = get_task_tree_coordinate();
+      rez.serialize(coordinate.index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -21895,10 +22096,7 @@ namespace Legion {
       for (std::vector<Future>::const_iterator it =
             futures.begin(); it != futures.end(); it++)
       {
-        const RtEvent mapped = 
-          it->impl->request_runtime_instance(this, false/*eager*/);
-        if (mapped.exists())
-          mapped_events.push_back(mapped);
+        it->impl->request_runtime_instance(this);
         const RtEvent ready = it->impl->find_runtime_instance_ready();
         if (ready.exists())
           ready_events.push_back(ready);
@@ -21911,8 +22109,11 @@ namespace Legion {
       {
         MemoryManager *manager = 
           runtime->find_memory_manager(runtime->runtime_system_memory);
-        instance = manager->create_future_instance(this, unique_op_id,
-                                      return_type_size, false/*eager*/);
+        TaskTreeCoordinates coordinates;
+        compute_task_tree_coordinates(coordinates);
+        // Safe to block here indefinitely waiting for unbounded pools
+        instance = manager->create_future_instance(unique_op_id,
+            coordinates, return_type_size, NULL/*safe_for_unbounded_pools*/);
         complete_mapping(futures_mapped);
       }
       // Also make sure we wait for any execution fences that we have
@@ -21964,7 +22165,7 @@ namespace Legion {
               return_type_size)
         // Copy the result into the instance
         FutureInstance *local = 
-            new FutureInstance(output.value, output.size, false/*eager*/,
+            new FutureInstance(output.value, output.size,
                 true/*external*/, output.take_ownership);
         const ApEvent done = 
           instance->copy_from(local, this, ApEvent::NO_AP_EVENT);
@@ -22094,10 +22295,7 @@ namespace Legion {
                                      FutureImpl *future)
     //--------------------------------------------------------------------------
     {
-      const RtEvent ready =
-        future->request_runtime_instance(this, false/*eager*/);
-      if (ready.exists() && !ready.has_triggered())
-        preconditions.push_back(ready);
+      future->request_runtime_instance(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22151,7 +22349,7 @@ namespace Legion {
       // create an external instance for the current allocation
       FutureInstance *serdez_redop_instance = 
         new FutureInstance(serdez_redop_buffer, future_result_size,
-          false/*eager*/, true/*external*/, false/*own allocation*/);
+          true/*external*/, false/*own allocation*/);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
@@ -22196,6 +22394,16 @@ namespace Legion {
 #endif
       tpl->get_allreduce_mapping(this, target_memories, future_result_size);
       perform_allreduce();
+    }
+
+    //--------------------------------------------------------------------------
+    bool AllReduceOp::record_trace_hash(TraceRecognizer &recognizer,
+                                        uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      Murmur3Hasher hasher;
+      hasher.hash(get_operation_kind());
+      return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
     //--------------------------------------------------------------------------
@@ -22381,6 +22589,8 @@ namespace Legion {
       const size_t result_size = 
         ((serdez_redop_fns == NULL) || (serdez_upper_bound == SIZE_MAX)) ?
         future_result_size : serdez_upper_bound;
+      TaskTreeCoordinates coordinates;
+      compute_task_tree_coordinates(coordinates);
       int runtime_visible = -1;
       for (std::vector<Memory>::const_iterator it =
             target_memories.begin(); it != target_memories.end(); it++)
@@ -22389,8 +22599,10 @@ namespace Legion {
             FutureInstance::check_meta_visible(*it))
           runtime_visible = targets.size();
         MemoryManager *manager = runtime->find_memory_manager(*it);
-        FutureInstance *instance = manager->create_future_instance(this, 
-            unique_op_id, result_size, false/*eager*/);
+        // Safe to block here indefinitely waiting for unbounded pools
+        FutureInstance *instance = manager->create_future_instance(
+            unique_op_id, coordinates, result_size,
+            NULL/*safe for unbounded pools*/);
         targets.push_back(instance);
       }
       // This is an important optimization: if we're doing a small
@@ -23893,13 +24105,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
+      rez.serialize(index_point); 
     }
 
     //--------------------------------------------------------------------------
     void RemoteAttachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing for the moment
+      derez.deserialize(index_point);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -23979,13 +24192,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_remote_base(rez);
+      rez.serialize(index_point);
     }
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Nothing for the moment
+      derez.deserialize(index_point);
     }
 
     ///////////////////////////////////////////////////////////// 

@@ -55,7 +55,6 @@ list(APPEND REALM_SRC
   realm/barrier_impl.h        realm/barrier_impl.cc
   realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
-  realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
@@ -813,6 +812,8 @@ list(APPEND LEGION_SRC
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
+  legion/legion_auto_trace.h              legion/legion_auto_trace.cc
+  legion/trie.h
   legion/legion_types.h
   legion/legion_utilities.h
   legion/legion_views.h                   legion/legion_views.cc

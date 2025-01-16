@@ -8,6 +8,7 @@
 
 #include "realm.h"
 #include "realm/cuda/cuda_module.h"
+#include "realm/hip/hip_module.h"
 #include "realm/profiling.h"
 
 #include "osdep.h"
@@ -20,6 +21,10 @@ Logger log_app("app");
 #ifdef REALM_USE_CUDA
 #include "cuda.h"
 extern void launch_spin_kernel(uint64_t t_ns, CUstream);
+#endif
+
+#ifdef REALM_USE_HIP
+extern void launch_spin_kernel(uint64_t t_ns, unifiedHipStream_t *);
 #endif
 
 // Task IDs, some IDs are reserved so start at first available number
@@ -97,6 +102,14 @@ void child_task(const void *args, size_t arglen, const void *userdata, size_t us
     launch_spin_kernel(10000, module->get_task_cuda_stream());
   }
 #endif // REALM_USE_CUDA
+
+#ifdef REALM_USE_HIP
+  Realm::Hip::HipModule *module =
+      Realm::Runtime::get_runtime().get_module<Realm::Hip::HipModule>("hip");
+  if(module != nullptr) {
+    launch_spin_kernel(10000, module->get_task_hip_stream());
+  }
+#endif // REALM_USE_HIP
 
 #ifdef REALM_USE_EXCEPTIONS
   bool inject_fault = *(const bool *)args;
@@ -218,7 +231,10 @@ void response_task(const void *args, size_t arglen,
 
   if(0&&pr.has_measurement<OperationBacktrace>()) {
     OperationBacktrace *op_backtrace = pr.get_measurement<OperationBacktrace>();
-    std::cout << "op backtrace = " << op_backtrace->backtrace;
+    std::cout << "op backtrace = ";
+    for(const std::string &sym : op_backtrace->symbols) {
+      std::cout << sym;
+    }
     delete op_backtrace;
   }
 

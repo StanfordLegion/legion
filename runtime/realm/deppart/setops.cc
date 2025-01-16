@@ -159,6 +159,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
+    std::vector<Event> events{wait_on};
+
     Event e = wait_on;
     UnionOperation<N,T> *op = 0;
 
@@ -174,61 +176,78 @@ namespace Realm {
       size_t ri = (rhss.size() == 1) ? 0 : i;
 
       // handle a bunch of special cases
-      const IndexSpace<N,T> &l = lhss[li];
-      const IndexSpace<N,T> &r = rhss[ri];
+      const IndexSpace<N, T> &l = lhss[li];
+      const IndexSpace<N, T> &r = rhss[ri];
 
       // 1) empty lhs
       if(l.empty()) {
-	results[i] = r;
-	continue;
+        results[i] = r;
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // 2) empty rhs
       if(rhss[li].empty()) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // 3) dense lhs containing rhs' bounds -> lhs
       if(l.dense() && l.bounds.contains(r.bounds)) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        continue;
       }
 
       // 4) dense rhs containing lhs' bounds -> rhs
       if(r.dense() && r.bounds.contains(l.bounds)) {
-	results[i] = r;
-	continue;
+        results[i] = r;
+        continue;
       }
 
       // 5) same sparsity map (or none) and simple union for bbox
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
-	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
-				      l.sparsity);
-	continue;
+        results[i] = IndexSpace<N, T>(l.bounds.union_bbox(r.bounds), l.sparsity);
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // general case - create op if needed
       if(!op) {
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	op = new UnionOperation<N,T>(reqs,
-				     finish_event, ID(e).event_generation());
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        events.push_back(e);
+        op = new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_union(l, r);
+      Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+      if(added.exists()) {
+        events.push_back(added);
+      }
     }
 
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+      log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
+                       << " (" << e << ")";
     }
 
     if(op)
       op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-    return e;
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -240,6 +259,8 @@ namespace Realm {
   {
     // output vector should start out empty
     assert(results.empty());
+
+    std::vector<Event> events{wait_on};
 
     Event e = wait_on;
     IntersectionOperation<N,T> *op = 0;
@@ -261,46 +282,58 @@ namespace Realm {
 
       // 1) either side empty or disjoint inputs
       if(l.empty() || r.empty() || !l.bounds.overlaps(r.bounds)) {
-	results[i] = IndexSpace<N,T>::make_empty();
-	continue;
+        results[i] = IndexSpace<N, T>::make_empty();
+        continue;
       }
 
       // 2) rhs is dense or has same sparsity map
       if(r.dense() || (r.sparsity == l.sparsity)) {
-	results[i] = IndexSpace<N,T>(l.bounds.intersection(r.bounds),
-				      l.sparsity);
-	continue;
+        results[i] = IndexSpace<N, T>(l.bounds.intersection(r.bounds), l.sparsity);
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // 3) lhs is dense
       if(l.dense()) {
-	results[i] = IndexSpace<N,T>(l.bounds.intersection(r.bounds),
-				      r.sparsity);
-	continue;
+        results[i] = IndexSpace<N, T>(l.bounds.intersection(r.bounds), r.sparsity);
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // general case - create op if needed
       if(!op) {
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	op = new IntersectionOperation<N,T>(reqs,
-					    finish_event,
-					    ID(e).event_generation());
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        op =
+            new IntersectionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
+        events.push_back(e);
       }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
+      Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+      if(added.exists()) {
+        events.push_back(added);
+      }
     }
 
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+      log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
+                       << " (" << e << ")";
     }
 
     if(op)
       op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-    return e;
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -312,6 +345,8 @@ namespace Realm {
   {
     // output vector should start out empty
     assert(results.empty());
+
+    std::vector<Event> events{wait_on};
 
     Event e = wait_on;
     DifferenceOperation<N,T> *op = 0;
@@ -333,59 +368,76 @@ namespace Realm {
 
       // 1) empty lhs
       if(l.empty()) {
-	results[i] = IndexSpace<N,T>::make_empty();
-	continue;
+        results[i] = IndexSpace<N, T>::make_empty();
+        continue;
       }
 
       // 2) empty rhs
       if(r.empty()) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // 3) no overlap between lhs and rhs
       if(!l.bounds.overlaps(r.bounds)) {
-	results[i] = l;
-	continue;
+        results[i] = l;
+        Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
+        continue;
       }
 
       // 4) dense rhs containing lhs' bounds -> empty
       if(r.dense() && r.bounds.contains(l.bounds)) {
-	results[i] = IndexSpace<N,T>::make_empty();
-	continue;
+        results[i] = IndexSpace<N, T>::make_empty();
+        continue;
       }
 
       // 5) same sparsity map (or none) and simple difference
       if(r.dense() || (l.sparsity == r.sparsity)) {
-	Rect<N,T> sdiff;
-	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
-	  results[i] = IndexSpace<N,T>(sdiff, l.sparsity);
-	  continue;
-	}
+        Rect<N, T> sdiff;
+        if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
+          results[i] = IndexSpace<N, T>(sdiff, l.sparsity);
+          Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+          if(added.exists()) {
+            events.push_back(added);
+          }
+          continue;
+        }
       }
 
       // general case - create op if needed
       if(!op) {
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	op = new DifferenceOperation<N,T>(reqs,
-					  finish_event,
-					  ID(e).event_generation());
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        events.push_back(e);
+        op = new DifferenceOperation<N, T>(reqs, finish_event, ID(e).event_generation());
       }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
+      Event added = SparsityMapRefCounter(results[i].sparsity.id).add_references(1);
+      if(added.exists()) {
+        events.push_back(added);
+      }
     }
 
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+      log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i]
+                       << " (" << e << ")";
     }
 
     if(op)
       op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-    return e;
+
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -394,6 +446,7 @@ namespace Realm {
 						   const ProfilingRequestSet &reqs,
 						   Event wait_on /*= Event::NO_EVENT*/)
   {
+    std::vector<Event> events{wait_on};
     Event e = wait_on;
 
     // record the start time of the potentially-inline operation if any
@@ -408,34 +461,46 @@ namespace Realm {
       result = subspaces[0];
 
       for(size_t i = 1; i < subspaces.size(); i++) {
-	// empty rhs - skip
-	if(subspaces[i].empty())
-	  continue;
+        // empty rhs - skip
+        if(subspaces[i].empty())
+          continue;
 
-	// lhs dense or subspace match, and containment - skip
-	if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
-	   result.bounds.contains(subspaces[i].bounds))
-	  continue;
+        // lhs dense or subspace match, and containment - skip
+        if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
+           result.bounds.contains(subspaces[i].bounds)) {
+          continue;
+        }
 
-	// TODO: subspace match ought to be sufficient here - also handle
-	//  merge-into-rectangle case?
-	// rhs dense and contains lhs - take rhs
-	if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
-	  result = subspaces[i];
-	  continue;
-	}
+        // TODO: subspace match ought to be sufficient here - also handle
+        //  merge-into-rectangle case?
+        // rhs dense and contains lhs - take rhs
+        if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
+          result = subspaces[i];
+          continue;
+        }
 
-	// general case - do full computation
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs,
-							  finish_event,
-							  ID(e).event_generation());
+        // general case - do full computation
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        events.push_back(e);
 
-	result = op->add_union(subspaces);
-	op->launch(wait_on);
-	was_inline = false;
-	break;
+        UnionOperation<N, T> *op =
+            new UnionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
+
+        result = op->add_union(subspaces);
+
+        op->launch(wait_on);
+        was_inline = false;
+        break;
+      }
+
+      if(!was_inline || !result.dense()) {
+        // TODO(apryakhin@): Check all places to make sure we aren't
+        // adding an event for non-existent sparsity maps.
+        Event added = SparsityMapRefCounter(result.sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
       }
     }
 
@@ -454,7 +519,7 @@ namespace Realm {
     if(was_inline)
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
 
-    return e;
+    return Event::merge_events(events);
   }
 
   template <int N, typename T>
@@ -463,6 +528,7 @@ namespace Realm {
 							  const ProfilingRequestSet &reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
+    std::vector<Event> events{wait_on};
     Event e = wait_on;
 
     // record the start time of the potentially-inline operation if any
@@ -477,48 +543,57 @@ namespace Realm {
       result = subspaces[0];
 
       for(size_t i = 1; i < subspaces.size(); i++) {
-	// no point in continuing if our result is empty
-	if(result.empty()) {
-	  result.sparsity.id = 0;  // forget any sparsity map we had
-	  break;
-	}
+        // no point in continuing if our result is empty
+        if(result.empty()) {
+          result.sparsity.id = 0; // forget any sparsity map we had
+          break;
+        }
 
-	// empty rhs - result is empty
-	if(subspaces[i].empty()) {
-	  result = IndexSpace<N,T>::make_empty();
-	  break;
-	}
+        // empty rhs - result is empty
+        if(subspaces[i].empty()) {
+          result = IndexSpace<N, T>::make_empty();
+          break;
+        }
 
-	// disjointness of lhs and rhs bounds - result is empty
-	if(!result.bounds.overlaps(subspaces[i].bounds)) {
-	  result = IndexSpace<N,T>::make_empty();
-	  break;
-	}
+        // disjointness of lhs and rhs bounds - result is empty
+        if(!result.bounds.overlaps(subspaces[i].bounds)) {
+          result = IndexSpace<N, T>::make_empty();
+          break;
+        }
 
-	// rhs dense or has same sparsity map
-	if(subspaces[i].dense() || (subspaces[i].sparsity == result.sparsity)) {
-	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
-	  continue;
-	}
+        // rhs dense or has same sparsity map
+        if(subspaces[i].dense() || (subspaces[i].sparsity == result.sparsity)) {
+          result.bounds = result.bounds.intersection(subspaces[i].bounds);
+          continue;
+        }
 
-	// lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
-	if(result.dense()) {
-	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
-	  result.sparsity = subspaces[i].sparsity;
-	  continue;	  
-	}
+        // lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
+        if(result.dense()) {
+          result.bounds = result.bounds.intersection(subspaces[i].bounds);
+          result.sparsity = subspaces[i].sparsity;
+          continue;
+        }
 
-	// general case - do full computation
-	GenEventImpl *finish_event = GenEventImpl::create_genevent();
-	e = finish_event->current_event();
-	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs,
-									finish_event,
-									ID(e).event_generation());
+        // general case - do full computation
+        GenEventImpl *finish_event = GenEventImpl::create_genevent();
+        e = finish_event->current_event();
+        events.push_back(e);
 
-	result = op->add_intersection(subspaces);
-	op->launch(wait_on);
-	was_inline = false;
-	break;
+        IntersectionOperation<N, T> *op =
+            new IntersectionOperation<N, T>(reqs, finish_event, ID(e).event_generation());
+
+        result = op->add_intersection(subspaces);
+
+        op->launch(wait_on);
+        was_inline = false;
+        break;
+      }
+
+      if(!was_inline || !result.dense()) {
+        Event added = SparsityMapRefCounter(result.sparsity.id).add_references(1);
+        if(added.exists()) {
+          events.push_back(added);
+        }
       }
     }
 
@@ -537,9 +612,8 @@ namespace Realm {
     if(was_inline)
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
 
-    return e;
+    return Event::merge_events(events);
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1103,7 +1177,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  IntersectionMicroOp<N,T>::~IntersectionMicroOp(void)
+  IntersectionMicroOp<N, T>::~IntersectionMicroOp(void)
   {}
 
   template <int N, typename T>
@@ -1609,7 +1683,7 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  IntersectionOperation<N,T>::~IntersectionOperation(void)
+  IntersectionOperation<N, T>::~IntersectionOperation(void)
   {}
 
   template <int N, typename T>
@@ -1729,7 +1803,7 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  DifferenceOperation<N,T>::~DifferenceOperation(void)
+  DifferenceOperation<N, T>::~DifferenceOperation(void)
   {}
 
   template <int N, typename T>
