@@ -416,6 +416,7 @@ namespace Legion {
       atomic_locks.clear(); 
       parent_req_indexes.clear();
       version_infos.clear();
+      future_return_size.reset();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
     }
@@ -475,6 +476,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < check_collective_regions.size(); idx++)
           rez.serialize(check_collective_regions[idx]);
       }
+      rez.serialize(future_return_size);
       rez.serialize(request_valid_instances);
       rez.serialize(execution_fence_event);
       rez.serialize(elide_future_return);
@@ -526,6 +528,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_check_collective_regions; idx++)
           derez.deserialize(check_collective_regions[idx]);
       }
+      derez.deserialize(future_return_size);
       derez.deserialize(request_valid_instances);
       derez.deserialize(execution_fence_event);
       derez.deserialize(elide_future_return);
@@ -1367,6 +1370,7 @@ namespace Legion {
       this->replicate = rhs->replicate;
       this->sharding_space = rhs->sharding_space;
       this->request_valid_instances = rhs->request_valid_instances;
+      this->future_return_size = rhs->future_return_size;
       // From TaskOp
       this->check_collective_regions = rhs->check_collective_regions;
       this->atomic_locks = rhs->atomic_locks;
@@ -2946,8 +2950,13 @@ namespace Legion {
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
       // Record the future output size
-      handle_future_size(variant_impl->return_type_size,
-          variant_impl->has_return_type_size, map_applied_conditions);
+      if (future_return_size)
+        handle_future_size(*future_return_size, map_applied_conditions);
+      else if (variant_impl->has_return_type_size)
+      {
+        future_return_size = variant_impl->return_type_size;
+        handle_future_size(*future_return_size, map_applied_conditions);  
+      }
       if (is_recording() && !variant_impl->has_return_type_size)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
             "Invalid mapper output from invocation of '%s' on mapper %s. "
@@ -3490,14 +3499,19 @@ namespace Legion {
       // Make sure to propagate any future sizes that we know about here
       if (!elide_future_return)
       {
-        VariantImpl *variant_impl = 
-          runtime->find_variant_impl(task_id, selected_variant);
+        if (future_return_size)
+          handle_future_size(*future_return_size, map_applied_conditions);
+        else
+        {
+          VariantImpl *variant_impl = 
+            runtime->find_variant_impl(task_id, selected_variant);
 #ifdef DEBUG_LEGION
-        assert(variant_impl->has_return_type_size);
+          assert(variant_impl->has_return_type_size);
 #endif
-        // Record the future output size
-        handle_future_size(variant_impl->return_type_size,
-            variant_impl->has_return_type_size, map_applied_conditions);
+          future_return_size = variant_impl->return_type_size;
+          // Record the future output size
+          handle_future_size(*future_return_size, map_applied_conditions);
+        }
       }
       if (!single_task_termination.exists())
       {
@@ -4641,10 +4655,7 @@ namespace Legion {
     void SingleTask::check_future_return_bounds(FutureInstance *instance) const
     //--------------------------------------------------------------------------
     {
-      VariantImpl *var_impl = 
-        runtime->find_variant_impl(task_id, selected_variant);
-      if (var_impl->has_return_type_size &&
-          (var_impl->return_type_size < instance->size))
+      if (future_return_size && (*future_return_size < instance->size))
       {
         Provenance *provenance = get_provenance();
         if (provenance != NULL)
@@ -4653,14 +4664,13 @@ namespace Legion {
               "variant with a maximum return size of %zd but "
               "returned a result of %zd bytes.",
               get_task_name(), get_unique_id(), int(provenance->human.length()),
-              provenance->human.data(),
-              var_impl->return_type_size, instance->size)
+              provenance->human.data(), *future_return_size, instance->size)
         else
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
               "Task %s (UID %lld) used a task variant with a maximum "
               "return size of %zd but returned a result of %zd bytes.",
               get_task_name(), get_unique_id(),
-              var_impl->return_type_size, instance->size)
+              *future_return_size, instance->size)
       }
     }
 
@@ -6574,8 +6584,12 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       if (launcher.elide_future_return)
         elide_future_return = true;
-      else if (!must_epoch_launch)
-        result = create_future();
+      else
+      {
+        future_return_size = launcher.future_return_size;
+        if (!must_epoch_launch)
+          result = create_future();
+      }
       validate_region_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -6922,11 +6936,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      if (elide_future_return)
-        return;
+#ifdef DEBUG_LEGION
+      assert(!elide_future_return);
+#endif
       if (is_remote())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -6935,13 +6950,12 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(orig_task);
           rez.serialize(return_type_size);
-          rez.serialize(has_return_type_size);
           rez.serialize(done_event);
         }
         runtime->send_individual_remote_future_size(orig_proc, rez);
         applied_events.insert(done_event);
       }
-      else if (has_return_type_size)
+      else
         result.impl->set_future_result_size(return_type_size,
                                             runtime->address_space);
     }
@@ -7589,13 +7603,10 @@ namespace Legion {
       derez.deserialize(task);
       size_t return_type_size;
       derez.deserialize(return_type_size);
-      bool has_return_type_size;
-      derez.deserialize(has_return_type_size);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       std::set<RtEvent> applied_events;
-      task->handle_future_size(return_type_size, 
-          has_return_type_size, applied_events);
+      task->handle_future_size(return_type_size, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event,
             Runtime::merge_events(applied_events));
@@ -7964,14 +7975,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+                                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      if (elide_future_return)
-        return;
-      if (has_return_type_size)
-        slice_owner->handle_future_size(return_type_size,
-                                        index_point, applied_events);
+#ifdef DEBUG_LEGION
+      assert(!elide_future_return);
+#endif
+      slice_owner->handle_future_size(return_type_size, index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -8801,7 +8811,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+                                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // do nothing 
@@ -9395,6 +9405,7 @@ namespace Legion {
       serdez_redop_targets.clear();
       // Remove our reference to the reduction future
       reduction_future = Future();
+      reduction_future_size.reset();
       map_applied_conditions.clear();
       output_preconditions.clear();
       commit_preconditions.clear();
@@ -9772,8 +9783,9 @@ namespace Legion {
         if (launcher.predicate != Predicate::TRUE_PRED)
           initialize_predicate(launcher.predicate_false_future,
                                launcher.predicate_false_result);
-        future_map = 
+        future_map =
           create_future_map(ctx, launch_space->handle, launcher.sharding_space);
+        future_return_size = launcher.future_return_size;
       }
       else
         elide_future_return = true;
@@ -9915,8 +9927,17 @@ namespace Legion {
           true/*register*/, runtime->get_available_distributed_id(),
           provenance, this));
       if (serdez_redop_fns == NULL)
+      {
+        reduction_future_size = reduction_op->sizeof_rhs;
         reduction_future.impl->set_future_result_size(
-            reduction_op->sizeof_rhs, runtime->address_space);
+            *reduction_future_size, runtime->address_space);
+      }
+      else if (launcher.future_return_size)
+      {
+        reduction_future_size = launcher.future_return_size;
+        reduction_future.impl->set_future_result_size(
+            *reduction_future_size, runtime->address_space);
+      }
       validate_region_requirements();
       if (concurrent_task && parent_ctx->is_concurrent_context())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
@@ -10893,6 +10914,31 @@ namespace Legion {
       // Set the future if we actually ran the task or we speculated
       if ((redop > 0) && (predication_state != PREDICATED_FALSE_STATE))
       {
+        if (reduction_future_size &&
+            (*reduction_future_size < reduction_instances.front()->size))
+        {
+#ifdef DEBUG_LEGION
+          // This failure mode should only happen with serdez redops fns
+          // since we should do the other reductions correctly ourself
+          assert(serdez_redop_fns != NULL);
+#endif
+          Provenance *provenance = get_provenance();
+          if (provenance != NULL)
+            REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+                "Index Task %s (UID %lld, provenance: %.*s) produced a "
+                "reduced future value of %zd bytes which is larger than "
+                "the dynamically specified bounds of %zd bytes.",
+                get_task_name(), get_unique_id(), 
+                int(provenance->human.length()), provenance->human.data(),
+                reduction_instances.front()->size, *reduction_future_size)
+          else
+            REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+                "Index Task %s (UID %lld) produced a reduced future value "
+                "of %zd bytes which is larger than the dynamically "
+                "specified bounds of %zd bytes.",
+                get_task_name(), get_unique_id(), 
+                reduction_instances.front()->size, *reduction_future_size)
+        }
         reduction_future.impl->set_results(effects,
             reduction_instances, reduction_metadata, reduction_metasize);
         // Clear this since we no longer own the buffer
@@ -13150,7 +13196,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::handle_future_size(size_t future_size,
-                const DomainPoint &point, std::set<RtEvent> &applied_conditions)
+                                       const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       if (redop > 0)
