@@ -459,6 +459,7 @@ namespace Legion {
       bool                              paused;
       // Whether we're inside a runtime call from the mapper
       bool                              runtime_call;
+      const bool                        priority;
     };
 
   };

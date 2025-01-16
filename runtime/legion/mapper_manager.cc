@@ -37,7 +37,7 @@ namespace Legion {
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
             operation->get_acquired_instances_ref()), profiling_ranges(NULL),
         start_time(0), reentrant(manager->initially_reentrant), paused(false),
-        runtime_call(false)
+        runtime_call(false), priority(prioritize)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1128,7 +1128,10 @@ namespace Legion {
           {
             info->resume = Runtime::create_rt_user_event();
             wait_on = info->resume;
-            ready_calls.push_back(info);
+            if (info->priority)
+              ready_calls.push_front(info);
+            else
+              ready_calls.push_back(info);
           }
           else
             executing_call = info;
@@ -1191,16 +1194,32 @@ namespace Legion {
       paused_calls++;
       if (permit_reentrant)
       {
-        if (!pending_calls.empty())
+        // If there are high priority calls already running do those first
+        if (!ready_calls.empty() && ready_calls.front()->priority)
+        {
+          executing_call = ready_calls.front();
+          ready_calls.pop_front();
+          return executing_call->resume;
+        }
+        // If there are high priority calls that haven't started do those next
+        else if (!pending_calls.empty() && pending_calls.front()->priority)
         {
           executing_call = pending_calls.front();
           pending_calls.pop_front();
           return executing_call->resume;
         }
+        // Otherwise prefer already running calls over new calls
         else if (!ready_calls.empty())
         {
           executing_call = ready_calls.front();
           ready_calls.pop_front();
+          return executing_call->resume;
+        }
+        // Finally start a new call
+        else if (!pending_calls.empty())
+        {
+          executing_call = pending_calls.front();
+          pending_calls.pop_front();
           return executing_call->resume;
         }
         // If we are allowing reentrant calls then clear the executing
@@ -1230,16 +1249,32 @@ namespace Legion {
 #endif
         permit_reentrant = true;
       }
-      if (!pending_calls.empty())
+      // If there are high priority calls already running do those first
+      if (!ready_calls.empty() && ready_calls.front()->priority)
+      {
+        executing_call = ready_calls.front();
+        ready_calls.pop_front();
+        return executing_call->resume;
+      }
+      // If there are high priority calls that haven't started do those next
+      else if (!pending_calls.empty() && pending_calls.front()->priority)
       {
         executing_call = pending_calls.front();
         pending_calls.pop_front();
         return executing_call->resume;
       }
+      // Otherwise prefer already running calls over new calls
       else if (!ready_calls.empty())
       {
         executing_call = ready_calls.front();
         ready_calls.pop_front();
+        return executing_call->resume;
+      }
+      // Finally start a new call
+      else if (!pending_calls.empty())
+      {
+        executing_call = pending_calls.front();
+        pending_calls.pop_front();
         return executing_call->resume;
       }
       else
