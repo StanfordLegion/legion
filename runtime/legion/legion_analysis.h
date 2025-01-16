@@ -350,6 +350,7 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
+                         bool is_leaf, bool has_return_size,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent pre,
@@ -504,6 +505,7 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          bool is_leaf, bool has_return_size,
                           std::set<RtEvent> &applied_events);
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent pre,
@@ -623,10 +625,12 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          bool is_leaf, bool has_return_size,
                           std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(tlid, output, physical_instances, applied);
+          rec->record_mapper_output(tlid, output, physical_instances,
+              is_leaf, has_return_size, applied);
         }
       inline void record_complete_replay(std::set<RtEvent> &applied,
                                   ApEvent pre = ApEvent::NO_AP_EVENT) const

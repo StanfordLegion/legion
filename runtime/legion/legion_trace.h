@@ -299,6 +299,8 @@ namespace Legion {
       NOT_REPLAYABLE_CONSENSUS,
       NOT_REPLAYABLE_VIRTUAL,
       NOT_REPLAYABLE_REMOTE_SHARD,
+      NOT_REPLAYABLE_NON_LEAF,
+      NOT_REPLAYABLE_VARIABLE_RETURN,
     };
 
     enum IdempotencyStatus {
@@ -963,6 +965,7 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
+                             bool is_leaf, bool has_return_size,
                              std::set<RtEvent> &applied_events);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
@@ -1179,6 +1182,8 @@ namespace Legion {
       std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
       std::map<TraceLocalID,CachedAllreduce> cached_allreduces;
       bool has_virtual_mapping;
+      bool has_non_leaf_task;
+      bool has_variable_return_size;
       std::atomic<bool> has_no_consensus;
       mutable TraceViewSet::FailedPrecondition failure;
     protected:

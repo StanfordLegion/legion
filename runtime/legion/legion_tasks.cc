@@ -2948,17 +2948,6 @@ namespace Legion {
       // Record the future output size
       handle_future_size(variant_impl->return_type_size,
           variant_impl->has_return_type_size, map_applied_conditions);
-      if (is_recording() && !variant_impl->has_return_type_size)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-            "Invalid mapper output from invocation of '%s' on mapper %s. "
-            "Mapper selected task variant %d when mapping task %s (UID %lld) "
-            "being recorded for trace %d in parent task %s (UID %lld). "
-            "However this variant does not specify a static upper bound "
-            "future size. All tasks recorded as part of a trace must use "
-            "variants with statically known future result sizes.", "map_task",
-            mapper->get_mapper_name(), output.chosen_variant, get_task_name(),
-            get_unique_id(), trace->tid, parent_ctx->get_task_name(),
-            parent_ctx->get_unique_id())
       // Create ny memory pools if this is a leaf task variant
       // Note this has to come AFTER we create the future instances or we
       // could accidentally end up blocking ourselves from doing memory 
@@ -3807,11 +3796,15 @@ namespace Legion {
           }
         }
         const TraceLocalID tlid = get_trace_local_id();
+        VariantImpl *variant_impl = runtime->find_variant_impl(
+            task_id, output.chosen_variant, false/*can fail*/);
         if (remote_trace_recorder != NULL)
           remote_trace_recorder->record_mapper_output(tlid, output,
-              physical_instances, map_applied_conditions);
+              physical_instances, variant_impl->is_leaf(),
+              variant_impl->has_return_type_size, map_applied_conditions);
         else
           tpl->record_mapper_output(tlid, output, physical_instances,
+              variant_impl->is_leaf(), variant_impl->has_return_type_size,
               map_applied_conditions);
       }
       return true;
