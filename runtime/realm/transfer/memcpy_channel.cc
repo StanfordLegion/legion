@@ -308,7 +308,6 @@ namespace Realm {
 
                     size_t planes = std::min(std::min(icount, ocount),
                                              (bytes_left / (contig_bytes * lines)));
-
                     bytes = contig_bytes * lines * planes;
                     memcpy_3d(out_base + out_offset, out_lstride, out_pstride,
                               in_base + in_offset, in_lstride, in_pstride, contig_bytes,

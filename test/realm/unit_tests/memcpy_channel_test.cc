@@ -54,11 +54,13 @@ struct MemcpyXferDescTestCase {
   std::vector<size_t> src_extents;
   std::vector<size_t> dst_strides;
   std::vector<size_t> dst_extents;
-  int expected_iterations = 1;
+  int max_entries = 1;
+  int max_iterations = 1;
 };
 
 size_t fill_address_list(const std::vector<size_t> &strides,
-                         const std::vector<size_t> &extents, AddressList &addrlist)
+                         const std::vector<size_t> &extents, AddressList &addrlist,
+                         size_t offset = 0)
 {
   int num_dims = static_cast<int>(strides.size());
   size_t *addr_data = addrlist.begin_nd_entry(num_dims);
@@ -90,6 +92,8 @@ size_t fill_address_list(const std::vector<size_t> &strides,
     cur_dim++;
   }
 
+  // offset of initial entry is easy to compute
+  addr_data[1] = offset;
   addr_data[0] = (bytes << 4) + cur_dim;
   addrlist.commit_nd_entry(cur_dim, total_bytes);
 
@@ -101,17 +105,17 @@ template <int DIM, typename T>
 class MockIterator : public TransferIterator {
 public:
   MockIterator(const std::vector<size_t> &_strides, const std::vector<size_t> &_extents,
-               int _max_iterations)
+               int _max_entries)
     : strides(_strides)
     , extents(_extents)
-    , max_iterations(_max_iterations)
+    , max_entries(_max_entries)
   {}
 
   virtual Event request_metadata(void) { return Event::NO_EVENT; }
 
   virtual void reset(void) {}
 
-  virtual bool done(void) { return iterations >= max_iterations; }
+  virtual bool done(void) { return entries >= max_entries; }
   virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
                       bool tentative = false)
   {
@@ -135,8 +139,12 @@ public:
                              const InstanceLayoutPieceBase *&nonaffine)
   {
     nonaffine = 0;
-    fill_address_list(strides, extents, addrlist);
-    return (++iterations >= max_iterations);
+    size_t offset = 0;
+    while(!done()) {
+      offset += fill_address_list(strides, extents, addrlist, offset);
+      entries++;
+    }
+    return true;
   }
 
   virtual bool get_next_rect(Rect<DIM, T> &r, FieldID &fid, size_t &offset, size_t &fsize)
@@ -146,8 +154,8 @@ public:
 
   std::vector<size_t> strides;
   std::vector<size_t> extents;
-  size_t max_iterations = 0;
-  size_t iterations = 0;
+  int entries = 0;
+  int max_entries = 1;
   size_t offset = 0;
   size_t total_bytes = 0;
 };
@@ -209,7 +217,7 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   XferDes::XferPort &input_port = xfer_desc->input_ports[0];
 
   size_t total_src_bytes = 0;
-  for(int i = 0; i < test_case.expected_iterations; i++) {
+  for(int i = 0; i < test_case.max_entries; i++) {
     size_t src_bytes = configure_port(input_port, test_case.src_strides,
                                       test_case.src_extents, total_src_bytes);
     total_src_bytes += src_bytes;
@@ -222,7 +230,7 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   input_port.mem = input_mem.get();
   input_port.peer_port_idx = 0;
   input_port.iter = new MockIterator<1, int>(test_case.src_strides, test_case.src_extents,
-                                             test_case.expected_iterations);
+                                             test_case.max_entries);
   input_port.peer_guid = XferDes::XFERDES_NO_GUID;
   input_port.addrcursor.set_addrlist(&input_port.addrlist);
 
@@ -230,7 +238,7 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   XferDes::XferPort &output_port = xfer_desc->output_ports[0];
 
   size_t total_dst_bytes = 0;
-  for(int i = 0; i < test_case.expected_iterations; i++) {
+  for(int i = 0; i < test_case.max_entries; i++) {
     size_t dst_bytes = configure_port(output_port, test_case.dst_strides,
                                       test_case.dst_extents, total_dst_bytes);
     total_dst_bytes += dst_bytes;
@@ -243,39 +251,41 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
   output_port.mem = output_mem.get();
   output_port.peer_port_idx = 0;
   output_port.iter = new MockIterator<1, int>(
-      test_case.dst_strides, test_case.dst_extents, test_case.expected_iterations);
+      test_case.dst_strides, test_case.dst_extents, test_case.max_entries);
   output_port.addrcursor.set_addrlist(&output_port.addrlist);
 
   int iterations = 0;
-  while(xfer_desc->progress_xd(channel, TimeLimit::responsive())) {
+  while(xfer_desc->progress_xd(channel, TimeLimit::relative(0))) {
     iterations++;
   }
 
-  EXPECT_EQ(iterations, test_case.expected_iterations);
+  EXPECT_EQ(iterations, test_case.max_iterations);
 
-  for(size_t i = 0; i < check_bytes; i++) {
+  for(size_t i = 0; i < check_bytes * test_case.max_entries; i++) {
     EXPECT_EQ(src_buffer[i], dst_buffer[i]);
   }
 }
 
 const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
-    // Case 1 - 1D
     MemcpyXferDescTestCase{
         .src_strides = {4}, .src_extents = {4}, .dst_strides = {4}, .dst_extents = {4}},
 
-    // Case 2 - 2D
+    MemcpyXferDescTestCase{.src_strides = {4},
+                           .src_extents = {4},
+                           .dst_strides = {4},
+                           .dst_extents = {4},
+                           .max_entries = 3},
+
     MemcpyXferDescTestCase{.src_strides = {4, 16},
                            .src_extents = {4, 4},
                            .dst_strides = {4, 16},
                            .dst_extents = {4, 4}},
 
-    // Case 3 - 2D
     MemcpyXferDescTestCase{.src_strides = {16, 4},
                            .src_extents = {4, 4},
                            .dst_strides = {16, 4},
                            .dst_extents = {4, 4}},
 
-    // Case 3 - 3D
     MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
                            .src_extents = {4, 4, 4},
                            .dst_strides = {256, 16, 4},
