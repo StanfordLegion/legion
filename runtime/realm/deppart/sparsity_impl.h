@@ -70,11 +70,13 @@ namespace Realm {
         sparse_untyped_remove_references_message_handler_reg;
   };
 
+  template <int N, typename T>
   class SparsityMapCommunicator {
   public:
     virtual ~SparsityMapCommunicator() = default;
 
-    // virtual void trigger(Event event, NodeID owner, bool poisoned);
+    virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
+                                 size_t total_count, bool disjoint);
   };
 
   /**
@@ -88,11 +90,10 @@ namespace Realm {
   template <int N, typename T>
   class SparsityMapImpl : public SparsityMapPublicImpl<N, T> {
   public:
-
     SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers);
 
     SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers,
-                    SparsityMapCommunicator *_sparsity_comm);
+                    SparsityMapCommunicator<N, T> *_sparsity_comm);
 
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
@@ -171,7 +172,7 @@ namespace Realm {
     NodeSet &remote_subscribers;
     size_t sizeof_precise;
 
-    std::unique_ptr<SparsityMapCommunicator> sparsity_comm;
+    std::unique_ptr<SparsityMapCommunicator<N, T>> sparsity_comm;
   };
 
   // we need a type-erased wrapper to store in the runtime's lookup table
