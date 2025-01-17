@@ -22,6 +22,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
+  sparsity_map_test.cc
   barrier_test.cc
   event_test.cc
   path_cache_test.cc
