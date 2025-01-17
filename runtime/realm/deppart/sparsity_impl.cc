@@ -1026,10 +1026,7 @@ namespace Realm {
       }
     } else {
       // send the contributor count to the owner node
-      ActiveMessage<SetContribCountMessage> amsg(ID(me).sparsity_creator_node());
-      amsg->sparsity = me;
-      amsg->count = count;
-      amsg.commit();
+      sparsity_comm->send_contribute(me, count, 0, false);
     }
   }
 
@@ -1047,14 +1044,15 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapCommunicator<N, T>::send_contribute(SparsityMap<N, T> me,
                                                       size_t piece_count,
-                                                      size_t total_count, bool disjoint)
+                                                      size_t total_count, 
+                                                      bool disjoint)
   {
     NodeID owner = ID(me).sparsity_creator_node();
     ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib> amsg(owner);
     amsg->sparsity = me;
-    amsg->piece_count = 1;
-    amsg->disjoint = false;
-    amsg->total_count = 0;
+    amsg->piece_count = piece_count;
+    amsg->total_count = total_count;
+    amsg->disjoint = disjoint;
     amsg.commit();
   }
 
