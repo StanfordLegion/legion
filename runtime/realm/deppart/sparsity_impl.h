@@ -26,10 +26,6 @@
 #include "realm/nodeset.h"
 #include "realm/atomics.h"
 
-#include "realm/event_impl.h"
-
-#include "realm/faults.h"
-
 namespace Realm {
 
   class PartitioningMicroOp;
