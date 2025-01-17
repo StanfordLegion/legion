@@ -25,6 +25,7 @@
 #include "realm/activemsg.h"
 #include "realm/nodeset.h"
 #include "realm/atomics.h"
+#include <memory>
 
 namespace Realm {
 
@@ -69,6 +70,13 @@ namespace Realm {
         sparse_untyped_remove_references_message_handler_reg;
   };
 
+  class SparsityMapCommunicator {
+  public:
+    virtual ~SparsityMapCommunicator() = default;
+
+    // virtual void trigger(Event event, NodeID owner, bool poisoned);
+  };
+
   /**
    * SparsityMapImpl is the actual dynamically allocated object that exists on
    * each "interested" node for a given SparsityMap - it inherits from
@@ -78,16 +86,20 @@ namespace Realm {
    * TODO(apryakhin@): Consider doing an doxygen style.
    */
   template <int N, typename T>
-  class SparsityMapImpl : public SparsityMapPublicImpl<N,T> {
+  class SparsityMapImpl : public SparsityMapPublicImpl<N, T> {
   public:
+
     SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers);
+
+    SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers,
+                    SparsityMapCommunicator *_sparsity_comm);
 
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
 
     void destroy(Event wait_on = Event::NO_EVENT);
 
-    static SparsityMapImpl<N,T> *lookup(SparsityMap<N,T> sparsity);
+    static SparsityMapImpl<N, T> *lookup(SparsityMap<N, T> sparsity);
 
     // methods used in the population of a sparsity map
 
@@ -99,11 +111,9 @@ namespace Realm {
     void record_remote_contributor(NodeID contributor);
 
     void contribute_nothing(void);
-    void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects,
-                                    bool disjoint);
-    void contribute_raw_rects(const Rect<N,T>* rects, size_t count,
-			      size_t piece_count, bool disjoint,
-                              size_t total_count);
+    void contribute_dense_rect_list(const std::vector<Rect<N, T>> &rects, bool disjoint);
+    void contribute_raw_rects(const Rect<N, T> *rects, size_t count, size_t piece_count,
+                              bool disjoint, size_t total_count);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
@@ -113,38 +123,35 @@ namespace Realm {
     void remote_data_request(NodeID requestor, bool send_precise, bool send_approx);
     void remote_data_reply(NodeID requestor, bool send_precise, bool send_approx);
 
-    SparsityMap<N,T> me;
+    SparsityMap<N, T> me;
 
     struct RemoteSparsityRequest {
-      SparsityMap<N,T> sparsity;
+      SparsityMap<N, T> sparsity;
       bool send_precise;
       bool send_approx;
 
-      static void handle_message(NodeID sender,
-				 const RemoteSparsityRequest &msg,
-				 const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const RemoteSparsityRequest &msg,
+                                 const void *data, size_t datalen);
     };
 
     struct RemoteSparsityContrib {
-      SparsityMap<N,T> sparsity;
+      SparsityMap<N, T> sparsity;
       size_t piece_count; // non-zero only on last piece of contribution
-      bool disjoint; // if set, all rectangles (from this source and any other)
-                     //   are known to be disjoint
+      bool disjoint;      // if set, all rectangles (from this source and any other)
+                          //   are known to be disjoint
       size_t total_count; // if non-zero, advertises the known total number of
                           //  recangles in the sparsity map
 
-      static void handle_message(NodeID sender,
-				 const RemoteSparsityContrib &msg,
-				 const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const RemoteSparsityContrib &msg,
+                                 const void *data, size_t datalen);
     };
 
     struct SetContribCountMessage {
-      SparsityMap<N,T> sparsity;
+      SparsityMap<N, T> sparsity;
       size_t count;
 
-      static void handle_message(NodeID sender,
-				 const SetContribCountMessage &msg,
-				 const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const SetContribCountMessage &msg,
+                                 const void *data, size_t datalen);
     };
 
   protected:
@@ -163,6 +170,8 @@ namespace Realm {
     NodeSet remote_precise_waiters, remote_approx_waiters;
     NodeSet &remote_subscribers;
     size_t sizeof_precise;
+
+    std::unique_ptr<SparsityMapCommunicator> sparsity_comm;
   };
 
   // we need a type-erased wrapper to store in the runtime's lookup table
@@ -189,12 +198,12 @@ namespace Realm {
     unsigned owner;
     SparsityMapImplWrapper *next_free;
     atomic<DynamicTemplates::TagType> type_tag;
-    atomic<void *> map_impl;  // actual implementation
+    atomic<void *> map_impl; // actual implementation
     atomic<unsigned> references;
     NodeSet subscribers;
 
     // need a type-erased deleter
-    typedef void(*Deleter)(void *);
+    typedef void (*Deleter)(void *);
     Deleter map_deleter;
 
     template <int N, typename T>

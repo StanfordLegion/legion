@@ -642,8 +642,9 @@ namespace Realm {
       // check overhead limit
       if(max_overhead >= 0) {
 	size_t extra = bbox.volume() - vol;
-	if(extra > (vol * max_overhead / 100))
+	if(extra > (vol * max_overhead / 100)) {
 	  return false;  // doesn't fit
+        }
       }
       covering.resize(1);
       covering[0] = bbox;
@@ -902,7 +903,8 @@ namespace Realm {
   // class SparsityMapImpl<N,T>
 
   template <int N, typename T>
-  SparsityMapImpl<N, T>::SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers)
+  SparsityMapImpl<N, T>::SparsityMapImpl(
+  SparsityMap<N, T> _me, NodeSet &subscribers)
     : me(_me)
     , remaining_contributor_count(0)
     , total_piece_count(0)
@@ -913,6 +915,23 @@ namespace Realm {
     , approx_ready_event(Event::NO_EVENT)
     , remote_subscribers(subscribers)
     , sizeof_precise(0)
+    , sparsity_comm(std::make_unique<SparsityMapCommunicator>())
+  {}
+
+  template <int N, typename T>
+  SparsityMapImpl<N, T>::SparsityMapImpl(
+  SparsityMap<N, T> _me, NodeSet &subscribers, SparsityMapCommunicator *_sparsity_comm)
+    : me(_me)
+    , remaining_contributor_count(0)
+    , total_piece_count(0)
+    , remaining_piece_count(0)
+    , precise_requested(false)
+    , approx_requested(false)
+    , precise_ready_event(Event::NO_EVENT)
+    , approx_ready_event(Event::NO_EVENT)
+    , remote_subscribers(subscribers)
+    , sizeof_precise(0)
+    , sparsity_comm(_sparsity_comm)
   {}
 
   template <int N, typename T>
