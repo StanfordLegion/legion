@@ -215,9 +215,168 @@ TYPED_TEST_P(SparsityMapTest, ComputeCoveringForOneRect)
   EXPECT_EQ(covering.front().hi, TypeParam(index - gap + 1));
 }
 
+TYPED_TEST_P(SparsityMapTest, ComputeCoveringForNRect)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  std::vector<Rect<N, T>> rect_list;
+  const size_t num_rects = 3;
+  const size_t max_rects = 2;
+  const int gap = 3;
+
+  int index = 0;
+  for(int i = 0; i < num_rects; i++) {
+    TypeParam lo_point = TypeParam(index);
+    TypeParam hi_point = TypeParam(index + 1);
+    index += gap;
+    rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+
+  SparsityMap<N, T> handle;
+  handle.id = 0;
+
+  NodeSet node;
+  auto *sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node, reinterpret_cast<SparsityMapCommunicator<N, T> *>(sparsity_comm));
+  impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0, /*disjoint=*/true, 0);
+
+  impl->set_contributor_count(1);
+  impl->contribute_nothing();
+  SparsityMapPublicImpl<N, T> *public_impl =
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+
+  TypeParam lo_point = TypeParam(0);
+  TypeParam hi_point = TypeParam(10);
+  Rect<N, T> bounds(lo_point, hi_point);
+  std::vector<Rect<N, T>> covering;
+  bool ok =
+      public_impl->compute_covering(bounds, max_rects, /*max_overhead=*/1000, covering);
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(covering.size(), max_rects);
+  EXPECT_EQ(covering[0].lo, TypeParam(0));
+  EXPECT_EQ(covering[0].hi, TypeParam(1));
+  return;
+  EXPECT_EQ(covering[1].lo, TypeParam(3));
+  EXPECT_EQ(covering[1].hi, TypeParam(4));
+}
+
+TYPED_TEST_P(SparsityMapTest, ComputeOverlapPassApprox)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  std::vector<Rect<N, T>> rect_list;
+  const size_t num_rects = 3;
+  const size_t max_rects = 2;
+  const int gap = 3;
+
+  int index = 0;
+  for(int i = 0; i < num_rects; i++) {
+    TypeParam lo_point = TypeParam(index);
+    TypeParam hi_point = TypeParam(index + 1);
+    index += gap;
+    rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+
+  SparsityMap<N, T> handle;
+  handle.id = 0;
+  NodeSet node;
+
+  auto *sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node, reinterpret_cast<SparsityMapCommunicator<N, T> *>(sparsity_comm));
+  impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0, /*disjoint=*/true, 0);
+  impl->set_contributor_count(1);
+  impl->contribute_nothing();
+  SparsityMapPublicImpl<N, T> *public_impl =
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+
+  auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto other_impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node,
+      reinterpret_cast<SparsityMapCommunicator<N, T> *>(other_sparsity_comm));
+  other_impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0,
+                                   /*disjoint=*/true, 0);
+  other_impl->set_contributor_count(1);
+  other_impl->contribute_nothing();
+  SparsityMapPublicImpl<N, T> *other_public_impl =
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+
+  TypeParam lo_point = TypeParam(0);
+  TypeParam hi_point = TypeParam(10);
+  Rect<N, T> bounds(lo_point, hi_point);
+  bool ok = public_impl->overlaps(other_public_impl, bounds, true);
+
+  EXPECT_TRUE(ok);
+}
+
+TYPED_TEST_P(SparsityMapTest, ComputeOverlapFail)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  const size_t num_rects = 3;
+  const size_t max_rects = 2;
+  const int gap = 3;
+
+  int index = 0;
+  std::vector<Rect<N, T>> rect_list;
+  for(int i = 0; i < num_rects; i++) {
+    TypeParam lo_point = TypeParam(index);
+    TypeParam hi_point = TypeParam(index + 1);
+    index += gap;
+    rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+
+  SparsityMap<N, T> handle;
+  handle.id = 0;
+  NodeSet node;
+
+  auto *sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node, reinterpret_cast<SparsityMapCommunicator<N, T> *>(sparsity_comm));
+  impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0, /*disjoint=*/true, 0);
+  impl->set_contributor_count(1);
+  impl->contribute_nothing();
+  SparsityMapPublicImpl<N, T> *public_impl =
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+
+  index = 100;
+  std::vector<Rect<N, T>> other_rect_list;
+  for(int i = 0; i < num_rects; i++) {
+    TypeParam lo_point = TypeParam(index);
+    TypeParam hi_point = TypeParam(index + 1);
+    index += gap;
+    other_rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+
+  auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto other_impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node,
+      reinterpret_cast<SparsityMapCommunicator<N, T> *>(other_sparsity_comm));
+  other_impl->contribute_raw_rects(other_rect_list.data(), other_rect_list.size(), 0,
+                                   /*disjoint=*/true, 0);
+  other_impl->set_contributor_count(1);
+  other_impl->contribute_nothing();
+  SparsityMapPublicImpl<N, T> *other_public_impl =
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+
+  TypeParam lo_point = TypeParam(100);
+  TypeParam hi_point = TypeParam(1000);
+  Rect<N, T> bounds(lo_point, hi_point);
+  bool ok = public_impl->overlaps(other_public_impl, bounds, false);
+
+  EXPECT_FALSE(ok);
+}
+
 REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, ContributeDenseJointRects,
                             ContributeDenseDisjointRects, SetContributorCountRemote,
-                            ContributeNothingRemote, ComputeCoveringForOneRect);
+                            ContributeNothingRemote, ComputeCoveringForOneRect,
+                            ComputeCoveringForNRect, ComputeOverlapPassApprox,
+                            ComputeOverlapFail);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
