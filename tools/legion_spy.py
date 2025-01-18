@@ -7542,10 +7542,13 @@ class Operation(object):
         # 4: A path with a fence (edges can be any combination) exists
         # The path computation will try to find the "strongest" (largest interger) kind
         # of path that it can through the graph 
-        if prev_op not in previous_deps or \
-                (point_ops is not None and previous_deps[prev_op] == self.UNKNOWN_PATH):
+        if prev_op not in previous_deps:
             self.compute_previous_path(prev_op, previous_deps, need_fence, point_ops is not None)
             assert prev_op in previous_deps
+        elif need_fence and previous_deps[prev_op] < self.POINTWISE_PATH:
+            self.compute_previous_path(prev_op, previous_deps, need_fence, point_ops is not None)
+        elif point_ops is not None and previous_deps[prev_op] < self.POINTWISE_PATH:
+            self.compute_previous_path(prev_op, previous_deps, need_fence, point_ops is not None)
         # Check the kind of the path
         path_kind = previous_deps[prev_op]
         if path_kind == self.NO_PATH:
@@ -7555,19 +7558,19 @@ class Operation(object):
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
                   str(self)+" (UID "+str(self.uid)+")")
             if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, field)
+                self.state.dump_bad_graph(self.context, req.tid, field)
             if self.state.assert_on_error:
                 assert False
         elif path_kind == self.UNKNOWN_PATH or path_kind == self.FULL_ONLY_PATH:
             if need_fence:
                 # If we need a fence and we didn't find one that is bad
                 print("ERROR: Missing internal fence operation on "+str(field)+" of tree "+
-                        str(tree_id)+" between region requirement "+str(prev_req.index)+
+                        str(req.tid)+" between region requirement "+str(prev_req.index)+
                         " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
                         "requriement "+str(req.index)+" of "+str(self)+" (UID "+
                         str(self.uid)+")")
                 if self.state.bad_graph_on_error:
-                    self.state.dump_bad_graph(self.context, tree_id, field)
+                    self.state.dump_bad_graph(self.context, req.tid, field)
                 if self.state.assert_on_error:
                     assert False
             else:
@@ -7869,92 +7872,6 @@ class Operation(object):
                     stack.append((dep.op1,0,next_set))
         # If we get here we didn't find a valid pointwise path
         return False
-
-    def has_verification_transitive_mapping_dependence(self, prev_op, need_fence, 
-                                                    field, tree_id, previous_deps):
-        # Equal is for stupid must epoch launches
-        assert prev_op.get_context_index() <= self.get_context_index()
-        if not need_fence:
-            # If we don't need a close then we can do BFS which is much more efficient
-            # at finding dependences of things nearby in the graph
-            queue = collections.deque()
-            queue.append(self)
-            if len(previous_deps) > 0:
-                # We already started BFS-ing so we can restart from all
-                # the operations that we already visited
-                for op in iterkeys(previous_deps):
-                    if prev_op.get_context_index() <= op.get_context_index():
-                        queue.append(op)
-            while queue:
-                current = queue.popleft()
-                if not current.logical_incoming:
-                    continue
-                # If this operation comes earlier in the program than the
-                # previous operation that we're searching for then there
-                # is no need to search past it for now
-                if current.get_context_index() < prev_op.get_context_index():
-                    continue
-                for next_op in current.logical_incoming:
-                    if next_op in previous_deps:
-                        continue
-                    previous_deps[next_op] = None
-                    if next_op is prev_op:
-                        return True
-                    queue.append(next_op)
-        else:
-            # First BFS to find all the close fence operations that we can reach 
-            # from this operation but also come before the previous operation. 
-            # Then for each of close fence operations run a BFS to see if we can 
-            # find the prev_op from them. As soon as we find one then we are done, 
-            # otherwise we fail
-            next_gen = self.state.get_next_traversal_generation()
-            self.generation = next_gen
-            queue = collections.deque()
-            queue.append(self)
-            merge_close_ops = list()
-            while queue:
-                current = queue.popleft()
-                if current.get_context_index() < prev_op.get_context_index():
-                    continue
-                if current.kind == INTER_CLOSE_OP_KIND:
-                    assert current.reqs is not None and len(current.reqs) == 1
-                    if current.reqs[0].logical_node.tree_id == tree_id and \
-                            field in current.reqs[0].fields:
-                        merge_close_ops.append(current)
-                # We also allow mapping fences and execution fences (which are
-                # also a kind of mapping fence to fulfill this purpose)
-                elif current.is_fence(): 
-                    merge_close_ops.append(current)
-                    # No need to keep scanning past a fence since it dominates
-                    continue
-                if not current.logical_incoming:
-                    continue
-                for next_op in current.logical_incoming:
-                    if next_op.generation == next_gen:
-                        continue
-                    next_op.generation = next_gen
-                    queue.append(next_op)
-            # Once we've got the merge close fences then iterate over them  
-            # and run BFS from them looking for the previous op, recording
-            # that there are fences on anything we find along the way
-            for close in merge_close_ops:
-                next_gen = self.state.get_next_traversal_generation()
-                close.generation = next_gen
-                queue.append(close)
-                while queue:
-                    current = queue.popleft()
-                    if current not in previous_deps or previous_deps[current] is None:
-                        previous_deps[current] = set()
-                    previous_deps[current].add((field,tree_id))
-                    if current.get_context_index() < prev_op.get_context_index():
-                        continue
-                    if not current.logical_incoming:
-                        continue
-                    for next_op in current.logical_incoming:
-                        if next_op.generation == next_gen:
-                            continue
-                        next_op.generation = next_gen
-                        queue.append(next_op)
 
     def analyze_previous_interference(self, next_op, next_req, reachable):
         if not self.reqs:
