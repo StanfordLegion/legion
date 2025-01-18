@@ -2206,6 +2206,19 @@ class PointSet(object):
                 return False
         return True
 
+    def __mul__(self, other):
+        # Not actually multiplication, separation logic disjointness operator
+        if len(self.points) <= len(other.points):
+            for point in self.points:
+                if point in other:
+                    return False
+            return True
+        else:
+            for point in other.points:
+                if point in self:
+                    return False
+            return True
+
     def __neq__(self, other):
         return not self == other
 
@@ -7449,6 +7462,11 @@ class Operation(object):
             # For index space operations we'll perform all their operations
             # separately so everything gets updated individually
             if self.points:
+                # Verify any of our pointwise mapping dependences to make sure
+                # that the runtime didn't claim we could do pointwise dependence
+                # when it was not actually safe to do so
+                if self.incoming and not self.verify_pointwise_dependences():
+                    return False
                 if self.kind == INDEX_TASK_KIND:
                     for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
                         if not point.op.perform_op_logical_verification(logical_op, previous_deps):
@@ -7466,6 +7484,83 @@ class Operation(object):
             for idx in iterkeys(logical_op.reqs):
                 if not self.verify_logical_requirement(idx, logical_op, previous_deps):
                     return False
+        return True
+
+    def verify_pointwise_dependences(self):
+        assert self.points
+        assert self.incoming
+        # See if we're in a control replicated environment or not
+        if self.context.shard is not None and \
+                self.context.original.replicants.control_replicated:
+            replicants = self.context.original.replicants
+        else:
+            replicants = None
+        for dep in self.incoming:
+            if not dep.pointwise:
+                continue
+            # Get the set of index spaces from our points for this requirement
+            dst_spaces = list()
+            for point in itervalues(self.points):
+                if self.kind == INDEX_TASK_KIND:
+                    dst_spaces.append((point.op.index_point,point.op.reqs[dep.idx2].index_node))
+                else:
+                    dst_spaces.append((point.index_point,point.reqs[dep.idx2].index_node))
+            # Now iterate all the points in the prior operation and find their
+            # used index spaces and make sure they can all be analyzed by name
+            if replicants is not None:
+                for shard in itervalues(replicants.shards):
+                    op1 = shard.operations[dep.op1.get_context_index()]
+                    if not op1.points:
+                        continue
+                    for point in itervalues(op1.points):
+                        if op1.kind == INDEX_TASK_KIND:
+                            src_point = point.op.index_point
+                            src_space = point.op.reqs[dep.idx1].index_node
+                        else:
+                            src_point = point.index_point
+                            src_space = point.reqs[dep.idx1].index_node
+                        for dst_point,dst_space in dst_spaces:
+                            # Names are the same so all is good
+                            if dst_space is src_space:
+                                continue
+                            # Names are not the same so check they are disjoint
+                            if src_space.get_point_set() * dst_space.get_point_set():
+                                continue
+                            # Very bad, not the same name and aliased
+                            print("ERROR: Invalid pointwise dependence for operations "+
+                                  str(op1)+" and "+str(dep.op2)+" on region requirements "+
+                                  str(dep.idx1)+" and "+str(dep.idx2)+" because "+str(src_space)+
+                                  " of point "+str(point.op.index_point)+" and "+str(dst_space)+
+                                  " of point "+str(dst_point)+" are aliased and are not the "+
+                                  "same index space.")
+                            if self.state.assert_on_error:
+                                assert False
+                            return False
+            elif dep.op1.points:
+                for point in itervalues(dep.op1.points):
+                    if dep.op1.kind == INDEX_TASK_KIND:
+                        src_point = point.op.index_point
+                        src_space = point.op.reqs[dep.idx1].index_node
+                    else:
+                        src_point = point.index_point
+                        src_space = point.reqs[dep.idx1].index_node
+                    for dst_point,dst_space in dst_spaces:
+                        # Names are the same so all is good
+                        if dst_space is src_space:
+                            continue
+                        # Names are not the same so check they are disjoint
+                        if src_space.get_point_set() * dst_space.get_point_set():
+                            continue
+                        # Very bad, not the same name and aliased
+                        print("ERROR: Invalid pointwise dependence for operations "+
+                              str(dep.op1)+" and "+str(dep.op2)+" on region requirements "+
+                              str(dep.idx1)+" and "+str(dep.idx2)+" because "+str(src_space)+
+                              " of point "+str(point.op.index_point)+" and "+str(dst_space)+
+                              " of point "+str(dst_point)+" are aliased and are not the "+
+                              "same index space.")
+                        if self.state.assert_on_error:
+                            assert False
+                        return False
         return True
 
     def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field):
