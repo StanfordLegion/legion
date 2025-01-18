@@ -9456,17 +9456,7 @@ namespace Legion {
     RtEvent IndexCopyOp::find_intra_space_dependence(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!points.empty());
-#endif
-      for (std::vector<PointCopyOp*>::const_iterator it =
-            points.begin(); it != points.end(); it++)
-      {
-        if (point != (*it)->index_point)
-          continue;
-        return (*it)->get_mapped_event();
-      }
-      std::abort();
+      return find_pointwise_dependence(point, get_generation());
     }
 
     /////////////////////////////////////////////////////////////
