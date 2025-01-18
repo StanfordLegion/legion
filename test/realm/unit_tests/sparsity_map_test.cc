@@ -222,7 +222,7 @@ TYPED_TEST_P(SparsityMapTest, ComputeCoveringForNRect)
 
   std::vector<Rect<N, T>> rect_list;
   const size_t num_rects = 3;
-  const size_t max_rects = 2;
+  const size_t max_rects = 4;
   const int gap = 3;
 
   int index = 0;
@@ -255,10 +255,9 @@ TYPED_TEST_P(SparsityMapTest, ComputeCoveringForNRect)
       public_impl->compute_covering(bounds, max_rects, /*max_overhead=*/1000, covering);
 
   EXPECT_TRUE(ok);
-  EXPECT_EQ(covering.size(), max_rects);
+  EXPECT_EQ(covering.size(), num_rects);
   EXPECT_EQ(covering[0].lo, TypeParam(0));
   EXPECT_EQ(covering[0].hi, TypeParam(1));
-  return;
   EXPECT_EQ(covering[1].lo, TypeParam(3));
   EXPECT_EQ(covering[1].hi, TypeParam(4));
 }
