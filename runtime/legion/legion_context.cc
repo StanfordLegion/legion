@@ -15708,7 +15708,7 @@ namespace Legion {
       {
         Domain color_space = runtime->get_index_partition_color_space(handle1);
         // This code will only work if the color space has type coord_t
-        TypeTag type_tag;
+        TypeTag type_tag = 0;
         switch (color_space.get_dim())
         {
 #define DIMFUNC(DIM) \
