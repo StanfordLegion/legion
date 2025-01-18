@@ -3905,19 +3905,7 @@ namespace Legion {
       const ShardID point_shard = 
         sharding_function->find_owner(point, launch_domain);
       if (point_shard == repl_ctx->owner_shard->shard_id)
-      {
-        // These points should already be enumerated so we should be
-        // able to find the mapped event for the point
-#ifdef DEBUG_LEGION
-        assert(!points.empty());
-#endif
-        for (std::vector<PointCopyOp*>::const_iterator it =
-            points.begin(); it != points.end(); it++)
-          if (point == (*it)->index_point)
-            return (*it)->get_mapped_event();
-        // Should never get here, if we do that means we couldn't find the point
-        std::abort();
-      }
+        return IndexCopyOp::find_intra_space_dependence(point);
       else
         return repl_ctx->find_pointwise_dependence(
             context_index, point, point_shard);
