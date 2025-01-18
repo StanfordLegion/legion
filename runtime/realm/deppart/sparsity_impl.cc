@@ -1044,8 +1044,8 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapCommunicator<N, T>::send_contribute(SparsityMap<N, T> me,
                                                       size_t piece_count,
-                                                      size_t total_count, 
-                                                      bool disjoint)
+                                                      size_t total_count, bool disjoint,
+                                                      const void *data, size_t datalen)
   {
     NodeID owner = ID(me).sparsity_creator_node();
     ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib> amsg(owner);
@@ -1053,7 +1053,18 @@ namespace Realm {
     amsg->piece_count = piece_count;
     amsg->total_count = total_count;
     amsg->disjoint = disjoint;
+    if (data && datalen) {
+        amsg.add_payload(data, datalen, PAYLOAD_COPY);
+    }
     amsg.commit();
+  }
+
+  template <int N, typename T>
+  size_t SparsityMapCommunicator<N, T>::recommend_max_payload(NodeID owner,
+                                                              bool with_congestion)
+  {
+    return ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib>::
+        recommended_max_payload(owner, with_congestion);
   }
 
   // SparsityMapCommunicator::SparsityMapCommunicator
@@ -1095,8 +1106,7 @@ namespace Realm {
     if(owner != Network::my_node_id) {
       // send the data to the owner to collect
       size_t max_bytes_per_packet =
-          ActiveMessage<RemoteSparsityContrib>::recommended_max_payload(
-              owner, false /*!with_congestion*/);
+          sparsity_comm->recommend_max_payload(owner, /*with_congestion=*/false);
       const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N, T>);
       assert(max_to_send > 0);
       const Rect<N, T> *rdata = (rects.empty() ? 0 : &rects[0]);
@@ -1104,15 +1114,10 @@ namespace Realm {
       size_t remaining = rects.size();
       // send partial messages first
       while(remaining > max_to_send) {
-        size_t bytes = max_to_send * sizeof(Rect<N, T>);
-        ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
-        amsg->sparsity = me;
-        amsg->piece_count = 0;
-        amsg->disjoint = disjoint;
-        amsg->total_count = 0;
-        amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
-        amsg.commit();
 
+        size_t bytes = max_to_send * sizeof(Rect<N, T>);
+        sparsity_comm->send_contribute(
+          me, 0, 0, disjoint, reinterpret_cast<const void*>(rdata), bytes);
         num_pieces++;
         remaining -= max_to_send;
         rdata += max_to_send;
@@ -1120,14 +1125,8 @@ namespace Realm {
 
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N, T>);
-      ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
-      amsg->sparsity = me;
-      amsg->piece_count = num_pieces + 1;
-      amsg->disjoint = disjoint;
-      amsg->total_count = 0;
-      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
-      amsg.commit();
-
+      sparsity_comm->send_contribute(me, num_pieces + 1, 0, disjoint,
+                                     reinterpret_cast<const void*>(rdata), bytes);
       return;
     }
 

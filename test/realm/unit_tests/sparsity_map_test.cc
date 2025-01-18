@@ -29,15 +29,48 @@ public:
   virtual ~MockSparsityMapCommunicator() = default;
 
   virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
-                               size_t total_count, bool disjoint)
+                               size_t total_count, bool disjoint, const void *data,
+                               size_t datalen)
   {
     sent_contributions++;
+    // TODO(apryakhin): verify data
+    sent_bytes += datalen;
   }
 
+  virtual size_t recommend_max_payload(NodeID owner, bool with_congestion) { return 128; }
+
   int sent_contributions = 0;
+  size_t sent_bytes = 0;
 };
 
-// TODO: Implement mock communicator
+TYPED_TEST_P(SparsityMapTest, ContributeDenseRectListRemote)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  std::vector<Rect<N, T>> rect_list;
+  const int num_rects = 2;
+
+  for(int i = 0; i < num_rects; i++) {
+    TypeParam lo_point = TypeParam(i);
+    TypeParam hi_point = TypeParam(i + 1);
+    rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+
+  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
+
+  NodeSet node;
+
+  auto *sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node, reinterpret_cast<SparsityMapCommunicator<N, T> *>(sparsity_comm));
+  impl->contribute_dense_rect_list(rect_list,
+                                   /*disjoint=*/false);
+
+  EXPECT_EQ(sparsity_comm->sent_contributions, 1);
+  EXPECT_EQ(sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
+}
+
 TYPED_TEST_P(SparsityMapTest, SetContributorCountRemote)
 {
   constexpr int N = TestFixture::N;
@@ -66,7 +99,6 @@ TYPED_TEST_P(SparsityMapTest, SetContributorCountRemote)
   EXPECT_EQ(sparsity_comm->sent_contributions, 1);
 }
 
-// TODO: Implement mock communicator
 TYPED_TEST_P(SparsityMapTest, ContributeNothingRemote)
 {
   constexpr int N = TestFixture::N;
@@ -371,11 +403,11 @@ TYPED_TEST_P(SparsityMapTest, ComputeOverlapFail)
   EXPECT_FALSE(ok);
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, ContributeDenseJointRects,
-                            ContributeDenseDisjointRects, SetContributorCountRemote,
-                            ContributeNothingRemote, ComputeCoveringForOneRect,
-                            ComputeCoveringForNRect, ComputeOverlapPassApprox,
-                            ComputeOverlapFail);
+REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, ContributeDenseRectListRemote,
+                            ContributeDenseJointRects, ContributeDenseDisjointRects,
+                            SetContributorCountRemote, ContributeNothingRemote,
+                            ComputeCoveringForOneRect, ComputeCoveringForNRect,
+                            ComputeOverlapPassApprox, ComputeOverlapFail);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
