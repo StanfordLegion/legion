@@ -170,6 +170,9 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype,
                                     const FieldMask &dependent_mask);
+      void record_pointwise_dependence(Operation *target, GenerationID target_gen,
+          Operation *source, GenerationID source_gen, unsigned idx,
+          const PointwiseDependence &dependence);
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }
@@ -206,6 +209,9 @@ namespace Legion {
     protected:
       void replay_operation_dependences(Operation *op,
           const LegionVector<DependenceRecord> &dependences);
+      void replay_pointwise_dependences(Operation *op,
+          const std::map<unsigned,
+            std::vector<PointwiseDependence> > &dependences);
       void translate_dependence_records(Operation *op, const unsigned index,
           const std::vector<StaticDependence> &dependences);
 #ifdef LEGION_SPY
@@ -230,16 +236,23 @@ namespace Legion {
       bool intermediate_fence;
     protected:
       struct OpInfo {
+      public:
+        OpInfo(Operation *o)
+          : op(o), gen(op->get_generation()),
+            context_index(op->get_context_index()),
+            unique_id(op->get_unique_op_id()) { }
+      public:
         Operation* op;
         GenerationID gen;
         uint64_t context_index;
+        UniqueID unique_id;
       };
       // Logical dependence analysis stage of the pipeline
       bool recording;
       size_t replay_index;
       std::deque<OperationInfo> replay_info;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
-      std::vector<OpInfo > operations;
+      std::vector<OpInfo> operations;
       // Only need this backwards lookup for trace capture
       std::map<std::pair<Operation*,GenerationID>,
         std::pair<unsigned,unsigned>> op_map;

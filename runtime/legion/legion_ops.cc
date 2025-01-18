@@ -2896,8 +2896,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::register_pointwise_dependence(unsigned idx,
-        const LogicalUser &previous, DependenceType dtype, 
-        const FieldMask &dependent_mask)
+        const LogicalUser &previous)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      std::abort();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::replay_pointwise_dependences(
+        std::map<unsigned,std::vector<PointwiseDependence> > &dependences)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4180,8 +4188,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     void PointwiseAnalyzable<OP>::register_pointwise_dependence(unsigned idx,
-          const LogicalUser &previous, DependenceType dtype,
-          const FieldMask &dependent_mask)
+          const LogicalUser &previous)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4191,13 +4198,29 @@ namespace Legion {
         pointwise_dependences[idx];
       for (std::vector<PointwiseDependence>::iterator it =
             dependences.begin(); it != dependences.end(); it++)
-        if (it->matches(previous, dtype, dependent_mask))
+        if (it->matches(previous))
           return;
       dependences.emplace_back(PointwiseDependence(previous));
-#ifdef LEGION_SPY
-      dependences.back().dtype = dtype; 
-      dependences.back().dependent_mask = dependent_mask;
+      if (this->tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(this->trace != NULL);
 #endif
+        this->trace->record_pointwise_dependence(previous.op, previous.gen,
+            this, this->gen, idx, dependences.back());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void PointwiseAnalyzable<OP>::replay_pointwise_dependences(
+        std::map<unsigned,std::vector<PointwiseDependence> > &dependences)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pointwise_dependences.empty());
+#endif
+      pointwise_dependences.swap(dependences); 
     }
 
     // Explicit instantiations

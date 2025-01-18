@@ -197,10 +197,6 @@ namespace Legion {
       if (sharding_domain != NULL)
         sharding_domain->add_base_expression_reference(
             POINTWISE_DEPENDENCE_REF);
-#ifdef LEGION_SPY
-      dtype = rhs.dtype;
-      dependence_mask = rhs.dependence_mask;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -214,10 +210,6 @@ namespace Legion {
       // Move references to ourselves
       rhs.domain = NULL;
       rhs.sharding_domain = NULL;
-#ifdef LEGION_SPY
-      dtype = rhs.dtype;
-      dependence_mask = rhs.dependence_mask;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -254,10 +246,6 @@ namespace Legion {
       sharding = rhs.sharding;
       sharding_id = rhs.sharding_id;
       sharding_domain = rhs.sharding_domain;
-#ifdef LEGION_SPY
-      dtype = rhs.dtype;
-      dependence_mask = rhs.dependence_mask;
-#endif
       if (domain != NULL)
         domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
       if (sharding_domain != NULL)
@@ -287,10 +275,6 @@ namespace Legion {
       sharding = rhs.sharding;
       sharding_id = rhs.sharding_id;
       sharding_domain = rhs.sharding_domain;
-#ifdef LEGION_SPY
-      dtype = rhs.dtype;
-      dependence_mask = rhs.dependence_mask;
-#endif
       // Just move over the references
       rhs.domain = NULL;
       rhs.sharding_domain = NULL;
@@ -298,8 +282,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointwiseDependence::matches(const LogicalUser &user,
-        DependenceType dep_type, const FieldMask &mask)
+    bool PointwiseDependence::matches(const LogicalUser &user) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -309,11 +292,6 @@ namespace Legion {
         return false;
       if (region_index != user.idx)
         return false;
-#ifdef LEGION_SPY
-      if (dtype != dep_type)
-        return false;
-      dependence_mask |= mask;
-#endif
       return true;
     }
 
@@ -342,10 +320,6 @@ namespace Legion {
         rez.serialize(sharding_domain->handle);
       else
         rez.serialize(IndexSpace::NO_SPACE);
-#ifdef LEGION_SPY
-      rez.serialize(dtype);
-      rez.serialize(dependence_mask);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -381,10 +355,6 @@ namespace Legion {
       }
       else
         sharding_domain = NULL;
-#ifdef LEGION_SPY
-      derez.deserialize(dtype);
-      derez.deserialize(dependence_mask);
-#endif
     }
 
     /////////////////////////////////////////////////////////////

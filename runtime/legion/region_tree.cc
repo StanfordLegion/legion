@@ -16608,10 +16608,14 @@ namespace Legion {
                   if (arrived && state.record_pointwise_dependence(
                         logical_analysis, prev, user))
                   {
-                    user.op->register_pointwise_dependence(
-                        user.idx, prev, dtype, overlap);
+                    user.op->register_pointwise_dependence(user.idx, prev);
                     // Not actually dominating so we can't prune it out
                     dominator_mask -= overlap;
+#ifdef LEGION_SPY
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype, true);
+#endif
                   }
                   else
                   {

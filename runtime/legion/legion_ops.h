@@ -691,8 +691,9 @@ namespace Legion {
       // Point-Wise analysis functions
       virtual bool is_pointwise_analyzable(void) const;
       virtual void register_pointwise_dependence(unsigned idx, 
-          const LogicalUser &previous, DependenceType dtype, 
-          const FieldMask &dependent_mask);
+          const LogicalUser &previous);
+      virtual void replay_pointwise_dependences(
+          std::map<unsigned,std::vector<PointwiseDependence> > &dependences);
       virtual RtEvent find_pointwise_dependence(
           const DomainPoint &point, GenerationID gen,
           RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
@@ -801,8 +802,7 @@ namespace Legion {
       PointwiseDependence& operator=(const PointwiseDependence &rhs);
       PointwiseDependence& operator=(PointwiseDependence &&rhs);
     public:
-      bool matches(const LogicalUser &user, DependenceType dtype,
-                   const FieldMask &dependent_mask);
+      bool matches(const LogicalUser &user) const;
       void find_dependences(const RegionRequirement &req,
           const std::vector<std::pair<LogicalRegion,DomainPoint> > &points,
           std::map<LogicalRegion,std::vector<DomainPoint> > &dependences) const;
@@ -824,10 +824,6 @@ namespace Legion {
       ShardingFunctor *sharding;
       ShardingID sharding_id;
       IndexSpaceNode *sharding_domain;
-#ifdef LEGION_SPY
-      DependenceType dtype;
-      FieldMask dependence_mask;
-#endif
     };
 
     /**
@@ -845,8 +841,9 @@ namespace Legion {
     public:
       virtual bool is_pointwise_analyzable(void) const;
       virtual void register_pointwise_dependence(unsigned idx, 
-          const LogicalUser &previous, DependenceType dtype,
-          const FieldMask &dependent_mask);
+          const LogicalUser &previous);
+      virtual void replay_pointwise_dependences(
+          std::map<unsigned,std::vector<PointwiseDependence> > &dependences);
     protected:
       // Map from region requirement indexes to the point-wise dependences
       // we'll need to compute for that region requirement
