@@ -33,13 +33,17 @@ public:
                                size_t datalen)
   {
     sent_contributions++;
-    // TODO(apryakhin): verify data
+    sent_piece_count += piece_count;
     sent_bytes += datalen;
   }
 
-  virtual size_t recommend_max_payload(NodeID owner, bool with_congestion) { return 128; }
+  virtual size_t recommend_max_payload(NodeID owner, bool with_congestion)
+  {
+    return sizeof(Rect<N, T>);
+  }
 
   int sent_contributions = 0;
+  size_t sent_piece_count = 0;
   size_t sent_bytes = 0;
 };
 
@@ -49,7 +53,7 @@ TYPED_TEST_P(SparsityMapTest, ContributeDenseRectListRemote)
   using T = typename TestFixture::T;
 
   std::vector<Rect<N, T>> rect_list;
-  const int num_rects = 2;
+  const int num_rects = 3;
 
   for(int i = 0; i < num_rects; i++) {
     TypeParam lo_point = TypeParam(i);
@@ -67,7 +71,8 @@ TYPED_TEST_P(SparsityMapTest, ContributeDenseRectListRemote)
   impl->contribute_dense_rect_list(rect_list,
                                    /*disjoint=*/false);
 
-  EXPECT_EQ(sparsity_comm->sent_contributions, 1);
+  EXPECT_EQ(sparsity_comm->sent_contributions, num_rects);
+  EXPECT_EQ(sparsity_comm->sent_piece_count, num_rects);
   EXPECT_EQ(sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
 }
 
