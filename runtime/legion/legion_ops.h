@@ -1704,6 +1704,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
+      virtual void predicate_false(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RtEvent exchange_indirect_records(
           const unsigned index, const ApEvent local_pre,
@@ -3755,6 +3756,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_commit(void);
+      virtual void predicate_false(void);
     public:
       // From MemoizableOp
       virtual void trigger_replay(void);

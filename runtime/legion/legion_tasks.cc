@@ -10711,6 +10711,17 @@ namespace Legion {
                                              reduction_op->sizeof_rhs);
         }
       }
+      // Can check this without the lock since we know the predication state
+      // has been marked correctly while holding the lock
+      if (!pending_pointwise_dependences.empty())
+      {
+        // Just trigger these since the points won't be mapped anyway
+        for (std::map<DomainPoint,RtUserEvent>::const_iterator it =
+              pending_pointwise_dependences.begin(); it !=
+              pending_pointwise_dependences.end(); it++)
+          Runtime::trigger_event(it->second);
+        pending_pointwise_dependences.clear();
+      }
       // Then clean up this task execution
       complete_mapping();
       complete_execution(execution_condition);
@@ -11232,7 +11243,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(needed_gen <= gen);
 #endif
-      if ((needed_gen < gen) || mapped)
+      if ((needed_gen < gen) || mapped ||
+          (predication_state == PREDICATED_FALSE_STATE))
       {
         if (to_trigger.exists())
         {

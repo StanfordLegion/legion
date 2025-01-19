@@ -8974,6 +8974,24 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void IndexCopyOp::predicate_false(void)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger any pending pointwise dependences since they will not
+      // be run, safe to do without the lock because we are protected
+      // by the predication_state having been set before this
+      if (!pending_pointwise_dependences.empty())
+      {
+        for (std::map<DomainPoint,RtUserEvent>::const_iterator it =
+              pending_pointwise_dependences.begin(); it !=
+              pending_pointwise_dependences.end(); it++)
+          Runtime::trigger_event(it->second);
+        pending_pointwise_dependences.clear();
+      }
+      CopyOp::predicate_false();
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent IndexCopyOp::find_pointwise_dependence(const DomainPoint &point,
         GenerationID needed_gen, RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
@@ -8982,7 +9000,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(needed_gen <= gen);
 #endif
-      if ((needed_gen < gen) || mapped)
+      if ((needed_gen < gen) || mapped ||
+          (predication_state == PREDICATED_FALSE_STATE))
       {
         if (to_trigger.exists())
         {
@@ -19180,7 +19199,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(needed_gen <= gen);
 #endif
-      if ((needed_gen < gen) || mapped)
+      if ((needed_gen < gen) || mapped ||
+          (predication_state == PREDICATED_FALSE_STATE))
       {
         if (to_trigger.exists())
         {
@@ -19224,6 +19244,24 @@ namespace Legion {
       }
       // Should never get here, if we do that means we couldn't find the point
       std::abort();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::predicate_false(void)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger any pending pointwise dependences since they will not
+      // be run, safe to do without the lock because we are protected
+      // by the predication_state having been set before this
+      if (!pending_pointwise_dependences.empty())
+      {
+        for (std::map<DomainPoint,RtUserEvent>::const_iterator it =
+              pending_pointwise_dependences.begin(); it !=
+              pending_pointwise_dependences.end(); it++)
+          Runtime::trigger_event(it->second);
+        pending_pointwise_dependences.clear();
+      }
+      FillOp::predicate_false();
     }
 
     //--------------------------------------------------------------------------
