@@ -105,7 +105,7 @@ cache: &global_cache
   PRIVILEGE_CHECKS: "1"
 
 .cxx17_normal: &cxx17_normal
-  CXXFLAGS: "-g"
+  CXXFLAGS: ""
   CXX_STANDARD: "17"
 .cxx17_external: &cxx17_external
   CXXFLAGS: ""
