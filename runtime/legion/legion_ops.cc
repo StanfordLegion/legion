@@ -8999,7 +8999,7 @@ namespace Legion {
         return false;
       if (!dst_indirect_requirements.empty() && collective_dst_indirect_points)
         return false;
-      return true;
+      return CopyOp::is_pointwise_analyzable();
     }
 
     //--------------------------------------------------------------------------

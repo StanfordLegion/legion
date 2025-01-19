@@ -666,12 +666,14 @@ namespace Legion {
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, uint64_t blocking_index,
+                    const std::optional<uint64_t> &context_index,
                     Provenance *provenance, bool register_now = true, 
                     CollectiveMapping *mapping = NULL); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t blocking_index,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    Provenance *provenance);
+                    Provenance *provenance, 
+                    const std::optional<uint64_t> &index);
       FutureMapImpl(const FutureMapImpl &rhs) = delete;
       virtual ~FutureMapImpl(void);
     public:
@@ -705,6 +707,8 @@ namespace Legion {
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
       void register_dependence(Operation *consumer_op);
+      virtual RtEvent find_pointwise_dependence(const DomainPoint &point,
+          int depth, RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       void process_future_response(Deserializer &derez);
     public:
       RtEvent record_future_map_registered(void);
@@ -712,6 +716,8 @@ namespace Legion {
                               Runtime *runtime, AddressSpaceID source);
       static void handle_future_map_future_response(Deserializer &derez,
                                                     Runtime *runtime);
+      static void handle_future_map_find_pointwise(Deserializer &derez,
+                                                   Runtime *runtime);
     public:
       TaskContext *const context;
       // Either an index space task or a must epoch op
@@ -722,6 +728,7 @@ namespace Legion {
       const uint64_t blocking_index;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
+      const std::optional<uint64_t> context_index;
     protected:
       mutable LocalLock future_map_lock;
       std::map<DomainPoint,FutureImpl*> futures;
@@ -759,6 +766,8 @@ namespace Legion {
       virtual FutureImpl* find_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
+      virtual RtEvent find_pointwise_dependence(const DomainPoint &point,
+          int depth, RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
     public:
       FutureMapImpl *const previous;
       const bool own_functor;
@@ -784,7 +793,7 @@ namespace Legion {
       ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, uint64_t index,
-                        Provenance *provenance,
+                        std::optional<uint64_t> ctx_idx, Provenance *provenance,
                         CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs) = delete;
       virtual ~ReplFutureMapImpl(void);
@@ -800,6 +809,8 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
+      virtual RtEvent find_pointwise_dependence(const DomainPoint &point,
+          int depth, RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
     public:
       bool set_sharding_function(ShardingFunction *function, bool own = false);
       RtEvent get_sharding_function_ready(void);
@@ -3602,6 +3613,8 @@ namespace Legion {
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
                                            Serializer &rez);
+      void send_future_map_find_pointwise(AddressSpaceID target,
+                                          Serializer &rez);
       void send_control_replicate_compute_equivalence_sets(
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_output_equivalence_set(
@@ -4022,6 +4035,7 @@ namespace Legion {
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
+      void handle_future_map_find_pointwise(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,
@@ -4350,9 +4364,9 @@ namespace Legion {
                                         UniqueID op_uid = 0,
                                         int op_depth = 0,
                                         CollectiveMapping *mapping = NULL);
-      FutureMapImpl* find_or_create_future_map(DistributedID did, 
-                          TaskContext *ctx, uint64_t coord, IndexSpace domain,
-                          Provenance *provenance);
+      FutureMapImpl* find_or_create_future_map(DistributedID did,
+          TaskContext *ctx, uint64_t coord, IndexSpace domain,
+          Provenance *provenance, const std::optional<uint64_t> &ctx_index);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
           bool take_ownership, TypeTag type_tag, Provenance *provenance);
     public:
@@ -6654,6 +6668,8 @@ namespace Legion {
         case SEND_FUTURE_MAP_REQUEST:
           break;
         case SEND_FUTURE_MAP_RESPONSE:
+          break;
+        case SEND_FUTURE_MAP_POINTWISE:
           break;
         case SEND_REPL_COMPUTE_EQUIVALENCE_SETS:
           break;

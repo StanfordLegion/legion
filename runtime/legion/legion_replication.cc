@@ -10564,7 +10564,8 @@ namespace Legion {
         // Didn't find it so make it
         ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, runtime,
                               domain, shard_domain, map_did, coordinate,
-                              provenance, collective_mapping);
+                              std::optional<uint64_t>(), provenance, 
+                              collective_mapping);
         // Add a reference to it to keep it from being deleted and then 
         // register it with the runtime
         result->add_nested_gc_ref(did);
@@ -10580,7 +10581,7 @@ namespace Legion {
       {
         ReplFutureMapImpl *impl = new ReplFutureMapImpl(ctx, this, runtime,
             domain, shard_domain, map_did, coordinate,
-            provenance, collective_mapping);
+            std::optional<uint64_t>(), provenance, collective_mapping);
         // Get a reference on it before we register it
         FutureMap result(impl);
         impl->register_with_runtime();

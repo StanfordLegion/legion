@@ -1408,27 +1408,6 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_phase_barrier_arrival(unique_op_id, it->phase_barrier);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::complete_point_projection(void)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask *single_task = dynamic_cast<SingleTask*>(this);
-      if (single_task != NULL)
-        single_task->update_no_access_regions();
-      // Log our requirements that we computed
-      if (runtime->legion_spy_enabled)
-      {
-        UniqueID our_uid = get_unique_id();
-        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-          log_requirement(our_uid, idx, logical_regions[idx]);
-      }
-#ifdef DEBUG_LEGION
-      {
-        perform_intra_task_alias_analysis();
-      }
-#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -6113,6 +6092,21 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    bool MultiTask::is_pointwise_analyzable(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (concurrent_task)
+        return false;
+      if (!check_collective_regions.empty())
+        return false;
+      // TODO: relax this to support pointwse output regions
+      if (!output_regions.empty())
+        return false;
+      return PointwiseAnalyzable<
+        CollectiveViewCreator<TaskOp> >::is_pointwise_analyzable();
+    }
+
+    //--------------------------------------------------------------------------
     void MultiTask::pack_multi_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -8373,7 +8367,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
                              const FutureMap &point_arguments, bool inline_task,
-                             const std::vector<FutureMap> &point_futures)
+                             const std::vector<FutureMap> &point_futures,
+                             bool record_future_pointwise_dependences)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
@@ -8417,9 +8412,25 @@ namespace Legion {
       }
       if (!point_futures.empty())
       {
+        const int context_depth = parent_ctx->get_depth();
         for (std::vector<FutureMap>::const_iterator it = 
               point_futures.begin(); it != point_futures.end(); it++)
+        {
           this->futures.push_back(it->impl->get_future(point,true/*internal*/));
+          if (record_future_pointwise_dependences)
+          {
+            const RtEvent pre = 
+              it->impl->find_pointwise_dependence(point, context_depth);
+            if (pre.exists() && !std::binary_search(
+                  pointwise_mapping_dependences.begin(),
+                  pointwise_mapping_dependences.end(), pre))
+            {
+              pointwise_mapping_dependences.push_back(pre);
+              std::sort(pointwise_mapping_dependences.begin(),
+                  pointwise_mapping_dependences.end());
+            }
+          }
+        }
       }
     }
 
@@ -9339,6 +9350,23 @@ namespace Legion {
         return false;
     }
 
+    //--------------------------------------------------------------------------
+    void PointTask::complete_point_projection(void)
+    //--------------------------------------------------------------------------
+    {
+      update_no_access_regions();
+      // Log our requirements that we computed
+      if (runtime->legion_spy_enabled)
+      {
+        UniqueID our_uid = get_unique_id();
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(our_uid, idx, logical_regions[idx]);
+      }
+#ifdef DEBUG_LEGION
+      perform_intra_task_alias_analysis();
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Task 
     /////////////////////////////////////////////////////////////
@@ -10243,12 +10271,38 @@ namespace Legion {
           it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
-      // Register mapping dependences on any future maps also
+      // Always have to register a full dependence on this since we need
+      // to have the producer mapped by the time we're enumerating points
       if (point_arguments.impl != NULL)
         point_arguments.impl->register_dependence(this);
-      for (std::vector<FutureMap>::const_iterator it = 
-            point_futures.begin(); it != point_futures.end(); it++)
-        it->impl->register_dependence(this);
+      // Register mapping dependences on any future maps also
+      // if we're not pointwise analyzable. If we are then we'll
+      // do pointwise analysis on these when we enumerate the points
+      if (!is_pointwise_analyzable())
+      {
+        for (std::vector<FutureMap>::const_iterator it = 
+              point_futures.begin(); it != point_futures.end(); it++)
+          it->impl->register_dependence(this);
+      }
+      // TODO: fix future dependence logging
+#if 0
+#ifdef LEGION_SPY
+      else
+      {
+        // Record pointwise dependences on the point futures
+        for (std::vector<FutureMap>::const_iterator it = 
+              point_futures.begin(); it != point_futures.end(); it++)
+        {
+          if (it->impl->op == NULL)
+            continue;
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), it->impl->op_uid, 0/*idx*/,
+              unique_op_id, 0/*idx*/, LEGION_TRUE_DEPENDENCE,
+              true/*pointwise*/);
+        }
+      }
+#endif
+#endif
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                   wait_barriers, arrive_barriers, must_epoch);
@@ -11202,7 +11256,7 @@ namespace Legion {
     {
       // We're not control replicated so this is just a pointwise dependence
       return find_pointwise_dependence(point, get_generation(), to_trigger);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     RtEvent IndexTask::find_pointwise_dependence(const DomainPoint &point,
@@ -12928,8 +12982,8 @@ namespace Legion {
       result->index_domain = this->index_domain;
       result->version_infos.resize(logical_regions.size());
       // Now figure out our local point information
-      result->initialize_point(this, point, point_arguments,
-                               inline_task, point_futures);
+      result->initialize_point(this, point, point_arguments, inline_task,
+          point_futures, is_pointwise_analyzable());
       if (concurrent_task)
       {
         // Find the color for this point task

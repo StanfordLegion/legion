@@ -494,7 +494,8 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-              InnerContext::NO_BLOCKING_INDEX, provenance, true/*reg now*/));
+              InnerContext::NO_BLOCKING_INDEX, std::optional<uint64_t>(),
+              provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -4130,7 +4131,8 @@ namespace Legion {
         context(ctx), op(o), op_gen(o->get_generation()),
         op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
         blocking_index(o->get_context()->get_next_blocking_index()),
-        provenance(prov), future_map_domain(domain)
+        provenance(prov), future_map_domain(domain),
+        context_index(o->get_context_index())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4148,13 +4150,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, uint64_t blocking,
+                                 const std::optional<uint64_t> &index,
                                  Provenance *prov,
                                  bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
         context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
-        blocking_index(blocking), provenance(prov), future_map_domain(d)
+        blocking_index(blocking), provenance(prov), future_map_domain(d),
+        context_index(index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4173,11 +4177,13 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t index,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, Provenance *prov)
+                                 DistributedID did, Provenance *prov,
+                                 const std::optional<uint64_t> &ctx_index)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
-        blocking_index(index), provenance(prov), future_map_domain(domain)
+        blocking_index(index), provenance(prov), future_map_domain(domain),
+        context_index(ctx_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4374,6 +4380,7 @@ namespace Legion {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
         rez.serialize(blocking_index);
+        rez.serialize(context_index);
         if (provenance != NULL)
           provenance->serialize(rez);
         else
@@ -4407,9 +4414,11 @@ namespace Legion {
       derez.deserialize(future_map_domain);
       uint64_t coordinate;
       derez.deserialize(coordinate);
+      std::optional<uint64_t> index;
+      derez.deserialize(index);
       AutoProvenance provenance(Provenance::deserialize(derez));
       FutureMap result(runtime->find_or_create_future_map(future_map_did, ctx, 
-                      coordinate, future_map_domain, provenance));
+                      coordinate, future_map_domain, provenance, index));
       result.impl->unpack_global_ref();
       return result;
     }
@@ -4505,7 +4514,7 @@ namespace Legion {
       // We know futures can never flow up the task tree so the
       // only way they have the same depth is if they are from 
       // the same parent context
-      TaskContext *context = consumer_op->get_context();
+      InnerContext *context = consumer_op->get_context();
       const int consumer_depth = context->get_depth();
 #ifdef DEBUG_LEGION
       assert(consumer_depth >= op_depth);
@@ -4519,6 +4528,41 @@ namespace Legion {
             consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent FutureMapImpl::find_pointwise_dependence(const DomainPoint &point,
+        int context_depth, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(context_depth >= op_depth);
+#endif
+      if (!context_index || (context_depth != op_depth))
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return RtEvent::NO_RT_EVENT;
+      }
+      if (!is_owner())
+      {
+        // Make an event and send it back to the owner node
+        if (!to_trigger.exists())
+          to_trigger = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(point);
+          rez.serialize(context_depth);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_future_map_find_pointwise(owner_space, rez);
+        return to_trigger;
+      }
+      else
+        return context->find_pointwise_dependence(*context_index,
+            point, 0/*shard*/, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -4619,6 +4663,31 @@ namespace Legion {
       Runtime::trigger_event(done);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureMapImpl::handle_future_map_find_pointwise(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      // Should always find it since this is the source node
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      FutureMapImpl *impl = dynamic_cast<FutureMapImpl*>(dc);
+      assert(impl != NULL);
+#else
+      FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
+#endif
+      DomainPoint point;
+      derez.deserialize(point);
+      int context_depth;
+      derez.deserialize(context_depth);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      impl->find_pointwise_dependence(point, context_depth, to_trigger);
+    }
+
     /////////////////////////////////////////////////////////////
     // Transform Future Map Impl 
     /////////////////////////////////////////////////////////////
@@ -4630,7 +4699,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prov),
+          prov, prev->context_index),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
@@ -4645,7 +4714,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prov),
+          prov, prev->context_index),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
@@ -4842,6 +4911,37 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent TransformFutureMapImpl::find_pointwise_dependence(
+        const DomainPoint &point, int context_depth, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain->contains_point(point));
+#endif
+      const Domain domain = future_map_domain->get_tight_domain();
+      const Domain range = previous->future_map_domain->get_tight_domain();
+      if (is_functor)
+      {
+        const DomainPoint transformed = 
+          transform.functor->transform_point(point, domain, range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->find_pointwise_dependence(transformed,
+            context_depth, to_trigger);
+      }
+      else
+      {
+        const DomainPoint transformed = (*transform.fnptr)(point,domain,range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->find_pointwise_dependence(transformed,
+            context_depth, to_trigger);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Future Map Impl 
     /////////////////////////////////////////////////////////////
@@ -4870,9 +4970,9 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
                             Runtime *rt, IndexSpaceNode *domain,
                             IndexSpaceNode *shard_dom, DistributedID did, 
-                            uint64_t coord,
+                            uint64_t coord, std::optional<uint64_t> ctx_index,
                             Provenance *prov, CollectiveMapping *mapping)
-      : FutureMapImpl(ctx, rt, domain, did, coord, prov, 
+      : FutureMapImpl(ctx, rt, domain, did, coord, ctx_index, prov,
                       false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), sharding_function(NULL),
@@ -5114,6 +5214,33 @@ namespace Legion {
       }
       else
         return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplFutureMapImpl::find_pointwise_dependence(
+        const DomainPoint &point, int context_depth, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(context_depth >= op_depth);
+#endif
+      if (!context_index || (context_depth != op_depth))
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return RtEvent::NO_RT_EVENT;
+      }
+      const Domain sharding_domain = shard_domain->get_tight_domain();
+      if (sharding_function.load() == NULL)
+      {
+        RtEvent wait_on = get_sharding_function_ready();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      const ShardID owner_shard = 
+        sharding_function.load()->find_owner(point, sharding_domain);
+      return context->find_pointwise_dependence(*context_index,
+          point, owner_shard, to_trigger);
     }
 
     /////////////////////////////////////////////////////////////
@@ -15691,6 +15818,11 @@ namespace Legion {
               runtime->handle_future_map_future_response(derez);
               break;
             }
+          case SEND_FUTURE_MAP_POINTWISE:
+            {
+              runtime->handle_future_map_find_pointwise(derez);
+              break;
+            }
           case SEND_REPL_COMPUTE_EQUIVALENCE_SETS:
             {
               runtime->handle_control_replicate_compute_equivalence_sets(
@@ -26188,6 +26320,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_future_map_find_pointwise(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_FUTURE_MAP_POINTWISE, rez,
+                                                          true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_compute_equivalence_sets(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -28683,6 +28824,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_future_map_find_pointwise(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FutureMapImpl::handle_future_map_find_pointwise(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_compute_equivalence_sets(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -30955,8 +31103,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                          TaskContext *ctx, uint64_t coord, IndexSpace domain,
-                          Provenance *provenance)
+              TaskContext *ctx, uint64_t coord, IndexSpace domain,
+              Provenance *provenance, const std::optional<uint64_t> &ctx_index)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -30980,7 +31128,7 @@ namespace Legion {
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
-           coord, provenance, false/*register now*/);
+           coord, ctx_index, provenance, false/*register now*/);
       // Retake the lock and see if we lost the race
       RtEvent ready;
       {

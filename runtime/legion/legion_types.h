@@ -890,6 +890,7 @@ namespace Legion {
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
+      SEND_FUTURE_MAP_POINTWISE,
       SEND_REPL_COMPUTE_EQUIVALENCE_SETS,
       SEND_REPL_OUTPUT_EQUIVALENCE_SET,
       SEND_REPL_REFINE_EQUIVALENCE_SETS,
@@ -1226,6 +1227,7 @@ namespace Legion {
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
+        "Send Future Map Find Pointwise Dependence",                  \
         "Send Replicate Compute Equivalence Sets",                    \
         "Send Replicate Register Output Equivalence Set",             \
         "Send Replicate Refine Equivalence Sets",                     \

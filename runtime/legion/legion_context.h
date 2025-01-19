@@ -122,6 +122,9 @@ namespace Legion {
           const void *arg2 = NULL, size_t arg2len = 0);
       virtual void post_semantic_attach(void);
     public:
+      virtual RtEvent find_pointwise_dependence(uint64_t context_index,
+          const DomainPoint &point, ShardID shard,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) = 0;
       virtual void return_resources(ResourceTracker *target,
                                     uint64_t return_index,
                                     std::set<RtEvent> &preconditions) = 0;
@@ -3552,6 +3555,9 @@ namespace Legion {
                 const std::vector<PhysicalRegion> &parent_regions,
                 std::deque<InstanceSet> &physical_instances);
       virtual bool is_leaf_context(void) const;
+      virtual RtEvent find_pointwise_dependence(uint64_t context_index,
+          const DomainPoint &point, ShardID shard,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       virtual void return_resources(ResourceTracker *target, 
                                     uint64_t return_index,
                                     std::set<RtEvent> &preconditions);

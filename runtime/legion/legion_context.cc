@@ -1284,7 +1284,8 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(),
-          InnerContext::NO_BLOCKING_INDEX, provenance);
+          InnerContext::NO_BLOCKING_INDEX, std::optional<uint64_t>(),
+          provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
@@ -7147,7 +7148,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-        NO_BLOCKING_INDEX, provenance);
+        NO_BLOCKING_INDEX, std::optional<uint64_t>(), provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -18811,7 +18812,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              NO_BLOCKING_INDEX, provenance));
+              NO_BLOCKING_INDEX, std::optional<uint64_t>(), provenance));
       }
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -24262,6 +24263,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent LeafContext::find_pointwise_dependence(uint64_t context_index,
+        const DomainPoint &point, ShardID shard, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // The only reason we're here is if we're inlining index tasks
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------

@@ -256,7 +256,6 @@ namespace Legion {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      void complete_point_projection(void);
       void finalize_output_region_trees(void);
     public:
       void compute_parent_indexes(InnerContext *alt_context = NULL);
@@ -670,6 +669,7 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const { return DomainPoint(0); }
       virtual Domain get_shard_domain(void) const 
         { return Domain(DomainPoint(0),DomainPoint(0)); }
+      virtual bool is_pointwise_analyzable(void) const;
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -997,7 +997,8 @@ namespace Legion {
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments, bool inline_task,
-                            const std::vector<FutureMap> &point_futures);
+                            const std::vector<FutureMap> &point_futures,
+                            bool record_future_pointwise_dependences);
       RtEvent perform_pointwise_analysis(void);
     public:
       // From MemoizableOp
@@ -1029,6 +1030,7 @@ namespace Legion {
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
             std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
+      void complete_point_projection(void);
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;
