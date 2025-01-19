@@ -3045,7 +3045,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionRegion::pointwise(const ProjectionNode *other) const
+    bool ProjectionRegion::pointwise_dominates(
+                                              const ProjectionNode *other) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3053,9 +3054,10 @@ namespace Legion {
         dynamic_cast<const ProjectionRegion*>(other);
       assert(rhs != NULL);
       assert(region == rhs->region);
-      return has_pointwise(rhs);
+      return has_pointwise_dominance(rhs);
 #else
-      return has_pointwise(static_cast<const ProjectionRegion*>(other));
+      return has_pointwise_dominance(
+          static_cast<const ProjectionRegion*>(other));
 #endif
     }
 
@@ -3161,7 +3163,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionRegion::has_pointwise(const ProjectionRegion *other) const
+    bool ProjectionRegion::has_pointwise_dominance(
+                                            const ProjectionRegion *other) const
     //--------------------------------------------------------------------------
     {
       if (other->shard_users.empty())
@@ -3180,7 +3183,7 @@ namespace Legion {
             finder = local_children.find(it->first);
           if (finder == local_children.end())
             return false;
-          if (!finder->second->has_pointwise(it->second))
+          if (!finder->second->has_pointwise_dominance(it->second))
             return false;
         }
         return true;
@@ -3310,7 +3313,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionPartition::pointwise(const ProjectionNode *other) const
+    bool ProjectionPartition::pointwise_dominates(
+                                              const ProjectionNode *other) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3318,9 +3322,10 @@ namespace Legion {
         dynamic_cast<const ProjectionPartition*>(other);
       assert(rhs != NULL);
       assert(partition == rhs->partition);
-      return has_pointwise(rhs);
+      return has_pointwise_dominance(rhs);
 #else
-      return has_pointwise(static_cast<const ProjectionPartition*>(other));
+      return has_pointwise_dominance(
+          static_cast<const ProjectionPartition*>(other));
 #endif
     }
 
@@ -3471,7 +3476,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionPartition::has_pointwise(
+    bool ProjectionPartition::has_pointwise_dominance(
                                          const ProjectionPartition *other) const
     //--------------------------------------------------------------------------
     {
@@ -3487,7 +3492,7 @@ namespace Legion {
           finder = local_children.find(it->first);
         if (finder == local_children.end())
           return false;
-        if (!finder->second->has_pointwise(it->second))
+        if (!finder->second->has_pointwise_dominance(it->second))
           return false;
       }
       return true;
@@ -5175,12 +5180,14 @@ namespace Legion {
       if (summary->can_perform_name_based_self_analysis())
       {
         std::unordered_map<ProjectionSummary*,
-          std::unordered_map<ProjectionSummary*,bool> >::iterator finder =
-            pointwise_dependences.find(summary);
+          std::unordered_map<ProjectionSummary*,
+            std::pair<bool,bool> > >::iterator finder =
+              pointwise_dependences.find(summary);
         if (finder != pointwise_dependences.end())
         {
-          for (std::unordered_map<ProjectionSummary*,bool>::const_iterator it =
-                finder->second.begin(); it != finder->second.end(); it++)
+          for (std::unordered_map<ProjectionSummary*,
+                std::pair<bool,bool> >::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
             pointwise_dependences[it->first].erase(summary);
           pointwise_dependences.erase(finder);
         }
@@ -5240,7 +5247,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LogicalState::record_pointwise_dependence(LogicalAnalysis &analysis,
-        const LogicalUser &prev, const LogicalUser &next)
+        const LogicalUser &prev, const LogicalUser &next, bool &dominates)
     //--------------------------------------------------------------------------
     {
       if (!prev.pointwise_analyzable)
@@ -5264,23 +5271,39 @@ namespace Legion {
         return false;
       // If they're the same summary then we can do pointiwse analysis
       if (one == two)
+      {
+        dominates = true;
         return true;
+      }
       // Before we do the local analysis, see if we can find the result
       // in the cache from a prior computation
       std::unordered_map<ProjectionSummary*,
-        std::unordered_map<ProjectionSummary*,bool> >::const_iterator
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> > >::const_iterator
           one_finder = pointwise_dependences.find(one);
       if (one_finder != pointwise_dependences.end())
       {
-        std::unordered_map<ProjectionSummary*,bool>::const_iterator
-          two_finder = one_finder->second.find(two);
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> >::const_iterator two_finder =
+            one_finder->second.find(two);
         if (two_finder != one_finder->second.end())
-          return two_finder->second;
+        {
+          dominates = two_finder->second.second;
+          return two_finder->second.first;
+        }
       }
       // If they are different summaries, but are using the same projection
-      // function and the launch space of the second one is a (non-strict)
-      // subset of the launch domain for the first one then we can also
-      // perform point-wise dependence analysis
+      // function and either one's launch domain is a (non-strict) subset of
+      // the other's launch domain then we can do pointwise dependence 
+      // analysis. This follows from the fact that we know that both launches
+      // can do intra-space named based dependence analysis so their is no
+      // aliasing between the subregions of either projection. Therefore 
+      // whichever points exist in one launch domain but not in the other
+      // cannot alias with the ones that overlap (or alias in a way that
+      // supports name-based analysis with other points). However, if both
+      // launch domains are just overlapping with neither dominating then
+      // the non-overlapping points in each projection could map to aliasing
+      // regions and therefore not be safe for name-based analysis.
       if ((one->projection == two->projection) &&
           ((one->args == two->args) || ((one->arglen == two->arglen) &&
             (std::memcmp(one->args, two->args, one->arglen) == 0))))
@@ -5288,19 +5311,23 @@ namespace Legion {
         if (one->domain == two->domain)
         {
           // If they both have the same domain then this is easy
-          pointwise_dependences[one][two] = true;
-          pointwise_dependences[two][one] = true;
+          pointwise_dependences[one][two] = std::make_pair(true,true);
+          pointwise_dependences[two][one] = std::make_pair(true,true);
+          dominates = true;
           return true;
         }
         else
         {
-          const bool result = one->domain->dominates(two->domain);
-          pointwise_dependences[one][two] = result;
+          const bool one_dominates = one->domain->dominates(two->domain);
+          dominates = two->domain->dominates(one->domain);
+          const bool result = one_dominates || dominates;
+          pointwise_dependences[one][two] =
+            std::make_pair(result, dominates);
           // Keep the data structure symmetric for when we go to
           // prune out projection summaries
           pointwise_dependences[two][one] =
-            two->domain->dominates(one->domain);
-          return result;
+            std::make_pair(result, one_dominates);
+          return result; 
         }
       }
       // If we get here, do the more expensive check to see if we can do
@@ -5308,11 +5335,17 @@ namespace Legion {
       // local address space and then all-reduce the result between any
       // shards to see if they are all local and then save the result
       // in the cache for future cases.
-      const std::pair<bool,bool> result =
-        analysis.context->has_pointwise_dependence(one, two);
-      pointwise_dependences[one][two] = result.first;
-      pointwise_dependences[two][one] = result.second;
-      return result.first;
+      const std::pair<bool,bool> dominance =
+        analysis.context->has_pointwise_dominance(one, two);
+      // Same logic applies here as above: if either dominates then you
+      // can do pointwise dependence analysis
+      const bool result = dominance.first || dominance.second;
+      pointwise_dependences[one][two] =
+        std::make_pair(result, dominance.second);
+      pointwise_dependences[two][one] =
+        std::make_pair(result, dominance.first);
+      dominates = dominance.second;
+      return result;
     }
 
     //--------------------------------------------------------------------------

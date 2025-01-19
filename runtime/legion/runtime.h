@@ -2544,14 +2544,14 @@ namespace Legion {
                           Runtime *runtime, const Domain &launch_domain,
                           const std::vector<PointTask*> &point_tasks,
                           const std::vector<PointwiseDependence> *pointwise,
-                          const size_t total_shards);
+                          const size_t total_shards, bool replaying);
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx,
                           const RegionRequirement &req,
                           Runtime *runtime, const Domain &launch_domain,
                           const std::vector<ProjectionPoint*> &points,
                           const std::vector<PointwiseDependence> *pointwise,
-                          const size_t total_shards);
+                          const size_t total_shards, bool replaying);
       // Find inversions for pointwise dependence analysis
       // TODO: fix this in grandrefactor where we can change op_kind back
       // to an OpKind type

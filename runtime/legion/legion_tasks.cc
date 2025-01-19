@@ -1411,36 +1411,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::compute_point_region_requirements(void)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, COMPUTE_POINT_REQUIREMENTS_CALL);
-      // Update the region requirements for this point
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].handle_type != LEGION_SINGULAR_PROJECTION)
-        {
-          ProjectionFunction *function = 
-            runtime->find_projection_function(regions[idx].projection);
-          if (function->is_invertible)
-            assert(false); // TODO: implement dependent launches for inline
-          regions[idx].region = function->project_point(this, idx, runtime, 
-                                                index_domain, index_point);
-          // Update the region requirement kind 
-          regions[idx].handle_type = LEGION_SINGULAR_PROJECTION;
-        }
-        // Check to see if the region is a NO_REGION,
-        // if it is then switch the privilege to NO_ACCESS
-        if (regions[idx].region == LogicalRegion::NO_REGION)
-        {
-          regions[idx].privilege = LEGION_NO_ACCESS;
-          continue;
-        }
-      }
-      complete_point_projection(); 
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::complete_point_projection(void)
     //--------------------------------------------------------------------------
     {
@@ -13024,7 +12994,7 @@ namespace Legion {
           finder = pointwise_dependences.find(idx);
         function->project_points(req, idx, runtime, index_domain, points,
             (finder == pointwise_dependences.end()) ? NULL : &finder->second,
-            parent_ctx->get_total_shards());
+            parent_ctx->get_total_shards(), is_replaying());
       }
       // Update the no access regions
       for (unsigned idx = 0; idx < num_points; idx++)

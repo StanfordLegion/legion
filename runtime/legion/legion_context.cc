@@ -11131,14 +11131,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::pair<bool,bool> InnerContext::has_pointwise_dependence(
+    std::pair<bool,bool> InnerContext::has_pointwise_dominance(
         ProjectionSummary *one, ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
       // Do the analysis in both directions
       ProjectionNode *t1 = one->get_tree();
       ProjectionNode *t2 = two->get_tree();
-      return std::make_pair(t1->pointwise(t2), t2->pointwise(t1));
+      return std::make_pair(t1->pointwise_dominates(t2), 
+                            t2->pointwise_dominates(t1));
     }
 
     //--------------------------------------------------------------------------
@@ -20628,12 +20629,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::pair<bool,bool> ReplicateContext::has_pointwise_dependence(
+    std::pair<bool,bool> ReplicateContext::has_pointwise_dominance(
         ProjectionSummary *one, ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
       std::pair<bool,bool> local = 
-        InnerContext::has_pointwise_dependence(one, two);
+        InnerContext::has_pointwise_dominance(one, two);
       PointwiseAllreduce allreduce(this,
         get_next_collective_index(COLLECTIVE_LOC_109, true/*logical*/), local);
       allreduce.perform_collective_sync();

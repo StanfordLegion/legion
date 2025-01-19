@@ -1715,6 +1715,7 @@ namespace Legion {
       virtual RtEvent finalize_exchange(const unsigned index,const bool source);
     public:
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
+      virtual bool is_pointwise_analyzable(void) const;
       virtual RtEvent find_pointwise_dependence(
           const DomainPoint &point, GenerationID gen,
           RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);

@@ -18660,7 +18660,7 @@ namespace Legion {
                   unsigned index, Runtime *runtime, const Domain &launch_domain,
                   const std::vector<PointTask*> &point_tasks,
                   const std::vector<PointwiseDependence> *pointwise_dependences,
-                  const size_t total_shards)
+                  const size_t total_shards, bool replaying)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18677,8 +18677,11 @@ namespace Legion {
       // it here inside the runtime since we control the implementation of
       // the identity projection function
       const bool find_dependences = IS_WRITE(req) && !IS_COLLECTIVE(req) &&
-        (is_invertible || ((projection_id == 0) && 
+        !replaying && (is_invertible || ((projection_id == 0) && 
                            (req.handle_type == LEGION_REGION_PROJECTION)));
+      // Can skip pointwise analysis if we're replaying
+      if (replaying)
+        pointwise_dependences = NULL;
       if (find_dependences || (pointwise_dependences != NULL))
         pointwise_regions.reserve(point_tasks.size());
       if (!is_exclusive)
@@ -18888,7 +18891,7 @@ namespace Legion {
                   Runtime *runtime, const Domain &launch_domain, 
                   const std::vector<ProjectionPoint*> &points,
                   const std::vector<PointwiseDependence> *pointwise_dependences,
-                  const size_t total_shards)
+                  const size_t total_shards, bool replaying)
     //--------------------------------------------------------------------------
     {
       Mappable *mappable = op->get_mappable();
@@ -18898,9 +18901,13 @@ namespace Legion {
 #endif
       size_t arglen = 0;
       const void *args = req.get_projection_args(&arglen);
-      const bool find_dependences = is_invertible && IS_WRITE(req);
+      const bool find_dependences =
+        !replaying && is_invertible && IS_WRITE(req);
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
       std::vector<std::pair<LogicalRegion,DomainPoint> > pointwise_regions;
+      // Can skip pointwise analysis if we're replaying
+      if (replaying)
+        pointwise_dependences = NULL;
       if (find_dependences || (pointwise_dependences != NULL))
         pointwise_regions.reserve(points.size());
       if (!is_exclusive)

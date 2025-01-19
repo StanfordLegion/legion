@@ -1328,7 +1328,6 @@ namespace Legion {
         return;
 
       LogicalAnalysis logical_analysis(this, get_output_offset());
-      logical_analysis.bail_point_wise_analysis = false;
 
       unsigned req_count = get_region_count();
       for (unsigned i = 0; i < req_count; i++)
@@ -8885,7 +8884,7 @@ namespace Legion {
         function->project_points(this, idx, src_requirements[idx],
             runtime, index_domain, projection_points, 
             (finder == pointwise_dependences.end()) ? NULL : &finder->second,
-            parent_ctx->get_total_shards());
+            parent_ctx->get_total_shards(), is_replaying());
       }
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -8899,7 +8898,7 @@ namespace Legion {
         function->project_points(this, offset + idx, dst_requirements[idx],
             runtime, index_domain, projection_points,
             (finder == pointwise_dependences.end()) ? NULL : &finder->second,
-            parent_ctx->get_total_shards());
+            parent_ctx->get_total_shards(), is_replaying());
       }
       offset += dst_requirements.size();
       if (!src_indirect_requirements.empty())
@@ -8918,7 +8917,7 @@ namespace Legion {
               src_indirect_requirements[idx], runtime,
               index_domain, projection_points,
               (finder == pointwise_dependences.end()) ? NULL : &finder->second,
-              parent_ctx->get_total_shards());
+              parent_ctx->get_total_shards(), is_replaying());
         }
         offset += src_indirect_requirements.size();
       }
@@ -8938,7 +8937,7 @@ namespace Legion {
               dst_indirect_requirements[idx], runtime,
               index_domain, projection_points,
               (finder == pointwise_dependences.end()) ? NULL : &finder->second,
-              parent_ctx->get_total_shards());
+              parent_ctx->get_total_shards(), is_replaying());
         }
       }
       if (runtime->legion_spy_enabled)
@@ -8989,6 +8988,18 @@ namespace Legion {
         pending_pointwise_dependences.clear();
       }
       CopyOp::predicate_false();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexCopyOp::is_pointwise_analyzable(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We're not pointwise analyzable if we're doing collective gather/scatter
+      if (!src_indirect_requirements.empty() && collective_src_indirect_points)
+        return false;
+      if (!dst_indirect_requirements.empty() && collective_dst_indirect_points)
+        return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -16917,7 +16928,7 @@ namespace Legion {
                                                         points.end());
         function->project_points(this, 0/*idx*/, requirement,
             runtime, index_domain, projection_points, NULL/*no pointwise*/,
-            parent_ctx->get_total_shards());
+            parent_ctx->get_total_shards(), false/*is replaying*/);
         // No need to check the validity of the points, we know they are good
         if (runtime->legion_spy_enabled)
         {
@@ -19156,7 +19167,7 @@ namespace Legion {
       function->project_points(this, 0/*idx*/, requirement, runtime, 
           index_domain, projection_points, pointwise_dependences.empty() ?
           NULL : &pointwise_dependences.begin()->second,
-          parent_ctx->get_total_shards());
+          parent_ctx->get_total_shards(), is_replaying());
       if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointFillOp*>::const_iterator it = 

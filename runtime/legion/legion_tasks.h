@@ -256,7 +256,6 @@ namespace Legion {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      void compute_point_region_requirements(void);
       void complete_point_projection(void);
       void finalize_output_region_trees(void);
     public:

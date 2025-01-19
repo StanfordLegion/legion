@@ -1685,7 +1685,7 @@ namespace Legion {
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);
     public:
-      virtual std::pair<bool,bool> has_pointwise_dependence(
+      virtual std::pair<bool,bool> has_pointwise_dominance(
           ProjectionSummary *one, ProjectionSummary *two);
       virtual RtEvent find_pointwise_dependence(uint64_t context_index,
           const DomainPoint &point, ShardID shard,
@@ -2933,7 +2933,7 @@ namespace Legion {
                                   std::vector<LogicalUser*> &to_delete,
                                   TimeoutMatchExchange *&exchange);
     public:
-      virtual std::pair<bool,bool> has_pointwise_dependence(
+      virtual std::pair<bool,bool> has_pointwise_dominance(
           ProjectionSummary *one, ProjectionSummary *two);
       virtual RtEvent find_pointwise_dependence(uint64_t context_index,
           const DomainPoint &point, ShardID shard,
