@@ -47,6 +47,42 @@ public:
   size_t sent_bytes = 0;
 };
 
+TYPED_TEST_P(SparsityMapTest, RemoteDataReply)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  std::vector<Rect<N, T>> rect_list;
+  const size_t num_rects = 3;
+  const size_t max_rects = 4;
+  const int gap = 3;
+
+  int index = 0;
+  for(int i = 0; i < num_rects; i++) {
+    TypeParam lo_point = TypeParam(index);
+    TypeParam hi_point = TypeParam(index + 1);
+    index += gap;
+    rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+
+  SparsityMap<N, T> handle;
+  handle.id = 0;
+
+  NodeSet node;
+  auto *sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node, reinterpret_cast<SparsityMapCommunicator<N, T> *>(sparsity_comm));
+  impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0, /*disjoint=*/true, 0);
+
+  impl->set_contributor_count(1);
+  impl->contribute_nothing();
+  impl->remote_data_reply(2, true, false);
+
+  EXPECT_EQ(sparsity_comm->sent_contributions, num_rects);
+  EXPECT_EQ(sparsity_comm->sent_piece_count, num_rects);
+  EXPECT_EQ(sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
+}
+
 TYPED_TEST_P(SparsityMapTest, ContributeDenseRectListRemote)
 {
   constexpr int N = TestFixture::N;
@@ -408,11 +444,12 @@ TYPED_TEST_P(SparsityMapTest, ComputeOverlapFail)
   EXPECT_FALSE(ok);
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, ContributeDenseRectListRemote,
-                            ContributeDenseJointRects, ContributeDenseDisjointRects,
-                            SetContributorCountRemote, ContributeNothingRemote,
-                            ComputeCoveringForOneRect, ComputeCoveringForNRect,
-                            ComputeOverlapPassApprox, ComputeOverlapFail);
+REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, RemoteDataReply,
+                            ContributeDenseRectListRemote, ContributeDenseJointRects,
+                            ContributeDenseDisjointRects, SetContributorCountRemote,
+                            ContributeNothingRemote, ComputeCoveringForOneRect,
+                            ComputeCoveringForNRect, ComputeOverlapPassApprox,
+                            ComputeOverlapFail);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)

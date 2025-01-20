@@ -1511,23 +1511,17 @@ namespace Realm {
       const Rect<N, T> *rdata = &rects[0];
       size_t total_count = rects.size();
       size_t remaining = total_count;
-      size_t max_bytes_per_packet =
-          ActiveMessage<RemoteSparsityContrib>::recommended_max_payload(
+
+      size_t max_bytes_per_packet = sparsity_comm->recommend_max_payload(
               requestor, false /*!with_congestion*/);
       const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N, T>);
       assert(max_to_send > 0);
       size_t num_pieces = 0;
+
       // send partial messages first
       while(remaining > max_to_send) {
         size_t bytes = max_to_send * sizeof(Rect<N, T>);
-        ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
-        amsg->sparsity = me;
-        amsg->piece_count = 0;
-        amsg->disjoint = true; // we've already de-overlapped everything
-        amsg->total_count = total_count;
-        amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
-        amsg.commit();
-
+        sparsity_comm->send_contribute(me, 0, total_count, /*disjoint=*/true, rdata, bytes);
         num_pieces++;
         remaining -= max_to_send;
         rdata += max_to_send;
@@ -1535,13 +1529,7 @@ namespace Realm {
 
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N, T>);
-      ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
-      amsg->sparsity = me;
-      amsg->piece_count = num_pieces + 1;
-      amsg->disjoint = true; // we've already de-overlapped everything
-      amsg->total_count = total_count;
-      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
-      amsg.commit();
+      sparsity_comm->send_contribute(me, num_pieces + 1, total_count, /*disjoint=*/true, rdata, bytes);
     }
   }
 
