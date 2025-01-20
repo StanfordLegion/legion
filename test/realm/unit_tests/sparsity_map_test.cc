@@ -28,6 +28,12 @@ class MockSparsityMapCommunicator : public SparsityMapCommunicator<N, T> {
 public:
   virtual ~MockSparsityMapCommunicator() = default;
 
+  virtual void send_request(SparsityMap<N, T> me, bool request_precise,
+                            bool request_approx)
+  {
+    sent_requests++;
+  }
+
   virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
                                size_t total_count, bool disjoint, const void *data,
                                size_t datalen)
@@ -42,10 +48,29 @@ public:
     return sizeof(Rect<N, T>);
   }
 
+  int sent_requests = 0;
   int sent_contributions = 0;
   size_t sent_piece_count = 0;
   size_t sent_bytes = 0;
 };
+
+TYPED_TEST_P(SparsityMapTest, RemoteAddWaiter)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+
+  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
+
+  NodeSet node;
+  auto *sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+  auto impl = std::make_unique<SparsityMapImpl<N, T>>(
+      handle, node, reinterpret_cast<SparsityMapCommunicator<N, T> *>(sparsity_comm));
+
+  bool ok = impl->add_waiter(/*uop=*/nullptr, true);
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(sparsity_comm->sent_requests, 1);
+}
 
 TYPED_TEST_P(SparsityMapTest, RemoteDataReply)
 {
@@ -444,7 +469,7 @@ TYPED_TEST_P(SparsityMapTest, ComputeOverlapFail)
   EXPECT_FALSE(ok);
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, RemoteDataReply,
+REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, RemoteAddWaiter, RemoteDataReply,
                             ContributeDenseRectListRemote, ContributeDenseJointRects,
                             ContributeDenseDisjointRects, SetContributorCountRemote,
                             ContributeNothingRemote, ComputeCoveringForOneRect,

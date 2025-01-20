@@ -1042,6 +1042,19 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  void SparsityMapCommunicator<N, T>::send_request(SparsityMap<N, T> me,
+                                                   bool request_precise,
+                                                   bool request_approx)
+  {
+    ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityRequest> amsg(
+        ID(me).sparsity_creator_node());
+    amsg->sparsity = me;
+    amsg->send_precise = request_precise;
+    amsg->send_approx = request_approx;
+    amsg.commit();
+  }
+
+  template <int N, typename T>
   void SparsityMapCommunicator<N, T>::send_contribute(SparsityMap<N, T> me,
                                                       size_t piece_count,
                                                       size_t total_count, bool disjoint,
@@ -1053,8 +1066,8 @@ namespace Realm {
     amsg->piece_count = piece_count;
     amsg->total_count = total_count;
     amsg->disjoint = disjoint;
-    if (data && datalen) {
-        amsg.add_payload(data, datalen, PAYLOAD_COPY);
+    if(data && datalen) {
+      amsg.add_payload(data, datalen, PAYLOAD_COPY);
     }
     amsg.commit();
   }
@@ -1116,8 +1129,8 @@ namespace Realm {
       while(remaining > max_to_send) {
 
         size_t bytes = max_to_send * sizeof(Rect<N, T>);
-        sparsity_comm->send_contribute(
-          me, 0, 0, disjoint, reinterpret_cast<const void*>(rdata), bytes);
+        sparsity_comm->send_contribute(me, 0, 0, disjoint,
+                                       reinterpret_cast<const void *>(rdata), bytes);
         num_pieces++;
         remaining -= max_to_send;
         rdata += max_to_send;
@@ -1126,7 +1139,7 @@ namespace Realm {
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N, T>);
       sparsity_comm->send_contribute(me, num_pieces + 1, 0, disjoint,
-                                     reinterpret_cast<const void*>(rdata), bytes);
+                                     reinterpret_cast<const void *>(rdata), bytes);
       return;
     }
 
@@ -1385,6 +1398,7 @@ namespace Realm {
   template <int N, typename T>
   bool SparsityMapImpl<N, T>::add_waiter(PartitioningMicroOp *uop, bool precise)
   {
+
     // early out
     if(precise ? this->entries_valid.load_acquire() : this->approx_valid.load_acquire())
       return false;
@@ -1430,11 +1444,7 @@ namespace Realm {
     }
 
     if(request_approx || request_precise) {
-      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node());
-      amsg->sparsity = me;
-      amsg->send_precise = request_precise;
-      amsg->send_approx = request_approx;
-      amsg.commit();
+      sparsity_comm->send_request(me, request_precise, request_approx);
     }
 
     return registered;
@@ -1512,8 +1522,8 @@ namespace Realm {
       size_t total_count = rects.size();
       size_t remaining = total_count;
 
-      size_t max_bytes_per_packet = sparsity_comm->recommend_max_payload(
-              requestor, false /*!with_congestion*/);
+      size_t max_bytes_per_packet =
+          sparsity_comm->recommend_max_payload(requestor, false /*!with_congestion*/);
       const size_t max_to_send = max_bytes_per_packet / sizeof(Rect<N, T>);
       assert(max_to_send > 0);
       size_t num_pieces = 0;
@@ -1521,7 +1531,8 @@ namespace Realm {
       // send partial messages first
       while(remaining > max_to_send) {
         size_t bytes = max_to_send * sizeof(Rect<N, T>);
-        sparsity_comm->send_contribute(me, 0, total_count, /*disjoint=*/true, rdata, bytes);
+        sparsity_comm->send_contribute(me, 0, total_count, /*disjoint=*/true, rdata,
+                                       bytes);
         num_pieces++;
         remaining -= max_to_send;
         rdata += max_to_send;
@@ -1529,7 +1540,8 @@ namespace Realm {
 
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N, T>);
-      sparsity_comm->send_contribute(me, num_pieces + 1, total_count, /*disjoint=*/true, rdata, bytes);
+      sparsity_comm->send_contribute(me, num_pieces + 1, total_count, /*disjoint=*/true,
+                                     rdata, bytes);
     }
   }
 
@@ -1771,7 +1783,6 @@ namespace Realm {
                 << " sparsity=" << this->entries[i].sparsity
                 << " bitmap=" << this->entries[i].bitmap << std::endl;
 #endif
-
     NodeSet sendto_precise, sendto_approx;
     Event trigger_precise = Event::NO_EVENT;
     Event trigger_approx = Event::NO_EVENT;
@@ -1781,6 +1792,7 @@ namespace Realm {
 
       assert(!this->entries_valid.load());
       this->entries_valid.store_release(true);
+
       precise_requested = false;
       if(precise_ready_event.exists()) {
         trigger_precise = precise_ready_event;

@@ -75,6 +75,8 @@ namespace Realm {
   public:
     virtual ~SparsityMapCommunicator() = default;
 
+    virtual void send_request(SparsityMap<N, T> me, bool request_precise, bool request_approx);
+
     virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
                                  size_t total_count, bool disjoint,
                                  const void *data = nullptr, size_t datalen = 0);
