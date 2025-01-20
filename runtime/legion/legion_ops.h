@@ -804,7 +804,7 @@ namespace Legion {
     public:
       bool matches(const LogicalUser &user) const;
       void find_dependences(const RegionRequirement &req,
-          const std::vector<std::pair<LogicalRegion,DomainPoint> > &points,
+          const std::vector<LogicalRegion> &point_regions,
           std::map<LogicalRegion,std::vector<DomainPoint> > &dependences) const;
     public:
       void serialize(Serializer &rez) const;

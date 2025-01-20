@@ -2568,8 +2568,7 @@ namespace Legion {
       // to an OpKind type
       void find_inversions(unsigned op_kind, UniqueID uid,
           unsigned region_index, const RegionRequirement &req,
-          IndexSpaceNode *domain, 
-          const std::vector<std::pair<LogicalRegion,DomainPoint> > &regions,
+          IndexSpaceNode *domain, const std::vector<LogicalRegion> &regions,
           std::map<LogicalRegion,std::vector<DomainPoint> > &dependences);
     protected:
       // Old checking code explicitly for tasks
@@ -2592,13 +2591,15 @@ namespace Legion {
                                           Runtime *runtime) const; 
       // Checking for inversion
       void check_inversion(const ProjectionPoint *point, unsigned idx,
-                           const std::vector<DomainPoint> &ordered_points);
+                           const std::vector<DomainPoint> &ordered_points,
+                           const Domain &launch_domain, bool allow_empty=false);
       void check_containment(const ProjectionPoint *point, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
       // TODO: fix this in grandrefactor where we can change op_kind back
       // to an OpKind type
       void check_inversion(unsigned op_kind, UniqueID uid, unsigned idx,
-                           const std::vector<DomainPoint> &ordered_points);
+                           const std::vector<DomainPoint> &ordered_points,
+                           const Domain &launch_domain, bool allow_empty=false);
       void check_containment(unsigned op_kind, UniqueID uid, 
           unsigned idx, const DomainPoint &point,
           const std::vector<DomainPoint> &ordered_points);

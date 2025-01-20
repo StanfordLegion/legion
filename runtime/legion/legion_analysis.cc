@@ -297,12 +297,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PointwiseDependence::find_dependences(const RegionRequirement &req,
-        const std::vector<std::pair<LogicalRegion,DomainPoint> > &points,
+        const std::vector<LogicalRegion> &point_regions,
         std::map<LogicalRegion,std::vector<DomainPoint> > &dependences) const
     //--------------------------------------------------------------------------
     {
       projection->find_inversions(kind, unique_id, region_index, req,
-          domain, points, dependences);
+          domain, point_regions, dependences);
     }
 
     //--------------------------------------------------------------------------

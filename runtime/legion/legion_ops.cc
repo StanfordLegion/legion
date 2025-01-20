@@ -9015,12 +9015,8 @@ namespace Legion {
           (predication_state == PREDICATED_FALSE_STATE))
       {
         if (to_trigger.exists())
-        {
           Runtime::trigger_event(to_trigger);
-          return to_trigger;
-        }
-        else
-          return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT;
       }
       if (points.empty())
       {
@@ -19214,12 +19210,8 @@ namespace Legion {
           (predication_state == PREDICATED_FALSE_STATE))
       {
         if (to_trigger.exists())
-        {
           Runtime::trigger_event(to_trigger);
-          return to_trigger;
-        }
-        else
-          return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT;
       }
       if (points.empty())
       {
@@ -20803,13 +20795,9 @@ namespace Legion {
     {
       if (!pointwise_dependences.empty())
       {
-        std::vector<std::pair<LogicalRegion,DomainPoint> > 
-          regions(points.size());
+        std::vector<LogicalRegion> regions(points.size());
         for (unsigned idx = 0; idx < points.size(); idx++)
-        {
-          regions[idx].first = points[idx]->requirement.region;
-          regions[idx].second = points[idx]->index_point;
-        }
+          regions[idx] = points[idx]->requirement.region;
 #ifdef DEBUG_LEGION
         assert(pointwise_dependences.size() == 1);
         assert(pointwise_dependences.begin()->first == 0);
@@ -20828,7 +20816,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < points.size(); idx++)
             {
               std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-                finder = dependences.find(regions[idx].first);
+                finder = dependences.find(regions[idx]);
 #ifdef DEBUG_LEGION
               assert(finder != dependences.end());
 #endif
@@ -20849,7 +20837,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < points.size(); idx++)
             {
               std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-                finder = dependences.find(regions[idx].first);
+                finder = dependences.find(regions[idx]);
 #ifdef DEBUG_LEGION
               assert(finder != dependences.end());
 #endif
@@ -21223,12 +21211,8 @@ namespace Legion {
       if ((needed_gen < gen) || mapped)
       {
         if (to_trigger.exists())
-        {
           Runtime::trigger_event(to_trigger);
-          return to_trigger;
-        }
-        else
-          return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT;
       }
 #ifdef DEBUG_LEGION
       assert(!points.empty());
@@ -22018,13 +22002,9 @@ namespace Legion {
     {
       if (!pointwise_dependences.empty())
       {
-        std::vector<std::pair<LogicalRegion,DomainPoint> > 
-          regions(points.size());
+        std::vector<LogicalRegion> regions(points.size());
         for (unsigned idx = 0; idx < points.size(); idx++)
-        {
-          regions[idx].first = points[idx]->requirement.region;
-          regions[idx].second = points[idx]->index_point;
-        }
+          regions[idx] = points[idx]->requirement.region;
 #ifdef DEBUG_LEGION
         assert(pointwise_dependences.size() == 1);
         assert(pointwise_dependences.begin()->first == 0);
@@ -22043,7 +22023,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < points.size(); idx++)
             {
               std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-                finder = dependences.find(regions[idx].first);
+                finder = dependences.find(regions[idx]);
 #ifdef DEBUG_LEGION
               assert(finder != dependences.end());
 #endif
@@ -22064,7 +22044,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < points.size(); idx++)
             {
               std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-                finder = dependences.find(regions[idx].first);
+                finder = dependences.find(regions[idx]);
 #ifdef DEBUG_LEGION
               assert(finder != dependences.end());
 #endif
@@ -22236,12 +22216,8 @@ namespace Legion {
       if ((needed_gen < gen) || mapped)
       {
         if (to_trigger.exists())
-        {
           Runtime::trigger_event(to_trigger);
-          return to_trigger;
-        }
-        else
-          return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT;
       }
 #ifdef DEBUG_LEGION
       assert(!points.empty());

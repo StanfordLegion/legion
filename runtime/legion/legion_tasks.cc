@@ -8416,6 +8416,11 @@ namespace Legion {
         for (std::vector<FutureMap>::const_iterator it = 
               point_futures.begin(); it != point_futures.end(); it++)
         {
+          if (!it->impl->future_map_domain->contains_point(point))
+          {
+            this->futures.push_back(Future());
+            continue;
+          }
           this->futures.push_back(it->impl->get_future(point,true/*internal*/));
           if (record_future_pointwise_dependences)
           {
@@ -11271,12 +11276,8 @@ namespace Legion {
           (predication_state == PREDICATED_FALSE_STATE))
       {
         if (to_trigger.exists())
-        {
           Runtime::trigger_event(to_trigger);
-          return to_trigger;
-        }
-        else
-          return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT;
       }
       // See if we can find this in the point mapped events data structure
       std::map<DomainPoint,RtEvent>::const_iterator finder =

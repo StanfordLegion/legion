@@ -18629,6 +18629,9 @@ namespace Legion {
                          std::vector<DomainPoint> &ordered_points)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(region == upper_bound);
+#endif
       // This is a special case for the ordered mapping of point tasks in 
       // the case where we used to try to premap regions for an index task
       // launch where all the points mapped the same region with read-write
@@ -18644,8 +18647,13 @@ namespace Legion {
                       std::vector<DomainPoint> &ordered_points)
     //--------------------------------------------------------------------------
     {
-      ordered_points.push_back(runtime->get_logical_region_color_point(region));
-      assert(launch_domain.contains(ordered_points[0]));
+#ifdef DEBUG_LEGION
+      assert(runtime->get_parent_logical_partition(region) == upper_bound);
+#endif
+      const DomainPoint point = runtime->get_logical_region_color_point(region);
+      // Need to check if it is in the launch domain
+      if (launch_domain.contains(point))
+        ordered_points.push_back(point);
     }
 
     //--------------------------------------------------------------------------
@@ -18801,7 +18809,7 @@ namespace Legion {
       size_t arglen = 0;
       const void *args = req.get_projection_args(&arglen);
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
-      std::vector<std::pair<LogicalRegion,DomainPoint> > pointwise_regions;
+      std::vector<LogicalRegion> pointwise_regions;
       // We used to support the case of the identity projection function
       // on logical regions special with the premap case, but it is really
       // just another case of having dependences between points on a region
@@ -18837,19 +18845,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion((*it), index, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
               check_containment((*it), index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -18869,19 +18875,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion((*it), index, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
               check_containment((*it), index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
       }
@@ -18905,19 +18909,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion((*it), index, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
               check_containment((*it), index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -18936,24 +18938,21 @@ namespace Legion {
             (*it)->set_projection_result(index, result);
 
             if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion((*it), index, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
               check_containment((*it), index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
       }
@@ -18965,7 +18964,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
           {
             std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-              finder = dependences.find(pointwise_regions[idx].first);
+              finder = dependences.find(pointwise_regions[idx]);
 #ifdef DEBUG_LEGION
             assert(finder != dependences.end());
 #endif
@@ -18975,11 +18974,11 @@ namespace Legion {
         }
         if (pointwise_dependences != NULL)
         {
-          dependences.clear();
           for (std::vector<PointwiseDependence>::const_iterator pit =
                 pointwise_dependences->begin(); pit !=
                 pointwise_dependences->end(); pit++)
           {
+            dependences.clear();
             // Careful! Not using the same region requirement as was originally
             // used for this projection but it has the same upper bound
             // which is good enough for us
@@ -18987,10 +18986,9 @@ namespace Legion {
             for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
             {
               std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-                finder = dependences.find(pointwise_regions[idx].first);
-#ifdef DEBUG_LEGION
-              assert(finder != dependences.end());
-#endif
+                finder = dependences.find(pointwise_regions[idx]);
+              if (finder == dependences.end())
+                continue;
               if (total_shards > 1)
               {
                 const Domain shard_domain = (pit->sharding_domain == NULL) ?
@@ -19036,7 +19034,7 @@ namespace Legion {
       const bool find_dependences =
         !replaying && is_invertible && IS_WRITE(req);
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
-      std::vector<std::pair<LogicalRegion,DomainPoint> > pointwise_regions;
+      std::vector<LogicalRegion> pointwise_regions;
       // Can skip pointwise analysis if we're replaying
       if (replaying)
         pointwise_dependences = NULL;
@@ -19063,19 +19061,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion(*it, index, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
               check_containment(*it, index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -19096,19 +19092,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion(*it, index, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
               check_containment(*it, index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
       }
@@ -19132,19 +19126,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion(*it, index, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
               check_containment(*it, index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -19165,19 +19157,17 @@ namespace Legion {
 
             if (find_dependences)
             {
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion(*it, index, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
               check_containment(*it, index, region_deps);
             }
             else if (pointwise_dependences != NULL)
-              pointwise_regions.emplace_back(
-                  std::make_pair(result, (*it)->get_domain_point()));
+              pointwise_regions.emplace_back(result);
           }
         }
       }
@@ -19189,7 +19179,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
           {
             std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-              finder = dependences.find(pointwise_regions[idx].first);
+              finder = dependences.find(pointwise_regions[idx]);
 #ifdef DEBUG_LEGION
             assert(finder != dependences.end());
 #endif
@@ -19199,11 +19189,11 @@ namespace Legion {
         }
         if (pointwise_dependences != NULL)
         {
-          dependences.clear();
           for (std::vector<PointwiseDependence>::const_iterator pit =
                 pointwise_dependences->begin(); pit !=
                 pointwise_dependences->end(); pit++)
           {
+            dependences.clear();
             // Careful! Not using the same region requirement as was originally
             // used for this projection but it has the same upper bound
             // which is good enough for us
@@ -19211,7 +19201,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
             {
               std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
-                finder = dependences.find(pointwise_regions[idx].first);
+                finder = dependences.find(pointwise_regions[idx]);
 #ifdef DEBUG_LEGION
               assert(finder != dependences.end());
 #endif
@@ -19244,8 +19234,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ProjectionFunction::find_inversions(unsigned op_kind, UniqueID uid,
         unsigned region_index, const RegionRequirement &req,
-        IndexSpaceNode *domain,
-        const std::vector<std::pair<LogicalRegion,DomainPoint> > &points,
+        IndexSpaceNode *domain, const std::vector<LogicalRegion> &points,
         std::map<LogicalRegion,std::vector<DomainPoint> > &dependences)
     //--------------------------------------------------------------------------
     {
@@ -19255,32 +19244,28 @@ namespace Legion {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
-          for (std::vector<
-                std::pair<LogicalRegion,DomainPoint> >::const_iterator it =
+          for (std::vector<LogicalRegion>::const_iterator it =
                 points.begin(); it != points.end(); it++)
           {
-            std::vector<DomainPoint> &region_deps = dependences[it->first];
-            if (region_deps.empty())
-            {
-              functor->invert(it->first, req.partition,
-                  launch_domain, region_deps);
-              check_inversion(op_kind, uid, region_index, region_deps);
-            }
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.partition, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
           }
         }
         else
         {
-          for (std::vector<
-                std::pair<LogicalRegion,DomainPoint> >::const_iterator it =
+          for (std::vector<LogicalRegion>::const_iterator it =
                 points.begin(); it != points.end(); it++)
           {
-            std::vector<DomainPoint> &region_deps = dependences[it->first];
-            if (region_deps.empty())
-            {
-              functor->invert(it->first, req.region,
-                  launch_domain, region_deps);
-              check_inversion(op_kind, uid, region_index, region_deps);
-            }
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.region, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
           }
         }
       }
@@ -19288,32 +19273,28 @@ namespace Legion {
       {
         if (req.handle_type == LEGION_PARTITION_PROJECTION)
         {
-          for (std::vector<
-                std::pair<LogicalRegion,DomainPoint> >::const_iterator it =
+          for (std::vector<LogicalRegion>::const_iterator it =
                 points.begin(); it != points.end(); it++)
           {
-            std::vector<DomainPoint> &region_deps = dependences[it->first];
-            if (region_deps.empty())
-            {
-              functor->invert(it->first, req.partition,
-                  launch_domain, region_deps);
-              check_inversion(op_kind, uid, region_index, region_deps);
-            }
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.partition, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
           }
         }
         else
         {
-          for (std::vector<
-                std::pair<LogicalRegion,DomainPoint> >::const_iterator it =
+          for (std::vector<LogicalRegion>::const_iterator it =
                 points.begin(); it != points.end(); it++)
           {
-            std::vector<DomainPoint> &region_deps = dependences[it->first];
-            if (region_deps.empty())
-            {
-              functor->invert(it->first, req.region,
-                  launch_domain, region_deps);
-              check_inversion(op_kind, uid, region_index, region_deps);
-            }
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.region, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
           }
         }
       }
@@ -19473,11 +19454,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_inversion(const ProjectionPoint *point,
-        unsigned index, const std::vector<DomainPoint> &points)
+        unsigned index, const std::vector<DomainPoint> &points,
+        const Domain &launch_domain, bool allow_empty)
     //--------------------------------------------------------------------------
     {
       const Operation *op = point->as_operation();
-      if (points.empty())
+      if (!allow_empty && points.empty())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
             "Projection functor %d produced an empty inversion result "
             "while inverting region requirement %d of %s (UID %lld). "
@@ -19486,24 +19468,36 @@ namespace Legion {
             projection_id, index, op->get_logging_name(),
             op->get_unique_op_id())
 #ifdef DEBUG_LEGION
-      std::set<DomainPoint> unique_points(points.begin(), points.end());
-      if (unique_points.size() != points.size())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+      std::set<DomainPoint> unique_points;
+      for (std::vector<DomainPoint>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (!launch_domain.contains(*it))
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "that contains points not in the launch domain for region "
+            "requirement %d of %s (UID %lld). Only points in the launch "
+            "domain can appear in the result.", projection_id, index,
+            op->get_logging_name(), op->get_unique_op_id())
+        if (!unique_points.insert(*it).second)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
             "Projection functor %d produced an invalid inversion result "
             "containing duplicate points for region requirement %d of "
             "%s (UID %lld). Each point is only permitted to "
             "appear once in an inversion.", projection_id, index,
             op->get_logging_name(), op->get_unique_op_id())
+      }
 #endif
     }
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_inversion(unsigned op_kind,
-        UniqueID uid, unsigned index, const std::vector<DomainPoint> &points)
+        UniqueID uid, unsigned index, const std::vector<DomainPoint> &points,
+        const Domain &launch_domain, bool allow_empty)
     //--------------------------------------------------------------------------
     {
       const Operation::OpKind kind = static_cast<Operation::OpKind>(op_kind);
-      if (points.empty())
+      if (!allow_empty && points.empty())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
             "Projection functor %d produced an empty inversion result "
             "while inverting region requirement %d of %s (UID %lld)."
@@ -19511,14 +19505,25 @@ namespace Legion {
             "that produced the region must always be included.",
             projection_id, index, Operation::get_string_rep(kind), uid)
 #ifdef DEBUG_LEGION
-      std::set<DomainPoint> unique_points(points.begin(), points.end());
-      if (unique_points.size() != points.size())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+      std::set<DomainPoint> unique_points;
+      for (std::vector<DomainPoint>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (!launch_domain.contains(*it))
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "that contains points not in the launch domain for region "
+            "requirement %d of %s (UID %lld). Only points in the launch "
+            "domain can appear in the result.", projection_id, index,
+            Operation::get_string_rep(kind), uid)
+        if (!unique_points.insert(*it).second)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
             "Projection functor %d produced an invalid inversion result "
             "containing duplicate points for region requirement %d of "
             "%s (UID %lld). Each point is only permitted to "
             "appear once in an inversion.", projection_id, index,
             Operation::get_string_rep(kind), uid)
+      }
 #endif
     }
 
