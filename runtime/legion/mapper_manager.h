@@ -387,29 +387,38 @@ namespace Legion {
                       Operation *op, bool prioritize = false);
       ~MappingCallInfo(void);
     public:
-      inline void begin_wait(void)
+      inline void begin_runtime_call(bool eager_pause)
         {
-          if (!paused)
+#ifdef DEBUG_LEGION
+          assert(!paused);
+          assert(!runtime_call);
+#endif
+          runtime_call = true;
+          if (eager_pause)
           {
             manager->pause_mapper_call(this);
             paused = true;
           }
         }
-      inline void pause_mapper_call(void)
+      inline void begin_wait(void)
         {
-#ifdef DEBUG_LEGION
-          assert(!paused);
-#endif
-          manager->pause_mapper_call(this);
-          paused = true;
+          if (!paused && runtime_call)
+          {
+            manager->pause_mapper_call(this);
+            paused = true;
+          }
         }
       inline void resume_mapper_call(void)
         { 
+#ifdef DEBUG_LEGION
+          assert(runtime_call);
+#endif
           if (paused)
           {
             manager->resume_mapper_call(this);
             paused = false;
           }
+          runtime_call = false;
         }
       inline const char* get_mapper_name(void) const
         { return manager->get_mapper_name(); }
@@ -448,6 +457,9 @@ namespace Legion {
       long long                         start_time;
       bool                              reentrant;
       bool                              paused;
+      // Whether we're inside a runtime call from the mapper
+      bool                              runtime_call;
+      const bool                        priority;
     };
 
   };

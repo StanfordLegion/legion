@@ -78,6 +78,16 @@ namespace Legion {
             out << "No (Remote Shard)";
             break;
           }
+        case NOT_REPLAYABLE_NON_LEAF:
+          {
+            out << "No (Non-Leaf Task Variant)";
+            break;
+          }
+        case NOT_REPLAYABLE_VARIABLE_RETURN:
+          {
+            out << "No (Variable Task Return Size)";
+            break;
+          }
         default:
           assert(false);
       }
@@ -4598,8 +4608,9 @@ namespace Legion {
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event)
       : trace(t), total_replays(1), replayable(REPLAYABLE), 
         idempotency(IDEMPOTENT), fence_completion_id(0),
-        has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL),
-        remaining_replays(0), total_logical(0)
+        has_virtual_mapping(false), has_non_leaf_task(false),
+        has_variable_return_size(false), has_no_consensus(false),
+        last_fence(NULL), remaining_replays(0), total_logical(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(fence_event);
@@ -5026,6 +5037,10 @@ namespace Legion {
         replayable = NOT_REPLAYABLE_BLOCKING;
       else if (has_virtual_mapping)
         replayable = NOT_REPLAYABLE_VIRTUAL;
+      else if (has_non_leaf_task)
+        replayable = NOT_REPLAYABLE_NON_LEAF;
+      else if (has_variable_return_size)
+        replayable = NOT_REPLAYABLE_VARIABLE_RETURN;
       op->begin_replayable_exchange(replayable);
       idempotency = capture_conditions(op); 
       op->begin_idempotent_exchange(idempotency);
@@ -7312,6 +7327,7 @@ namespace Legion {
     void PhysicalTemplate::record_mapper_output(const TraceLocalID &tlid,
                                             const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
+                                            bool is_leaf, bool has_return_size,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -7352,6 +7368,10 @@ namespace Legion {
             has_virtual_mapping = true;
         }
       }
+      if (!is_leaf)
+        has_non_leaf_task = true;
+      if (!has_return_size)
+        has_variable_return_size = true;
     }
 
     //--------------------------------------------------------------------------

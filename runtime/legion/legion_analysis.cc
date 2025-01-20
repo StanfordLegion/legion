@@ -1201,6 +1201,7 @@ namespace Legion {
     void RemoteTraceRecorder::record_mapper_output(const TraceLocalID &tlid,
                               const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
+                              bool is_leaf, bool has_return_size,
                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -1236,13 +1237,15 @@ namespace Legion {
           for (std::deque<InstanceSet>::const_iterator it = 
                physical_instances.begin(); it != physical_instances.end(); it++)
             it->pack_references(rez);
+          rez.serialize<bool>(is_leaf);
+          rez.serialize<bool>(has_return_size);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         applied_events.insert(applied);
       }
       else
         remote_tpl->record_mapper_output(tlid, output, physical_instances,
-                                         applied_events);
+            is_leaf, has_return_size, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1811,15 +1814,19 @@ namespace Legion {
             for (unsigned idx = 0; idx < num_phy_instances; idx++)
               physical_instances[idx].unpack_references(runtime, derez,
                                                         ready_events);
+            bool is_leaf, has_return_size;
+            derez.deserialize<bool>(is_leaf);
+            derez.deserialize<bool>(has_return_size);
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
+            
             std::set<RtEvent> applied_events;
             tpl->record_mapper_output(tlid, output, physical_instances,
-                                      applied_events);
+                is_leaf, has_return_size, applied_events);
             if (!applied_events.empty())
               Runtime::trigger_event(applied, 
                   Runtime::merge_events(applied_events));
