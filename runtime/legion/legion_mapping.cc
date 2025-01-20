@@ -25,6 +25,49 @@
 namespace Legion {
   namespace Mapping {
 
+    class AutoMapperCall {
+    public:
+      inline AutoMapperCall(MapperContext ctx, Internal::RuntimeCallKind kind,
+                            bool eager_pause = false);
+      inline ~AutoMapperCall(void);
+    public:
+      const MapperContext ctx;
+      const Internal::RuntimeCallKind kind;
+      long long start_time;
+    };
+
+    //--------------------------------------------------------------------------
+    inline AutoMapperCall::AutoMapperCall(MapperContext c,
+        Internal::RuntimeCallKind k, bool eager_pause)
+      : ctx(c), kind(k), start_time(0)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != Internal::implicit_mapper_call)
+      {
+        static RUNTIME_CALL_DESCRIPTIONS(runtime_call_names);
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
+                      "Invalid mapper context passed to mapper runtime "
+                      "call %s by mapper %s inside of mapper call %s. Mapper "
+                      "contexts are only valid for the mapper call to which "
+                      "they are passed. They cannot be stored beyond the "
+                      "lifetime of the mapper call.", runtime_call_names[kind],
+                      ctx->get_mapper_name(), ctx->get_mapper_call_name())
+      }
+      if (ctx->manager->profile_mapper)
+        start_time = Realm::Clock::current_time_in_nanoseconds();
+      ctx->begin_runtime_call(eager_pause);
+    }
+
+    //--------------------------------------------------------------------------
+    inline AutoMapperCall::~AutoMapperCall(void)
+    //--------------------------------------------------------------------------
+    {
+      ctx->resume_mapper_call();
+      if (ctx->manager->profile_mapper)
+        Internal::implicit_profiler->record_runtime_call(kind, start_time,
+            Realm::Clock::current_time_in_nanoseconds());
+    }
+
     /////////////////////////////////////////////////////////////
     // PhysicalInstance 
     /////////////////////////////////////////////////////////////
@@ -308,7 +351,14 @@ namespace Legion {
     {
       if (impl == NULL)
         return false;
-      return impl->entails(constraint_set, failed_constraint);
+      if (Internal::implicit_mapper_call != NULL)
+      {
+        AutoMapperCall call(Internal::implicit_mapper_call, 
+            Internal::MAPPER_CONSTRAINTS_ENTAIL_CALL);
+        return impl->entails(constraint_set, failed_constraint);
+      }
+      else
+        return impl->entails(constraint_set, failed_constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -424,7 +474,14 @@ namespace Legion {
       if (impl == NULL)
         return;
       std::vector<Internal::PhysicalManager*> managers;
-      impl->find_instances_in_memory(memory, managers);
+      if (Internal::implicit_mapper_call != NULL)
+      {
+        AutoMapperCall call(Internal::implicit_mapper_call,
+            Internal::MAPPER_FIND_COLLECTIVE_INSTANCES_IN_MEMORY);
+        impl->find_instances_in_memory(memory, managers);
+      }
+      else
+        impl->find_instances_in_memory(memory, managers);
       insts.reserve(insts.size() + managers.size());
       for (unsigned idx = 0; idx < managers.size(); idx++)
         insts.emplace_back(PhysicalInstance(managers[idx]));
@@ -438,7 +495,14 @@ namespace Legion {
       if (impl == NULL)
         return;
       std::vector<Internal::PhysicalManager*> managers;
-      impl->find_instances_nearest_memory(memory, managers, bandwidth);
+      if (Internal::implicit_mapper_call != NULL)
+      {
+        AutoMapperCall call(Internal::implicit_mapper_call,
+            Internal::MAPPER_FIND_COLLECTIVE_INSTANCES_NEAREST_MEMORY);
+        impl->find_instances_nearest_memory(memory, managers, bandwidth);
+      }
+      else
+        impl->find_instances_nearest_memory(memory, managers, bandwidth);
       insts.reserve(insts.size() + managers.size());
       for (unsigned idx = 0; idx < managers.size(); idx++)
         insts.emplace_back(PhysicalInstance(managers[idx]));
@@ -543,51 +607,7 @@ namespace Legion {
     {
     }
 
-    LEGION_REENABLE_DEPRECATED_WARNINGS
-
-    class AutoMapperCall {
-    public:
-      inline AutoMapperCall(MapperContext ctx, Internal::RuntimeCallKind kind,
-                            bool eager_pause = false);
-      inline ~AutoMapperCall(void);
-    public:
-      const MapperContext ctx;
-      const Internal::RuntimeCallKind kind;
-      long long start_time;
-    };
-
-    //--------------------------------------------------------------------------
-    inline AutoMapperCall::AutoMapperCall(MapperContext c,
-        Internal::RuntimeCallKind k, bool eager_pause)
-      : ctx(c), kind(k), start_time(0)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != Internal::implicit_mapper_call)
-      {
-        static RUNTIME_CALL_DESCRIPTIONS(runtime_call_names);
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
-                      "Invalid mapper context passed to mapper runtime "
-                      "call %s by mapper %s inside of mapper call %s. Mapper "
-                      "contexts are only valid for the mapper call to which "
-                      "they are passed. They cannot be stored beyond the "
-                      "lifetime of the mapper call.", runtime_call_names[kind],
-                      ctx->get_mapper_name(), ctx->get_mapper_call_name())
-      }
-      if (ctx->manager->profile_mapper)
-        start_time = Realm::Clock::current_time_in_nanoseconds();
-      if (eager_pause)
-        ctx->pause_mapper_call();
-    }
-
-    //--------------------------------------------------------------------------
-    inline AutoMapperCall::~AutoMapperCall(void)
-    //--------------------------------------------------------------------------
-    {
-      ctx->resume_mapper_call();
-      if (ctx->manager->profile_mapper)
-        Internal::implicit_profiler->record_runtime_call(kind, start_time,
-            Realm::Clock::current_time_in_nanoseconds());
-    }
+    LEGION_REENABLE_DEPRECATED_WARNINGS 
 
     /////////////////////////////////////////////////////////////
     // MapperRuntime
