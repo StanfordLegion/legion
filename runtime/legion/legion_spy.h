@@ -1514,6 +1514,13 @@ namespace Legion {
                       pointwise ? 1 : 0);
       }
 
+      static inline void log_future_dependence(UniqueID context, 
+                UniqueID prev_id, UniqueID next_id, bool pointwise = false)
+      {
+        log_spy.print("Future Dependence %llu %llu %llu %d",
+            context, prev_id, next_id, pointwise ? 1 : 0);
+      }
+
       // Logger calls for realm events
       static inline void log_event_dependence(LgEvent one, LgEvent two)
       {

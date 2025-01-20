@@ -10282,8 +10282,6 @@ namespace Legion {
               point_futures.begin(); it != point_futures.end(); it++)
           it->impl->register_dependence(this);
       }
-      // TODO: fix future dependence logging
-#if 0
 #ifdef LEGION_SPY
       else
       {
@@ -10291,15 +10289,13 @@ namespace Legion {
         for (std::vector<FutureMap>::const_iterator it = 
               point_futures.begin(); it != point_futures.end(); it++)
         {
-          if (it->impl->op == NULL)
+          if (!it->impl->context_index)
             continue;
-          LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_id(), it->impl->op_uid, 0/*idx*/,
-              unique_op_id, 0/*idx*/, LEGION_TRUE_DEPENDENCE,
-              true/*pointwise*/);
+          LegionSpy::log_future_dependence(
+              parent_ctx->get_unique_id(), it->impl->op_uid,
+              unique_op_id, true/*pointwise*/);
         }
       }
-#endif
 #endif
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 

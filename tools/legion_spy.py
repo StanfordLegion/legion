@@ -6221,12 +6221,15 @@ class MappingDependence(object):
 
     def __str__(self):
         return "index %d of %s and index %d of %s (type: %s) (pointwise: %s)" % \
-                (self.idx1, str(self.op1),
-                 self.idx2, str(self.op2),
+                (self.idx1 if self.idx1 is not None else -1, str(self.op1),
+                 self.idx2 if self.idx2 is not None else -1, str(self.op2),
                  DEPENDENCE_TYPES[self.dtype],
                  "true" if self.pointwise else "false")
 
     __repr__ = __str__
+
+    def is_future_dependence(self):
+        return self.idx1 is None and self.idx2 is None
 
     def print_dataflow_edge(self, printer, previous_pairs):
         key = (self.op1,self.op2,self.pointwise)
@@ -7496,7 +7499,7 @@ class Operation(object):
         else:
             replicants = None
         for dep in self.incoming:
-            if not dep.pointwise:
+            if not dep.pointwise or dep.is_future_dependence():
                 continue
             # Get the set of index spaces from our points for this requirement
             dst_spaces = list()
@@ -7640,9 +7643,9 @@ class Operation(object):
         if prev_op not in previous_deps:
             self.compute_previous_path(prev_op, previous_deps, need_fence, point_ops is not None)
             assert prev_op in previous_deps
-        elif need_fence and previous_deps[prev_op] < self.POINTWISE_PATH:
+        elif need_fence and previous_deps[prev_op] == self.UNKNOWN_PATH:
             self.compute_previous_path(prev_op, previous_deps, need_fence, point_ops is not None)
-        elif point_ops is not None and previous_deps[prev_op] < self.POINTWISE_PATH:
+        elif point_ops is not None and previous_deps[prev_op] == self.UNKNOWN_PATH:
             self.compute_previous_path(prev_op, previous_deps, need_fence, point_ops is not None)
         # Check the kind of the path
         path_kind = previous_deps[prev_op]
@@ -7695,8 +7698,8 @@ class Operation(object):
                 # We already started BFS-ing so we can restart from all
                 # the operations that we already visited
                 for op,kind in iteritems(previous_deps):
-                    # Skip any kind of pointwise path or no path
-                    if kind == self.POINTWISE_PATH or kind == self.NO_PATH:
+                    # If it was a no-path then we don't need that
+                    if kind == self.NO_PATH:
                         continue
                     if prev_op.get_context_index() <= op.get_context_index():
                         queue.append(op)
@@ -7710,13 +7713,8 @@ class Operation(object):
                 if current.get_context_index() < prev_op.get_context_index():
                     continue
                 for next_op,point in iteritems(current.logical_incoming):
-                    # Skip pointwise-only edges during this analysis
-                    if point:
-                        continue
                     if next_op in previous_deps:
                         assert previous_deps[next_op] != self.NO_PATH
-                        if previous_deps[next_op] != self.POINTWISE_PATH:
-                            continue
                     else:
                         previous_deps[next_op] = self.UNKNOWN_PATH
                     if next_op is prev_op:
@@ -7724,15 +7722,12 @@ class Operation(object):
                     queue.append(next_op)
                 if prev_op in previous_deps:
                     break
-            # Pointwise might still be able to find a point-wise path
-            if not pointwise:
-                # If we couldn't find it then we're done
-                if prev_op not in previous_deps:
-                    previous_deps[prev_op] = self.NO_PATH
-                    return
-                if not need_fence:
-                    previous_deps[prev_op] = self.FULL_ONLY_PATH
-                    return
+            # If we couldn't find a path of any kind well that is easy
+            if prev_op not in previous_deps:
+                previous_deps[prev_op] = self.NO_PATH
+                return
+            if not need_fence:
+                return
         # Now check to see if we can find a fenced path to this operation
         # First BFS to find all the frontier fence operations that we can reach 
         # from this operation but also come before the previous operation. 
@@ -7872,7 +7867,7 @@ class Operation(object):
                 continue
             # No need to traverse backwards through any fences since we
             # know that there is only a pointwise path here
-            if dep.op1.kind == INTER_CLOSE_OP_KIND or dep.op1.is_fence():
+            if dep.op1.kind == INTER_CLOSE_OP_KIND or dep.op1.is_fence() or dep.is_future_dependence():
                 continue
             if dep.op1 is prev_op or dep.op1.incoming:
                 # Compute the next set going backwards through this edge
@@ -12554,6 +12549,9 @@ index_launch_domain_pat = re.compile(
 mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+) (?P<pointwise>[0-1])")
+future_dep_pat          = re.compile(
+    prefix+"Future Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) "+
+           "(?P<next_id>[0-9]+) (?P<pointwise>[0-1])")
 future_create_pat       = re.compile(
     prefix+"Future Creation (?P<uid>[0-9]+) (?P<did>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
@@ -12914,6 +12912,17 @@ def parse_legion_spy_line(line, state):
         op2 = state.get_operation(int(m.group('next_id')))
         dep = MappingDependence(op1, op2, int(m.group('pidx')),
             int(m.group('nidx')), int(m.group('dtype')),
+            False if int(m.group('pointwise')) == 0 else True)
+        op2.add_incoming(dep)
+        op1.add_outgoing(dep)
+        # Record that we found a mapping dependence
+        state.has_mapping_deps = True
+        return True
+    m = future_dep_pat.match(line)
+    if m is not None:
+        op1 = state.get_operation(int(m.group('prev_id')))
+        op2 = state.get_operation(int(m.group('next_id')))
+        dep = MappingDependence(op1, op2, None, None, TRUE_DEPENDENCE,
             False if int(m.group('pointwise')) == 0 else True)
         op2.add_incoming(dep)
         op1.add_outgoing(dep)

@@ -2753,9 +2753,9 @@ namespace Legion {
         {
           consumer_op->register_dependence(producer_op, op_gen);
 #ifdef LEGION_SPY
-          LegionSpy::log_mapping_dependence(
-              context->get_unique_id(), producer_uid, 0,
-              consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+          LegionSpy::log_future_dependence(
+              context->get_unique_id(), producer_uid,
+              consumer_op->get_unique_op_id());
 #endif
         }
         else
@@ -4523,9 +4523,8 @@ namespace Legion {
       {
         consumer_op->register_dependence(op, op_gen);
 #ifdef LEGION_SPY
-        LegionSpy::log_mapping_dependence(
-            context->get_unique_id(), op_uid, 0,
-            consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+        LegionSpy::log_future_dependence(
+            context->get_unique_id(), op_uid, consumer_op->get_unique_op_id());
 #endif
       }
     }
