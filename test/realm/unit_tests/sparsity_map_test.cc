@@ -54,7 +54,7 @@ public:
   size_t sent_bytes = 0;
 };
 
-TYPED_TEST_P(SparsityMapTest, RemoteAddWaiter)
+TYPED_TEST_P(SparsityMapTest, AddRemoteWaiter)
 {
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
@@ -469,7 +469,7 @@ TYPED_TEST_P(SparsityMapTest, ComputeOverlapFail)
   EXPECT_FALSE(ok);
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, RemoteAddWaiter, RemoteDataReply,
+REGISTER_TYPED_TEST_SUITE_P(SparsityMapTest, AddRemoteWaiter, RemoteDataReply,
                             ContributeDenseRectListRemote, ContributeDenseJointRects,
                             ContributeDenseDisjointRects, SetContributorCountRemote,
                             ContributeNothingRemote, ComputeCoveringForOneRect,
