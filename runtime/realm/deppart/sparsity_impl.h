@@ -75,7 +75,8 @@ namespace Realm {
   public:
     virtual ~SparsityMapCommunicator() = default;
 
-    virtual void send_request(SparsityMap<N, T> me, bool request_precise, bool request_approx);
+    virtual void send_request(SparsityMap<N, T> me, bool request_precise,
+                              bool request_approx);
 
     virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
                                  size_t total_count, bool disjoint,
@@ -180,12 +181,19 @@ namespace Realm {
     std::unique_ptr<SparsityMapCommunicator<N, T>> sparsity_comm;
   };
 
+  class SparsityMapImplWrapper;
+  class SparsityWrapperCommunicator {
+  public:
+    virtual void unsubscribe(SparsityMapImplWrapper *impl, NodeID sender, ID id);
+  };
+
   // we need a type-erased wrapper to store in the runtime's lookup table
   class SparsityMapImplWrapper {
   public:
     static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
+    SparsityMapImplWrapper(SparsityWrapperCommunicator* _communicator);
     ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -207,6 +215,7 @@ namespace Realm {
     atomic<void *> map_impl; // actual implementation
     atomic<unsigned> references;
     NodeSet subscribers;
+    std::unique_ptr<SparsityWrapperCommunicator > communicator;
 
     // need a type-erased deleter
     typedef void (*Deleter)(void *);

@@ -214,6 +214,17 @@ namespace Realm {
     , type_tag(0)
     , map_impl(0)
     , references(0)
+    , communicator(std::make_unique<SparsityWrapperCommunicator>())
+  {}
+
+  SparsityMapImplWrapper::SparsityMapImplWrapper(SparsityWrapperCommunicator *_communcator)
+    : me((ID::IDType)-1)
+    , owner((unsigned)-1)
+    , next_free(0)
+    , type_tag(0)
+    , map_impl(0)
+    , references(0)
+    , communicator(_communcator)
   {}
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
@@ -285,6 +296,15 @@ namespace Realm {
     NodeID node;
   };
 
+  void SparsityWrapperCommunicator::unsubscribe(SparsityMapImplWrapper *impl,
+                                               NodeID sender, ID id)
+  {
+    ActiveMessage<typename SparsityMapImplWrapper::UnsubscribeMessage> amsg(sender);
+    amsg.add_remote_completion(UnsubscribeAcknowledeged(impl, sender));
+    amsg->id = id.id;
+    amsg.commit();
+  }
+
   void SparsityMapImplWrapper::remove_references(unsigned count, Event wait_on)
   {
     // Should be on the owner node when we get these messages
@@ -305,10 +325,7 @@ namespace Realm {
           references.store(subscribers.size() + 1);
           // broadcast delete to remote subscribers
           for(NodeID node : subscribers) {
-            ActiveMessage<typename SparsityMapImplWrapper::UnsubscribeMessage> amsg(node);
-            amsg.add_remote_completion(UnsubscribeAcknowledeged(this, node));
-            amsg->id = me.id;
-            amsg.commit();
+            communicator->unsubscribe(this, node, me);
           }
           // remove the guard and recycle if we've seen all the responses
           if(references.fetch_sub_acqrel(1) == 1) {

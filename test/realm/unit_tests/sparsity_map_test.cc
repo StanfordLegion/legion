@@ -3,6 +3,15 @@
 
 using namespace Realm;
 
+class MockSparsityWrapperCommunicator : public SparsityWrapperCommunicator {
+public:
+  virtual void unsubscribe(SparsityMapImplWrapper *impl, NodeID sender, ID id)
+  {
+    unsubscribers.add(sender);
+  }
+  NodeSet unsubscribers;
+};
+
 TEST(SparistyMapImplWrapperTest, AddReferences)
 {
   const int unsigned count = 2;
@@ -13,16 +22,28 @@ TEST(SparistyMapImplWrapperTest, AddReferences)
   EXPECT_EQ(wrapper->references.load(), count);
 }
 
-TEST(SparistyMapImplWrapperTest, DISABLED_RemoveReferences)
+TEST(SparistyMapImplWrapperTest, RemoveReferences)
 {
-  const int unsigned count = 2;
-  auto wrapper = std::make_unique<SparsityMapImplWrapper>();
+  NodeSet subscribers;
+  MockSparsityWrapperCommunicator *comm = new MockSparsityWrapperCommunicator();
+  SparsityMapImplWrapper *wrapper = new SparsityMapImplWrapper(comm);
+  SparsityMap<1, int> handle =
+      (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<1, int>>();
+  subscribers.add(7);
+  subscribers.add(9);
 
   wrapper->init(ID::make_sparsity(0, 0, 0), 0);
-  wrapper->add_references(count);
-  wrapper->remove_references(count, Event::NO_EVENT);
+  auto impl = wrapper->get_or_create(handle);
+  wrapper->add_references(1);
+  for(const auto node : subscribers) {
+    impl->record_remote_contributor(node);
+  }
+  wrapper->remove_references(1, Event::NO_EVENT);
 
-  EXPECT_EQ(wrapper->references.load(), 0);
+  EXPECT_NE(impl, nullptr);
+  for(const auto node : subscribers) {
+    EXPECT_TRUE(comm->unsubscribers.contains(node));
+  }
 }
 
 template <typename PointType>
