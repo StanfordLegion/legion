@@ -12,6 +12,38 @@ public:
   NodeSet unsubscribers;
 };
 
+TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
+{
+  NodeSet subscribers;
+  NodeSet removed;
+  MockSparsityWrapperCommunicator *comm = new MockSparsityWrapperCommunicator();
+  SparsityMapImplWrapper *wrapper = new SparsityMapImplWrapper(comm);
+  SparsityMap<1, int> handle =
+      (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<1, int>>();
+
+  subscribers.add(7);
+  subscribers.add(9);
+  subscribers.add(11);
+  wrapper->init(ID::make_sparsity(0, 0, 0), 0);
+  auto impl = wrapper->get_or_create(handle);
+  wrapper->add_references(subscribers.size() + 1);
+  for(const auto node : subscribers) {
+    impl->record_remote_contributor(node);
+  }
+
+  removed = subscribers;
+  for(const auto node : subscribers) {
+    wrapper->unsubscribe(node);
+    removed.remove(node);
+    if(removed.size() <= 1)
+      break;
+  }
+
+  for(const auto node : removed) {
+    EXPECT_TRUE(wrapper->subscribers.contains(node));
+  }
+}
+
 TEST(SparistyMapImplWrapperTest, AddReferences)
 {
   const int unsigned count = 2;
