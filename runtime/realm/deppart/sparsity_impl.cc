@@ -217,8 +217,7 @@ namespace Realm {
     , communicator(std::make_unique<SparsityWrapperCommunicator>())
   {}
 
-  SparsityMapImplWrapper::SparsityMapImplWrapper(
-      SparsityWrapperCommunicator *_communcator)
+  SparsityMapImplWrapper::SparsityMapImplWrapper(SparsityWrapperCommunicator *_communcator)
     : me((ID::IDType)-1)
     , owner((unsigned)-1)
     , next_free(0)
@@ -298,7 +297,7 @@ namespace Realm {
   };
 
   void SparsityWrapperCommunicator::unsubscribe(SparsityMapImplWrapper *impl,
-                                                NodeID sender, ID id)
+                                               NodeID sender, ID id)
   {
     ActiveMessage<typename SparsityMapImplWrapper::UnsubscribeMessage> amsg(sender);
     amsg.add_remote_completion(UnsubscribeAcknowledeged(impl, sender));
@@ -628,6 +627,7 @@ namespace Realm {
       if(bounds.overlaps(entries[i].bounds))
         in_bounds.push_back(i);
     }
+
     // does this fit within the 'max_rects' constraint?
     if((max_rects == 0) || (in_bounds.size() <= max_rects)) {
       // yay!  copy (intersected) rectangles over and we're done - there was
@@ -799,7 +799,6 @@ namespace Realm {
         size_t c = start_count;
         while(c-- > 0) {
           PerClumpCountState<N, T> &pc = state[c];
-
           // at each existing count, we have a choice of combining with
           //  one of the existing clumps at that count, or using the result
           //  from the next count down and starting a new clump
@@ -1371,7 +1370,6 @@ namespace Realm {
     }
 
     bool have_all_pieces = false;
-
     if(piece_count > 0) {
       // this is the last (or only) piece of a contribution, so add our
       //  piece count to the total piece count across all contributions and
