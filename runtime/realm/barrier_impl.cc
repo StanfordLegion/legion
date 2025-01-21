@@ -1361,7 +1361,7 @@ namespace Realm {
         }
 
         assert(original_trigger_gen <= trigger_gen);
-        // trigger_gen might have changed so make sure you use args.trigger_gen here
+        // trigger_gen might have changed so make sure you use original_trigger_gen here
         assert(datalen == (redop->sizeof_lhs * (original_trigger_gen - previous_gen)));
         assert(previous_gen >= first_gen);
         memcpy(final_values.data() +
