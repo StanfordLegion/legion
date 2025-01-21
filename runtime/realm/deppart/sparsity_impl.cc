@@ -217,7 +217,8 @@ namespace Realm {
     , communicator(std::make_unique<SparsityWrapperCommunicator>())
   {}
 
-  SparsityMapImplWrapper::SparsityMapImplWrapper(SparsityWrapperCommunicator *_communcator)
+  SparsityMapImplWrapper::SparsityMapImplWrapper(
+      SparsityWrapperCommunicator *_communcator)
     : me((ID::IDType)-1)
     , owner((unsigned)-1)
     , next_free(0)
@@ -297,7 +298,7 @@ namespace Realm {
   };
 
   void SparsityWrapperCommunicator::unsubscribe(SparsityMapImplWrapper *impl,
-                                               NodeID sender, ID id)
+                                                NodeID sender, ID id)
   {
     ActiveMessage<typename SparsityMapImplWrapper::UnsubscribeMessage> amsg(sender);
     amsg.add_remote_completion(UnsubscribeAcknowledeged(impl, sender));
@@ -1370,6 +1371,7 @@ namespace Realm {
     }
 
     bool have_all_pieces = false;
+
     if(piece_count > 0) {
       // this is the last (or only) piece of a contribution, so add our
       //  piece count to the total piece count across all contributions and
