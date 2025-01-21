@@ -990,11 +990,7 @@ namespace Realm {
     }
 
     if(request_approx || request_precise) {
-      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node());
-      amsg->sparsity = me;
-      amsg->send_precise = request_precise;
-      amsg->send_approx = request_approx;
-      amsg.commit();
+      sparsity_comm->send_request(me, request_precise, request_approx);
     }
 
     return e;
