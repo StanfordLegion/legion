@@ -7715,6 +7715,7 @@ class Operation(object):
                 for next_op,point in iteritems(current.logical_incoming):
                     if next_op in previous_deps:
                         assert previous_deps[next_op] != self.NO_PATH
+                        continue
                     else:
                         previous_deps[next_op] = self.UNKNOWN_PATH
                     if next_op is prev_op:
