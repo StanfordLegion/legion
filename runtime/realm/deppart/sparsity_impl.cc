@@ -377,8 +377,9 @@ namespace Realm {
       // Invalidating on a remote node so recycle immediately
       recycle_now = true;
     }
-    if(recycle_now)
+    if(recycle_now) {
       recycle();
+    }
   }
 
   void SparsityMapImplWrapper::UnsubscribeMessage::handle_message(

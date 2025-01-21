@@ -3,7 +3,27 @@
 
 using namespace Realm;
 
-TEST(SparistyMapTest, Construct) {}
+TEST(SparistyMapImplWrapperTest, AddReferences)
+{
+  const int unsigned count = 2;
+  auto wrapper = std::make_unique<SparsityMapImplWrapper>();
+
+  wrapper->add_references(count);
+
+  EXPECT_EQ(wrapper->references.load(), count);
+}
+
+TEST(SparistyMapImplWrapperTest, DISABLED_RemoveReferences)
+{
+  const int unsigned count = 2;
+  auto wrapper = std::make_unique<SparsityMapImplWrapper>();
+
+  wrapper->init(ID::make_sparsity(0, 0, 0), 0);
+  wrapper->add_references(count);
+  wrapper->remove_references(count, Event::NO_EVENT);
+
+  EXPECT_EQ(wrapper->references.load(), 0);
+}
 
 template <typename PointType>
 struct PointTraits;
