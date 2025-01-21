@@ -1249,6 +1249,8 @@ namespace Realm {
       bool is_complete_list, unsigned base_count, const void *data, size_t datalen,
       TimeLimit work_until)
   {
+    // Make a copy here because this can change later
+    const EventImpl::gen_t original_trigger_gen = trigger_gen;
     if(!remote_notifications.empty()) {
       AutoLock<> a(mutex);
 
@@ -1358,9 +1360,9 @@ namespace Realm {
           value_capacity = new_capacity;
         }
 
-        assert(trigger_gen <= trigger_gen);
+        assert(original_trigger_gen <= trigger_gen);
         // trigger_gen might have changed so make sure you use args.trigger_gen here
-        assert(datalen == (redop->sizeof_lhs * (trigger_gen - previous_gen)));
+        assert(datalen == (redop->sizeof_lhs * (original_trigger_gen - previous_gen)));
         assert(previous_gen >= first_gen);
         memcpy(final_values.data() +
                    ((previous_gen - first_generation) * redop->sizeof_lhs),
