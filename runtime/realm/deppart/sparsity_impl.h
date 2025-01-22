@@ -182,6 +182,7 @@ namespace Realm {
   class SparsityMapImplWrapper;
   class SparsityWrapperCommunicator {
   public:
+    virtual ~SparsityWrapperCommunicator() = default;
     virtual void unsubscribe(SparsityMapImplWrapper *impl, NodeID sender, ID id);
   };
 
@@ -191,7 +192,7 @@ namespace Realm {
     static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
-    SparsityMapImplWrapper(SparsityWrapperCommunicator* _communicator);
+    SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator);
     ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -213,7 +214,7 @@ namespace Realm {
     atomic<void *> map_impl; // actual implementation
     atomic<unsigned> references;
     NodeSet subscribers;
-    std::unique_ptr<SparsityWrapperCommunicator > communicator;
+    std::unique_ptr<SparsityWrapperCommunicator> communicator;
 
     // need a type-erased deleter
     typedef void (*Deleter)(void *);

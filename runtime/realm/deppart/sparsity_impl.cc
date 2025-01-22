@@ -217,7 +217,8 @@ namespace Realm {
     , communicator(std::make_unique<SparsityWrapperCommunicator>())
   {}
 
-  SparsityMapImplWrapper::SparsityMapImplWrapper(SparsityWrapperCommunicator *_communcator)
+  SparsityMapImplWrapper::SparsityMapImplWrapper(
+      SparsityWrapperCommunicator *_communcator)
     : me((ID::IDType)-1)
     , owner((unsigned)-1)
     , next_free(0)
@@ -297,7 +298,7 @@ namespace Realm {
   };
 
   void SparsityWrapperCommunicator::unsubscribe(SparsityMapImplWrapper *impl,
-                                               NodeID sender, ID id)
+                                                NodeID sender, ID id)
   {
     ActiveMessage<typename SparsityMapImplWrapper::UnsubscribeMessage> amsg(sender);
     amsg.add_remote_completion(UnsubscribeAcknowledeged(impl, sender));
@@ -1075,7 +1076,8 @@ namespace Realm {
                                                       const void *data, size_t datalen)
   {
     NodeID owner = ID(me).sparsity_creator_node();
-    ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib> amsg(owner);
+    ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib> amsg(owner,
+                                                                              datalen);
     amsg->sparsity = me;
     amsg->piece_count = piece_count;
     amsg->total_count = total_count;
