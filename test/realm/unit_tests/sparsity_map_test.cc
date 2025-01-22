@@ -265,6 +265,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
   SparsityMapPublicImpl<N, T> *public_impl =
       reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
   auto entries = public_impl->get_entries();
+  EXPECT_TRUE(public_impl->is_valid());
   EXPECT_EQ(entries.size(), num_rects);
   EXPECT_EQ(entries.size(), rect_list.size());
   for(size_t i = 0; i < entries.size(); i++) {

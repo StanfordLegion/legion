@@ -104,8 +104,6 @@ namespace Realm {
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
 
-    void destroy(Event wait_on = Event::NO_EVENT);
-
     static SparsityMapImpl<N, T> *lookup(SparsityMap<N, T> sparsity);
 
     // methods used in the population of a sparsity map
