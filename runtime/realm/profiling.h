@@ -380,7 +380,7 @@ namespace Realm {
     std::vector<ProfilingRequest *> requests;
   };
 
-  class REALM_INTERNAL_API ProfilingMeasurementCollection {
+  class REALM_PUBLIC_API ProfilingMeasurementCollection {
   public:
     ProfilingMeasurementCollection(void);
     ~ProfilingMeasurementCollection(void);

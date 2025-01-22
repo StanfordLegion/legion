@@ -1,0 +1,156 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "win",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "debug-coverage",
+      "displayName": "Coverage",
+      "inherits": "debug",
+      "cacheVariables": {
+        "REALM_ENABLE_COVERAGE": true
+      }
+    },
+    {
+      "name": "gasnet-slingshot-11",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_GASNETEX": true,
+        "GASNET_CONDUIT": "ofi",
+        "GASNet_CONFIG_ARGS": "--with-ofi-provider=cxi --with-ofi-spawner=pmi --with-pmi-version=cray"
+      }
+    },
+    {
+      "name": "gasnet-slingshot-10",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_GASNETEX": true,
+        "GASNET_CONDUIT": "ofi",
+        "GASNet_CONFIG_ARGS": "--with-ofi-provider=verbs:ofi_rxm --with-ofi-spawner=pmi --with-pmi-version=cray"
+      }
+    },
+    {
+      "name": "gasnet-omnipath",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_GASNETEX": true,
+        "GASNET_CONDUIT": "ofi",
+        "GASNet_CONFIG_ARGS": "--with-ofi-provider=psm2"
+      }
+    },
+    {
+      "name": "gasnet-mpi",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_GASNETEX": true,
+        "GASNET_CONDUIT": "mpi"
+      }
+    },
+    {
+      "name": "gasnet-ucx",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_GASNETEX": true,
+        "GASNET_CONDUIT": "ucx"
+      }
+    },
+    {
+      "name": "ucx",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_UCX": true
+      }
+    },
+    {
+      "name": "cuda",
+      "hidden": true,
+      "cacheVariables": {
+        "REALM_USE_CUDA": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "displayName": "Release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-common",
+      "description": "Test CMake settings that apply to all configurations",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      }
+    },
+    {
+      "name": "test-unit",
+      "description": "Runs specifically unit tests",
+      "hidden": true,
+      "filter": {
+        "include": {
+          "label": "unit"
+        }
+      }
+    },
+    {
+      "name": "test-integ",
+      "description": "Runs specifically integration tests",
+      "hidden": true,
+      "filter": {
+        "include": {
+          "label": "integ"
+        }
+      }
+    },
+    {
+      "name": "test-bench",
+      "description": "Runs specifically benchmark tests",
+      "hidden": true,
+      "filter": {
+        "include": {
+          "label": "bench"
+        }
+      }
+    }
+  ]
+}
