@@ -21,6 +21,25 @@ public:
 
 TYPED_TEST_SUITE_P(DenseRectListTest);
 
+TYPED_TEST_P(DenseRectListTest, AddPoints)
+{
+  const size_t max_rects = 3;
+  const size_t max_points = 3;
+  DenseRectangleList<TestFixture::N, typename TestFixture::T> rectlist(max_rects);
+  std::vector<TypeParam> points;
+
+  for(size_t i = 0; i < max_points; i++) {
+    TypeParam point(0);
+    point.x() = i;
+    points.emplace_back(point);
+    rectlist.add_point(points.back());
+  }
+
+  EXPECT_EQ(rectlist.rects.size(), 1);
+  EXPECT_EQ(TypeParam(0), rectlist.rects[0].lo);
+  EXPECT_EQ(points.back(), rectlist.rects[0].hi);
+}
+
 TYPED_TEST_P(DenseRectListTest, AddMaxDisjointRects)
 {
   const size_t max_rects = 3;
@@ -42,7 +61,7 @@ TYPED_TEST_P(DenseRectListTest, AddMaxDisjointRects)
   }
 }
 
-REGISTER_TYPED_TEST_SUITE_P(DenseRectListTest, AddMaxDisjointRects);
+REGISTER_TYPED_TEST_SUITE_P(DenseRectListTest, AddMaxDisjointRects, AddPoints);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
