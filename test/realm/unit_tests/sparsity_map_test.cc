@@ -93,6 +93,14 @@ public:
                                size_t total_count, bool disjoint, const void *data,
                                size_t datalen)
   {
+    send_contribute(NodeID(ID(me).sparsity_creator_node()), me, piece_count, total_count,
+                    disjoint, data, datalen);
+  }
+
+  virtual void send_contribute(NodeID target, SparsityMap<N, T> me, size_t piece_count,
+                               size_t total_count, bool disjoint, const void *data,
+                               size_t datalen)
+  {
     sent_contributions++;
     sent_piece_count += piece_count;
     sent_bytes += datalen;
@@ -229,13 +237,13 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
   const int contribute_count = 1;
   std::vector<Rect<N, T>> rect_list{Rect<N, T>(TypeParam(0), TypeParam(1))};
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-  auto sparsity_comm = new MockSparsityMapCommunicator<N, T>();
+
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
 
   impl->contribute_nothing();
 
-  EXPECT_EQ(sparsity_comm->sent_contributions, 1);
+  EXPECT_EQ(this->sparsity_comm->sent_contributions, 1);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
@@ -380,13 +388,13 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
 
   auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
   auto other_impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, other_sparsity_comm);
   other_impl->contribute_dense_rect_list(rect_list,
                                          /*disjoint=*/true);
   other_impl->set_contributor_count(1);
   other_impl->contribute_nothing();
   SparsityMapPublicImpl<N, T> *other_public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(other_impl.get());
 
   Rect<N, T> bounds(TypeParam(0), TypeParam(10));
   bool ok = public_impl->overlaps(other_public_impl, bounds, true);

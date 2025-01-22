@@ -82,6 +82,10 @@ namespace Realm {
                                  size_t total_count, bool disjoint,
                                  const void *data = nullptr, size_t datalen = 0);
 
+    virtual void send_contribute(NodeID target, SparsityMap<N, T> me, size_t piece_count,
+                                 size_t total_count, bool disjoint,
+                                 const void *data = nullptr, size_t datalen = 0);
+
     virtual size_t recommend_max_payload(NodeID owner, bool with_congestion);
   };
 

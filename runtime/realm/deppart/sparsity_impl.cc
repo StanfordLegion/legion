@@ -1075,8 +1075,17 @@ namespace Realm {
                                                       size_t total_count, bool disjoint,
                                                       const void *data, size_t datalen)
   {
-    NodeID owner = ID(me).sparsity_creator_node();
-    ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib> amsg(owner,
+    send_contribute(ID(me).sparsity_creator_node(), me, piece_count, total_count,
+                    disjoint, data, datalen);
+  }
+
+  template <int N, typename T>
+  void SparsityMapCommunicator<N, T>::send_contribute(NodeID target, SparsityMap<N, T> me,
+                                                      size_t piece_count,
+                                                      size_t total_count, bool disjoint,
+                                                      const void *data, size_t datalen)
+  {
+    ActiveMessage<typename SparsityMapImpl<N, T>::RemoteSparsityContrib> amsg(target,
                                                                               datalen);
     amsg->sparsity = me;
     amsg->piece_count = piece_count;
@@ -1547,8 +1556,8 @@ namespace Realm {
       // send partial messages first
       while(remaining > max_to_send) {
         size_t bytes = max_to_send * sizeof(Rect<N, T>);
-        sparsity_comm->send_contribute(me, 0, total_count, /*disjoint=*/true, rdata,
-                                       bytes);
+        sparsity_comm->send_contribute(requestor, me, 0, total_count, /*disjoint=*/true,
+                                       rdata, bytes);
         num_pieces++;
         remaining -= max_to_send;
         rdata += max_to_send;
@@ -1556,8 +1565,8 @@ namespace Realm {
 
       // final message includes the count of all messages (including this one!)
       size_t bytes = remaining * sizeof(Rect<N, T>);
-      sparsity_comm->send_contribute(me, num_pieces + 1, total_count, /*disjoint=*/true,
-                                     rdata, bytes);
+      sparsity_comm->send_contribute(requestor, me, num_pieces + 1, total_count,
+                                     /*disjoint=*/true, rdata, bytes);
     }
   }
 
