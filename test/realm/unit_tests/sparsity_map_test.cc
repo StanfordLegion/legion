@@ -174,7 +174,6 @@ TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
   using T = typename TestFixture::T;
 
   const size_t num_rects = 3;
-  const size_t max_rects = 4;
   const int gap = 3;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
@@ -234,7 +233,6 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
   using T = typename TestFixture::T;
 
   NodeSet subscribers;
-  const int contribute_count = 1;
   std::vector<Rect<N, T>> rect_list{Rect<N, T>(TypeParam(0), TypeParam(1))};
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
 
@@ -372,7 +370,6 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
   using T = typename TestFixture::T;
 
   const size_t num_rects = 3;
-  const size_t max_rects = 2;
   const int gap = 3;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
@@ -408,7 +405,6 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   using T = typename TestFixture::T;
 
   const size_t num_rects = 3;
-  const size_t max_rects = 2;
   const int gap = 3;
 
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
