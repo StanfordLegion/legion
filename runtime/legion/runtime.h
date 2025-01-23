@@ -3167,8 +3167,6 @@ namespace Legion {
       static TraceID generate_static_trace_id(void);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
-      Future issue_timing_measurement(Context ctx,
-                                      const TimingLauncher &launcher);
     public:
       void* get_local_task_variable(Context ctx, LocalVariableID id);
       void set_local_task_variable(Context ctx, LocalVariableID id,
