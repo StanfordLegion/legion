@@ -9213,7 +9213,8 @@ namespace Legion {
           Range& r_before = ranges[pf_idx];
           grow_hole(pf_idx, r_before, r.last, false/*before*/);
           r_before.next = r.next;
-          ranges[r.next].prev = pf_idx;
+          if (r.next != SENTINEL)
+            ranges[r.next].prev = pf_idx;
           free_range(index);
         }
       } 
@@ -9226,7 +9227,8 @@ namespace Legion {
           Range& r_after = ranges[nf_idx];
           grow_hole(nf_idx, r_after, r.first, true/*before*/);
           r_after.prev = r.prev;
-          ranges[r.prev].next = nf_idx;
+          if (r.prev != SENTINEL)
+            ranges[r.prev].next = nf_idx;
           free_range(index);
         } 
         else 
@@ -9242,7 +9244,6 @@ namespace Legion {
           r_before.next = r_after.next;
           if (r_after.next != SENTINEL)
             ranges[r_after.next].prev = pf_idx;
-
           free_range(index);
           free_range(nf_idx);
         }
