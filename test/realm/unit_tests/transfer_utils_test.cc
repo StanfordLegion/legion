@@ -5,77 +5,106 @@
 
 using namespace Realm;
 
-TEST(TransferUtilsTest, EmptyDomainAndBounds)
-{
-  Rect<1> subrect, domain = Rect<1>(Point<1>(1), Point<1>(0));
-  Point<1> next_start(0);
-  std::vector<int> dim_order{0};
-  EXPECT_TRUE(
-      next_subrect(domain, Point<1>(1), domain, dim_order.data(), subrect, next_start));
-  EXPECT_EQ(subrect.lo, domain.lo);
-  EXPECT_EQ(subrect.hi, domain.hi);
-  EXPECT_EQ(next_start, Point<1>(0));
-}
+template <typename PointType>
+struct PointTraits;
 
-TEST(TransferUtilsTest, EmptyDomain)
-{
-  Rect<1> subrect, domain = Rect<1>(Point<1>(1), Point<1>(0));
-  Point<1> next_start(0);
-  std::vector<int> dim_order{0};
-  EXPECT_TRUE(
-      next_subrect(domain, Point<1>(1), domain, dim_order.data(), subrect, next_start));
-  EXPECT_EQ(subrect.lo, domain.lo);
-  EXPECT_EQ(subrect.hi, domain.hi);
-  EXPECT_EQ(next_start, Point<1>(0));
-}
+template <int N, typename T>
+struct PointTraits<Realm::Point<N, T>> {
+  static constexpr int DIM = N;
+  using value_type = T;
+};
 
-TEST(TransferUtilsTest, BoundsContainFullSubrect)
-{
-  Rect<1> subrect, domain = Rect<1>(Point<1>(0), Point<1>(10));
-  Point<1> next_start(0);
-  std::vector<int> dim_order{0};
-  EXPECT_TRUE(
-      next_subrect(domain, Point<1>(0), domain, dim_order.data(), subrect, next_start));
-  EXPECT_EQ(subrect.lo, domain.lo);
-  EXPECT_EQ(subrect.hi, domain.hi);
-  EXPECT_EQ(next_start, Point<1>(0));
-}
+template <typename PointType>
+class NextRectTest : public ::testing::Test {
+protected:
+  static constexpr int N = PointTraits<PointType>::DIM;
+  using T = typename PointTraits<PointType>::value_type;
 
-TEST(TransferUtilsTest, StartNotFullSpanDimension)
-{
-  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
-  Rect<2> subrect, domain = Rect<2>(Point<2>(0, 0), Point<2>(8, 8));
-  Point<2> next_start(0, 0);
-  std::vector<int> dim_order{0, 1};
-
-  EXPECT_FALSE(next_subrect(domain, Point<2>(1, 0), bounds, dim_order.data(), subrect,
-                            next_start));
-  EXPECT_EQ(subrect.lo, Point<2>(1, 0));
-  EXPECT_EQ(subrect.hi, Point<2>(8, 0));
-  EXPECT_EQ(next_start, Point<2>(0, 1));
-
-  EXPECT_TRUE(
-      next_subrect(domain, next_start, bounds, dim_order.data(), subrect, next_start));
-  EXPECT_EQ(subrect.lo, Point<2>(0, 1));
-  EXPECT_EQ(subrect.hi, Point<2>(8, 8));
-  EXPECT_EQ(next_start, Point<2>(0, 0));
-}
-
-TEST(TransferUtilsTest, HigherDomainBounds)
-{
-  Rect<2> bounds = Rect<2>(Point<2>(0, 0), Point<2>(10, 10));
-  Rect<2> subrect, domain = Rect<2>(Point<2>(1, 1), Point<2>(11, 11));
-  Point<2> next_start(0, 0);
-  std::vector<int> dim_order{0, 1};
-
-  for(int next_y = 1; next_y < 10; next_y++) {
-    EXPECT_FALSE(next_subrect(domain, Point<2>(1, next_y), bounds, dim_order.data(),
-                              subrect, next_start));
-    EXPECT_EQ(subrect.lo, Point<2>(1, next_y));
-    EXPECT_EQ(subrect.hi, Point<2>(10, next_y));
-    EXPECT_EQ(next_start, Point<2>(11, next_y));
+  void SetUp() override
+  {
+    dim_order.resize(N);
+    for(int i = 0; i < N; i++) {
+      dim_order[i] = i;
+    }
   }
+
+  std::vector<int> dim_order;
+};
+
+TYPED_TEST_SUITE_P(NextRectTest);
+
+TYPED_TEST_P(NextRectTest, EmptyDomain)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+  Rect<N, T> subrect;
+  Rect<N, T> domain = Rect<N, T>(TypeParam(1), TypeParam(0));
+  TypeParam next_start(0);
+
+  EXPECT_TRUE(next_subrect(domain, TypeParam(1), domain, this->dim_order.data(), subrect,
+                           next_start));
+
+  EXPECT_EQ(subrect.lo, domain.lo);
+  EXPECT_EQ(subrect.hi, domain.hi);
+  EXPECT_EQ(next_start, TypeParam(0));
 }
+
+TYPED_TEST_P(NextRectTest, ContainsFullSubrect)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+  Rect<N, T> subrect;
+  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(8));
+  TypeParam next_start(0);
+
+  EXPECT_TRUE(next_subrect(domain, TypeParam(0), domain, this->dim_order.data(), subrect,
+                           next_start));
+
+  EXPECT_EQ(subrect.lo, domain.lo);
+  EXPECT_EQ(subrect.hi, domain.hi);
+  EXPECT_EQ(next_start, TypeParam(0));
+}
+
+TYPED_TEST_P(NextRectTest, ContainsPartialSubrect)
+{
+  constexpr int N = TestFixture::N;
+  using T = typename TestFixture::T;
+  const T size = 4;
+  Rect<N, T> subrect;
+  Rect<N, T> bounds = Rect<N, T>(TypeParam(0), TypeParam(size));
+  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(size * 2));
+  TypeParam exp_lo = TypeParam(0);
+  exp_lo.x() = size;
+  TypeParam exp_next = TypeParam(0);
+  exp_next.x() = size + 1;
+
+  TypeParam next_start(0);
+  bool done = next_subrect(domain, TypeParam(0), bounds, this->dim_order.data(), subrect,
+                           next_start);
+
+  EXPECT_FALSE(done);
+  EXPECT_EQ(subrect.lo, TypeParam(0));
+  EXPECT_EQ(subrect.hi, exp_lo);
+  EXPECT_EQ(next_start, exp_next);
+}
+
+// Register the Dot test
+REGISTER_TYPED_TEST_SUITE_P(NextRectTest, EmptyDomain, ContainsFullSubrect,
+                            ContainsPartialSubrect);
+
+template <typename T, int... Ns>
+auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
+{
+  return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
+}
+
+using TestTypesInt =
+    decltype(GeneratePointTypes<int>(std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+using TestTypesLongLong = decltype(GeneratePointTypes<long long>(
+    std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+
+INSTANTIATE_TYPED_TEST_SUITE_P(IntInstantiation, NextRectTest, TestTypesInt);
+INSTANTIATE_TYPED_TEST_SUITE_P(LongLongInstantiation, NextRectTest, TestTypesLongLong);
 
 template <int N>
 struct ComputeTargetSubrectTestCase {
