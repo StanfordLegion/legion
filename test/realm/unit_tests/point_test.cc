@@ -141,7 +141,6 @@ TYPED_TEST_P(PointTest, Dot)
 TYPED_TEST_P(PointTest, Conversion)
 {
   constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
 
   using PointUnsigned = Point<N, unsigned>;
   PointUnsigned point_unsigned;
