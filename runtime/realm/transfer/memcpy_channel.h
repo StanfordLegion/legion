@@ -44,17 +44,16 @@ namespace Realm {
     bool progress_xd(MemcpyChannel *channel, TimeLimit work_until);
 
   private:
-    bool memcpy_req_in_use;
+    bool memcpy_req_in_use = false;
     MemcpyRequest memcpy_req;
-    bool has_serdez;
+    bool has_serdez = false;
   };
 
   class MemcpyChannel : public SingleXDQChannel<MemcpyChannel, MemcpyXferDes> {
   public:
     MemcpyChannel(BackgroundWorkManager *_bgwork, const Node *_node,
                   const std::unordered_map<realm_id_t, SharedMemoryInfo>
-                      &remote_shared_memory_mappings,
-                  NodeID _my_node_id);
+                      &remote_shared_memory_mappings);
 
     // multiple concurrent memcpys ok
     static const bool is_ordered = false;
@@ -77,8 +76,8 @@ namespace Realm {
 
     virtual long submit(Request **requests, long nr);
 
-    const Node *node;
-    bool is_stopped;
+    const Node *node = nullptr;
+    bool is_stopped = false;
   };
 }; // namespace Realm
 

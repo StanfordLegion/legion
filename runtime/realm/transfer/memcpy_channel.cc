@@ -48,7 +48,6 @@ namespace Realm {
                                int _priority)
     : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
               _priority, 0, 0)
-    , memcpy_req_in_use(false)
   {
     kind = XFER_MEM_CPY;
 
@@ -406,8 +405,7 @@ namespace Realm {
 
   MemcpyChannel::MemcpyChannel(BackgroundWorkManager *_bgwork, const Node *_node,
                                const std::unordered_map<realm_id_t, SharedMemoryInfo>
-                                   &remote_shared_memory_mappings,
-                               NodeID _my_node_id)
+                                   &remote_shared_memory_mappings)
     : SingleXDQChannel<MemcpyChannel, MemcpyXferDes>(_bgwork, XFER_MEM_CPY,
                                                      "memcpy channel")
     , node(_node)

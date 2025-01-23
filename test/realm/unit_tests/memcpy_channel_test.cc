@@ -13,7 +13,7 @@ TEST(MemcpyChannelTest, CreateMemcpyChannel)
   BackgroundWorkManager *bgwork = new BackgroundWorkManager();
 
   std::unique_ptr<Channel> channel(
-      new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings, owner));
+      new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
   NodeID channel_owner = channel->node;
   XferDesKind channel_kind = channel->kind;
   auto paths = channel->get_paths();
@@ -140,7 +140,7 @@ protected:
   void SetUp() override
   {
     bgwork = new BackgroundWorkManager();
-    channel = new MemcpyChannel(bgwork, &node_data, remote_shared_memory_mappings, owner);
+    channel = new MemcpyChannel(bgwork, &node_data, remote_shared_memory_mappings);
   }
 
   void TearDown() override
