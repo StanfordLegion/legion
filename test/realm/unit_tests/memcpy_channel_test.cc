@@ -24,31 +24,6 @@ TEST(MemcpyChannelTest, CreateMemcpyChannel)
   channel->shutdown();
 }
 
-/*struct ChannelTestCase {
-  std::vector<Memory> memories;
-};
-
-class MemcpyChannelParamTest : public ::testing::TestWithParam<ChannelTestCase> {};
-
-TEST_P(MemcpyChannelParamTest, MemcpyChannelCreateXferDes)
-{
-  // ChannelTestCase test_case = GetParam();
-  NodeID owner = 0;
-  Node node;
-  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
-  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
-  MemcpyChannel channel(bgwork, &node, remote_shared_memory_mappings, owner);
-
-  channel.shutdown();
-}
-
-const static ChannelTestCase kMemcpyChannelTestCases[] = {
-    ChannelTestCase{},
-};
-
-INSTANTIATE_TEST_SUITE_P(Foo, MemcpyChannelParamTest,
-                         testing::ValuesIn(kMemcpyChannelTestCases));*/
-
 struct MemcpyXferDescTestCase {
   std::vector<size_t> src_strides;
   std::vector<size_t> src_extents;
@@ -223,10 +198,9 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
     total_src_bytes += src_bytes;
   }
 
-  std::byte *src_buffer = new std::byte[total_src_bytes];
-  std::memset(src_buffer, 7, total_src_bytes);
-  auto input_mem = std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_src_bytes, 0,
-                                                    Memory::SYSTEM_MEM, src_buffer);
+  std::vector<std::byte> src_buffer(total_src_bytes, std::byte(7));
+  auto input_mem = std::make_unique<LocalCPUMemory>(
+      Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, src_buffer.data());
   input_port.mem = input_mem.get();
   input_port.peer_port_idx = 0;
   input_port.iter = new MockIterator<1, int>(test_case.src_strides, test_case.src_extents,
@@ -244,10 +218,9 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
     total_dst_bytes += dst_bytes;
   }
 
-  std::byte *dst_buffer = new std::byte[total_dst_bytes];
-  std::memset(dst_buffer, 1, total_dst_bytes);
-  auto output_mem = std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_dst_bytes,
-                                                     0, Memory::SYSTEM_MEM, dst_buffer);
+  std::vector<std::byte> dst_buffer(total_dst_bytes, std::byte(1));
+  auto output_mem = std::make_unique<LocalCPUMemory>(
+      Memory::NO_MEMORY, total_dst_bytes, 0, Memory::SYSTEM_MEM, dst_buffer.data());
   output_port.mem = output_mem.get();
   output_port.peer_port_idx = 0;
   output_port.iter = new MockIterator<1, int>(
