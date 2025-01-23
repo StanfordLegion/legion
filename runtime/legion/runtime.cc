@@ -8775,9 +8775,7 @@ namespace Legion {
 #endif
       if (remaining_bytes < size)
         return NULL;
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      size_t alignment = std::min<size_t>(size & ~(size-1), 128);
+      size_t alignment = manager->compute_future_alignment(size);
       uintptr_t start = 0;
       const unsigned range_index = allocate(size, alignment, start);
       if (range_index == SENTINEL)
@@ -13725,6 +13723,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t MemoryManager::compute_future_alignment(size_t size) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      // Default max alignment is 32 bytes
+      size_t max_alignment = 32;
+      const Memory::Kind kind = memory.kind();
+      // See if this is a GPU memory, if it is then we increase the maximum
+      // alignment up to 128 bytes since GPUs tend to like that
+      if ((kind == Memory::GPU_FB_MEM) || (kind == Memory::GPU_MANAGED_MEM) ||
+          (kind == Memory::GPU_DYNAMIC_MEM))
+        max_alignment = 128;
+      static_assert((sizeof(size_t) == 4) || (sizeof(size_t) == 8));
+      // Round up to the nearest power of 2
+      size--;
+      size |= size >> 1;
+      size |= size >> 2;
+      size |= size >> 4;
+      size |= size >> 8;
+      size |= size >> 16;
+      if (sizeof(size_t) == 8)
+        size |= size >> 32;
+      size++;
+      return std::min<size_t>(size, max_alignment);
+    }
+
+    //--------------------------------------------------------------------------
     FutureInstance* MemoryManager::create_future_instance(UniqueID creator_uid,
                             const TaskTreeCoordinates &coordinates, size_t size,
                             RtEvent *safe_for_unbounded_pools)
@@ -13784,9 +13811,7 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       // Create the layout for the future
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      ilg->alignment_reqd = std::min<size_t>(size & ~(size-1), 128);
+      ilg->alignment_reqd = compute_future_alignment(size);
       LgEvent unique_event;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
