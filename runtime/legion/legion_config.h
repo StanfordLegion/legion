@@ -76,7 +76,7 @@
 #endif
 
 #ifndef LEGION_GC_MAX_PRIORITY
-#define LEGION_GC_MAX_PRIORITY    INT_MAX
+#define LEGION_GC_MAX_PRIORITY    (INT_MAX-1)
 #else
 #error "legion.h requires the ability to define the macro 'LEGION_GC_MAX_PRIORITY' but it has already been defined"
 #endif
@@ -93,6 +93,13 @@
 #else
 #error "legion.h requires the ability to define the macro 'LEGION_GC_NEVER_PRIORITY' but it has already been defined"
 #endif
+
+#ifndef LEGION_GC_EAGER_PRIORITY
+#define LEGION_GC_EAGER_PRIORITY  INT_MAX
+#else
+#error "legion.h requires the ability to define the macro 'LEGION_GC_EAGER_PRIORITY' but it has already been defined"
+#endif
+
 // This is for backwards compatibility
 // Try to be nice in case someone else defined this
 #ifndef LEGION_DISABLE_DEPRECATED_ENUMS
@@ -247,6 +254,9 @@
 #define LEGION_MAX_APPLICATION_SHARDING_ID    (MAX_APPLICATION_SHARDING_ID)
 #endif
 #endif
+#ifndef LEGION_MAX_APPLICATION_CONCURRENT_ID
+#define LEGION_MAX_APPLICATION_CONCURRENT_ID  (1<<20)
+#endif
 // Maximum ID for an application reduction ID
 #ifndef LEGION_MAX_APPLICATION_REDOP_ID
 #ifdef LEGION_USE_PYTHON_CFFI
@@ -335,10 +345,6 @@
 #ifndef LEGION_DEFAULT_META_TASK_VECTOR_WIDTH
 #define LEGION_DEFAULT_META_TASK_VECTOR_WIDTH  (DEFAULT_META_TASK_VECTOR_WIDTH)
 #endif
-#endif
-// Percentage of memory to reserve for eager allocations
-#ifndef LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE
-#define LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE 1
 #endif
 // Maximum number of templates to keep around in traces
 #ifndef LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE
@@ -1105,6 +1111,7 @@ typedef enum legion_error_t {
   ERROR_SERDEZ_FIELD_DISALLOWED = 214,
   ERROR_INSTANCE_FIELD_DUPLICATE = 215,
   ERROR_PARENT_TASK_COPY = 216,
+  ERROR_ILLEGAL_HANDSHAKE = 217,
   ERROR_REGION_REQUIREMENT_COPY = 220,
   ERROR_SOURCE_REGION_REQUIREMENT = 232,
   ERROR_DESTINATION_REGION_REQUIREMENT = 233,
@@ -1318,6 +1325,10 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_CONCURRENT_EXECUTION = 626,
   ERROR_MISSING_FILL_VALUE = 627,
   ERROR_ILLEGAL_CONCURRENT_TASK_BARRIER = 628,
+  ERROR_POOL_USE_AFTER_FREE = 629,
+  ERROR_RESERVED_CONCURRENT_ID = 630,
+  ERROR_INVALID_CONCURRENT_ID = 631,
+  ERROR_DUPLICATE_CONCURRENT_ID = 632,
 
 
   LEGION_WARNING_FUTURE_NONLEAF = 1000,
@@ -1394,6 +1405,10 @@ typedef enum legion_error_t {
   LEGION_WARNING_UNSUPPORTED_REPLICATION = 1117,
   LEGION_WARNING_UNUSED_CONCURRENCY = 1118,
   LEGION_WARNING_IGNORED_REPLICATION = 1119,
+  LEGION_WARNING_MISSING_ALLOCATION_BOUNDS = 1120,
+  LEGION_WARNING_UNBOUND_MEMORY_POOL = 1121,
+  LEGION_WARNING_TRACING_UNBOUND_MEMORY_POOL = 1122,
+  LEGION_WARNING_DYNAMIC_CONCURRENT_REG = 1123,
   
   
   LEGION_FATAL_MUST_EPOCH_NOADDRESS = 2000,
@@ -1414,6 +1429,8 @@ typedef enum legion_error_t {
   LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP = 2018,
   LEGION_FATAL_MORTON_TILING_FAILURE = 2019,
   LEGION_FATAL_NO_CRITICAL_PATH_DYNAMIC_COLLECTIVES = 2020,
+  LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS = 2021,
+  LEGION_FATAL_UNSAFE_ALLOCATION_WITH_UNBOUNDED_POOLS = 2022,
   
 }  legion_error_t;
 
@@ -2129,7 +2146,7 @@ typedef enum legion_domain_max_rect_dim_t {
 typedef enum legion_unbound_pool_scope_t {
   // Bounded pool so other allocations always permitted in parallel
   LEGION_BOUNDED_POOL,
-  // Nothing else is allowed to allocate in parallel
+  // Only allocations for the same task are permitted in parallel
   LEGION_STRICT_UNBOUNDED_POOL,
   // Only tasks in the same index space task launch
   // are allowed to allocate in parallel
@@ -2168,6 +2185,7 @@ typedef unsigned int legion_generation_id_t;
 typedef unsigned int legion_type_handle;
 typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_sharding_id_t;
+typedef unsigned int legion_concurrent_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_local_variable_id_t;

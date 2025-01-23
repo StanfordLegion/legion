@@ -1,0 +1,16 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "include": [
+    "cmake/CMakePresets.json",
+    "tests/CMakePresets.json"
+  ],
+  "configurePresets": [],
+  "buildPresets": [],
+  "testPresets": [],
+  "packagePresets": []
+}

@@ -498,19 +498,21 @@ namespace Legion {
       public:
         TaskSlice(void) : domain_is(IndexSpace::NO_SPACE), 
           domain(Domain::NO_DOMAIN), proc(Processor::NO_PROC), 
-          recurse(false), stealable(false) { }
-        TaskSlice(const Domain &d, Processor p, bool r, bool s)
+          recurse(false), stealable(false), take_ownership(false) { }
+        TaskSlice(const Domain &d, Processor p, bool r, bool s, 
+                  bool own = false)
           : domain_is(IndexSpace::NO_SPACE), domain(d), 
-            proc(p), recurse(r), stealable(s) { }
+            proc(p), recurse(r), stealable(s), take_ownership(own) { }
         TaskSlice(IndexSpace is, Processor p, bool r, bool s)
           : domain_is(is), domain(Domain::NO_DOMAIN),
-            proc(p), recurse(r), stealable(s) { }
+            proc(p), recurse(r), stealable(s), take_ownership(false) { }
       public:
         IndexSpace                              domain_is;
         Domain                                  domain;
         Processor                               proc;
         bool                                    recurse;
         bool                                    stealable;
+        bool                                    take_ownership;
       };
       struct SliceTaskInput {
         IndexSpace                             domain_is;
@@ -591,10 +593,28 @@ namespace Legion {
        * indicates with which priority the profiling results should
        * be send back to the mapper.
        *
+       * When selecting a leaf-task variant for the task, the mapper can
+       * use the 'leaf_pool_bounds' to specify sizes of memory pools for
+       * the runtime to allocate to handle dynamic memory allocations during
+       * the execution of the task. These must be big enough to handle all
+       * such dynamic memory allocations in each kind of memory. The mapper
+       * can use the value of zero to indicate that an "unbound" pool should
+       * be created which will block all future memory allocations in that 
+       * memory until the task is done running (this will likely result in
+       * severe performance degradations). If the task variant also has
+       * statically specified pool bounds, then the dynamically sized upper
+       * bound provided by the mapper will override the static bound 
+       * provided at the time of task variant registration.
+       *
        * Finally, the mapper can requrest a postmap_task mapper call be
        * performed to make additional copies of any output regions of the
        * task for resilience purposes by setting the 'postmap_task' flag
        * to true.
+       *
+       * If the mapper decides that it wants to abort the mapping of the
+       * task it can do that by setting the 'abort_mapping' flag. This
+       * will return the task back to the ready queue presented to the
+       * mapper by select_tasks_to_map mapper call.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> > valid_instances;
@@ -622,6 +642,7 @@ namespace Legion {
         ProfilingRequest                            task_prof_requests;
         ProfilingRequest                            copy_prof_requests;
         bool                                        postmap_task; // = false
+        bool                                        abort_mapping; // = false
       };
       //------------------------------------------------------------------------
       virtual void map_task(MapperContext            ctx,
@@ -1657,6 +1678,48 @@ namespace Legion {
        * field of the 'select_task_options' mapper call. If this is set 
        * to false then the child mappers cannot change the priority of
        * the parent task.
+       *
+       * The 'auto_tracing_enabled' parameter allows the mapper to direct
+       * Legion whether it should attempt to automatically identify traces in 
+       * the sequence of operations and sub-tasks launched by this task. This
+       * defaults to true and can be disabled by setting the flag to 'false'.
+       *
+       * The `auto_tracing_window_size` parameter specifies the size
+       * of the window for the Legion's automatic tracing functionality to
+       * consider when looking for repeated sequences of tasks/operations.
+       * Note that this can be (but doesn't have to be) larger than the 
+       * window size for the context to look for traces that span more 
+       * than one window's worth of sub-tasks/operations.
+       *
+       * The 'auto_tracing_ruler_function' specifies the ruler function
+       * ( https://en.wikipedia.org/wiki/Ruler_function )
+       * that should be used for looking for traces that occur in a subset
+       * of the auto tracing window of operations/tasks. There is a trade-off
+       * with this parameter. The smaller you make it the more rapidly you will
+       * discover small traces and be able to replay them quickly, but the
+       * longer it will take to identify larger traces that might be more
+       * efficient at replaying. Making the multi-scale factor smaller will 
+       * also result in higher overhead for checking for automatic traces 
+       * in the window when traces are not being replayed.
+       *
+       * The 'auto_tracing_min_trace_length' specifies the minimum length
+       * trace that can be found by automatic tracing.
+       *
+       * The 'auto_tracing_max_trace_length' specifies the maximum length
+       * trace that can be found by automatic tracing. This value is always
+       * bounded above by the auto_tracing_window_size since we cannot find
+       * any traces larger than the window size. If this value is less than
+       * the auto tracing window size and a sequence of repeated tasks/ops
+       * is found larger than this value, then Legion will break the sequence
+       * into traces of this size and replay them consecutively.
+       *
+       * The 'auto_tracing_visit_threshold' specifies how many times a trace
+       * needs to be observed before it becomes eligible for replay. The
+       * tradeoff here is that a smaller value may lead to finding and
+       * replaying traces sooner, but those traces might be local maximas,
+       * while a larger value will cause you to wait longer to start replaying
+       * traces but could lead to finding more robust traces that are going
+       * to be replayed for the duration of the application.
        */
       struct ContextConfigOutput {
         unsigned                                max_window_size; // = 1024
@@ -1667,6 +1730,12 @@ namespace Legion {
         unsigned                                meta_task_vector_width; // = 16
         unsigned                                max_templates_per_trace; // = 16
         bool                                    mutable_priority; // = false
+        bool                                    auto_tracing_enabled; // = true
+        unsigned                                auto_tracing_window_size; // = 1000
+        unsigned                                auto_tracing_ruler_function; // = 100
+        unsigned                                auto_tracing_min_trace_length; // = 5
+        unsigned                                auto_tracing_max_trace_length; // = UINT_MAX
+        unsigned                                auto_tracing_visit_threshold; // = 10
       };
       //------------------------------------------------------------------------
       virtual void configure_context(MapperContext               ctx,
@@ -2292,10 +2361,37 @@ namespace Legion {
       void collect_instances(MapperContext ctx,
                              const std::vector<PhysicalInstance> &instances,
                              std::vector<bool> &collected) const;
+      // This method will attempt to redistrict an instance from one layout
+      // to another one, thereby reusing the memory associated with the first
+      // instance to create the new instance (thereby deleting the original 
+      // instance in the process). This will only be permitted if the original
+      // instance does not not contain any valid data and if the new layout
+      // fits within the footprint of the original instance. The runtime will
+      // return a boolean indicating whether the redistricting was successful.
+      // If the invocation is successful, the 'instance' will be overwritten
+      // with a handle to the new instance.
+      bool redistrict_instance(MapperContext ctx, PhysicalInstance &instance,
+                               const LayoutConstraintSet &constraints,
+                               const std::vector<LogicalRegion> &regions,
+                               bool acquire = true, GCPriority priority = 0,
+                               bool tight_region_bounds = false);
+      bool redistrict_instance(MapperContext ctx, PhysicalInstance &instance,
+                               LayoutConstraintID layout_id,
+                               const std::vector<LogicalRegion> &regions,
+                               bool acquire = true, GCPriority priority = 0,
+                               bool tight_region_bounds = false);
     public:
       // Futures can also be acquired to ensure that they are available in
       // particular memories prior to running a task.
       bool acquire_future(MapperContext ctx, const Future &f, Memory mem) const;
+      // Users can also acquire memory for unbound memory pools when mapping
+      // tasks. These pools will be implicitly used to satisfy any leaf_pool
+      // bounds requested for mapping the task. This interface allows mappers
+      // to discover if leaf pools can be allocated and potentially switch to
+      // an alternative mapping strategy if they cannot.
+      bool acquire_pool(MapperContext ctx, Memory memory,
+                        const PoolBounds &bounds) const;
+      void release_pool(MapperContext ctx, Memory memory);
     public:
       //------------------------------------------------------------------------
       // Methods for creating index spaces which mappers need to do
@@ -2304,7 +2400,8 @@ namespace Legion {
       IndexSpace create_index_space(MapperContext ctx, 
                                     const Domain &bounds,
                                     TypeTag type_tag = 0,
-                                    const char *provenance = NULL) const;
+                                    const char *provenance = NULL,
+                                    bool take_ownership = false) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,

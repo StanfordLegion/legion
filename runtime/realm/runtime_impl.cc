@@ -96,6 +96,7 @@ static char *strndup(const char *src, size_t maxlen)
   size_t actlen = strnlen(src, maxlen);
   char *dst = (char *)malloc(actlen + 1);
   strncpy(dst, src, actlen);
+  dst[actlen] = '\0';
   return dst;
 }
 #endif
@@ -828,7 +829,7 @@ namespace Realm {
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
-    config_map.insert({"enable_sparsity_refcount", &enable_sparsity_refcount});
+    config_map.insert({"report_sparsity_leaks", &report_sparsity_leaks});
     config_map.insert({"barrier_broadcast_radix", &barrier_broadcast_radix});
 
     resource_map.insert({"cpu", &res_num_cpus});
@@ -977,6 +978,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
         .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
         .add_option_int("-ll:ext_sysmem", use_ext_sysmem)
+        .add_option_bool("-ll:report_sparsity_leaks", report_sparsity_leaks)
         .add_option_int("-ll:barrier_radix", barrier_broadcast_radix);
 
     // config for RuntimeImpl
@@ -2965,16 +2967,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
         Network::single_network = 0;
 
-        // clean up all the module configs
-        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
-            it != module_configs.end(); it++) {
-          delete(it->second);
-          it->second = nullptr;
-        }
-
-        // dlclose all dynamic module handles
-        module_registrar.unload_module_sofiles();
-
         delete[] nodes;
         delete local_event_free_list;
         delete local_barrier_free_list;
@@ -2995,6 +2987,18 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         Network::shared_peers.clear();
 
         NodeSetBitmask::free_allocations();
+
+        // clean up all the module configs only after cleaning pu the local state in
+        // case some of them might still need to refer to it during deletion
+        // e.g. the sparsity map impl class
+        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
+            it != module_configs.end(); it++) {
+          delete(it->second);
+          it->second = nullptr;
+        }
+
+        // dlclose all dynamic module handles
+        module_registrar.unload_module_sofiles();
       }
 
       if (!Threading::cleanup())

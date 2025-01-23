@@ -168,7 +168,7 @@ namespace Legion {
               return true;
             if ((eq2 == LEGION_GT_EK) && (v1 <= v2)) // > v2
               return true;
-            if ((eq2 == LEGION_GT_EK) && (v1 < v2)) // >= v2
+            if ((eq2 == LEGION_GE_EK) && (v1 < v2)) // >= v2
               return true;
             if ((eq2 == LEGION_EQ_EK) && (v1 != v2)) // == v2
               return true;

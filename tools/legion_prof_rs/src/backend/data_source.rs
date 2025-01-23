@@ -1428,6 +1428,15 @@ impl StateDataSource {
                     ))
                 }
             }
+            EventEntryKind::ExternalHandshake => {
+                assert!(event.is_barrier());
+                let trigger_time = event_entry.trigger_time.unwrap();
+                let trigger_ts: ts::Timestamp = trigger_time.into();
+                Field::String(format!(
+                    "External handshake on node {} at {}",
+                    node.0, trigger_ts
+                ))
+            }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution
