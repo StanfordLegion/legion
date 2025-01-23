@@ -566,7 +566,7 @@ endif
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
-INC_FLAGS	+= -I$(CUDA)/include
+INC_FLAGS	+= -I$(CUDA)/include -I$(CUDA)/extras/CUPTI/include
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -g -O0
 #NVCC_FLAGS	+= -G
@@ -842,36 +842,6 @@ ifeq ($(strip $(USE_ZLIB)),1)
   SLIB_LEGION_DEPS += -l$(ZLIB_LIBNAME)
 endif
 
-# capture backtrace using unwind
-REALM_BACKTRACE_USE_UNWIND ?= 1
-ifeq ($(strip $(REALM_BACKTRACE_USE_UNWIND)),1)
-  REALM_CC_FLAGS += -DREALM_USE_UNWIND
-endif
-
-# analyze backtrace using libdw
-REALM_BACKTRACE_USE_LIBDW ?= 0
-ifeq ($(strip $(REALM_BACKTRACE_USE_LIBDW)),1)
-  ifndef LIBDW_PATH
-    # we try to find header in /usr/include and lib in /usr/lib/x86_64-linux-gnu
-    LIBDW_HEADER := $(wildcard /usr/include/elfutils/libdwfl.h)
-    ifeq ($(LIBDW_HEADER),)
-      $(error Can not find elfutils/libdwfl.h in /usr/include, please set LIBDW_PATH explicitly)
-    endif
-    LIBDW_LIBRARY := $(wildcard /usr/lib/*/libdw.so)
-    ifeq ($(LIBDW_LIBRARY),)
-      $(error Can not find libdw in /usr/lib/x86_64-linux-gnu, please set LIBDW_PATH explicitly)
-    endif
-    LIBDW_PATH = /usr
-    LIBDW_LIBRARY_PATH := $(abspath $(dir $(LIBDW_LIBRARY)))
-  else
-    LIBDW_LIBRARY_PATH := $(LIBDW_PATH)/lib
-  endif
-  REALM_CC_FLAGS += -DREALM_USE_LIBDW
-  INC_FLAGS += -I$(LIBDW_PATH)/include
-  LEGION_LD_FLAGS += -L$(LIBDW_LIBRARY_PATH) -ldw
-  SLIB_REALM_DEPS += -L$(LIBDW_LIBRARY_PATH) -ldw
-endif
-
 ifeq ($(strip $(DEBUG)),1)
   ifeq ($(strip $(DARWIN)),1)
     CFLAGS	+= -O0 -glldb
@@ -963,6 +933,17 @@ $(error Legion requires a C++ compiler that supports at least C++17)
 endif
 endif
 
+# analyze backtrace using libdw
+REALM_BACKTRACE_USE_CPPTRACE ?= 0
+ifeq ($(strip $(REALM_BACKTRACE_USE_CPPTRACE)),1)
+  ifndef CPPTRACE_PATH
+    $(error CPPTRACE_PATH variable is not defined, aborting build)
+  endif
+  REALM_CC_FLAGS += -DREALM_USE_CPPTRACE
+  INC_FLAGS    += -I$(CPPTRACE_PATH)/include
+  LEGION_LD_FLAGS    += -L$(CPPTRACE_PATH)/lib -lcpptrace -ldwarf -lzstd
+  SLIB_REALM_DEPS    += -L$(CPPTRACE_PATH)/lib -lcpptrace -ldwarf -lzstd
+endif
 
 # if requested, add --defcheck flags to the compile line so that the
 #  cxx_defcheck wrapper can verify that source files include the configuration
@@ -1135,6 +1116,7 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_tasks.cc \
 		    $(LG_RT_DIR)/legion/legion_context.cc \
 		    $(LG_RT_DIR)/legion/legion_trace.cc \
+		    $(LG_RT_DIR)/legion/legion_auto_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_spy.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling_serializer.cc \
@@ -1148,8 +1130,8 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
-                    $(LG_RT_DIR)/legion/index_space_value.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
+
 LEGION_CUDA_SRC  += $(LG_RT_DIR)/legion/legion_redop.cu
 LEGION_HIP_SRC   += $(LG_RT_DIR)/legion/legion_redop.cu
 # LEGION_INST_SRC will be compiled {MAX_DIM}^2 times in parallel
@@ -1244,7 +1226,6 @@ INSTALL_HEADERS += legion.h \
 		   realm/bytearray.h \
 		   realm/bytearray.inl \
 		   realm/faults.h \
-		   realm/faults.inl \
 		   realm/atomics.h \
 		   realm/atomics.inl \
 		   realm/point.h \

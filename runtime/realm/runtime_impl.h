@@ -64,45 +64,45 @@ namespace Realm {
 
   class Channel; // from transfer/channel.h
 
-    // use a wide tree for local events - max depth will be 2
-    typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
-    // use a narrow tree for remote events - depth is 3, leaves have 128 events
-    typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
-    typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
-    typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
-    typedef DynamicTableAllocator<ProcessorGroupImpl, 10, 4> ProcessorGroupTableAllocator;
-    typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
-    typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
-    typedef DynamicTableAllocator<SubgraphImpl, 10, 4> SubgraphTableAllocator;
+  // use a wide tree for local events - max depth will be 2
+  // use a narrow tree for remote events - depth is 3, leaves have 128 events
+  typedef DynamicTableAllocator<GenEventImpl, 11, 16> LocalEventTableAllocator;
+  typedef DynamicTableAllocator<GenEventImpl, 10, 7> RemoteEventTableAllocator;
+  typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
+  typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
+  typedef DynamicTableAllocator<ProcessorGroupImpl, 10, 4> ProcessorGroupTableAllocator;
+  typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
+  typedef DynamicTableAllocator<CompQueueImpl, 10, 4> CompQueueTableAllocator;
+  typedef DynamicTableAllocator<SubgraphImpl, 10, 4> SubgraphTableAllocator;
 
-    // for each of the ID-based runtime objects, we're going to have an
-    //  implementation class and a table to look them up in
-    struct Node {
-      Node(void);
-      ~Node(void);
+  // for each of the ID-based runtime objects, we're going to have an
+  //  implementation class and a table to look them up in
+  struct Node {
+    Node(void);
+    ~Node(void);
 
-      Node(const Node &) = delete;
-      Node &operator=(const Node &) = delete;
-      Node(Node &&) noexcept = delete;
-      Node &operator=(Node &&) noexcept = delete;
+    Node(const Node &) = delete;
+    Node &operator=(const Node &) = delete;
+    Node(Node &&) noexcept = delete;
+    Node &operator=(Node &&) noexcept = delete;
 
-      // not currently resizable
-      std::vector<MemoryImpl *> memories;
-      std::vector<IBMemory *> ib_memories;
-      std::vector<ProcessorImpl *> processors;
-      std::vector<Channel *> dma_channels;
+    // not currently resizable
+    std::vector<MemoryImpl *> memories;
+    std::vector<IBMemory *> ib_memories;
+    std::vector<ProcessorImpl *> processors;
+    std::vector<Channel *> dma_channels;
 
-      DynamicTable<RemoteEventTableAllocator> remote_events;
-      DynamicTable<BarrierTableAllocator> barriers;
-      DynamicTable<ReservationTableAllocator> reservations;
-      DynamicTable<CompQueueTableAllocator> compqueues;
+    DynamicTable<RemoteEventTableAllocator> remote_events;
+    DynamicTable<BarrierTableAllocator> barriers;
+    DynamicTable<ReservationTableAllocator> reservations;
+    DynamicTable<CompQueueTableAllocator> compqueues;
 
-      // sparsity maps can be created by other nodes, so keep a
-      //  map per-creator_node
-      std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *> > sparsity_maps;
-      std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> > subgraphs;
-      std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *> > proc_groups;
-    };
+    // sparsity maps can be created by other nodes, so keep a
+    //  map per-creator_node
+    std::vector<atomic<DynamicTable<SparsityMapTableAllocator> *>> sparsity_maps;
+    std::vector<atomic<DynamicTable<SubgraphTableAllocator> *>> subgraphs;
+    std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *>> proc_groups;
+  };
 
     // the "core" module provides the basic memories and processors used by Realm
     class CoreModuleConfig : public ModuleConfig {
@@ -167,7 +167,10 @@ namespace Realm {
       size_t res_sysmem_size = 0;
 
       // sparstiy maps
-      bool enable_sparsity_refcount = false;
+      bool report_sparsity_leaks = false;
+
+      // barriers
+      int barrier_broadcast_radix = 4;
     };
 
     class CoreModule : public Module {
@@ -259,7 +262,9 @@ namespace Realm {
       void start(void);
 
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
-      bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+      Event notify_register_reduction(ReductionOpID redop_id);
+      bool register_reduction(Event &event, ReductionOpID redop_id,
+                              const ReductionOpUntyped *redop);
       bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
 
       Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 

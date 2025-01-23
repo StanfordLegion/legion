@@ -34,38 +34,32 @@ TYPED_TEST_SUITE_P(PointTest);
 
 TYPED_TEST_P(PointTest, Zeroes)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   TypeParam point = TypeParam::ZEROES();
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(point[i], static_cast<T>(0));
   }
 }
 
 TYPED_TEST_P(PointTest, Ones)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   TypeParam point = TypeParam::ONES();
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(point[i], static_cast<T>(1));
   }
 }
 
 TYPED_TEST_P(PointTest, BaseAccess)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point(this->values1);
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(point[i], this->values1[i]);
   }
 }
 
 TYPED_TEST_P(PointTest, Equality)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point1(this->values1);
   TypeParam point2(this->values1);
   TypeParam point3(this->values2);
@@ -76,75 +70,64 @@ TYPED_TEST_P(PointTest, Equality)
 
 TYPED_TEST_P(PointTest, Add)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point1(this->values1);
   TypeParam point2(this->values2);
   TypeParam result = point1 + point2;
 
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values1[i] + this->values2[i]);
   }
 }
 
 TYPED_TEST_P(PointTest, Subtract)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point1(this->values2);
   TypeParam point2(this->values1);
   TypeParam result = point1 - point2;
 
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values2[i] - this->values1[i]);
   }
 }
 
 TYPED_TEST_P(PointTest, Multiply)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point1(this->values2);
   TypeParam point2(this->values1);
   TypeParam result = point1 * point2;
 
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values2[i] * this->values1[i]);
   }
 }
 
 TYPED_TEST_P(PointTest, Divide)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point1(this->values2);
   TypeParam point2(this->values1);
   TypeParam result = point1 / point2;
 
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values2[i] / this->values1[i]);
   }
 }
 
 TYPED_TEST_P(PointTest, Modulo)
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
   TypeParam point1(this->values2);
   TypeParam point2(this->values1);
   TypeParam result = point1 % point2;
 
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values2[i] % this->values1[i]);
   }
 }
 
 TYPED_TEST_P(PointTest, Dot)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   T product = 0;
-  for(int i = 0; i < N; i++) {
+  for(int i = 0; i < TestFixture::N; i++) {
     product += this->values1[i] * this->values2[i];
   }
 

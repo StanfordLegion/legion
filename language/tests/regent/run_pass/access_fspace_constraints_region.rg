@@ -37,6 +37,7 @@ end
 
 task h() : int
   var t = region(ispace(ptr, 5), int)
+  fill(t, 0)
   var y = dynamic_cast(ptr(int, t), 0)
   @y = 7
   var a = dynamic_cast(ptr(int, t), 1)

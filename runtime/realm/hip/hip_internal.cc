@@ -240,7 +240,7 @@ namespace Realm {
                 if(in_gpu) {
                   if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                     copy_type = hipMemcpyDeviceToDevice;
-                  } else if(!out_gpu) {
+                  } else if(!out_gpu && !out_mapping) {
                     copy_type = hipMemcpyDeviceToHost;
                   } else {
                     copy_type = hipMemcpyDefault;
@@ -322,7 +322,7 @@ namespace Realm {
                   if(in_gpu) {
                     if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                       copy_type = hipMemcpyDeviceToDevice;
-                    } else if(!out_gpu) {
+                    } else if(!out_gpu && !out_mapping) {
                       copy_type = hipMemcpyDeviceToHost;
                     } else {
                       copy_type = hipMemcpyDefault;
@@ -394,10 +394,10 @@ namespace Realm {
                   //  allowing us to stop early if we hit the rate limit or a
                   //  timeout
                   hipMemcpyKind copy_type;
-                    if(in_gpu) {
+                  if(in_gpu) {
                     if(out_gpu == in_gpu || (out_ipc_index >= 0)) {
                       copy_type = hipMemcpyDeviceToDevice;
-                    } else if(!out_gpu) {
+                    } else if(!out_gpu && !out_mapping) {
                       copy_type = hipMemcpyDeviceToHost;
                     } else {
                       copy_type = hipMemcpyDefault;
@@ -1018,6 +1018,8 @@ namespace Realm {
                                                        (p * pstride));
                         CHECK_HIP( hipMemcpy2DAsync(dstDevice, lstride, srcDevice, lstride, bytes, lines, hipMemcpyDeviceToDevice, stream->get_stream()) );
                       }
+                      out_alc.advance(2, planes);
+                      total_bytes += bytes * lines * planes;
                     }
                   }
                 }
@@ -1496,86 +1498,52 @@ namespace Realm {
 
         xdq.add_to_manager(bgwork);
       }
-      
-      /*static*/ bool GPUreduceChannel::is_gpu_redop(ReductionOpID redop_id)
+
+      bool GPUreduceChannel::supports_redop(ReductionOpID redop_id) const
       {
-        if(redop_id == 0)
+        if(redop_id == 0) {
           return false;
+        }
 
         ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
-        assert(redop);
-
         // there's four different kernels, but they should be all or nothing, so
         //  just check one
-        if(!redop->hip_apply_excl_fn)
-          return false;
-
-        return true;
+        return (redop != nullptr) && (redop->hip_apply_excl_fn != nullptr);
       }
 
-      uint64_t GPUreduceChannel::supports_path(ChannelCopyInfo channel_copy_info,
-                                               CustomSerdezID src_serdez_id,
-                                               CustomSerdezID dst_serdez_id,
-                                               ReductionOpID redop_id,
-                                               size_t total_bytes,
-                                               const std::vector<size_t> *src_frags,
-                                               const std::vector<size_t> *dst_frags,
-                                               XferDesKind *kind_ret /*= 0*/,
-                                               unsigned *bw_ret /*= 0*/,
-                                               unsigned *lat_ret /*= 0*/)
-      {
-        // first check that we have a reduction op (if not, we want the cudamemcpy
-        //   path to pick this up instead) and that it has cuda kernels available
-        if(!is_gpu_redop(redop_id))
-          return 0;
-
-        // then delegate to the normal supports_path logic
-        return Channel::supports_path(channel_copy_info,
-                                      src_serdez_id, dst_serdez_id, redop_id,
-                                      total_bytes, src_frags, dst_frags,
-                                      kind_ret, bw_ret, lat_ret);
-      }
-      
       RemoteChannelInfo *GPUreduceChannel::construct_remote_info() const
       {
         return new GPUreduceRemoteChannelInfo(node, kind,
-                                              reinterpret_cast<uintptr_t>(this),
-                                              paths);
+                                              reinterpret_cast<uintptr_t>(this), paths);
       }
 
-      XferDes *GPUreduceChannel::create_xfer_des(uintptr_t dma_op,
-                                                 NodeID launch_node,
-                                                 XferDesID guid,
-                                                 const std::vector<XferDesPortInfo>& inputs_info,
-                                                 const std::vector<XferDesPortInfo>& outputs_info,
-                                                 int priority,
-                                                 XferDesRedopInfo redop_info,
-                                                 const void *fill_data, size_t fill_size,
-                                                 size_t fill_total)
+      XferDes *GPUreduceChannel::create_xfer_des(
+          uintptr_t dma_op, NodeID launch_node, XferDesID guid,
+          const std::vector<XferDesPortInfo> &inputs_info,
+          const std::vector<XferDesPortInfo> &outputs_info, int priority,
+          XferDesRedopInfo redop_info, const void *fill_data, size_t fill_size,
+          size_t fill_total)
       {
         assert(fill_size == 0);
-        return new GPUreduceXferDes(dma_op, this, launch_node, guid,
-                                    inputs_info, outputs_info,
-                                    priority,
-                                    redop_info);
+        return new GPUreduceXferDes(dma_op, this, launch_node, guid, inputs_info,
+                                    outputs_info, priority, redop_info);
       }
 
-      long GPUreduceChannel::submit(Request** requests, long nr)
+      long GPUreduceChannel::submit(Request **requests, long nr)
       {
         // unused
         assert(0);
         return 0;
       }
-      
+
       ////////////////////////////////////////////////////////////////////////
       //
       // class GPUreduceRemoteChannelInfo
       //
 
-      GPUreduceRemoteChannelInfo::GPUreduceRemoteChannelInfo(NodeID _owner,
-                                                             XferDesKind _kind,
-                                                             uintptr_t _remote_ptr,
-                                                             const std::vector<Channel::SupportedPath>& _paths)
+      GPUreduceRemoteChannelInfo::GPUreduceRemoteChannelInfo(
+          NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+          const std::vector<Channel::SupportedPath> &_paths)
         : SimpleRemoteChannelInfo(_owner, _kind, _remote_ptr, _paths)
       {}
 
@@ -1590,26 +1558,23 @@ namespace Realm {
 
       // these templates can go here because they're only used by the helper below
       template <typename S>
-      bool GPUreduceRemoteChannelInfo::serialize(S& serializer) const
+      bool GPUreduceRemoteChannelInfo::serialize(S &serializer) const
       {
-        return ((serializer << owner) &&
-                (serializer << kind) &&
-                (serializer << remote_ptr) &&
-                (serializer << paths));
+        return ((serializer << owner) && (serializer << kind) &&
+                (serializer << remote_ptr) && (serializer << paths));
       }
 
       template <typename S>
-      /*static*/ RemoteChannelInfo *GPUreduceRemoteChannelInfo::deserialize_new(S& deserializer)
+      /*static*/ RemoteChannelInfo *
+      GPUreduceRemoteChannelInfo::deserialize_new(S &deserializer)
       {
         NodeID owner;
         XferDesKind kind;
         uintptr_t remote_ptr;
         std::vector<Channel::SupportedPath> paths;
 
-        if((deserializer >> owner) &&
-           (deserializer >> kind) &&
-           (deserializer >> remote_ptr) &&
-           (deserializer >> paths)) {
+        if((deserializer >> owner) && (deserializer >> kind) &&
+           (deserializer >> remote_ptr) && (deserializer >> paths)) {
           return new GPUreduceRemoteChannelInfo(owner, kind, remote_ptr, paths);
         } else {
           return 0;
@@ -1617,8 +1582,8 @@ namespace Realm {
       }
 
       /*static*/ Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
-                                                          GPUreduceRemoteChannelInfo> GPUreduceRemoteChannelInfo::serdez_subclass;
-
+                                                          GPUreduceRemoteChannelInfo>
+          GPUreduceRemoteChannelInfo::serdez_subclass;
 
       ////////////////////////////////////////////////////////////////////////
       //
@@ -1629,77 +1594,51 @@ namespace Realm {
         : RemoteChannel(_remote_ptr)
       {}
 
-      uint64_t GPUreduceRemoteChannel::supports_path(ChannelCopyInfo channel_copy_info,
-                                                     CustomSerdezID src_serdez_id,
-                                                     CustomSerdezID dst_serdez_id,
-                                                     ReductionOpID redop_id,
-                                                     size_t total_bytes,
-                                                     const std::vector<size_t> *src_frags,
-                                                     const std::vector<size_t> *dst_frags,
-                                                     XferDesKind *kind_ret /*= 0*/,
-                                                     unsigned *bw_ret /*= 0*/,
-                                                     unsigned *lat_ret /*= 0*/)
+      ////////////////////////////////////////////////////////////////////////
+      //
+      // class GPUReplHeapListener
+      //
+
+      GPUReplHeapListener::GPUReplHeapListener(HipModule *_module)
+        : module(_module)
+      {}
+
+      void GPUReplHeapListener::chunk_created(void *base, size_t bytes)
       {
-        // check first that we have a reduction op (if not, we want the cudamemcpy
-        //   path to pick this up instead) and that it has cuda kernels available
-        if(!GPUreduceChannel::is_gpu_redop(redop_id))
-          return 0;
+        if(!module->gpus.empty()) {
+          log_gpu.info() << "registering replicated heap chunk: base=" << base
+                         << " size=" << bytes;
 
-        // then delegate to the normal supports_path logic
-        return Channel::supports_path(channel_copy_info,
-                                      src_serdez_id, dst_serdez_id, redop_id,
-                                      total_bytes, src_frags, dst_frags,
-                                      kind_ret, bw_ret, lat_ret);
-      }
-
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class GPUReplHeapListener
-    //
-
-    GPUReplHeapListener::GPUReplHeapListener(HipModule *_module)
-      : module(_module)
-    {}
-
-    void GPUReplHeapListener::chunk_created(void *base, size_t bytes)
-    {
-      if(!module->gpus.empty()) {
-        log_gpu.info() << "registering replicated heap chunk: base=" << base
-                       << " size=" << bytes;
-
-        hipError_t ret;
-        {
-          AutoGPUContext agc(module->gpus[0]);
-          ret = hipHostRegister(base, bytes,
-                                hipHostRegisterPortable |
-                                hipHostRegisterMapped);
-        }
-        if(ret != hipSuccess) {
-          log_gpu.fatal() << "failed to register replicated heap chunk: base=" << base
-                          << " size=" << bytes << " ret=" << ret;
-          abort();
-        }
-      }
-    }
-
-    void GPUReplHeapListener::chunk_destroyed(void *base, size_t bytes)
-    {
-      if(!module->gpus.empty()) {
-	log_gpu.info() << "unregistering replicated heap chunk: base=" << base
-                       << " size=" << bytes;
-
-        hipError_t ret;
-        {
-          AutoGPUContext agc(module->gpus[0]);
-          ret = hipHostUnregister(base);
-        }
-        if(ret != hipSuccess)
-          log_gpu.warning() << "failed to unregister replicated heap chunk: base=" << base
+          hipError_t ret;
+          {
+            AutoGPUContext agc(module->gpus[0]);
+            ret = hipHostRegister(base, bytes,
+                                  hipHostRegisterPortable | hipHostRegisterMapped);
+          }
+          if(ret != hipSuccess) {
+            log_gpu.fatal() << "failed to register replicated heap chunk: base=" << base
                             << " size=" << bytes << " ret=" << ret;
+            abort();
+          }
+        }
       }
-    }
 
+      void GPUReplHeapListener::chunk_destroyed(void *base, size_t bytes)
+      {
+        if(!module->gpus.empty()) {
+          log_gpu.info() << "unregistering replicated heap chunk: base=" << base
+                         << " size=" << bytes;
+
+          hipError_t ret;
+          {
+            AutoGPUContext agc(module->gpus[0]);
+            ret = hipHostUnregister(base);
+          }
+          if(ret != hipSuccess)
+            log_gpu.warning() << "failed to unregister replicated heap chunk: base="
+                              << base << " size=" << bytes << " ret=" << ret;
+        }
+      }
 
   }; // namespace Hip
 

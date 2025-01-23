@@ -89,7 +89,8 @@ namespace Realm {
     struct OperationBacktrace {
       static const ProfilingMeasurementID ID = PMID_OP_BACKTRACE;
 
-      Backtrace backtrace;
+      std::vector<uintptr_t> pcs;
+      std::vector<std::string> symbols;
     };
 
     struct OperationTimeline {
@@ -141,8 +142,6 @@ namespace Realm {
       timestamp_t start_time; // when was the GPU started?
       timestamp_t end_time; // when was the GPU completed?
 
-      inline void record_start_time(void);
-      inline void record_end_time(void);
       inline bool is_valid(void) const;
     };
 
@@ -381,7 +380,7 @@ namespace Realm {
     std::vector<ProfilingRequest *> requests;
   };
 
-  class REALM_INTERNAL_API ProfilingMeasurementCollection {
+  class REALM_PUBLIC_API ProfilingMeasurementCollection {
   public:
     ProfilingMeasurementCollection(void);
     ~ProfilingMeasurementCollection(void);

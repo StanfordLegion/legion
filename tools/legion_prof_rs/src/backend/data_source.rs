@@ -1017,6 +1017,7 @@ impl StateDataSource {
                                     .find_previous_executing_entry(
                                         interval.start.into(),
                                         interval.stop.into(),
+                                        device,
                                     )
                                 {
                                     item_meta.fields.push((
@@ -1403,6 +1404,39 @@ impl StateDataSource {
                     ))
                 }
             }
+            EventEntryKind::InstanceDeletion => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(mem_id) = self.state.insts.get(&prof_uid) {
+                    // This means the critical path was the deletion of the instance
+                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let inst = mem.entry(prof_uid);
+                    let stop_time: ts::Timestamp = inst.time_range.stop.unwrap().into();
+                    let inst_name = inst.name(&self.state);
+                    let mem_name = mem.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: inst.base.prof_uid.into(),
+                        title: format!(
+                            "Deletion of {} at {} in {}",
+                            &inst_name, stop_time, mem_name
+                        ),
+                        interval: inst.time_range.into(),
+                        entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
+                    })
+                } else {
+                    Field::String(format!(
+                            "Critical path from an instance deletion on node {}. Please load the logfile from that node to see it.", node.0
+                    ))
+                }
+            }
+            EventEntryKind::ExternalHandshake => {
+                assert!(event.is_barrier());
+                let trigger_time = event_entry.trigger_time.unwrap();
+                let trigger_ts: ts::Timestamp = trigger_time.into();
+                Field::String(format!(
+                    "External handshake on node {} at {}",
+                    node.0, trigger_ts
+                ))
+            }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution
@@ -1625,7 +1659,7 @@ impl StateDataSource {
                         // on this processor so that we can check to see if it was why we
                         // were delayed from running
                         let mut has_critical = false;
-                        let mut need_critical = true;
+                        let mut need_critical = self.state.has_critical_path_data();
                         // Check to see if we have a critical path event
                         if let Some(critical) = entry.critical() {
                             has_critical = true;
@@ -1772,7 +1806,7 @@ impl StateDataSource {
                     ));
                     // See if there was something previously executing that delayed us
                     if let Some((previous, start_time, stop_time)) =
-                        proc.find_previous_executing_entry(ready, start)
+                        proc.find_previous_executing_entry(ready, start, device)
                     {
                         fields.push((
                             self.fields.previous_executing,
@@ -1903,7 +1937,7 @@ impl StateDataSource {
             // 1. The precondition event can be slow to trigger
             // 2. The caller task can be slow to create it
             // 3. We might need to wait for space in the memory to be freed for it to be ready
-            let mut need_critical = true;
+            let mut need_critical = self.state.has_critical_path_data();
             if let Some(critical) = entry.critical() {
                 if let Some(event_entry) = self.state.find_critical_entry(critical) {
                     // Check to see if the critical entry happened before or after
@@ -1967,7 +2001,8 @@ impl StateDataSource {
                     }
                 } else {
                     // Critical path is waiting for other instances to be deleted
-                    let ready_ts: ts::Timestamp = entry.time_range.ready.unwrap().into();
+                    let ready_time = entry.time_range.ready.unwrap();
+                    let ready_ts: ts::Timestamp = ready_time.into();
                     fields.push((
                         self.fields.critical,
                         Field::String(format!(
@@ -1975,6 +2010,13 @@ impl StateDataSource {
                             ready_ts
                         )),
                         Some(Color32::GOLD),
+                    ));
+                    // Record the deferred time here for how long we waited for
+                    // the instance to be ready
+                    fields.push((
+                        self.fields.deferred_time,
+                        Field::Interval(ts::Interval::new(creation_time.into(), ready_ts)),
+                        self.select_interval_color(creation_time, ready_time),
                     ));
                     // Still need to record the creator
                     if let Some(creator) = entry.creator() {

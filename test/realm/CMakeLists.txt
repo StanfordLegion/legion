@@ -55,7 +55,9 @@ list(APPEND REALM_TESTS
   rsrv_acquire_poisoned
   refcount_image_test
   inst_chain_redistrict
+  refcount_setops_test
   refcount_preimage_test
+  refcount_byfield_test
   )
 
 if(Legion_USE_CUDA)
@@ -64,13 +66,14 @@ if(Legion_USE_CUDA)
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
   set(CUDASRC_multiaffine multiaffine_gpu.cu)
+  set(CUDASRC_test_profiling test_profiling_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1635
   # list(APPEND REALM_TESTS cuda_arrays)
   # set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)
   list(APPEND REALM_TESTS cuda_memcpy_test)
   list(APPEND REALM_TESTS cuda_scatter_test)
-  list(APPEND REALM_TESTS cuda_transpose_test)
+  list(APPEND REALM_TESTS transpose_test_gpu)
   list(APPEND REALM_TESTS task_stream)
   set(CUDASRC_task_stream task_stream_gpu.cu)
 
@@ -83,12 +86,14 @@ if(Legion_USE_HIP)
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
   set(HIPSRC_multiaffine multiaffine_gpu.cu)
+  set(HIPSRC_test_profiling test_profiling_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)
   # set(HIPSRC_cuda_arrays cuda_arrays_gpu.cu)
 
   list(APPEND REALM_TESTS task_stream)
+  list(APPEND REALM_TESTS transpose_test_gpu)
   set(HIPSRC_task_stream task_stream_gpu.cu)
 endif()
 
@@ -143,11 +148,12 @@ set(TESTARGS_scatter_test        -ll:gpu 1)
 set(TESTARGS_transpose_test      -ll:gpu 1 -unit_test 1)
 set(TESTARGS_cuda_memcpy_test    -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
 set(TESTARGS_machine_config_args -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
-set(TESTARGS_cuda_transpose_test -ll:gpu 1)
+set(TESTARGS_transpose_test_gpu -ll:gpu 1)
 set(TESTARGS_cuda_scatter_test   -ll:gpu 1)
 
 if(Legion_USE_CUDA)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
+  list(APPEND TESTARGS_test_profiling -ll:gpu 1)
 endif()
 if(Legion_USE_HIP)
   list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)

@@ -17,6 +17,7 @@
 #include "legion/legion_redop.h"
 
 #include <array>
+#include <string.h>
 
 #ifndef __MAX__
 #define __MAX__(x,y) (((x) > (y)) ? (x) : (y))

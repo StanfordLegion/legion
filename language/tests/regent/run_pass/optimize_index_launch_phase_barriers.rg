@@ -21,11 +21,11 @@ import "regent"
 -- compiler.
 
 task k1(x : phase_barrier)
-where arrives(x) do
+  arrive(x)
 end
 
 task k2(x : phase_barrier)
-where awaits(x) do
+  await(x)
 end
 
 task k3(x : phase_barrier)
@@ -37,7 +37,7 @@ end
 
 task main()
   var n = 2
-  var z = phase_barrier(1)
+  var z = phase_barrier(n)
   must_epoch
     __demand(__index_launch)
     for i = 0, n do
