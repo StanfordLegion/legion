@@ -241,7 +241,7 @@ namespace Realm {
                           std::vector<Rect<N, T>> &covering);
 
   protected:
-    atomic<bool> entries_valid, approx_valid;
+    atomic<bool> entries_valid{}, approx_valid{};
     std::vector<SparsityMapEntry<N,T> > entries;
     std::vector<Rect<N,T> > approx_rects;
   };

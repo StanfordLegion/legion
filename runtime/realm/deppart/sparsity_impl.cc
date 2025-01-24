@@ -208,24 +208,12 @@ namespace Realm {
   // class SparsityMapImplWrapper
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(void)
-    : me((ID::IDType)-1)
-    , owner((unsigned)-1)
-    , next_free(0)
-    , type_tag(0)
-    , map_impl(0)
-    , references(0)
-    , communicator(std::make_unique<SparsityWrapperCommunicator>())
+    : communicator(std::make_unique<SparsityWrapperCommunicator>())
   {}
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(
       SparsityWrapperCommunicator *_communcator)
-    : me((ID::IDType)-1)
-    , owner((unsigned)-1)
-    , next_free(0)
-    , type_tag(0)
-    , map_impl(0)
-    , references(0)
-    , communicator(_communcator)
+    : communicator(_communcator)
   {}
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
@@ -415,8 +403,6 @@ namespace Realm {
 
   template <int N, typename T>
   SparsityMapPublicImpl<N, T>::SparsityMapPublicImpl(void)
-    : entries_valid(false)
-    , approx_valid(false)
   {}
 
   // call actual implementation - inlining makes this cheaper than a virtual method
@@ -914,15 +900,7 @@ namespace Realm {
   template <int N, typename T>
   SparsityMapImpl<N, T>::SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers)
     : me(_me)
-    , remaining_contributor_count(0)
-    , total_piece_count(0)
-    , remaining_piece_count(0)
-    , precise_requested(false)
-    , approx_requested(false)
-    , precise_ready_event(Event::NO_EVENT)
-    , approx_ready_event(Event::NO_EVENT)
     , remote_subscribers(subscribers)
-    , sizeof_precise(0)
     , sparsity_comm(std::make_unique<SparsityMapCommunicator<N, T>>())
   {}
 
@@ -930,15 +908,7 @@ namespace Realm {
   SparsityMapImpl<N, T>::SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers,
                                          SparsityMapCommunicator<N, T> *_sparsity_comm)
     : me(_me)
-    , remaining_contributor_count(0)
-    , total_piece_count(0)
-    , remaining_piece_count(0)
-    , precise_requested(false)
-    , approx_requested(false)
-    , precise_ready_event(Event::NO_EVENT)
-    , approx_ready_event(Event::NO_EVENT)
     , remote_subscribers(subscribers)
-    , sizeof_precise(0)
     , sparsity_comm(_sparsity_comm)
   {}
 
