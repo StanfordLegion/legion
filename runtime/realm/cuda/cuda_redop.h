@@ -18,6 +18,9 @@
 
 #include "realm/realm_config.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 namespace Realm {
 
   namespace Cuda {
