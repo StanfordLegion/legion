@@ -46,7 +46,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
 
 TEST(SparistyMapImplWrapperTest, AddReferences)
 {
-  const int unsigned count = 2;
+  constexpr int unsigned count = 2;
   auto wrapper = std::make_unique<SparsityMapImplWrapper>();
 
   wrapper->add_references(count);
@@ -156,7 +156,6 @@ TYPED_TEST_P(SparsityMapImplTest, AddRemoteWaiter)
 {
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
   NodeSet subscribers;
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
   auto impl =
@@ -170,11 +169,10 @@ TYPED_TEST_P(SparsityMapImplTest, AddRemoteWaiter)
 
 TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
-  const size_t num_rects = 3;
-  const int gap = 3;
+  constexpr int N = TestFixture::N;
+  constexpr int gap = 3;
+  constexpr size_t num_rects = 3;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
@@ -193,15 +191,15 @@ TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
+  constexpr int N = TestFixture::N;
+  constexpr int num_rects = 3, gap = 3;
   NodeSet subscribers;
-  const int num_rects = 3, gap = 3;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
+
   impl->contribute_dense_rect_list(rect_list,
                                    /*disjoint=*/false);
 
@@ -212,8 +210,8 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
 
 TYPED_TEST_P(SparsityMapImplTest, SetContributorCountRemote)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
+  constexpr int N = TestFixture::N;
 
   NodeSet subscribers;
   std::vector<Rect<N, T>> rect_list{Rect<N, T>(TypeParam(0), TypeParam(1))};
@@ -229,13 +227,11 @@ TYPED_TEST_P(SparsityMapImplTest, SetContributorCountRemote)
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
+  constexpr int N = TestFixture::N;
   NodeSet subscribers;
   std::vector<Rect<N, T>> rect_list{Rect<N, T>(TypeParam(0), TypeParam(1))};
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
 
@@ -246,21 +242,20 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
+  constexpr int N = TestFixture::N;
+  constexpr int num_rects = 2, gap = 3;
   NodeSet subscribers;
-  const int num_rects = 2, gap = 3;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(rect_list,
                                    /*disjoint=*/false);
 
-  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
   auto entries = public_impl->get_entries();
   EXPECT_TRUE(public_impl->is_valid());
   EXPECT_EQ(entries.size(), num_rects);
@@ -273,11 +268,10 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
+  constexpr int N = TestFixture::N;
+  constexpr int num_rects = 2, gap = 3;
   NodeSet subscribers;
-  const int num_rects = 2, gap = 3;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   auto impl = std::make_unique<SparsityMapImpl<N, T>>(
@@ -298,16 +292,17 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
 
 TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForOneRect)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
+  constexpr int N = TestFixture::N;
+  constexpr int num_rects = 2, gap = 3, max_overhead = 1000;
   NodeSet subscribers;
-  const int num_rects = 2, gap = 3, max_overhead = 1000;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   std::vector<Rect<N, T>> rect_list;
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
+  Rect<N, T> bounds(TypeParam(0), TypeParam(10));
+  std::vector<Rect<N, T>> covering;
 
   int offset = 0;
   for(int i = 0; i < num_rects; i++) {
@@ -319,8 +314,6 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForOneRect)
 
   impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
   impl->set_contributor_count(1);
-  Rect<N, T> bounds(TypeParam(0), TypeParam(10));
-  std::vector<Rect<N, T>> covering;
   bool ok =
       public_impl->compute_covering(bounds, /*max_rects=*/1, max_overhead, covering);
 
@@ -332,26 +325,23 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForOneRect)
 
 TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForNRect)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
-
-  const size_t num_rects = 4, max_rects = 3, gap = 3, max_overhead = 1000;
-
+  constexpr int N = TestFixture::N;
+  constexpr size_t num_rects = 4, max_rects = 3, gap = 3, max_overhead = 1000;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-
   NodeSet subscribers;
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
-  impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
-
-  impl->set_contributor_count(1);
-  impl->contribute_nothing();
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
-
   Rect<N, T> bounds(TypeParam(0), TypeParam(10));
   std::vector<Rect<N, T>> covering;
+
+  impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
+  impl->set_contributor_count(1);
+  impl->contribute_nothing();
   bool ok = public_impl->compute_covering(bounds, max_rects, max_overhead, covering);
+
   EXPECT_TRUE(ok);
   EXPECT_EQ(covering.size(), max_rects);
   EXPECT_EQ(covering[0].lo, TypeParam(0));
@@ -365,8 +355,8 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
 
-  const size_t num_rects = 3;
-  const int gap = 3;
+  constexpr size_t num_rects = 3;
+  constexpr int gap = 3;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
@@ -398,8 +388,8 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
 
-  const size_t num_rects = 3;
-  const int gap = 3;
+  constexpr size_t num_rects = 3;
+  constexpr int gap = 3;
 
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   std::vector<Rect<N, T>> other_rect_list = this->create_rects(num_rects, gap, 100);
