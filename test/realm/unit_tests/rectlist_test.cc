@@ -24,11 +24,10 @@ TYPED_TEST_SUITE_P(DenseRectListTest);
 TYPED_TEST_P(DenseRectListTest, AddPoints)
 {
   const size_t max_rects = 3;
-  const size_t max_points = 3;
   DenseRectangleList<TestFixture::N, typename TestFixture::T> rectlist(max_rects);
   std::vector<TypeParam> points;
 
-  for(size_t i = 0; i < max_points; i++) {
+  for(size_t i = 0; i < max_rects; i++) {
     TypeParam point(0);
     point.x() = i;
     points.emplace_back(point);
@@ -63,17 +62,23 @@ TYPED_TEST_P(DenseRectListTest, AddMaxDisjointRects)
 
 REGISTER_TYPED_TEST_SUITE_P(DenseRectListTest, AddMaxDisjointRects, AddPoints);
 
+#define TEST_POINT_TYPES(T) GeneratePointTypesForAllDims<T>()
+
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
 {
   return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
 }
 
-using TestTypesInt =
-    decltype(GeneratePointTypes<int>(std::make_integer_sequence<int, REALM_MAX_DIM>{}));
-using TestTypesLongLong = decltype(GeneratePointTypes<long long>(
-    std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+template <typename T>
+auto GeneratePointTypesForAllDims()
+{
+  return GeneratePointTypes<T>(std::make_integer_sequence<int, REALM_MAX_DIM>{});
+}
 
-INSTANTIATE_TYPED_TEST_SUITE_P(IntInstantiation, DenseRectListTest, TestTypesInt);
-INSTANTIATE_TYPED_TEST_SUITE_P(LongLongInstantiation, DenseRectListTest,
-                               TestTypesLongLong);
+#define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX, SUITE)                                 \
+  using N##SUFFIX = decltype(TEST_POINT_TYPES(BASE_TYPE));                               \
+  INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, SUITE, N##SUFFIX)
+
+INSTANTIATE_TEST_TYPES(int, Int, DenseRectListTest);
+INSTANTIATE_TEST_TYPES(long long, LongLong, DenseRectListTest);
