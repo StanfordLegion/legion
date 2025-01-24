@@ -103,8 +103,8 @@ using TestTypesInt =
 using TestTypesLongLong = decltype(GeneratePointTypes<long long>(
     std::make_integer_sequence<int, REALM_MAX_DIM>{}));
 
-INSTANTIATE_TYPED_TEST_SUITE_P(IntInstantiation, NextRectTest, TestTypesInt);
-INSTANTIATE_TYPED_TEST_SUITE_P(LongLongInstantiation, NextRectTest, TestTypesLongLong);
+INSTANTIATE_TYPED_TEST_SUITE_P(Int, NextRectTest, TestTypesInt);
+INSTANTIATE_TYPED_TEST_SUITE_P(LongLong, NextRectTest, TestTypesLongLong);
 
 template <int N>
 struct ComputeTargetSubrectTestCase {
@@ -179,6 +179,7 @@ const static ComputeTargetSubrectTestCase1D kComputeSubrectTestCases1D[] = {
      {}},*/
 };
 
+#if REALM_MAX_DIM > 1
 // 2D test cases
 const static ComputeTargetSubrectTestCase2D kComputeSubrectTestCases2D[] = {
     // Full cover in 2D
@@ -207,7 +208,9 @@ const static ComputeTargetSubrectTestCase2D kComputeSubrectTestCases2D[] = {
      Point<2>(11, 11),
      {}},*/
 };
+#endif
 
+#if REALM_MAX_DIM > 2
 // 3D test cases
 const static ComputeTargetSubrectTestCase3D kComputeSubrectTestCases3D[] = {
     // Full cover in 3D
@@ -237,6 +240,7 @@ const static ComputeTargetSubrectTestCase3D kComputeSubrectTestCases3D[] = {
      Point<3>(11, 11, 11),
      {}},*/
 };
+#endif
 
 // Concatenate all test cases into one vector
 std::vector<ComputeTargetSubrectTestVariant> allTestCases()
@@ -244,10 +248,16 @@ std::vector<ComputeTargetSubrectTestVariant> allTestCases()
   std::vector<ComputeTargetSubrectTestVariant> cases;
   cases.insert(cases.end(), std::begin(kComputeSubrectTestCases1D),
                std::end(kComputeSubrectTestCases1D));
+
+#if REALM_MAX_DIM > 1
   cases.insert(cases.end(), std::begin(kComputeSubrectTestCases2D),
                std::end(kComputeSubrectTestCases2D));
+#endif
+#if REALM_MAX_DIM > 2
   cases.insert(cases.end(), std::begin(kComputeSubrectTestCases3D),
                std::end(kComputeSubrectTestCases3D));
+#endif
+
   return cases;
 }
 
