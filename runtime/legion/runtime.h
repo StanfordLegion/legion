@@ -1811,6 +1811,7 @@ namespace Legion {
       static void handle_notify_collected_instances(Deserializer &derez,
                                                     Runtime *runtime);
     public:
+      size_t compute_future_alignment(size_t size) const;
       FutureInstance* create_future_instance(UniqueID creator_id, 
           const TaskTreeCoordinates &coordinates, size_t size,
           RtEvent *safe_for_unbounded_pools);
@@ -3167,8 +3168,6 @@ namespace Legion {
       static TraceID generate_static_trace_id(void);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
-      Future issue_timing_measurement(Context ctx,
-                                      const TimingLauncher &launcher);
     public:
       void* get_local_task_variable(Context ctx, LocalVariableID id);
       void set_local_task_variable(Context ctx, LocalVariableID id,

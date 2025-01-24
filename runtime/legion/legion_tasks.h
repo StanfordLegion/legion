@@ -298,6 +298,9 @@ namespace Legion {
       // The version infos for this task
       LegionVector<VersionInfo>                 version_infos;
     protected:
+      // Whether we have an optional future return value
+      std::optional<size_t>                     future_return_size;
+    protected:
       bool commit_received;
     protected:
       bool options_selected;
@@ -497,7 +500,6 @@ namespace Legion {
       virtual bool perform_mapping(MustEpochOp *owner = NULL,
                                    const DeferMappingArgs *args = NULL) = 0;
       virtual void handle_future_size(size_t return_type_size,
-                                      bool has_return_type_size,
                                       std::set<RtEvent> &applied_events) = 0;
       virtual uint64_t order_collectively_mapped_unbounded_pools(
           uint64_t lamport_clock, bool need_result)
@@ -823,7 +825,6 @@ namespace Legion {
                                             Mapper::MapTaskOutput &output,
                                             MustEpochOp *must_epoch_owner);
       virtual void handle_future_size(size_t return_type_size,
-                                      bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
       virtual void record_output_registered(RtEvent registered,
                                       std::set<RtEvent> &applied_events);
@@ -947,7 +948,6 @@ namespace Legion {
       virtual bool perform_mapping(MustEpochOp *owner = NULL,
                                    const DeferMappingArgs *args = NULL);
       virtual void handle_future_size(size_t return_type_size,
-                                      bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const;
@@ -1105,7 +1105,6 @@ namespace Legion {
       virtual bool perform_mapping(MustEpochOp *owner = NULL,
                                    const DeferMappingArgs *args = NULL);
       virtual void handle_future_size(size_t return_type_size,
-                                      bool has_return_type_size,
                                       std::set<RtEvent> &applied_events);
       virtual bool is_stealable(void) const;
       virtual void initialize_map_task_input(Mapper::MapTaskInput &input,
@@ -1373,6 +1372,7 @@ namespace Legion {
     protected:
       friend class SliceTask;
       Future reduction_future;
+      std::optional<size_t> reduction_future_size;
       unsigned total_points;
       unsigned mapped_points;
       unsigned completed_points;
@@ -1485,8 +1485,7 @@ namespace Legion {
       void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
     public:
-      void handle_future_size(size_t future_size, const DomainPoint &p,
-                              std::set<RtEvent> &applied_conditions);
+      void handle_future_size(size_t future_size, const DomainPoint &p);
       void record_output_extent(unsigned index,
           const DomainPoint &color, const DomainPoint &extent);
       void record_output_registered(RtEvent registered,

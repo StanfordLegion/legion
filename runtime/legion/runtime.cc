@@ -8775,9 +8775,7 @@ namespace Legion {
 #endif
       if (remaining_bytes < size)
         return NULL;
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      size_t alignment = std::min<size_t>(size & ~(size-1), 128);
+      size_t alignment = manager->compute_future_alignment(size);
       uintptr_t start = 0;
       const unsigned range_index = allocate(size, alignment, start);
       if (range_index == SENTINEL)
@@ -9213,7 +9211,8 @@ namespace Legion {
           Range& r_before = ranges[pf_idx];
           grow_hole(pf_idx, r_before, r.last, false/*before*/);
           r_before.next = r.next;
-          ranges[r.next].prev = pf_idx;
+          if (r.next != SENTINEL)
+            ranges[r.next].prev = pf_idx;
           free_range(index);
         }
       } 
@@ -9226,7 +9225,8 @@ namespace Legion {
           Range& r_after = ranges[nf_idx];
           grow_hole(nf_idx, r_after, r.first, true/*before*/);
           r_after.prev = r.prev;
-          ranges[r.prev].next = nf_idx;
+          if (r.prev != SENTINEL)
+            ranges[r.prev].next = nf_idx;
           free_range(index);
         } 
         else 
@@ -9242,7 +9242,6 @@ namespace Legion {
           r_before.next = r_after.next;
           if (r_after.next != SENTINEL)
             ranges[r_after.next].prev = pf_idx;
-
           free_range(index);
           free_range(nf_idx);
         }
@@ -13725,6 +13724,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t MemoryManager::compute_future_alignment(size_t size) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      // Default max alignment is 32 bytes
+      size_t max_alignment = 32;
+      const Memory::Kind kind = memory.kind();
+      // See if this is a GPU memory, if it is then we increase the maximum
+      // alignment up to 128 bytes since GPUs tend to like that
+      if ((kind == Memory::GPU_FB_MEM) || (kind == Memory::GPU_MANAGED_MEM) ||
+          (kind == Memory::GPU_DYNAMIC_MEM))
+        max_alignment = 128;
+      static_assert((sizeof(size_t) == 4) || (sizeof(size_t) == 8));
+      // Round up to the nearest power of 2
+      size--;
+      size |= size >> 1;
+      size |= size >> 2;
+      size |= size >> 4;
+      size |= size >> 8;
+      size |= size >> 16;
+      if (sizeof(size_t) == 8)
+        size |= size >> 32;
+      size++;
+      return std::min<size_t>(size, max_alignment);
+    }
+
+    //--------------------------------------------------------------------------
     FutureInstance* MemoryManager::create_future_instance(UniqueID creator_uid,
                             const TaskTreeCoordinates &coordinates, size_t size,
                             RtEvent *safe_for_unbounded_pools)
@@ -13784,9 +13812,7 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       // Create the layout for the future
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      ilg->alignment_reqd = std::min<size_t>(size & ~(size-1), 128);
+      ilg->alignment_reqd = compute_future_alignment(size);
       LgEvent unique_event;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
@@ -22235,17 +22261,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context issue must epoch!");
       return ctx->execute_must_epoch(launcher); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::issue_timing_measurement(Context ctx,
-                                             const TimingLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context in timing measurement!");
-      return ctx->issue_timing_measurement(launcher); 
     }
 
     //--------------------------------------------------------------------------

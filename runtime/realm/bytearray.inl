@@ -80,19 +80,23 @@ namespace Realm {
   //
 
   inline ByteArray::ByteArray(void)
+  : ByteArrayRef()
   {}
 
   inline ByteArray::ByteArray(const void *copy_from, size_t copy_size)
+  : ByteArrayRef()
   {
     make_copy(copy_from, copy_size);
   }
 
   inline ByteArray::ByteArray(const ByteArray& copy_from)
+  : ByteArrayRef()
   {
     make_copy(copy_from.array_base, copy_from.array_size);
   }
 
   inline ByteArray::ByteArray(const ByteArrayRef& copy_from)
+  : ByteArrayRef()
   {
     make_copy(copy_from.base(), copy_from.size());
   }
