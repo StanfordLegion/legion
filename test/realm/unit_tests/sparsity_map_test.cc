@@ -445,17 +445,23 @@ REGISTER_TYPED_TEST_SUITE_P(SparsityMapImplTest, AddRemoteWaiter, RemoteDataRepl
                             ComputeCoveringForNRect, ComputeOverlapPassApprox,
                             ComputeOverlapFail);
 
+#define TEST_POINT_TYPES(T) GeneratePointTypesForAllDims<T>()
+
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
 {
   return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
 }
 
-using TestTypesInt =
-    decltype(GeneratePointTypes<int>(std::make_integer_sequence<int, REALM_MAX_DIM>{}));
-using TestTypesLongLong = decltype(GeneratePointTypes<long long>(
-    std::make_integer_sequence<int, REALM_MAX_DIM>{}));
+template <typename T>
+auto GeneratePointTypesForAllDims()
+{
+  return GeneratePointTypes<T>(std::make_integer_sequence<int, REALM_MAX_DIM>{});
+}
 
-INSTANTIATE_TYPED_TEST_SUITE_P(IntInstantiation, SparsityMapImplTest, TestTypesInt);
-INSTANTIATE_TYPED_TEST_SUITE_P(LongLongInstantiation, SparsityMapImplTest,
-                               TestTypesLongLong);
+#define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX, FIXTURE)                               \
+  using N##SUFFIX = decltype(TEST_POINT_TYPES(BASE_TYPE));                               \
+  INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, FIXTURE, N##SUFFIX)
+
+INSTANTIATE_TEST_TYPES(int, Int, SparsityMapImplTest);
+INSTANTIATE_TEST_TYPES(long long, LongLong, SparsityMapImplTest);
