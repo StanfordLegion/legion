@@ -355,7 +355,7 @@ namespace Realm {
   // class CompQueueImpl
   //
 
-  CompQueueImpl::~CompQueueImpl(void)
+  CompQueueImpl::~CompQueueImpl()
   {
     AutoLock<> al(mutex);
     assert(pending_events.load() == 0);

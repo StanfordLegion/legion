@@ -27,8 +27,8 @@ namespace Realm {
 
   class CompQueueImpl {
   public:
-    CompQueueImpl(void) = default;
-    ~CompQueueImpl(void);
+    CompQueueImpl() = default;
+    ~CompQueueImpl();
 
     void init(CompletionQueue _me, int _owner);
 

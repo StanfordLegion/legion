@@ -88,40 +88,6 @@ TEST_F(CompQueueTest, AddEvent)
   EXPECT_TRUE(event_b.trigger(1, 0, /*poisoned=*/false, TimeLimit::responsive()));
 }
 
-// TODO: probably don't need this test
-TEST_F(CompQueueTest, AddAndCompleteEvent)
-{
-  const NodeID owner = 0;
-  const int index = 0;
-  const size_t max_size = 16;
-  const GenEventImpl::gen_t trigger_gen = 1;
-  bool poisoned_a = false;
-  bool poisoned_b = true;
-  CompQueueImpl compqueue;
-  GenEventImpl event_a(event_triggerer, new MockEventCommunicator());
-  GenEventImpl event_b(event_triggerer, event_comm);
-
-  event_a.init(ID::make_event(owner, index, 0), 0);
-  compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
-  compqueue.set_capacity(max_size, /*!resizable=*/false);
-  compqueue.add_event(event_a.current_event(), &event_a, /*faultaware=*/false);
-  compqueue.add_event(event_b.current_event(), &event_b, /*faultaware=*/false);
-  bool free_event =
-      event_b.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
-  size_t num_pending_events = compqueue.get_pending_events();
-  bool ok_a = event_a.has_triggered(trigger_gen, poisoned_a);
-  bool ok_b = event_b.has_triggered(trigger_gen, poisoned_b);
-
-  EXPECT_FALSE(free_event);
-  EXPECT_EQ(num_pending_events, 1);
-  EXPECT_FALSE(ok_a);
-  EXPECT_TRUE(ok_b);
-  EXPECT_FALSE(poisoned_a);
-  EXPECT_FALSE(poisoned_b);
-  EXPECT_TRUE(
-      event_a.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive()));
-}
-
 TEST_F(CompQueueTest, AddAndCompleteEventRemote)
 {
   const NodeID owner = 1;
