@@ -93,6 +93,17 @@ TYPED_TEST_P(PointTest, Add)
   }
 }
 
+TYPED_TEST_P(PointTest, AdditionAssignment)
+{
+  TypeParam point1(this->values1);
+  TypeParam point2(this->values2);
+  point1 += point2;
+
+  for(int i = 0; i < TestFixture::N; i++) {
+    EXPECT_EQ(point1[i], this->values1[i] + this->values2[i]);
+  }
+}
+
 TYPED_TEST_P(PointTest, Subtract)
 {
   TypeParam point1(this->values2);
@@ -101,6 +112,17 @@ TYPED_TEST_P(PointTest, Subtract)
 
   for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values2[i] - this->values1[i]);
+  }
+}
+
+TYPED_TEST_P(PointTest, SubstractAssignment)
+{
+  TypeParam point1(this->values1);
+  TypeParam point2(this->values2);
+  point2 -= point1;
+
+  for(int i = 0; i < TestFixture::N; i++) {
+    EXPECT_EQ(point2[i], this->values2[i] - this->values1[i]);
   }
 }
 
@@ -115,6 +137,17 @@ TYPED_TEST_P(PointTest, Multiply)
   }
 }
 
+TYPED_TEST_P(PointTest, MultiplyAssignment)
+{
+  TypeParam point1(this->values2);
+  TypeParam point2(this->values1);
+  point1 *= point2;
+
+  for(int i = 0; i < TestFixture::N; i++) {
+    EXPECT_EQ(point1[i], this->values2[i] * this->values1[i]);
+  }
+}
+
 TYPED_TEST_P(PointTest, Divide)
 {
   TypeParam point1(this->values2);
@@ -126,6 +159,17 @@ TYPED_TEST_P(PointTest, Divide)
   }
 }
 
+TYPED_TEST_P(PointTest, DivideAssignment)
+{
+  TypeParam point1(this->values2);
+  TypeParam point2(this->values1);
+  point1 /= point2;
+
+  for(int i = 0; i < TestFixture::N; i++) {
+    EXPECT_EQ(point1[i], this->values2[i] / this->values1[i]);
+  }
+}
+
 TYPED_TEST_P(PointTest, Modulo)
 {
   TypeParam point1(this->values2);
@@ -134,6 +178,17 @@ TYPED_TEST_P(PointTest, Modulo)
 
   for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values2[i] % this->values1[i]);
+  }
+}
+
+TYPED_TEST_P(PointTest, ModuloAssignment)
+{
+  TypeParam point1(this->values2);
+  TypeParam point2(this->values1);
+  point1 %= point2;
+
+  for(int i = 0; i < TestFixture::N; i++) {
+    EXPECT_EQ(point1[i], this->values2[i] % this->values1[i]);
   }
 }
 
@@ -172,7 +227,9 @@ TYPED_TEST_P(PointTest, Conversion)
 
 // Register the Dot test
 REGISTER_TYPED_TEST_SUITE_P(PointTest, BaseAccess, Equality, Dot, Zeroes, Ones, Add,
-                            Subtract, Multiply, Divide, Modulo, Conversion);
+                            AdditionAssignment, Subtract, SubstractAssignment, Multiply,
+                            MultiplyAssignment, Divide, DivideAssignment, Modulo,
+                            ModuloAssignment, Conversion);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
