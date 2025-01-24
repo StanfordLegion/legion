@@ -7,8 +7,6 @@ using namespace Realm::UCP;
 
 class UCXMPoolTest : public ::testing::Test {
 protected:
-  void SetUp() override {}
-  void TearDown() override {}
   size_t obj_size = 16;
   size_t alignment = 16;
   size_t alignment_offset = 0;
@@ -16,9 +14,9 @@ protected:
 
 TEST_F(UCXMPoolTest, GetMoreObjects)
 {
-  const size_t obj_per_chunks = 1;
-  const size_t init_number_objects = 4;
-  const size_t max_objects = 4;
+  constexpr size_t obj_per_chunks = 1;
+  constexpr size_t init_number_objects = 4;
+  constexpr size_t max_objects = 4;
   MPool mpool("test", /*leak_check_=*/false, obj_size, alignment, alignment_offset,
               obj_per_chunks, init_number_objects, max_objects);
 
@@ -31,16 +29,16 @@ TEST_F(UCXMPoolTest, GetMoreObjects)
     EXPECT_NE(objects[i], nullptr);
   }
 
-  EXPECT_EQ(objects[init_number_objects], nullptr);
+  EXPECT_EQ(objects.at(init_number_objects), nullptr);
   EXPECT_FALSE(mpool.has(false));
   EXPECT_FALSE(mpool.expand(1));
 }
 
 TEST_F(UCXMPoolTest, Expand)
 {
-  const size_t obj_per_chunks = 4;
-  const size_t init_number_objects = 0;
-  const size_t max_objects = 4;
+  constexpr size_t obj_per_chunks = 4;
+  constexpr size_t init_number_objects = 0;
+  constexpr size_t max_objects = 4;
   MPool mpool("test", /*leak_check_=*/false, obj_size, alignment, alignment_offset,
               obj_per_chunks, init_number_objects, max_objects);
 
@@ -49,9 +47,9 @@ TEST_F(UCXMPoolTest, Expand)
 
 TEST_F(UCXMPoolTest, GetAndPutBack)
 {
-  const size_t obj_per_chunks = 4;
-  const size_t init_number_objects = 1;
-  const size_t max_objects = 1;
+  constexpr size_t obj_per_chunks = 4;
+  constexpr size_t init_number_objects = 1;
+  constexpr size_t max_objects = 1;
   MPool mpool("test", /*leak_check_=*/false, obj_size, alignment, alignment_offset,
               obj_per_chunks, init_number_objects, max_objects);
 
@@ -91,7 +89,7 @@ TEST_P(UCXMPoolParamTest, GetObjectsBase)
   auto obj_init_func = [](void *obj, void *arg) {
     int size = *static_cast<int *>(arg);
     int *object = static_cast<int *>(obj);
-    for(size_t i = 0; i < size / sizeof(int); ++i) {
+    for(size_t i = 0; i < size / sizeof(*object); ++i) {
       object[i] = 7;
     }
   };
@@ -108,10 +106,10 @@ TEST_P(UCXMPoolParamTest, GetObjectsBase)
     objects.push_back(mpool.get());
   }
 
-  for(size_t i = 0; i < test_case.get_objects_count; i++) {
-    EXPECT_NE(objects[i], nullptr);
-    int *object = static_cast<int *>(objects[i]);
-    for(size_t i = 0; i < test_case.obj_size / sizeof(int); ++i) {
+  for(const auto *ptr : objects) {
+    EXPECT_NE(ptr, nullptr);
+    const int *object = static_cast<const int *>(ptr);
+    for(size_t i = 0; i < test_case.obj_size / sizeof(*object); ++i) {
       EXPECT_EQ(object[i], 7);
     }
   }
