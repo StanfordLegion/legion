@@ -27,41 +27,40 @@ namespace Realm {
   // class CoverageCounter<N,T>
 
   template <int N, typename T>
-  inline CoverageCounter<N,T>::CoverageCounter(void)
+  inline CoverageCounter<N, T>::CoverageCounter(void)
     : count(0)
   {}
 
   template <int N, typename T>
-  inline void CoverageCounter<N,T>::add_point(const Point<N,T>& p)
+  inline void CoverageCounter<N, T>::add_point(const Point<N, T> &p)
   {
     count++;
   }
 
   template <int N, typename T>
-  inline void CoverageCounter<N,T>::add_rect(const Rect<N,T>& r)
+  inline void CoverageCounter<N, T>::add_rect(const Rect<N, T> &r)
   {
     count += r.volume();
   }
 
   template <int N, typename T>
-  inline size_t CoverageCounter<N,T>::get_count(void) const
+  inline size_t CoverageCounter<N, T>::get_count(void) const
   {
     return count;
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class DenseRectangleList<N,T>
 
   template <int N, typename T>
-  inline DenseRectangleList<N,T>::DenseRectangleList(size_t _max_rects /*= 0*/)
+  inline DenseRectangleList<N, T>::DenseRectangleList(size_t _max_rects /*= 0*/)
     : max_rects(_max_rects)
     , merge_dim(-1)
   {}
 
   template <int N, typename T>
-  inline void DenseRectangleList<N,T>::merge_rects(size_t upper_bound)
+  inline void DenseRectangleList<N, T>::merge_rects(size_t upper_bound)
   {
     assert(upper_bound > 0);
     while(rects.size() > upper_bound) {
@@ -69,42 +68,43 @@ namespace Realm {
       size_t best_idx = 0;
       T best_gap = rects[1].lo[0] - rects[0].hi[0];
       for(size_t i = 1; i < max_rects; i++) {
-	T gap = rects[i + 1].lo[0] - rects[i].hi[0];
-	if(gap < best_gap) {
-	  best_gap = gap;
-	  best_idx = i;
-	}
+        T gap = rects[i + 1].lo[0] - rects[i].hi[0];
+        if(gap < best_gap) {
+          best_gap = gap;
+          best_idx = i;
+        }
       }
-      //std::cout << "merging " << rects[best_idx] << " and " << rects[best_idx + 1] << "\n";
+      // std::cout << "merging " << rects[best_idx] << " and " << rects[best_idx + 1] <<
+      // "\n";
       rects[best_idx].hi[0] = rects[best_idx + 1].hi[0];
       rects.erase(rects.begin() + best_idx + 1);
     }
   }
 
   template <int N, typename T>
-  inline void DenseRectangleList<N,T>::add_point(const Point<N,T>& p)
+  inline void DenseRectangleList<N, T>::add_point(const Point<N, T> &p)
   {
     if(rects.empty()) {
-      rects.push_back(Rect<N,T>(p, p));
+      rects.push_back(Rect<N, T>(p, p));
       return;
     }
 
     if(N == 1) {
       // optimize for sorted insertion (i.e. stuff at end)
       {
-	Rect<N,T> &lr = *rects.rbegin();
-	if(p[0] == (lr.hi[0] + 1)) {
-	  lr.hi[0] = p[0];
-	  return;
-	}
-	if(p[0] > (lr.hi[0] + 1)) {
-	  rects.push_back(Rect<N,T>(p, p));
-	  if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
-	    //std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
-	    merge_rects(max_rects);
-	  }
-	  return;
-	}
+        Rect<N, T> &lr = *rects.rbegin();
+        if(p[0] == (lr.hi[0] + 1)) {
+          lr.hi[0] = p[0];
+          return;
+        }
+        if(p[0] > (lr.hi[0] + 1)) {
+          rects.push_back(Rect<N, T>(p, p));
+          if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
+            // std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
+            merge_rects(max_rects);
+          }
+          return;
+        }
       }
 
       // maintain sorted order, even at the cost of copying stuff (for lists
@@ -118,54 +118,55 @@ namespace Realm {
       int lo = 0;
       int hi = rects.size();
       while(lo < hi) {
-	int mid = (lo + hi) >> 1;
-	if(p[0] < rects[mid].lo[0])
-	  hi = mid;
-	else if(p[0] > rects[mid].hi[0])
-	  lo = mid + 1;
-	else {
-	  // we landed right on an existing rectangle - we're done
-	  // std::cout << "{{";
-	  // for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
-	  // std::cout << " }} INCLUDED\n";
-	  return;
-	}
+        int mid = (lo + hi) >> 1;
+        if(p[0] < rects[mid].lo[0])
+          hi = mid;
+        else if(p[0] > rects[mid].hi[0])
+          lo = mid + 1;
+        else {
+          // we landed right on an existing rectangle - we're done
+          // std::cout << "{{";
+          // for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
+          // std::cout << " }} INCLUDED\n";
+          return;
+        }
       }
-      // when we get here, 'lo' is the first rectangle above us, so check for a merge below first
+      // when we get here, 'lo' is the first rectangle above us, so check for a merge
+      // below first
       if((lo > 0) && (rects[lo - 1].hi[0] == (p[0] - 1))) {
-	// merging low
-	if((lo < (int)rects.size()) && rects[lo].lo[0] == (p[0] + 1)) {
-	  // merging high too
-	  rects[lo - 1].hi[0] = rects[lo].hi[0];
-	  rects.erase(rects.begin() + lo);
-	} else {
-	  // just low
-	  rects[lo - 1].hi[0] = p[0];
-	}
+        // merging low
+        if((lo < (int)rects.size()) && rects[lo].lo[0] == (p[0] + 1)) {
+          // merging high too
+          rects[lo - 1].hi[0] = rects[lo].hi[0];
+          rects.erase(rects.begin() + lo);
+        } else {
+          // just low
+          rects[lo - 1].hi[0] = p[0];
+        }
       } else {
-	if((lo < (int)rects.size()) && rects[lo].lo[0] == (p[0] + 1)) {
-	  // merging just high
-	  rects[lo].lo[0] = p[0];
-	} else {
-	  // no merge - must insert
-	  rects.insert(rects.begin() + lo, Rect<N,T>(p, p));
-	  if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
-	    //std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
-	    merge_rects(max_rects);
-	  }
-	}
+        if((lo < (int)rects.size()) && rects[lo].lo[0] == (p[0] + 1)) {
+          // merging just high
+          rects[lo].lo[0] = p[0];
+        } else {
+          // no merge - must insert
+          rects.insert(rects.begin() + lo, Rect<N, T>(p, p));
+          if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
+            // std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
+            merge_rects(max_rects);
+          }
+        }
       }
       // std::cout << "{{";
       // for(size_t i = 0; i < rects.size(); i++) std::cout << " " << rects[i];
       // std::cout << " }}\n";
     } else {
       // just treat it as a small rectangle
-      add_rect(Rect<N,T>(p,p));
+      add_rect(Rect<N, T>(p, p));
     }
   }
 
   template <int N, typename T>
-  inline bool can_merge(const Rect<N,T>& r1, const Rect<N,T>& r2)
+  inline bool can_merge(const Rect<N, T> &r1, const Rect<N, T> &r2)
   {
     // N-1 dimensions must match exactly and 1 may be adjacent
     int idx = 0;
@@ -173,17 +174,17 @@ namespace Realm {
       idx++;
 
     // if we get all the way through, the rectangles are equal and can be "merged"
-    if(idx >= N) return true;
+    if(idx >= N)
+      return true;
 
     // if not, this has to be the dimension that is adjacent or overlaps
-    if(((r1.hi[idx] + 1) < r2.lo[idx]) ||
-       ((r2.hi[idx] + 1) < r1.lo[idx]))
+    if(((r1.hi[idx] + 1) < r2.lo[idx]) || ((r2.hi[idx] + 1) < r1.lo[idx]))
       return false;
 
     // and the rest of the dimensions have to match too
     while(++idx < N)
       if((r1.lo[idx] != r2.lo[idx]) || (r1.hi[idx] != r2.hi[idx]))
-	return false;
+        return false;
 
     return true;
   }
@@ -192,16 +193,16 @@ namespace Realm {
   extern Logger log_part;
 
   template <int N, typename T>
-  inline std::ostream& operator<<(std::ostream& os, const std::vector<Rect<N,T> >& v)
+  inline std::ostream &operator<<(std::ostream &os, const std::vector<Rect<N, T>> &v)
   {
     if(v.empty()) {
       os << "[]";
     } else {
       os << "[ ";
-      typename std::vector<Rect<N,T> >::const_iterator it = v.begin();
+      typename std::vector<Rect<N, T>>::const_iterator it = v.begin();
       os << *it;
       while(++it != v.end())
-	os << ", " << *it;
+        os << ", " << *it;
       os << " ]";
     }
     return os;
@@ -209,7 +210,7 @@ namespace Realm {
 #endif
 
   template <int N, typename T>
-  inline void DenseRectangleList<N,T>::add_rect(const Rect<N,T>& _r)
+  inline void DenseRectangleList<N, T>::add_rect(const Rect<N, T> &_r)
   {
     // never add an empty rectangle
     if(_r.empty())
@@ -222,17 +223,17 @@ namespace Realm {
 
     if(N == 1) {
       // try to optimize for sorted insertion (i.e. stuff at end)
-      Rect<N,T> &lr = *rects.rbegin();
+      Rect<N, T> &lr = *rects.rbegin();
       if(_r.lo[0] == (lr.hi[0] + 1)) {
-	lr.hi[0] = _r.hi[0];
-	return;
+        lr.hi[0] = _r.hi[0];
+        return;
       }
       if(_r.lo[0] > (lr.hi[0] + 1)) {
-	rects.push_back(_r);
-	if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
+        rects.push_back(_r);
+        if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
           merge_rects(max_rects);
-	}
-	return;
+        }
+        return;
       }
 
       // maintain sorted order, even at the cost of copying stuff (for lists
@@ -243,22 +244,22 @@ namespace Realm {
       int lo = 0;
       int hi = rects.size();
       while(lo < hi) {
-	int mid = (lo + hi) >> 1;
-	if(rects[mid].hi[0] + 1 < _r.lo[0])
-	  lo = mid + 1;
-	else
-	  hi = mid;
+        int mid = (lo + hi) >> 1;
+        if(rects[mid].hi[0] + 1 < _r.lo[0])
+          lo = mid + 1;
+        else
+          hi = mid;
       }
       // because of the early out tests above, 'lo' should always point at a
       //  valid index
       assert(lo < (int)rects.size());
-      Rect<N,T> &mr = rects[lo];
+      Rect<N, T> &mr = rects[lo];
 
       // if the new rect fits entirely below the existing one, insert the new
       //  one here and we're done
       if(_r.hi[0] + 1 < mr.lo[0]) {
-	rects.insert(rects.begin()+lo, _r);
-	return;
+        rects.insert(rects.begin() + lo, _r);
+        return;
       }
 
       // last case: merge _r with mr and possibly rects above it
@@ -266,13 +267,12 @@ namespace Realm {
       mr = mr.union_bbox(_r);
       int dlo = lo + 1;
       int dhi = dlo;
-      while((dhi < (int)rects.size()) &&
-	    ((mr.hi[0] + 1) >= rects[dhi].lo[0])) {
-	mr.hi[0] = std::max(mr.hi[0], rects[dhi].hi[0]);
-	dhi++;
+      while((dhi < (int)rects.size()) && ((mr.hi[0] + 1) >= rects[dhi].lo[0])) {
+        mr.hi[0] = std::max(mr.hi[0], rects[dhi].hi[0]);
+        dhi++;
       }
       if(dhi > dlo)
-	rects.erase(rects.begin()+dlo, rects.begin()+dhi);
+        rects.erase(rects.begin() + dlo, rects.begin() + dhi);
       return;
     }
 
@@ -285,7 +285,7 @@ namespace Realm {
 #endif
 
     {
-      Rect<N,T>& last = rects[rects.size() - 1];
+      Rect<N, T> &last = rects[rects.size() - 1];
 
       if(merge_dim == -1) {
         // no merging has occurred, so we're free to pick any dimension that is
@@ -296,7 +296,8 @@ namespace Realm {
           if((last.lo[i] == _r.lo[i]) && (last.hi[i] == _r.hi[i]))
             matching_dims++;
           else
-            candidate_dim += i;  // if more than one adds here, matching count will be wrong
+            candidate_dim +=
+                i; // if more than one adds here, matching count will be wrong
         if(matching_dims == (N - 1)) {
           if((last.hi[candidate_dim] + 1) == _r.lo[candidate_dim]) {
             merge_dim = candidate_dim;
@@ -314,8 +315,7 @@ namespace Realm {
         //  possible)
         bool ok = true;
         for(int i = 0; i < N; i++)
-          if((i != merge_dim) &&
-             ((last.lo[i] != _r.lo[i]) || (last.hi[i] != _r.hi[i]))) {
+          if((i != merge_dim) && ((last.lo[i] != _r.lo[i]) || (last.hi[i] != _r.hi[i]))) {
             ok = false;
             break;
           }
@@ -344,10 +344,10 @@ namespace Realm {
     //  union'd with this new rectangle
     {
       size_t best_idx = 0;
-      Rect<N,T> best_bbox = rects[0].union_bbox(_r);
+      Rect<N, T> best_bbox = rects[0].union_bbox(_r);
       size_t best_volume = best_bbox.volume();
       for(size_t i = 1; i < rects.size(); i++) {
-        Rect<N,T> bbox = rects[i].union_bbox(_r);
+        Rect<N, T> bbox = rects[i].union_bbox(_r);
         size_t volume = bbox.volume();
         if(volume < best_volume) {
           best_idx = i;
@@ -465,53 +465,51 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const DenseRectangleList<N,T>& drl)
+  std::ostream &operator<<(std::ostream &os, const DenseRectangleList<N, T> &drl)
   {
     os << "drl";
     if(drl.rects.empty()) {
       os << "{}";
     } else {
       os << "{";
-      for(typename std::vector<Rect<N,T> >::const_iterator it = drl.rects.begin();
-	  it != drl.rects.end();
-	  ++it)
-	os << " " << *it;
+      for(typename std::vector<Rect<N, T>>::const_iterator it = drl.rects.begin();
+          it != drl.rects.end(); ++it)
+        os << " " << *it;
       os << " }";
     }
     return os;
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class HybridRectangleList<N,T>
 
   template <int N, typename T>
-  HybridRectangleList<N,T>::HybridRectangleList(void)
+  HybridRectangleList<N, T>::HybridRectangleList(void)
   {}
 
   template <int N, typename T>
-  inline void HybridRectangleList<N,T>::add_point(const Point<N,T>& p)
+  inline void HybridRectangleList<N, T>::add_point(const Point<N, T> &p)
   {
     as_vector.add_point(p);
-    //as_vector.push_back(Rect<N,T>(p, p));
+    // as_vector.push_back(Rect<N,T>(p, p));
   }
 
   template <int N, typename T>
-  inline void HybridRectangleList<N,T>::add_rect(const Rect<N,T>& r)
+  inline void HybridRectangleList<N, T>::add_rect(const Rect<N, T> &r)
   {
     as_vector.add_rect(r);
-    //as_vector.push_back(r);
+    // as_vector.push_back(r);
   }
 
   template <int N, typename T>
-  inline const std::vector<Rect<N,T> >& HybridRectangleList<N,T>::convert_to_vector(void)
+  inline const std::vector<Rect<N, T>> &HybridRectangleList<N, T>::convert_to_vector(void)
   {
     return as_vector.rects;
   }
 
   template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const HybridRectangleList<N,T>& hrl)
+  std::ostream &operator<<(std::ostream &os, const HybridRectangleList<N, T> &hrl)
   {
     os << "hrl[]";
     os << "hrl";
@@ -519,33 +517,32 @@ namespace Realm {
       os << "{}";
     } else {
       os << "{ (vec)";
-      for(typename std::vector<Rect<N,T> >::const_iterator it = hrl.as_vector.rects.begin();
-	  it != hrl.as_vector.rects.end();
-	  ++it)
-	os << " " << *it;
+      for(typename std::vector<Rect<N, T>>::const_iterator it =
+              hrl.as_vector.rects.begin();
+          it != hrl.as_vector.rects.end(); ++it)
+        os << " " << *it;
       os << " }";
     }
     return os;
   }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class HybridRectangleList<1,T>
 
   template <typename T>
-  class HybridRectangleList<1,T> : public DenseRectangleList<1,T> {
+  class HybridRectangleList<1, T> : public DenseRectangleList<1, T> {
   public:
     static const size_t HIGH_WATER_MARK = 64;
     static const size_t LOW_WATER_MARK = 16;
 
     HybridRectangleList(void);
 
-    void add_point(const Point<1,T>& p);
+    void add_point(const Point<1, T> &p);
 
-    void add_rect(const Rect<1,T>& r);
+    void add_rect(const Rect<1, T> &r);
 
-    const std::vector<Rect<1,T> >& convert_to_vector(void);
+    const std::vector<Rect<1, T>> &convert_to_vector(void);
     void convert_to_map(void);
 
     bool is_vector;
@@ -553,17 +550,17 @@ namespace Realm {
   };
 
   template <typename T>
-  HybridRectangleList<1,T>::HybridRectangleList(void)
+  HybridRectangleList<1, T>::HybridRectangleList(void)
     : is_vector(true)
   {}
 
   template <typename T>
-  void HybridRectangleList<1,T>::add_point(const Point<1,T>& p)
+  void HybridRectangleList<1, T>::add_point(const Point<1, T> &p)
   {
     if(is_vector) {
-      DenseRectangleList<1,T>::add_point(p);
+      DenseRectangleList<1, T>::add_point(p);
       if(this->rects.size() > HIGH_WATER_MARK)
-	convert_to_map();
+        convert_to_map();
       return;
     }
 
@@ -571,51 +568,54 @@ namespace Realm {
     assert(!as_map.empty());
     typename std::map<T, T>::iterator it = as_map.lower_bound(p[0]);
     if(it == as_map.end()) {
-      //std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," << as_map.rbegin()->second << "\n";
-      // bigger than everything - see if we can merge with the last guy
-      T& last = as_map.rbegin()->second;
+      // std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," <<
+      // as_map.rbegin()->second << "\n";
+      //  bigger than everything - see if we can merge with the last guy
+      T &last = as_map.rbegin()->second;
       if(last == (p[0] - 1))
-	last = p[0];
+        last = p[0];
       else if(last < (p[0] - 1))
-	as_map[p[0]] = p[0];
-    } 
-    else if(it->first == p[0]) {
-      //std::cout << "add " << p << " OVERLAP1 " << it->first << "," << it->second << "\n";
-      // we're the beginning of an existing range - nothing to do
+        as_map[p[0]] = p[0];
+    } else if(it->first == p[0]) {
+      // std::cout << "add " << p << " OVERLAP1 " << it->first << "," << it->second <<
+      // "\n";
+      //  we're the beginning of an existing range - nothing to do
     } else if(it == as_map.begin()) {
-      //std::cout << "add " << p << " FIRST " << it->first << "," << it->second << "\n";
-      // we're before everything - see if we can merge with the first guy
+      // std::cout << "add " << p << " FIRST " << it->first << "," << it->second << "\n";
+      //  we're before everything - see if we can merge with the first guy
       if(it->first == (p[0] + 1)) {
-	T last = it->second;
-	as_map.erase(it);
-	as_map[p[0]] = last;
+        T last = it->second;
+        as_map.erase(it);
+        as_map[p[0]] = last;
       } else {
-	as_map[p[0]] = p[0];
+        as_map[p[0]] = p[0];
       }
     } else {
-      typename std::map<T, T>::iterator it2 = it; --it2;
-      //std::cout << "add " << p << " BETWEEN " << it->first << "," << it->second << " / " << it2->first << "," << it2->second << "\n";
+      typename std::map<T, T>::iterator it2 = it;
+      --it2;
+      // std::cout << "add " << p << " BETWEEN " << it->first << "," << it->second << " /
+      // " << it2->first << "," << it2->second << "\n";
       if(it2->second >= p[0]) {
-	// range below us includes us - nothing to do
+        // range below us includes us - nothing to do
       } else {
-	bool merge_above = it->first == (p[0] + 1);
-	bool merge_below = it2->second == (p[0] - 1);
+        bool merge_above = it->first == (p[0] + 1);
+        bool merge_below = it2->second == (p[0] - 1);
 
-	if(merge_below) {
-	  if(merge_above) {
-	    it2->second = it->second;
-	    as_map.erase(it);
-	  } else
-	    it2->second = p[0];
-	} else {
-	  T last;
-	  if(merge_above) {
-	    last = it->second;
-	    as_map.erase(it);
-	  } else
-	    last = p[0];
-	  as_map[p[0]] = last;
-	}
+        if(merge_below) {
+          if(merge_above) {
+            it2->second = it->second;
+            as_map.erase(it);
+          } else
+            it2->second = p[0];
+        } else {
+          T last;
+          if(merge_above) {
+            last = it->second;
+            as_map.erase(it);
+          } else
+            last = p[0];
+          as_map[p[0]] = last;
+        }
       }
     }
     // mergers can cause us to drop below LWM
@@ -624,16 +624,16 @@ namespace Realm {
   }
 
   template <typename T>
-  void HybridRectangleList<1,T>::add_rect(const Rect<1,T>& r)
+  void HybridRectangleList<1, T>::add_rect(const Rect<1, T> &r)
   {
     // never add an empty rectangle
     if(r.empty())
       return;
 
     if(is_vector) {
-      DenseRectangleList<1,T>::add_rect(r);
+      DenseRectangleList<1, T>::add_rect(r);
       if(this->rects.size() > HIGH_WATER_MARK)
-	convert_to_map();
+        convert_to_map();
       return;
     }
 
@@ -641,41 +641,43 @@ namespace Realm {
     assert(!as_map.empty());
     typename std::map<T, T>::iterator it = as_map.lower_bound(r.lo[0]);
     if(it == as_map.end()) {
-      //std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," << as_map.rbegin()->second << "\n";
-      // bigger than everything - see if we can merge with the last guy
-      T& last = as_map.rbegin()->second;
+      // std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," <<
+      // as_map.rbegin()->second << "\n";
+      //  bigger than everything - see if we can merge with the last guy
+      T &last = as_map.rbegin()->second;
       if(last == (r.lo[0] - 1))
-	last = r.hi[0];
+        last = r.hi[0];
       else if(last < (r.lo[0] - 1))
-	as_map[r.lo[0]] = r.hi[0];
+        as_map[r.lo[0]] = r.hi[0];
     } else {
       // if the interval we found isn't the first, we may need to back up one to
       //  find the one that overlaps the start of our range
       if(it != as_map.begin()) {
-	typename std::map<T, T>::iterator it2 = it;
-	--it2;
-	if(it2->second >= (r.lo[0] - 1))
-	  it = it2;
+        typename std::map<T, T>::iterator it2 = it;
+        --it2;
+        if(it2->second >= (r.lo[0] - 1))
+          it = it2;
       }
 
       if(it->first <= r.lo[0]) {
-	assert((it->second + 1) >= r.lo[0]); // it had better overlap or just touch
+        assert((it->second + 1) >= r.lo[0]); // it had better overlap or just touch
 
-	if(it->second < r.hi[0])
-	  it->second = r.hi[0];
+        if(it->second < r.hi[0])
+          it->second = r.hi[0];
       } else {
-	// we are the low end of a range (but may absorb other ranges)
-	it = as_map.insert(std::make_pair(r.lo[0], r.hi[0])).first;
+        // we are the low end of a range (but may absorb other ranges)
+        it = as_map.insert(std::make_pair(r.lo[0], r.hi[0])).first;
       }
 
       // have we subsumed or merged with anything?
       typename std::map<T, T>::iterator it2 = it;
       ++it2;
       while((it2 != as_map.end()) && (it2->first <= (it->second + 1))) {
-	if(it2->second > it->second) it->second = it2->second;
-	typename std::map<T, T>::iterator it3 = it2;
-	++it2;
-	as_map.erase(it3);
+        if(it2->second > it->second)
+          it->second = it2->second;
+        typename std::map<T, T>::iterator it3 = it2;
+        ++it2;
+        as_map.erase(it3);
       }
     }
     // mergers can cause us to drop below LWM
@@ -684,33 +686,32 @@ namespace Realm {
   }
 
   template <typename T>
-  void HybridRectangleList<1,T>::convert_to_map(void)
+  void HybridRectangleList<1, T>::convert_to_map(void)
   {
-    if(!is_vector) return;
+    if(!is_vector)
+      return;
     assert(as_map.empty());
-    for(typename std::vector<Rect<1,T> >::iterator it = this->rects.begin();
-	it != this->rects.end();
-	it++)
+    for(typename std::vector<Rect<1, T>>::iterator it = this->rects.begin();
+        it != this->rects.end(); it++)
       as_map[it->lo[0]] = it->hi[0];
     this->rects.clear();
     is_vector = false;
   }
 
   template <typename T>
-  const std::vector<Rect<1,T> >& HybridRectangleList<1,T>::convert_to_vector(void)
+  const std::vector<Rect<1, T>> &HybridRectangleList<1, T>::convert_to_vector(void)
   {
     if(!is_vector) {
       assert(this->rects.empty());
-      for(typename std::map<T, T>::iterator it = as_map.begin();
-	  it != as_map.end();
-	  it++) {
-	Rect<1,T> r;
-	r.lo[0] = it->first;
-	r.hi[0] = it->second;
-	this->rects.push_back(r);
+      for(typename std::map<T, T>::iterator it = as_map.begin(); it != as_map.end();
+          it++) {
+        Rect<1, T> r;
+        r.lo[0] = it->first;
+        r.hi[0] = it->second;
+        this->rects.push_back(r);
       }
       for(size_t i = 1; i < this->rects.size(); i++)
-	assert(this->rects[i-1].hi[0] < (this->rects[i].lo[0] - 1));
+        assert(this->rects[i - 1].hi[0] < (this->rects[i].lo[0] - 1));
       as_map.clear();
       is_vector = true;
     }
@@ -718,31 +719,29 @@ namespace Realm {
   }
 
   template <typename T>
-  std::ostream& operator<<(std::ostream& os, const HybridRectangleList<1,T>& hrl)
+  std::ostream &operator<<(std::ostream &os, const HybridRectangleList<1, T> &hrl)
   {
     os << "hrl";
     if(hrl.is_vector) {
       if(hrl.rects.empty()) {
-	os << "{}";
+        os << "{}";
       } else {
-	os << "{ (vec)";
-	for(typename std::vector<Rect<1,T> >::const_iterator it = hrl.rects.begin();
-	    it != hrl.rects.end();
-	    ++it)
-	  os << " " << *it;
-	os << " }";
+        os << "{ (vec)";
+        for(typename std::vector<Rect<1, T>>::const_iterator it = hrl.rects.begin();
+            it != hrl.rects.end(); ++it)
+          os << " " << *it;
+        os << " }";
       }
     } else {
       os << "{ (map)";
-      for(typename std::map<T,T>::const_iterator it = hrl.as_map.begin();
-	  it != hrl.as_map.end();
-	  ++it)
-	os << " " << Rect<1,T>(it->first, it->second);
+      for(typename std::map<T, T>::const_iterator it = hrl.as_map.begin();
+          it != hrl.as_map.end(); ++it)
+        os << " " << Rect<1, T>(it->first, it->second);
       os << " }";
     }
     return os;
   }
-    
-};
+
+}; // namespace Realm
 
 #endif // REALM_DEPPART_RECTLIST_INL
