@@ -77,6 +77,20 @@ TYPED_TEST_P(PointTest, Add)
   for(int i = 0; i < TestFixture::N; i++) {
     EXPECT_EQ(result[i], this->values1[i] + this->values2[i]);
   }
+
+  EXPECT_EQ(result.x(), this->values1[0] + this->values2[0]);
+
+  if constexpr(TestFixture::N > 1) {
+    EXPECT_EQ(result.y(), this->values1[1] + this->values2[1]);
+  }
+
+  if constexpr(TestFixture::N > 2) {
+    EXPECT_EQ(result.z(), this->values1[2] + this->values2[2]);
+  }
+
+  if constexpr(TestFixture::N > 3) {
+    EXPECT_EQ(result.w(), this->values1[3] + this->values2[3]);
+  }
 }
 
 TYPED_TEST_P(PointTest, Subtract)
