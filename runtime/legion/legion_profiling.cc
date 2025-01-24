@@ -1435,6 +1435,9 @@ namespace Legion {
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
+        // Ignore runtime calls that happen from outside threads
+        if (implicit_context == NULL)
+          return;
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
@@ -1466,6 +1469,9 @@ namespace Legion {
       Processor current = Processor::get_executing_processor();
       if (!current.exists())
       {
+        // Ignore runtime calls that happen from outside threads
+        if (implicit_context == NULL)
+          return;
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
         // for the context instead
