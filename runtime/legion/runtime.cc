@@ -22238,17 +22238,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::issue_timing_measurement(Context ctx,
-                                             const TimingLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context in timing measurement!");
-      return ctx->issue_timing_measurement(launcher); 
-    }
-
-    //--------------------------------------------------------------------------
     void* Runtime::get_local_task_variable(Context ctx, LocalVariableID id)
     //--------------------------------------------------------------------------
     {
