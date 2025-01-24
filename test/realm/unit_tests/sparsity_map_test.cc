@@ -12,6 +12,8 @@ public:
   NodeSet unsubscribers;
 };
 
+// TOOD(apryakhin@): Add test SparsityMapRefCounter
+
 TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
 {
   NodeSet subscribers, removed;
@@ -66,11 +68,11 @@ TEST(SparistyMapImplWrapperTest, RemoveReferences)
 
   wrapper->init(ID::make_sparsity(0, 0, 0), 0);
   auto impl = wrapper->get_or_create(handle);
-  wrapper->add_references(1);
+  wrapper->add_references(2);
   for(const auto node : subscribers) {
     impl->record_remote_contributor(node);
   }
-  wrapper->remove_references(1, Event::NO_EVENT);
+  wrapper->remove_references(2, Event::NO_EVENT);
 
   EXPECT_NE(impl, nullptr);
   for(const auto node : subscribers) {
@@ -146,7 +148,7 @@ public:
     }
     return rect_list;
   }
-
+  // constexpr static int num_rects = 3;
   MockSparsityMapCommunicator<N, T> *sparsity_comm;
 };
 
@@ -154,8 +156,8 @@ TYPED_TEST_SUITE_P(SparsityMapImplTest);
 
 TYPED_TEST_P(SparsityMapImplTest, AddRemoteWaiter)
 {
-  constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
+  constexpr int N = TestFixture::N;
   NodeSet subscribers;
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
   auto impl =
@@ -244,7 +246,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
 {
   using T = typename TestFixture::T;
   constexpr int N = TestFixture::N;
-  constexpr int num_rects = 2, gap = 3;
+  constexpr int num_rects = 3, gap = 3;
   NodeSet subscribers;
   std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
@@ -323,6 +325,8 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForOneRect)
   EXPECT_EQ(covering.front().hi, TypeParam(offset - gap + 1));
 }
 
+// TODO(apryakhin@): There are possible inputs for ::compute_covering, so consider making
+// a standlone paratemerie test if needed.
 TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForNRect)
 {
   using T = typename TestFixture::T;
