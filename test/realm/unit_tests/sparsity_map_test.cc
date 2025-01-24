@@ -260,8 +260,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
   impl->contribute_dense_rect_list(rect_list,
                                    /*disjoint=*/false);
 
-  SparsityMapPublicImpl<N, T> *public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
   auto entries = public_impl->get_entries();
   EXPECT_TRUE(public_impl->is_valid());
   EXPECT_EQ(entries.size(), num_rects);
@@ -288,8 +287,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
 
-  SparsityMapPublicImpl<N, T> *public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
   auto entries = public_impl->get_entries();
   EXPECT_EQ(entries.size(), rect_list.size());
   for(size_t i = 0; i < entries.size(); i++) {
@@ -309,8 +307,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForOneRect)
   std::vector<Rect<N, T>> rect_list;
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
-  SparsityMapPublicImpl<N, T> *public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
   int offset = 0;
   for(int i = 0; i < num_rects; i++) {
@@ -350,8 +347,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForNRect)
 
   impl->set_contributor_count(1);
   impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
   Rect<N, T> bounds(TypeParam(0), TypeParam(10));
   std::vector<Rect<N, T>> covering;
@@ -380,8 +376,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
   impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0, /*disjoint=*/true, 0);
   impl->set_contributor_count(1);
   impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
   auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
   auto other_impl =
@@ -390,11 +385,10 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
                                          /*disjoint=*/true);
   other_impl->set_contributor_count(1);
   other_impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *other_public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(other_impl.get());
+  SparsityMapPublicImpl<N, T> *other_public_impl = other_impl.get();
 
   Rect<N, T> bounds(TypeParam(0), TypeParam(10));
-  bool ok = public_impl->overlaps(other_public_impl, bounds, true);
+  bool ok = public_impl->overlaps(other_public_impl, bounds, /*approx=*/true);
 
   EXPECT_TRUE(ok);
 }
@@ -418,8 +412,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
   impl->set_contributor_count(1);
   impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
   auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
   auto other_impl = std::make_unique<SparsityMapImpl<N, T>>(
@@ -429,11 +422,10 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
                                    /*disjoint=*/true, 0);
   other_impl->set_contributor_count(1);
   other_impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *other_public_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+  SparsityMapPublicImpl<N, T> *other_public_impl = other_impl.get();
 
-  Rect<N, T> bounds(TypeParam(100), TypeParam(1000));
-  bool ok = public_impl->overlaps(other_public_impl, bounds, false);
+  Rect<N, T> bounds(TypeParam(0), TypeParam(1000));
+  bool ok = public_impl->overlaps(other_public_impl, bounds, /*approx=*/false);
 
   EXPECT_FALSE(ok);
 }
