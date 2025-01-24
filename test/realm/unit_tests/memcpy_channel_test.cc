@@ -1,5 +1,4 @@
 #include "realm/transfer/memcpy_channel.h"
-#include <tuple>
 #include <gtest/gtest.h>
 #include <cstring>
 
@@ -30,7 +29,6 @@ struct MemcpyXferDescTestCase {
   std::vector<size_t> dst_strides;
   std::vector<size_t> dst_extents;
   int max_entries = 1;
-  int max_iterations = 1;
 };
 
 size_t fill_address_list(const std::vector<size_t> &strides,
@@ -232,7 +230,7 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
     iterations++;
   }
 
-  EXPECT_EQ(iterations, test_case.max_iterations);
+  EXPECT_EQ(iterations, 1);
 
   for(size_t i = 0; i < check_bytes * test_case.max_entries; i++) {
     EXPECT_EQ(src_buffer[i], dst_buffer[i]);
