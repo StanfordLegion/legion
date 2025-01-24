@@ -23,6 +23,7 @@ endif()
 
 list(APPEND REALM_TESTS
   ucx_mpool_test.cc
+  barrier_test.cc
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
@@ -45,6 +46,12 @@ list(APPEND UCX_SOURCES
    ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.h
    ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.cc
 )
+
+if(NOT WIN32)
+list(APPEND REALM_TESTS
+  backtrace_test.cc
+)
+endif()
 
 include(FetchContent)
 FetchContent_Declare(

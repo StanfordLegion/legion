@@ -26,6 +26,7 @@
 #endif
 #include <cuda.h>
 #include <nvml.h>
+#include <cupti.h>
 #if defined(REALM_USE_CUDART_HIJACK)
 #include <cuda_runtime_api.h>   // For cudaDeviceProp
 #endif
@@ -106,6 +107,20 @@
 #define IS_DEFAULT_STREAM(stream)                                                        \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) ||                                  \
    ((stream) == CU_STREAM_PER_THREAD))
+
+#define REPORT_CUPTI_ERROR(level, cmd, ret)                                              \
+  do {                                                                                   \
+    log_gpu.newmsg(level) << __FILE__ << '(' << __LINE__ << "):" << cmd << " = " << ret; \
+  } while(0)
+
+#define CHECK_CUPTI(cmd)                                                                 \
+  do {                                                                                   \
+    CUptiResult ret = (cmd);                                                             \
+    if(ret != CUPTI_SUCCESS) {                                                           \
+      REPORT_CUPTI_ERROR(Logger::LEVEL_ERROR, #cmd, ret);                                \
+      abort();                                                                           \
+    }                                                                                    \
+  } while(0)
 
 namespace Realm {
 
@@ -189,7 +204,10 @@ namespace Realm {
 
     class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
     public:
-      GPUWorkFence(Realm::Operation *op);
+      GPUWorkFence(GPU *gpu, Realm::Operation *op);
+      ~GPUWorkFence();
+
+      virtual void mark_finished(bool successful);
 
       virtual void request_cancellation(void);
 
@@ -205,6 +223,7 @@ namespace Realm {
 
     protected:
       static void cuda_callback(CUstream stream, CUresult res, void *data);
+      GPU *gpu = nullptr;
     };
 
     class GPUWorkStart : public Realm::Operation::AsyncWorkItem {
@@ -479,6 +498,7 @@ namespace Realm {
       std::vector<GPUStream *> task_streams;
       atomic<unsigned> next_task_stream = atomic<unsigned>(0);
       atomic<unsigned> next_d2d_stream = atomic<unsigned>(0);
+      size_t cupti_activity_refcount = 0;
 
       GPUEventPool event_pool;
 
@@ -1450,6 +1470,25 @@ namespace Realm {
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
     NVML_APIS(DECL_FNPTR_EXTERN)
 #undef DECL_FNPTR_EXTERN
+
+#define CUPTI_APIS(__op__)                                                               \
+  __op__(cuptiActivityRegisterCallbacks);                                                \
+  __op__(cuptiActivityEnable);                                                           \
+  __op__(cuptiActivityDisable);                                                          \
+  __op__(cuptiActivityEnableContext);                                                    \
+  __op__(cuptiActivityDisableContext);                                                   \
+  __op__(cuptiActivityFlushAll);                                                         \
+  __op__(cuptiActivityGetNextRecord);                                                    \
+  __op__(cuptiActivityRegisterTimestampCallback);                                        \
+  __op__(cuptiActivityPushExternalCorrelationId);                                        \
+  __op__(cuptiActivityPopExternalCorrelationId);
+
+#define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
+    CUPTI_APIS(DECL_FNPTR_EXTERN)
+#undef DECL_FNPTR_EXTERN
+
+#define CUPTI_HAS_FNPTR(name) (name##_fnptr != nullptr)
+#define CUPTI_FNPTR(name) (assert(name##_fnptr != nullptr), name##_fnptr)
 
   }; // namespace Cuda
 

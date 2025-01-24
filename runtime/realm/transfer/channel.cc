@@ -453,9 +453,10 @@ namespace Realm {
         // succeeded - return the mutex we made
         return new_mutex;
       } else {
-        // failed - destroy the one we made and use the one that got there first
+        // failed - someone already set the mutex with new_mutex,
+        // so just return the mutex
         delete new_mutex;
-        return ptr;
+        return mutex.load();
       }
     }
 

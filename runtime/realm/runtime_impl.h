@@ -167,7 +167,10 @@ namespace Realm {
       size_t res_sysmem_size = 0;
 
       // sparstiy maps
-      bool enable_sparsity_refcount = false;
+      bool report_sparsity_leaks = false;
+
+      // barriers
+      int barrier_broadcast_radix = 4;
     };
 
     class CoreModule : public Module {

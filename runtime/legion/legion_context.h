@@ -102,7 +102,7 @@ namespace Legion {
           void (*freefunc)(const Realm::ExternalInstanceResource&),
           Provenance *provenance, bool shard_local);
       virtual Future consensus_match(const void *input, void *output,
-          size_t num_elements, size_t element_size, Provenance *provenance);
+          size_t num_elements, size_t element_size, Provenance *provenance); 
     public:
       virtual VariantID register_variant(const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
@@ -112,6 +112,7 @@ namespace Legion {
       virtual MapperID generate_dynamic_mapper_id(void);
       virtual ProjectionID generate_dynamic_projection_id(void);
       virtual ShardingID generate_dynamic_sharding_id(void);
+      virtual ConcurrentID generate_dynamic_concurrent_id(void);
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
@@ -132,6 +133,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context 
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance) = 0;
       virtual IndexSpace create_index_space(const Future &future,
@@ -506,10 +508,11 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
         bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-        Provenance *provenance) = 0;
+        Provenance *provenance, bool from_application = true) = 0;
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance) = 0;
-      virtual void record_blocking_call(uint64_t future_coordinate) = 0;
+                             Provenance *provenance, bool from_application = true) = 0;
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true) = 0;
       virtual void wait_on_future(FutureImpl *future, RtEvent ready) = 0;
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready) = 0;
     public:
@@ -526,10 +529,17 @@ namespace Legion {
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0) = 0;
     public:
-      const std::vector<PhysicalRegion>& begin_task(Processor proc);
+      virtual FutureInstance* create_task_local_future(Memory memory, 
+          size_t size, bool silence_warnings = false, 
+          const char *warning_string = NULL) = 0;
       virtual PhysicalInstance create_task_local_instance(Memory memory,
-                                        Realm::InstanceLayoutGeneric *layout);
-      virtual void destroy_task_local_instance(PhysicalInstance instance);
+                                      Realm::InstanceLayoutGeneric *layout) = 0;
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition) = 0;
+      virtual size_t query_available_memory(Memory target) = 0;
+      virtual void release_memory_pool(Memory target) = 0;
+    public:
+      const std::vector<PhysicalRegion>& begin_task(Processor proc);
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -537,8 +547,12 @@ namespace Legion {
                       const void *metadataptr, size_t metadatasize, 
                       ApEvent effects);
       virtual void post_end_task(void) = 0;
-      bool is_task_local_instance(PhysicalInstance instance);
-      LgEvent escape_task_local_instance(PhysicalInstance instance);
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          RtEvent effects, size_t num_results, PhysicalInstance *results, 
+          LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts = NULL);
+      virtual void release_task_local_instances(ApEvent effects,
+                                                RtEvent safe_effects);
       FutureInstance* copy_to_future_inst(const void *value, size_t size);
       virtual void handle_mispredication(void);
     public:
@@ -598,8 +612,8 @@ namespace Legion {
     public:
       void add_output_region(const OutputRequirement &req,
                              const InstanceSet &instances,
-                             bool global_indexing, bool valid);
-      void finalize_output_regions(void);
+                             bool global_indexing, bool valid, bool grouped);
+      void finalize_output_regions(RtEvent safe_effects);
       void initialize_overhead_profiler(void);
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
@@ -616,9 +630,7 @@ namespace Legion {
                                    void (*destructor)(void*));
     public:
       void yield(void);
-      size_t query_available_memory(Memory target);
       void concurrent_task_barrier(void);
-      void release_task_local_instances(void);
     public:
       void increment_inlined(void);
       void decrement_inlined(void);
@@ -633,10 +645,6 @@ namespace Legion {
                                                IndexSpace launch_space,
                                                ReductionOpID redop,
                                                Provenance *provenance);
-    public:
-      // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &domain,
-                                         Provenance *provenance);
     public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,
@@ -690,7 +698,7 @@ namespace Legion {
     protected:
       // Map of task local instances including their unique events
       // from the profilters perspective
-      std::map<PhysicalInstance,LgEvent> task_local_instances;
+      std::map<PhysicalInstance,LgEvent> task_local_instances; 
     protected:
       std::vector<long long> user_profiling_ranges;
     protected:
@@ -769,42 +777,10 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
       public:
-        DeferredEnqueueTaskArgs(TaskOp *t, InnerContext *ctx, 
+        DeferredEnqueueTaskArgs(SingleTask *t, InnerContext *ctx, 
                                 RtEvent pre, long long perf)
           : LgTaskArgs<DeferredEnqueueTaskArgs>(t->get_unique_op_id()),
             context(ctx), precondition(pre), 
-            previous_fevent(implicit_fevent), performed(perf) { }
-      public:
-        InnerContext *const context;
-        const RtEvent precondition;
-        const LgEvent previous_fevent;
-        const long long performed;
-      };
-      struct DeferredDistributeTaskArgs : 
-        public LgTaskArgs<DeferredDistributeTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_DISTRIBUTE_TASK_ID;
-      public:
-        DeferredDistributeTaskArgs(TaskOp *op, InnerContext *ctx,
-                                   RtEvent pre, long long perf)
-          : LgTaskArgs<DeferredDistributeTaskArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre),
-            previous_fevent(implicit_fevent), performed(perf) { }
-      public:
-        InnerContext *const context;
-        const RtEvent precondition;
-        const LgEvent previous_fevent;
-        const long long performed;
-      };
-      struct DeferredLaunchTaskArgs :
-        public LgTaskArgs<DeferredLaunchTaskArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_LAUNCH_TASK_ID;
-      public:
-        DeferredLaunchTaskArgs(TaskOp *op, InnerContext *ctx,
-                               RtEvent pre, long long perf)
-          : LgTaskArgs<DeferredLaunchTaskArgs>(op->get_unique_op_id()),
-            context(ctx), precondition(pre),
             previous_fevent(implicit_fevent), performed(perf) { }
       public:
         InnerContext *const context;
@@ -969,11 +945,12 @@ namespace Legion {
       };
       typedef CollectiveViewCreatorBase::CollectiveResult CollectiveResult; 
     public:
-      InnerContext(Runtime *runtime, SingleTask *owner, int depth, 
+      InnerContext(const Mapper::ContextConfigOutput &config,
+                   Runtime *runtime, SingleTask *owner, int depth, 
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
                    const std::vector<OutputRequirement> &output_reqs,
                    const std::vector<unsigned> &parent_indexes,
-                   const std::vector<bool> &virt_mapped,
+                   const std::vector<bool> &virt_mapped, TaskPriority priority,
                    ApEvent execution_fence, DistributedID did = 0,
                    bool inline_task = false, bool implicit_task = false,
                    bool concurrent_task = false,
@@ -1162,16 +1139,16 @@ namespace Legion {
                                     std::set<RtEvent> &preconditions);
       virtual void pack_return_resources(Serializer &rez,uint64_t return_index);
     protected:
-      IndexSpace create_index_space_internal(const Domain *bounds,
-                                             TypeTag type_tag,
-                                             Provenance *provenance);
+      IndexSpace create_index_space_internal(const Domain &bounds,
+          TypeTag type_tag, Provenance *provenance, bool take_ownership);
     public:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &domain,
-                                         Provenance *provenance);
+          Provenance *provenance, bool take_ownership = false);
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,
@@ -1553,6 +1530,8 @@ namespace Legion {
       virtual void insert_unordered_ops(AutoLock &d_lock);
       void issue_unordered_operations(AutoLock &d_lock, 
                 std::vector<Operation*> &ready_operations);
+      virtual unsigned minimize_repeat_results(unsigned ready,
+                                               bool &double_wait_interval);
     public:
       void add_to_prepipeline_queue(Operation *op);
       bool process_prepipeline_stage(void);
@@ -1578,17 +1557,9 @@ namespace Legion {
       void add_to_ready_queue(Operation *op);
       bool process_ready_queue(void);
     public:
-      void add_to_task_queue(TaskOp *op, RtEvent ready);
+      void add_to_task_queue(SingleTask *task, RtEvent ready);
       bool process_enqueue_task_queue(RtEvent precondition, LgEvent fevent,
                                       long long performed);
-    public:
-      void add_to_distribute_task_queue(TaskOp *op, RtEvent ready);
-      bool process_distribute_task_queue(RtEvent precondition, LgEvent fevent,
-                                         long long performed);
-    public:
-      void add_to_launch_task_queue(TaskOp *op, RtEvent ready);
-      bool process_launch_task_queue(RtEvent precondition, LgEvent fevent,
-                                     long long performed);
     public:
       void add_to_trigger_execution_queue(Operation *op, RtEvent ready);
       bool process_trigger_execution_queue(RtEvent precondition,
@@ -1635,10 +1606,11 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-          Provenance *provenance);
+          Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance);
-      virtual void record_blocking_call(uint64_t future_coordinate);
+                             Provenance *provenance, bool from_application = true);
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true);
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:
@@ -1670,7 +1642,6 @@ namespace Legion {
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
-      void configure_context(MapperManager *mapper, TaskPriority priority);
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
@@ -1729,6 +1700,16 @@ namespace Legion {
       virtual bool remove_subscriber_reference(PhysicalManager *manager)
         { return remove_nested_resource_ref(manager->did); }
     public:
+      virtual FutureInstance* create_task_local_future(Memory memory, 
+          size_t size, bool silence_warnings = false,
+          const char *warning_string = NULL);
+      virtual PhysicalInstance create_task_local_instance(Memory memory,
+                                        Realm::InstanceLayoutGeneric *layout);
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition);
+      virtual size_t query_available_memory(Memory target);
+      virtual void release_memory_pool(Memory target);
+    public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -1785,7 +1766,6 @@ namespace Legion {
       static void handle_dependence_stage(const void *args);
       static void handle_ready_queue(const void *args);
       static void handle_enqueue_task_queue(const void *args);
-      static void handle_distribute_task_queue(const void *args);
       static void handle_launch_task_queue(const void *args);
       static void handle_trigger_execution_queue(const void *args);
       static void handle_deferred_execution_queue(const void *args);
@@ -1906,9 +1886,17 @@ namespace Legion {
       // Pending computations for equivalence set trees
       std::map<unsigned,RtUserEvent>            pending_equivalence_set_trees;
     protected:
-      Mapper::ContextConfigOutput           context_configuration;
+      const Mapper::ContextConfigOutput     context_configuration;
       TaskTreeCoordinates                   context_coordinates;
     protected:
+      // TODO: In the future convert these into std::span so that they
+      // are bounded from above by regions.size(), in practice they might
+      // actually be bigger than that since the owner task might have 
+      // output regions which means these will be as big as 
+      // regions.size() + output_regions.size(), but we don't actually
+      // want to think of them that way since the output regions this
+      // task is producing don't have any bearing on the sub-tasks that
+      // we are launching in this context.
       const std::vector<unsigned>           &parent_req_indexes;
       const std::vector<bool>               &virtual_mapped;
       // Keep track of inline mapping regions for this task
@@ -1949,16 +1937,8 @@ namespace Legion {
       std::deque<Operation*>                          ready_queue;
     protected:
       mutable LocalLock                               enqueue_task_lock;
-      std::list<QueueEntry<TaskOp*> >                 enqueue_task_queue;
+      std::list<QueueEntry<SingleTask*> >             enqueue_task_queue;
       CompletionQueue                                 enqueue_task_comp_queue;
-    protected:
-      mutable LocalLock                               distribute_task_lock;
-      std::list<QueueEntry<TaskOp*> >                 distribute_task_queue;
-      CompletionQueue                                distribute_task_comp_queue;
-    protected:
-      mutable LocalLock                               launch_task_lock;
-      std::list<QueueEntry<TaskOp*> >                 launch_task_queue;
-      CompletionQueue                                 launch_task_comp_queue;
     protected:
       mutable LocalLock                               trigger_execution_lock;
       std::list<QueueEntry<Operation*> >              trigger_execution_queue;
@@ -2077,7 +2057,7 @@ namespace Legion {
       mutable LocalLock                                 collective_lock;
       // Only valid on the onwer context node
       std::map<RegionTreeID,
-               std::vector<CollectiveResult*> >         collective_results;
+               std::vector<CollectiveResult*> >         collective_results; 
     };
 
     /**
@@ -2098,6 +2078,9 @@ namespace Legion {
       virtual ~TopLevelContext(void);
     public:
       TopLevelContext& operator=(const TopLevelContext &rhs) = delete;
+    public:
+      static Mapper::ContextConfigOutput configure_toplevel_context(
+          Runtime *runtime);
     public:
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
@@ -2259,6 +2242,7 @@ namespace Legion {
         REPLICATE_GENERATE_DYNAMIC_MAPPER_ID,
         REPLICATE_GENERATE_DYNAMIC_PROJECTION_ID,
         REPLICATE_GENERATE_DYNAMIC_SHARDING_ID,
+        REPLICATE_GENERATE_DYNAMIC_CONCURRENT_ID,
         REPLICATE_GENERATE_DYNAMIC_TASK_ID,
         REPLICATE_GENERATE_DYNAMIC_REDUCTION_ID,
         REPLICATE_GENERATE_DYNAMIC_SERDEZ_ID,
@@ -2407,12 +2391,13 @@ namespace Legion {
         const bool verify_every_call;
       };
     public:
-      ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
+      ReplicateContext(const Mapper::ContextConfigOutput &config,
+                       Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<OutputRequirement> &output_reqs,
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
-                       ApEvent execution_fence_event,
+                       TaskPriority priority, ApEvent execution_fence_event,
                        ShardManager *manager, bool inline_task, 
                        bool implicit_task = false, bool concurrent = false);
       ReplicateContext(const ReplicateContext &rhs) = delete;
@@ -2537,6 +2522,7 @@ namespace Legion {
       virtual MapperID generate_dynamic_mapper_id(void);
       virtual ProjectionID generate_dynamic_projection_id(void);
       virtual ShardingID generate_dynamic_sharding_id(void);
+      virtual ConcurrentID generate_dynamic_concurrent_id(void);
       virtual TaskID generate_dynamic_task_id(void);
       virtual ReductionOpID generate_dynamic_reduction_id(void);
       virtual CustomSerdezID generate_dynamic_serdez_id(void);
@@ -2571,6 +2557,7 @@ namespace Legion {
     public: 
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &domain, 
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future, 
@@ -2585,9 +2572,8 @@ namespace Legion {
       virtual IndexSpace create_unbound_index_space(TypeTag type_tag,
                                                     Provenance *provenance);
     protected:
-      IndexSpace create_index_space_replicated(const Domain *bounds,
-                                               TypeTag type_tag,
-                                               Provenance *provenance);
+      IndexSpace create_index_space_replicated(const Domain &bounds,
+          TypeTag type_tag, Provenance *provenance, bool take_ownership);
     public:
       virtual IndexSpace union_index_spaces(
                            const std::vector<IndexSpace> &spaces,
@@ -2846,6 +2832,8 @@ namespace Legion {
       void finalize_unordered_collective(AutoLock &d_lock);
       virtual void insert_unordered_ops(AutoLock &d_lock);
       virtual void progress_unordered_operations(bool end_task = false);
+      virtual unsigned minimize_repeat_results(unsigned ready,
+                                               bool &double_wait_interval);
       virtual Future execute_task(const TaskLauncher &launcher,
                                   std::vector<OutputRequirement> *outputs);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher,
@@ -2906,9 +2894,9 @@ namespace Legion {
       virtual Future issue_execution_fence(Provenance *provenance);
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-          Provenance *provenance);
+          Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance);
+                             Provenance *provenance, bool from_application = true);
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
       virtual void end_task(const void *res, size_t res_size, bool owned,
@@ -3040,6 +3028,8 @@ namespace Legion {
         { return mapping_fence_barrier.next(this); }
       inline ApBarrier get_next_execution_fence_barrier(void)
         { return execution_fence_barrier.next(this); }
+      inline RtBarrier get_next_must_epoch_mapped_barrier(void)
+        { return must_epoch_mapped_barrier.next(this); }
       inline RtBarrier get_next_resource_return_barrier(void)
         { return resource_return_barrier.next(this); }
       inline RtBarrier get_next_summary_fence_barrier(void)
@@ -3254,6 +3244,7 @@ namespace Legion {
       RtReplBar attach_resource_barrier;
       ApLogicalBar detach_effects_barrier;
       RtLogicalBar mapping_fence_barrier;
+      RtReplBar must_epoch_mapped_barrier;
       RtReplBar resource_return_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
@@ -3360,6 +3351,11 @@ namespace Legion {
       unsigned unordered_ops_counter;
       unsigned unordered_ops_epoch;
       UnorderedExchange *unordered_collective;
+    protected:
+      // Collective for auto-tracing to determine the number of minimum
+      // number of repeat jobs that are ready across all the shards
+      AllReduceCollective<
+        MinReduction<unsigned>,false> *minimize_repeats_collective;
     };
 
     /**
@@ -3408,6 +3404,8 @@ namespace Legion {
       virtual ~RemoteContext(void);
     public:
       RemoteContext& operator=(const RemoteContext &rhs) = delete;
+    public:
+      static Mapper::ContextConfigOutput configure_remote_context(Runtime *rt);
     public:
       virtual Task* get_task(void);
       virtual UniqueID get_unique_id(void) const;
@@ -3505,7 +3503,6 @@ namespace Legion {
       DomainPoint shard_point;
       Domain shard_domain;
       DistributedID repl_id;
-      std::map<ShardingID,ShardingFunction*> sharding_functions;
     };
 
     /**
@@ -3515,7 +3512,8 @@ namespace Legion {
     class LeafContext : public TaskContext,
                         public LegionHeapify<LeafContext> {
     public:
-      LeafContext(Runtime *runtime, SingleTask *owner,bool inline_task = false);
+      LeafContext(Runtime *runtime, SingleTask *owner,
+          std::map<Memory,MemoryPool*> &&pools, bool inline_task = false);
       LeafContext(const LeafContext &rhs) = delete;
       virtual ~LeafContext(void);
     public:
@@ -3543,6 +3541,7 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(const Domain &bounds,
+                                            bool take_ownership,
                                             TypeTag type_tag,
                                             Provenance *provenance);
       virtual IndexSpace create_index_space(const Future &future,
@@ -3910,10 +3909,11 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid, bool logical_only,
           bool static_trace, const std::set<RegionTreeID> *managed, bool dep,
-          Provenance *provenance);
+          Provenance *provenance, bool from_application = true);
       virtual void end_trace(TraceID tid, bool deprecated,
-                             Provenance *provenance);
-      virtual void record_blocking_call(uint64_t future_coordinate);
+                             Provenance *provenance, bool from_application = true);
+      virtual void record_blocking_call(uint64_t future_coordinate,
+                                        bool invalidate_trace = true);
       virtual void wait_on_future(FutureImpl *future, RtEvent ready);
       virtual void wait_on_future_map(FutureMapImpl *map, RtEvent ready);
     public:
@@ -3929,6 +3929,16 @@ namespace Legion {
                                       const ShardMapping *mapping = NULL,
                                       ShardID source_shard = 0);
     public:
+      virtual FutureInstance* create_task_local_future(Memory memory,
+          size_t size, bool silence_warnings = false, 
+          const char *warning_string = NULL);
+      virtual PhysicalInstance create_task_local_instance(Memory memory,
+                                        Realm::InstanceLayoutGeneric *layout);
+      virtual void destroy_task_local_instance(PhysicalInstance instance,
+                                               RtEvent precondition);
+      virtual size_t query_available_memory(Memory target);
+      virtual void release_memory_pool(Memory target);
+    public:
       virtual void end_task(const void *res, size_t res_size, bool owned,
                       PhysicalInstance inst, FutureFunctor *callback_functor,
                       const Realm::ExternalInstanceResource *resource,
@@ -3936,6 +3946,13 @@ namespace Legion {
                       const void *metadataptr, size_t metadatasize,
                       ApEvent effects);
       virtual void post_end_task(void);
+      virtual RtEvent escape_task_local_instance(PhysicalInstance instance,
+          RtEvent effects, size_t num_results, PhysicalInstance *results, 
+          LgEvent *unique_events,
+          const Realm::InstanceLayoutGeneric **layouts = NULL);
+      virtual void release_task_local_instances(ApEvent effects,
+                                                RtEvent safe_effects);
+      virtual void handle_mispredication(void);
     public:
       virtual void destroy_lock(Lock l);
       virtual Grant acquire_grant(const std::vector<LockRequest> &requests);
@@ -3958,12 +3975,20 @@ namespace Legion {
                                                    Provenance *provenance);
       virtual DynamicCollective advance_dynamic_collective(
                                                    DynamicCollective dc);
-    protected:
-      mutable LocalLock                            leaf_lock;
-      size_t                                       inlined_tasks;
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
+    protected:
+      // These are the memory pools for doing immediate allocations since
+      // this leaf task has already considered itself as mapped and therefore
+      // cannot use the normal allocation pathway
+#ifndef DEBUG_LEGION
+      const 
+#endif
+        std::map<Memory,MemoryPool*>               memory_pools;
+    protected:
+      mutable LocalLock                            leaf_lock;
+      size_t                                       inlined_tasks;
     };
 
     //--------------------------------------------------------------------------

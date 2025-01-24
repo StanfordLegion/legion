@@ -148,7 +148,7 @@ namespace Realm {
 
   public:
     int cuda_device_id;
-    uintptr_t array;
+    CUarray_st *array;
   };
 
   class REALM_PUBLIC_API ExternalCudaPinnedHostResource : public ExternalMemoryResource {
