@@ -21,8 +21,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-list(APPEND REALM_TESTS
-  sparsity_map_test.cc
+list(APPEND REALM_TEST
   barrier_test.cc
   event_test.cc
   path_cache_test.cc
@@ -41,7 +40,14 @@ list(APPEND REALM_TESTS
   lowlevel_dma_test.cc
   circ_queue_test.cc
   gather_scatter_test.cc
+  sparsity_map_test.cc
+  ucx_mpool_test.cc
  )
+
+list(APPEND UCX_SOURCES
+   ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.h
+   ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.cc
+)
 
 if(NOT WIN32)
 list(APPEND REALM_TESTS
@@ -59,6 +65,8 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
+
+target_sources(realm_tests PRIVATE ${UCX_SOURCES})
 
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
