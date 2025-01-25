@@ -634,8 +634,7 @@ namespace Legion {
         // Another hairy case: if we receive a notification of a new remote
         // instance and we're in the middle of a downgrade check, we can't
         // trust the results of our downgrade attempt anymore without also
-        // querying the new instance that has just been added in case it added
-        // a reference and then sent its packed global reference back to us.
+        // querying the new instance that has just been added.
         notready_owner = remote_inst;
       }
       remote_instances.add(remote_inst);
@@ -663,7 +662,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent DistributedCollectable::send_remote_registration(
-                                                        bool passing_global_ref)
+                                                      bool has_global_reference)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -671,7 +670,7 @@ namespace Legion {
       assert(registered_with_runtime);
 #endif
       RtUserEvent registered_event;
-      if (!passing_global_ref)
+      if (!has_global_reference)
         registered_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
@@ -698,8 +697,6 @@ namespace Legion {
       target->update_remote_instances(source);
       if (done_event.exists())
         Runtime::trigger_event(done_event);
-      else
-        target->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

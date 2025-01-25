@@ -6698,12 +6698,10 @@ namespace Legion {
 #endif
         result->add_base_expression_reference(LIVE_EXPR_REF);
         if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          // Unpack the global reference that we had
-          op->unpack_global_ref();
+          // Notify the owner of the new instance
+          op->send_remote_registration(true/*has global ref*/);
+        // Unpack the global reference that we had
+        op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }

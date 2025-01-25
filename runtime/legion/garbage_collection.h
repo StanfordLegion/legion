@@ -307,7 +307,8 @@ namespace Legion {
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
-      RtEvent send_remote_registration(bool passing_global_ref = false);
+      // Can ignore return result if you hold a global reference
+      RtEvent send_remote_registration(bool has_global_reference);
       static void handle_did_remote_registration(Runtime *runtime,
                                                  Deserializer &derez,
                                                  AddressSpaceID source);
