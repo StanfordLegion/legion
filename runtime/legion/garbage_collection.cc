@@ -475,8 +475,6 @@ namespace Legion {
       assert(finder != detailed_base_gc_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_base_gc_references.erase(finder);
       if (gc_references == 0)
         return can_delete(gc);
       else
@@ -499,8 +497,6 @@ namespace Legion {
       assert(finder != detailed_nested_gc_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_nested_gc_references.erase(finder);
       if (gc_references == 0)
         return can_delete(gc);
       else
@@ -559,8 +555,6 @@ namespace Legion {
       assert(finder != detailed_base_resource_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_base_resource_references.erase(finder);
       if (resource_references == 0)
         return can_delete(gc);
       else
@@ -583,8 +577,6 @@ namespace Legion {
       assert(finder != detailed_nested_resource_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_nested_resource_references.erase(finder);
       if (resource_references == 0)
         return can_delete(gc);
       else
@@ -636,6 +628,16 @@ namespace Legion {
         rez.serialize(current_state);
         runtime->send_did_downgrade_update(remote_inst, rez);
         downgrade_owner = remote_inst;
+      }
+      else if ((downgrade_owner == local_space) && (remaining_responses > 0))
+      {
+        // Another hairy case: if we're the downgrade owner and we receive
+        // a notification of a new remote instance and we're in the middle
+        // of a downgrade process, we can't trust the results of our 
+        // downgrade attempt anymore without also querying the new instance
+        // that has just been added in case it added a reference and then
+        // sent its packed global reference back to us.
+        notready_owner = remote_inst;
       }
       remote_instances.add(remote_inst);
     }
@@ -707,7 +709,10 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global<false/*need lock*/>());
+      // Must be in a global state when packing a reference
+      assert((current_state == VALID_REF_STATE) ||
+          (current_state == GLOBAL_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE));
 #endif
       sent_global_references += cnt;
     }
@@ -1552,8 +1557,6 @@ namespace Legion {
       assert(finder != detailed_base_valid_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_base_valid_references.erase(finder);
       if (valid_references == 0)
         return can_delete(gc);
       else
@@ -1576,8 +1579,6 @@ namespace Legion {
       assert(finder != detailed_nested_valid_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
-      if (finder->second == 0)
-        detailed_nested_valid_references.erase(finder);
       if (valid_references == 0)
         return can_delete(gc);
       else
@@ -1827,7 +1828,8 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid<false/*need lock*/>());
+      // Must be valid when packing a reference
+      assert(current_state == VALID_REF_STATE);
 #endif
       sent_valid_references += cnt;
     }
