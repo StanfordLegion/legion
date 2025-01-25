@@ -85,24 +85,6 @@ namespace Legion {
     };
 
     /**
-     * \struct PendingRemoteExpression
-     * A small helper class for passing arguments associated
-     * with deferred calls to unpack remote expressions
-     */
-    struct PendingRemoteExpression {
-    public:
-      PendingRemoteExpression(void)
-        : handle(IndexSpace::NO_SPACE), remote_expr_id(0),
-          source(0), is_index_space(false), done_ref_counting(false) { }
-    public:
-      IndexSpace handle;
-      IndexSpaceExprID remote_expr_id;
-      AddressSpaceID source;
-      bool is_index_space;
-      bool done_ref_counting;
-    };
-
-    /**
      * \class OperationCreator
      * A base class for handling the creation of index space operations
      */
@@ -920,8 +902,6 @@ namespace Legion {
       // Remote expression methods
       IndexSpaceExpression* find_or_create_remote_expression(
           IndexSpaceExprID remote_expr_id, Deserializer &derez, bool &created);
-      IndexSpaceExpression* find_remote_expression(
-              const PendingRemoteExpression &pending_expression);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
     public:
       Runtime *const runtime;
@@ -1521,9 +1501,6 @@ namespace Legion {
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source); 
-      static IndexSpaceExpression* unpack_expression(Deserializer &derez,
-                         RegionTreeForest *forest, AddressSpaceID source,
-                         PendingRemoteExpression &pending, RtEvent &wait_for);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
