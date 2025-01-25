@@ -2719,8 +2719,10 @@ namespace Legion {
       if (collective_mapping != NULL)
         collective_mapping->add_reference();
       AutoProvenance provenance(Provenance::deserialize(derez));
+      RtEvent dummy;
       Future result(runtime->find_or_create_future(future_did, ctx_did,
                                             coordinate, provenance,
+                                            true/*has global ref*/, dummy,
                                             op, op_gen, op_uid, op_depth,
                                             collective_mapping));
       result.impl->unpack_global_ref();
@@ -3128,7 +3130,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::record_future_registered(void)
+    RtEvent FutureImpl::record_future_registered(bool has_global_reference)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -3140,7 +3142,7 @@ namespace Legion {
       registered_with_runtime = true;
       RtEvent result;
       if (!is_owner())
-        result = send_remote_registration();
+        result = send_remote_registration(has_global_reference);
       return result;
     }
 
@@ -4522,7 +4524,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureMapImpl::record_future_map_registered(void)
+    void FutureMapImpl::record_future_map_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -4532,10 +4534,13 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
-      RtEvent result;
+      // We always have a global unpack reference from 
+      // FutureMapImpl::unpack_future_map and that ensures that we can
+      // send the registration method without blocking since the 
+      // distributed collectable cannot collect itself until it finds
+      // the unpacked global reference
       if (!is_owner())
-        result = send_remote_registration();
-      return result;
+        send_remote_registration(true/*has global reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4584,9 +4589,11 @@ namespace Legion {
       derez.deserialize(coordinate.index_point);
       DistributedID future_did;
       derez.deserialize(future_did);
+      RtEvent dummy;
       FutureImpl *impl = runtime->find_or_create_future(future_did,
                                     context->did, coordinate,
-                                    provenance, op, op_gen,
+                                    provenance, true/*has global ref*/,
+                                    dummy, op, op_gen,
 #ifdef LEGION_SPY
                                     op_uid,
 #endif
@@ -30736,6 +30743,8 @@ namespace Legion {
                                                DistributedID ctx_did,
                                                const ContextCoordinate &coord,
                                                Provenance *provenance,
+                                               bool has_global_reference,
+                                               RtEvent &registered,
                                                Operation *op, GenerationID gen,
                                                UniqueID op_uid, int op_depth, 
                                                CollectiveMapping *mapping)
@@ -30761,28 +30770,23 @@ namespace Legion {
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
           op, gen, coord, op_uid, op_depth, provenance, mapping);
       // Retake the lock and see if we lost the race
-      RtEvent ready;
+      AutoLock d_lock(distributed_collectable_lock);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator 
+        finder = dist_collectables.find(did);
+      if (finder != dist_collectables.end())
       {
-        AutoLock d_lock(distributed_collectable_lock);
-        std::map<DistributedID,DistributedCollectable*>::const_iterator 
-          finder = dist_collectables.find(did);
-        if (finder != dist_collectables.end())
-        {
-          // We lost the race
-          delete result;
+        // We lost the race
+        delete result;
 #ifdef DEBUG_LEGION
-          result = dynamic_cast<FutureImpl*>(finder->second);
-          assert(result != NULL);
+        result = dynamic_cast<FutureImpl*>(finder->second);
+        assert(result != NULL);
 #else
-          result = static_cast<FutureImpl*>(finder->second);
+        result = static_cast<FutureImpl*>(finder->second);
 #endif
-          return result;
-        }
-        ready = result->record_future_registered();
-        dist_collectables[did] = result;
+        return result;
       }
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      registered = result->record_future_registered(has_global_reference);
+      dist_collectables[did] = result;
       return result;
     }
 
@@ -30814,29 +30818,23 @@ namespace Legion {
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
            coord, provenance, false/*register now*/);
-      // Retake the lock and see if we lost the race
-      RtEvent ready;
+      AutoLock d_lock(distributed_collectable_lock);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator 
+        finder = dist_collectables.find(did);
+      if (finder != dist_collectables.end())
       {
-        AutoLock d_lock(distributed_collectable_lock);
-        std::map<DistributedID,DistributedCollectable*>::const_iterator 
-          finder = dist_collectables.find(did);
-        if (finder != dist_collectables.end())
-        {
-          // We lost the race
-          delete result;
+        // We lost the race
+        delete result;
 #ifdef DEBUG_LEGION
-          result = dynamic_cast<FutureMapImpl*>(finder->second);
-          assert(result != NULL);
+        result = dynamic_cast<FutureMapImpl*>(finder->second);
+        assert(result != NULL);
 #else
-          result = static_cast<FutureMapImpl*>(finder->second);
+        result = static_cast<FutureMapImpl*>(finder->second);
 #endif
-          return result;
-        }
-        ready = result->record_future_map_registered();
-        dist_collectables[did] = result;
+        return result;
       }
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      result->record_future_map_registered();
+      dist_collectables[did] = result;
       return result;
     }
 

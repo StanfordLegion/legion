@@ -12891,8 +12891,10 @@ namespace Legion {
         assert(finder != future_handles->handles.end());
 #endif
         const ContextCoordinate coordinate(future_map_coordinate, point);
+        RtEvent registered;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->did, coordinate, get_provenance());
+            parent_ctx->did, coordinate, get_provenance(),
+            false/*has global reference*/, registered);
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -12903,6 +12905,11 @@ namespace Legion {
         }
         else
           impl->set_result(effects, instance, metadata, metasize);
+        if (registered.exists())
+        {
+          AutoLock o_lock(op_lock);
+          commit_preconditions.insert(registered);
+        }
       }
     }
 
@@ -13049,8 +13056,10 @@ namespace Legion {
       assert(finder != future_handles->handles.end());
 #endif
       const ContextCoordinate coordinate(future_map_coordinate, point);
+      RtEvent registered;
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-          parent_ctx->did, coordinate, get_provenance());
+          parent_ctx->did, coordinate, get_provenance(),
+          false/*has global reference*/, registered);
       if (predicate_false_future.impl == NULL)
       {
         if (predicate_false_size > 0)
@@ -13061,6 +13070,11 @@ namespace Legion {
       }
       else
         impl->set_result(execution_context, predicate_false_future.impl);
+      if (registered.exists())
+      {
+        AutoLock o_lock(op_lock);
+        commit_preconditions.insert(registered);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13215,9 +13229,16 @@ namespace Legion {
       assert(finder != handles.end());
 #endif
       const ContextCoordinate coordinate(future_map_coordinate, point);
+      RtEvent registered;
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->did, coordinate, get_provenance());
+        parent_ctx->did, coordinate, get_provenance(),
+        false/*has global reference*/, registered);
       impl->set_future_result_size(future_size, runtime->address_space);
+      if (registered.exists())
+      {
+        AutoLock o_lock(op_lock);
+        commit_preconditions.insert(registered);
+      }
     }
 
     //--------------------------------------------------------------------------

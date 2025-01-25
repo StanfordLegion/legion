@@ -260,9 +260,8 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_MANAGER_TASK_ID;
       public:
-        DeferPhysicalManagerArgs(DistributedID d,
-            Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
-            const PendingRemoteExpression &pending, FieldSpace h, 
+        DeferPhysicalManagerArgs(DistributedID d, Memory m, PhysicalInstance i,
+            size_t f, IndexSpaceExpression *lx, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use, LgEvent unique,
             InstanceKind kind, ReductionOpID redop, const void *piece_list,
             size_t piece_list_size, GarbageCollectionState state);
@@ -271,7 +270,6 @@ namespace Legion {
         const Memory mem;
         const PhysicalInstance inst;
         const size_t footprint;
-        const PendingRemoteExpression pending;
         IndexSpaceExpression *local_expr;
         const FieldSpace handle;
         const RegionTreeID tree_id;

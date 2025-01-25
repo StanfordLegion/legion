@@ -6195,47 +6195,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::find_remote_expression(
-                                         const PendingRemoteExpression &pending)
-    //--------------------------------------------------------------------------
-    {
-      if (pending.is_index_space)
-      {
-        IndexSpaceNode *node = get_node(pending.handle);
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        if (!pending.done_ref_counting)
-          node->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(node);
-        return node;
-      }
-      else
-      {
-        // Technically shouldn't happen anymore but if it does its still here
-        IndexSpaceExpression *result = NULL;
-        {
-          AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-            finder = remote_expressions.find(pending.remote_expr_id);
-#ifdef DEBUG_LEGION
-          assert(finder != remote_expressions.end());
-#endif
-          result = finder->second;
-        }
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        if (!pending.done_ref_counting)
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::unregister_remote_expression(
                                                 IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
@@ -6706,6 +6665,7 @@ namespace Legion {
           op->add_base_expression_reference(LIVE_EXPR_REF);
           op->unpack_global_ref();
         }
+        // Else LIVE_EXPR_REF added by pack_expression call
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
@@ -6738,85 +6698,10 @@ namespace Legion {
 #endif
         result->add_base_expression_reference(LIVE_EXPR_REF);
         if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          // Unpack the global reference that we had
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
-          Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source,
-          PendingRemoteExpression &pending, RtEvent &wait_for)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!pending.done_ref_counting);
-#endif
-      // Handle the special case where this is a local index space expression 
-      bool is_local;
-      derez.deserialize(is_local);
-      if (is_local)
-      {
-        IndexSpaceExpression *result;
-        derez.deserialize(result);
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = 
-          dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        op->add_base_expression_reference(LIVE_EXPR_REF);
-        if (source != forest->runtime->address_space)
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        pending.done_ref_counting = true;
-        return result;
-      }
-      derez.deserialize(pending.is_index_space);
-      // If this is an index space it is easy
-      if (pending.is_index_space)
-      {
-        derez.deserialize(pending.handle);
-        IndexSpaceNode *node = forest->get_node(pending.handle, &wait_for);
-        if (node == NULL)
-        {
-          pending.source = source;
-          return node;
-        }
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        node->unpack_global_ref();
-        pending.done_ref_counting = true;
-        ImplicitReferenceTracker::record_live_expression(node);
-        return node;
-      }
-      else
-      {
-        derez.deserialize(pending.remote_expr_id);
-        bool created = false;
-        IndexSpaceExpression *result =
-          forest->find_or_create_remote_expression(
-              pending.remote_expr_id, derez, created);
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          op->unpack_global_ref();
-        pending.done_ref_counting = true;
+          // Notify the owner of the new instance
+          op->send_remote_registration(true/*has global ref*/);
+        // Unpack the global reference that we had
+        op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
