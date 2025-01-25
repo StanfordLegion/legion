@@ -629,14 +629,13 @@ namespace Legion {
         runtime->send_did_downgrade_update(remote_inst, rez);
         downgrade_owner = remote_inst;
       }
-      else if ((downgrade_owner == local_space) && (remaining_responses > 0))
+      else if (remaining_responses > 0)
       {
-        // Another hairy case: if we're the downgrade owner and we receive
-        // a notification of a new remote instance and we're in the middle
-        // of a downgrade process, we can't trust the results of our 
-        // downgrade attempt anymore without also querying the new instance
-        // that has just been added in case it added a reference and then
-        // sent its packed global reference back to us.
+        // Another hairy case: if we receive a notification of a new remote
+        // instance and we're in the middle of a downgrade check, we can't
+        // trust the results of our downgrade attempt anymore without also
+        // querying the new instance that has just been added in case it added
+        // a reference and then sent its packed global reference back to us.
         notready_owner = remote_inst;
       }
       remote_instances.add(remote_inst);
