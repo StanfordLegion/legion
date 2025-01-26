@@ -1881,12 +1881,14 @@ namespace Legion {
     CopyAcrossUnstructured* 
       IndexSpaceOperationT<DIM,T>::create_across_unstructured(
                                  const std::map<Reservation,bool> &reservations,
-                                 const bool compute_preimages)
+                                 const bool compute_preimages,
+                                 const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space = get_tight_index_space();
       return new CopyAcrossUnstructuredT<DIM,T>(context->runtime, this,
-          local_space, ApEvent::NO_AP_EVENT, reservations, compute_preimages);
+          local_space, ApEvent::NO_AP_EVENT, reservations,
+          compute_preimages, shadow_indirections);
     }
 
     //--------------------------------------------------------------------------
@@ -5680,12 +5682,14 @@ namespace Legion {
     template<int DIM, typename T>
     CopyAcrossUnstructured* IndexSpaceNodeT<DIM,T>::create_across_unstructured(
                                  const std::map<Reservation,bool> &reservations,
-                                 const bool compute_preimages)
+                                 const bool compute_preimages,
+                                 const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
       DomainT<DIM,T> local_space = get_tight_index_space();
       return new CopyAcrossUnstructuredT<DIM,T>(context->runtime, this,
-          local_space, ApEvent::NO_AP_EVENT, reservations, compute_preimages);
+          local_space, ApEvent::NO_AP_EVENT, reservations,
+          compute_preimages, shadow_indirections);
     }
 
     //--------------------------------------------------------------------------
@@ -10466,9 +10470,10 @@ namespace Legion {
     CopyAcrossUnstructuredT<DIM,T>::CopyAcrossUnstructuredT(Runtime *rt,
                 IndexSpaceExpression *e, const DomainT<DIM,T> &domain, 
                 ApEvent ready, const std::map<Reservation,bool> &rsrvs,
-                const bool preimages)
+                const bool preimages, const bool shadow)
       : CopyAcrossUnstructured(rt, preimages, rsrvs), expr(e),
-        copy_domain(domain), copy_domain_ready(ready), 
+        copy_domain(domain), copy_domain_ready(ready),
+        shadow_indirections(shadow), shadow_layout(NULL),
         need_src_indirect_precondition(true),
         need_dst_indirect_precondition(true), 
         src_indirect_immutable_for_tracing(false),
@@ -10499,9 +10504,16 @@ namespace Legion {
             current_dst_preimages.begin(); it != 
             current_dst_preimages.end(); it++)
         it->destroy(last_copy);
+      // Destroy any shadow instances that we have
+      for (std::map<Memory,ShadowInstance>::iterator it =
+            shadow_instances.begin(); it != shadow_instances.end(); it++)
+        it->second.instance.destroy(last_copy);
+      // Lastly cleanup the indirections
       for (typename std::vector<const CopyIndirection*>::const_iterator it =
             indirections.begin(); it != indirections.end(); it++)
         delete (*it);
+      if (shadow_layout != NULL)
+        delete shadow_layout;
     }
 
     //--------------------------------------------------------------------------
@@ -10615,12 +10627,13 @@ namespace Legion {
             src_preimages.pop_front();
 #ifdef LEGION_SPY
             assert(!src_preimage_preconditions.empty());
-            current_src_preimage_precondition =
+            src_indirect_precondition =
               src_preimage_preconditions.front();
             src_preimage_preconditions.pop_front();
 #endif
           }
-          RebuildIndirectionsHelper helper(this, true/*sources*/);
+          RebuildIndirectionsHelper helper(this, op,
+              src_indirect_precondition, true/*sources*/);
           NT_TemplateHelper::demux<RebuildIndirectionsHelper>(
               src_indirect_type, &helper);
           if (helper.empty)
@@ -10647,12 +10660,13 @@ namespace Legion {
             dst_preimages.pop_front();
 #ifdef LEGION_SPY
             assert(!dst_preimage_preconditions.empty());
-            current_dst_preimage_precondition =
+            dst_indirect_precondition =
               dst_preimage_preconditions.front();
             dst_preimage_preconditions.pop_front();
 #endif
           }
-          RebuildIndirectionsHelper helper(this, false/*sources*/);
+          RebuildIndirectionsHelper helper(this, op,
+              dst_indirect_precondition, false/*sources*/);
           NT_TemplateHelper::demux<RebuildIndirectionsHelper>(
               dst_indirect_type, &helper);
           if (helper.empty)
@@ -10661,11 +10675,10 @@ namespace Legion {
 #ifdef LEGION_SPY
         // This part isn't necessary for correctness but it helps Legion Spy
         // see the dependences between the preimages and copy operations
-        if (current_src_preimage_precondition.exists() ||
-            current_dst_preimage_precondition.exists())
+        if (src_indirect_precondition.exists() ||
+            dst_indirect_precondition.exists())
           copy_precondition = Runtime::merge_events(NULL, copy_precondition,
-              current_src_preimage_precondition,
-              current_dst_preimage_precondition);
+              src_indirect_precondition, dst_indirect_precondition);
 #endif
       }
       if (has_empty_preimages)
@@ -10709,26 +10722,45 @@ namespace Legion {
           Runtime::merge_events(NULL, copy_precondition, ApEvent(pred_guard));
       else
         copy_pre = copy_precondition;
-      // No need for tracing to know about the reservations
-      for (std::map<Reservation,bool>::const_iterator it =
-            reservations.begin(); it != reservations.end(); it++)
-        copy_pre = Runtime::acquire_ap_reservation(it->first, 
-                                        it->second, copy_pre);
-      if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, this, op,
-            copy_pre, total_copies);
-      if (!indirections.empty())
+      if (!reservations.empty())
       {
-        if (individual_field_indexes.empty())
-          last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
-                indirections, requests, copy_pre, priority));
-        else
-          last_copy = issue_individual_copies(copy_pre, requests);
-          
+        // TODO
+        // Reservations are broken for indirection copies right now because we
+        // need to exchange all the reservations collectively across the point
+        // copy operations and then figure out which ones we need for each of
+        // the indirection copies based on the instances used
+        if (!indirections.empty())
+          std::abort();
+        // No need for tracing to know about the reservations
+        for (std::map<Reservation,bool>::const_iterator it =
+              reservations.begin(); it != reservations.end(); it++)
+          copy_pre = Runtime::acquire_ap_reservation(it->first, 
+                                          it->second, copy_pre);
+      }
+      if (indirections.empty() || individual_field_indexes.empty())
+      {
+        if (!indirections.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(reservations.empty());
+#endif
+          // Merge in the indirection preconditions into the copy precondition
+          // since that isn't included by default. Only need to do this for
+          // non-pointwise 
+          // Note this code will need to change once we start handling
+          // reservations correctly for indirection copies since we'll need
+          // to merge these before acquiring the reservations
+          copy_pre = Runtime::merge_events(NULL, copy_pre,
+              src_indirect_precondition, dst_indirect_precondition);
+        }
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_copy_request(requests, this, op,
+              copy_pre, total_copies);
+        last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
+              indirections, requests, copy_pre, priority));
       }
       else
-        last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
-              requests, copy_pre, priority));
+        last_copy = issue_individual_copies(op, copy_pre, requests);
       // Release any reservations
       for (std::map<Reservation,bool>::const_iterator it =
             reservations.begin(); it != reservations.end(); it++)
@@ -10805,13 +10837,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void CopyAcrossUnstructuredT<DIM,T>::release_shadow_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Memory,ShadowInstance>::const_iterator it =
+            shadow_instances.begin(); it != shadow_instances.end(); it++)
+        it->second.instance.destroy(last_copy);
+      shadow_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent CopyAcrossUnstructuredT<DIM,T>::issue_individual_copies(
-                                     const ApEvent precondition,
+                                     Operation *op, const ApEvent precondition,
                                      const Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(compute_preimages);
+      // TODO: fix reservation handling here
+      assert(reservations.empty());
 #endif
       // This is the case of separate gather/scatter copies for each 
       // of the individual preimages
@@ -10826,6 +10871,7 @@ namespace Legion {
       std::vector<CopySrcDstField> &fields = gather ? src_fields : dst_fields;
 #ifdef DEBUG_LEGION
       assert(preimages.size() == individual_field_indexes.size());
+      assert(preimages.size() == indirection_preconditions.size());
 #endif
       std::vector<ApEvent> postconditions;
       for (unsigned idx = 0; idx < preimages.size(); idx++)
@@ -10836,14 +10882,236 @@ namespace Legion {
         // Setup the indirect field indexes
         for (unsigned fidx = 0; fidx < fields.size(); fidx++)
           fields[fidx].indirect_index = individual_field_indexes[idx][fidx];
-        const ApEvent post(preimages[idx].copy(src_fields, dst_fields, 
-                            indirections, requests, precondition, priority));
+        ApEvent pre = precondition;
+        // Check to see if we have an indirection precondition. In general
+        // the precondition for the base indirection instance is already
+        // encompased here because we had to read it to compute the preimages.
+        // However, if we made shadow instances then we'll have a shadow
+        // instance precondition for the shadow instances are ready.
+        if (indirection_preconditions[idx].exists())
+        {
+          if (pre.exists())
+            pre =
+              Runtime::merge_events(NULL, pre, indirection_preconditions[idx]);
+          else
+            pre = indirection_preconditions[idx];
+        }
+        Realm::ProfilingRequestSet preimage_requests;
+        if (runtime->profiler != NULL)
+        {
+          preimage_requests = requests;
+          runtime->profiler->add_copy_request(preimage_requests, this, op, pre);
+        }
+        const ApEvent post(preimages[idx].copy(src_fields, dst_fields,
+                            indirections, preimage_requests, pre, priority));
         if (post.exists())
           postconditions.push_back(post);
       }
       if (postconditions.empty())
         return ApEvent::NO_AP_EVENT;
       return Runtime::merge_events(NULL, postconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric*
+        CopyAcrossUnstructuredT<DIM,T>::select_shadow_layout(bool source) const
+    //--------------------------------------------------------------------------
+    {
+      const PhysicalInstance &indirect =
+        source ? src_indirect_instance : dst_indirect_instance;
+      const FieldID fid = source ? src_indirect_field : dst_indirect_field;
+      // Get the layout for indirect instance
+      const Realm::InstanceLayoutGeneric *layout = indirect.get_layout();
+      // Get the size of the field that we need
+      std::map<Realm::FieldID,
+        Realm::InstanceLayoutGeneric::FieldLayout>::const_iterator finder =
+          layout->fields.find(fid);
+#ifdef DEBUG_LEGION
+      assert(finder != layout->fields.end());
+#endif
+      const int field_size = finder->second.size_in_bytes;
+      Realm::InstanceLayout<DIM,T> *result = new Realm::InstanceLayout<DIM,T>();
+      result->space = copy_domain;
+      result->piece_lists.resize(1);
+      result->alignment_reqd = layout->alignment_reqd;
+      result->fields[fid] = { 0/*list idx*/, 0/*rel offset*/, field_size };
+      // Don't use the base index space from the indirect instance because
+      // it might be bigger than we need it to be. We could consider using
+      // the preimage space, but we want this instance to be reusable even
+      // if the preimage changes so we make it big enough to handle the
+      // entire copy domain.
+      std::vector<Rect<DIM,T> > covering;
+      if (copy_domain.dense())
+        covering.push_back(copy_domain.bounds);
+      // See if we can compute a covering with up to 100% overhead
+      // meaning this takes 2X space as all the points, if not we'll
+      // just make pieces for all the rectangles
+      else if (!copy_domain.compute_covering(0/*max rects*/,
+            100/*allow up to 100% overhead*/, covering))
+      {
+        // No covering just do all the rects individually
+        for (Realm::IndexSpaceIterator itr(copy_domain); itr.valid; itr.step())
+          covering.push_back(itr.rect);
+      }
+      // Figure out which order to iterate the dimensions based on the first
+      // piece of the current indirection layout
+      int dim_order[DIM];
+      {
+#ifdef DEBUG_LEGION
+        const Realm::InstanceLayout<DIM,T> *typed_layout =
+          dynamic_cast<const Realm::InstanceLayout<DIM,T>*>(layout);
+        assert(typed_layout != NULL);
+        assert(((size_t)finder->second.list_idx) < 
+            typed_layout->piece_lists.size());
+        assert(
+            !typed_layout->piece_lists[finder->second.list_idx].pieces.empty());
+        const Realm::AffineLayoutPiece<DIM,T> *piece =
+          dynamic_cast<const Realm::AffineLayoutPiece<DIM,T>*>(
+             typed_layout->piece_lists[finder->second.list_idx].pieces.front());
+        assert(piece != NULL);
+#else
+        const Realm::InstanceLayout<DIM,T> *typed_layout =
+          static_cast<const Realm::InstanceLayout<DIM,T>*>(layout);
+        const Realm::AffineLayoutPiece<DIM,T> *piece =
+          static_cast<const Realm::AffineLayoutPiece<DIM,T>*>(
+             typed_layout->piece_lists[finder->second.list_idx].pieces.front());
+#endif
+        // Sort dimensions based on the size of the strides
+        std::map<size_t,int> strides;
+        for (int d = 0; d < DIM; d++)
+          strides.emplace(std::make_pair(piece->strides[d],d));
+        for (int d = 0; d < DIM; d++)
+        {
+          std::map<size_t,int>::iterator next = strides.begin();
+          dim_order[d] = next->second;
+          strides.erase(next);
+        }
+      }
+      // Make all the pieces for the layout
+      size_t size = 0;
+      for (typename std::vector<Rect<DIM,T> >::const_iterator it =
+            covering.begin(); it != covering.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!it->empty());
+#endif
+        Realm::AffineLayoutPiece<DIM,T> *piece = 
+          new Realm::AffineLayoutPiece<DIM,T>();
+        size = round_up(size, result->alignment_reqd); 
+        piece->offset = size;
+        piece->bounds = *it;
+        size_t piece_size = field_size;
+        for (int d = 0; d < DIM; d++)
+        {
+          piece->strides[dim_order[d]] = piece_size;
+          piece_size *= ((it->hi[dim_order[d]] - it->lo[dim_order[d]]) + 1);
+        }
+        result->piece_lists.back().pieces.push_back(piece);
+        size += piece_size;
+      }
+      result->bytes_used = size;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance
+      CopyAcrossUnstructuredT<DIM,T>::allocate_shadow_indirection(
+        Memory memory, UniqueID creator_uid, bool source, LgEvent &unique_event)
+    //--------------------------------------------------------------------------
+    {
+      if (shadow_layout == NULL)
+        shadow_layout = select_shadow_layout(source);
+      // See if we can allocate this in the target memory. If the instance
+      // is not immediately available then we return a NO_INST since it is
+      // not safe to do a deferred allocation here without risking deadlock.
+      // Fortunately we can easily fall back to the previous indirection
+      // instance if we have to so failing to allocate is not fatal.
+      // Note that we're technically by-passing unbounded pool allocations
+      // here which is not strictly safe, but since we're only going to hold
+      // onto the memory if we allocation it immediately makes it safe.
+      if (!unique_event.exists() && (runtime->profiler != NULL))
+      {
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
+      }
+      MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
+      ProfilingResponseBase base(&allocator, creator_uid, false);
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingRequest &req = requests.add_request(
+          runtime->find_local_group(), LG_LEGION_PROFILING_ID,
+          &base, sizeof(base), LG_RESOURCE_PRIORITY);
+      req.add_measurement<
+        Realm::ProfilingMeasurements::InstanceAllocResult>();
+      if (runtime->profiler != NULL)
+        runtime->profiler->add_inst_request(requests, creator_uid, 
+                                            unique_event);
+      PhysicalInstance result;
+      const RtEvent ready(PhysicalInstance::create_instance(result, memory,
+            shadow_layout->clone(), requests));
+      if (allocator.succeeded())
+      {
+        if (ready.exists())
+        {
+          ready.subscribe();
+          if (!ready.has_triggered())
+          {
+            // Cannot permit a deferred allocation safely here since we're
+            // not in the mapping stage of the pipeline
+            result.destroy(ready);
+            return PhysicalInstance::NO_INST;
+          }
+        }
+        return result;
+      }
+      else
+        return PhysicalInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent CopyAcrossUnstructuredT<DIM,T>::update_shadow_indirection(
+        PhysicalInstance shadow, LgEvent unique_event,
+        ApEvent indirection_ready, Operation *op,
+        size_t field_size, bool source) const
+    //--------------------------------------------------------------------------
+    {
+      // No need for a trace info here since we should never be recording
+      const PhysicalTraceInfo dummy_trace_info(NULL, 0);
+      const std::vector<Reservation> no_reservations;
+      std::vector<CopySrcDstField> src_fields, dst_fields;
+      CopySrcDstField &src_field = src_fields.emplace_back(CopySrcDstField());
+      CopySrcDstField &dst_field = dst_fields.emplace_back(CopySrcDstField());
+      if (source)
+      {
+        src_field.set_field(src_indirect_instance, src_indirect_field,
+            field_size);
+        dst_field.set_field(shadow, src_indirect_field, field_size);
+        return expr->issue_copy(op, dummy_trace_info, 
+            dst_fields, src_fields, no_reservations,
+#ifdef LEGION_SPY
+            src_tree_id, src_tree_id, 
+#endif
+            indirection_ready, PredEvent::NO_PRED_EVENT,
+            src_indirect_instance_event, unique_event,
+            COLLECTIVE_NONE, false/*record effect*/);
+      }
+      else
+      {
+        src_field.set_field(dst_indirect_instance, dst_indirect_field,
+            field_size);
+        dst_field.set_field(shadow, dst_indirect_field, field_size);
+        return expr->issue_copy(op, dummy_trace_info,
+            dst_fields, src_fields, no_reservations,
+#ifdef LEGION_SPY
+            dst_tree_id, dst_tree_id,
+#endif
+            indirection_ready, PredEvent::NO_PRED_EVENT,
+            dst_indirect_instance_event, unique_event,
+            COLLECTIVE_NONE, false/*record effect*/);
+      }
     }
 #endif // defined(DEFINE_NT_TEMPLATES)
 
@@ -10860,6 +11128,7 @@ namespace Legion {
       std::vector<Realm::IndexSpace<D2,T2> > targets(indirect_records.size());
       for (unsigned idx = 0; idx < indirect_records.size(); idx++)
         targets[idx] = indirect_records[idx].domain;
+      ApEvent indirect_spaces_precondition;
       if (source ? need_src_indirect_precondition : 
           need_dst_indirect_precondition)
       {
@@ -10876,26 +11145,24 @@ namespace Legion {
         if (source)
         {
           // No need for tracing to know about this merge
-          src_indirect_spaces_precondition = 
+          indirect_spaces_precondition = 
             Runtime::merge_events(NULL, preconditions);
           need_src_indirect_precondition = false;
         }
         else
         {
-          dst_indirect_spaces_precondition = 
+          indirect_spaces_precondition = 
             Runtime::merge_events(NULL, preconditions);
           need_dst_indirect_precondition = false;
         }
       }
-      if (source ? src_indirect_spaces_precondition.exists() :
-          dst_indirect_spaces_precondition.exists())
+      if (indirect_spaces_precondition.exists())
       {
         if (precondition.exists())
-          precondition = Runtime::merge_events(NULL, precondition, source ?
-           src_indirect_spaces_precondition : dst_indirect_spaces_precondition);
+          precondition = Runtime::merge_events(NULL, precondition, 
+              indirect_spaces_precondition);
         else
-          precondition = source ? src_indirect_spaces_precondition : 
-            dst_indirect_spaces_precondition;
+          precondition = indirect_spaces_precondition; 
       }
       ApEvent result;
       if (both_are_range)
@@ -10968,12 +11235,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int D1, typename T1> template<int D2, typename T2>
-    bool CopyAcrossUnstructuredT<D1,T1>::rebuild_indirections(const bool source)
+    bool CopyAcrossUnstructuredT<D1,T1>::rebuild_indirections(
+        Operation *op, ApEvent indirection_event, const bool source)
     //--------------------------------------------------------------------------
     {
       std::vector<CopySrcDstField> &fields = source ? src_fields : dst_fields;
       const std::vector<IndirectRecord> &indirect_records =
         source ? src_indirections : dst_indirections;
+      std::map<Memory,ShadowInstance> old_shadows;
+      old_shadows.swap(shadow_instances);
       nonempty_indexes.clear();
       if (compute_preimages)
       {
@@ -11020,6 +11290,19 @@ namespace Legion {
         // Note we don't bother doing this with legion spy since it doesn't
         // know how to analyze these anyway
         individual_field_indexes.resize(nonempty_indexes.size());
+        indirection_preconditions.resize(nonempty_indexes.size(),
+            indirection_event);
+        // If we're doing to shadow indirections, update the indirection
+        // event to encompass the previous copy to handle WAR dependences
+        // on the shadow instances
+        if (shadow_indirections && last_copy.exists())
+        {
+          if (indirection_event.exists())
+            indirection_event =
+              Runtime::merge_events(NULL, indirection_event, last_copy);
+          else
+            indirection_event = last_copy;
+        }
         // We're also going to need to update preimages to match
         std::vector<DomainT<D1,T1> > &preimages =
           source ? current_src_preimages : current_dst_preimages;
@@ -11028,6 +11311,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
         {
           const unsigned nonempty_index = nonempty_indexes[idx];
+          std::vector<ApEvent> shadow_preconditions;
           // copy over the preimages to the set of dense non-empty preimages
           new_preimages[idx] = preimages[nonempty_index]; 
           std::vector<unsigned> &field_indexes = individual_field_indexes[idx];
@@ -11046,8 +11330,8 @@ namespace Legion {
               const UnstructuredIndirection *unstructured = 
                static_cast<const UnstructuredIndirection*>(indirections[index]);
 #ifdef DEBUG_LEGION
-              assert(unstructured->inst == 
-                  (source ? src_indirect_instance : dst_indirect_instance));
+              assert(shadow_indirections || (unstructured->inst == 
+                  (source ? src_indirect_instance : dst_indirect_instance)));
               assert(unsigned(unstructured->field_id) == 
                   (source ? src_indirect_field : dst_indirect_field));
               assert(unstructured->insts.size() == 1);
@@ -11064,8 +11348,66 @@ namespace Legion {
                 new UnstructuredIndirection();
               unstructured->field_id = 
                 source ? src_indirect_field : dst_indirect_field;
-              unstructured->inst = 
-                source ? src_indirect_instance : dst_indirect_instance;
+              if (shadow_indirections)
+              {
+                // First check to see if we already have a new shadow
+                // indirection instance to use
+                const Memory memory = instance.get_location(); 
+                std::map<Memory,ShadowInstance>::iterator
+                  finder = shadow_instances.find(memory);
+                if (finder == shadow_instances.end())
+                {
+                  // Didn't find it, see if we have an old shadow to reuse
+                  finder = old_shadows.find(memory);
+                  if (finder == old_shadows.end())
+                  {
+                    // Try to allocate a new shadow instance
+                    LgEvent unique_event;
+                    PhysicalInstance shadow = allocate_shadow_indirection(
+                        memory, op->get_unique_op_id(), source, unique_event);
+                    if (shadow.exists())
+                    {
+                      unstructured->inst = shadow;
+                      // If we're successful issue a copy to it
+                      ApEvent ready = update_shadow_indirection(shadow,
+                          unique_event, indirection_event, op,
+                          sizeof(Point<D2,T2>), source);
+                      shadow_instances.emplace(std::make_pair(memory,
+                            ShadowInstance{shadow, ready, unique_event}));
+                      shadow_preconditions.push_back(ready);
+                    }
+                    else
+                      // Otherwise default to using the original indirection
+                      unstructured->inst =
+                        source ? src_indirect_instance : dst_indirect_instance;
+                  }
+                  else
+                  {
+                    unstructured->inst = finder->second.instance;
+                    // Issue a copy to bring the old shadow instance up
+                    // to date with the new indirection field
+                    ApEvent ready =
+                      update_shadow_indirection(finder->second.instance, 
+                          finder->second.unique_event, indirection_event,
+                          op, sizeof(Point<D2,T2>), source);
+                    // Update the new shadows instances
+                    shadow_instances.emplace(std::make_pair(memory,
+                          ShadowInstance{finder->second.instance, ready,
+                                         finder->second.unique_event}));
+                    // Remove this instance from the old shadow instances
+                    old_shadows.erase(finder);
+                    shadow_preconditions.push_back(ready);
+                  }
+                }
+                else
+                {
+                  unstructured->inst = finder->second.instance;
+                  shadow_preconditions.push_back(finder->second.ready);
+                }
+              }
+              else
+                unstructured->inst = 
+                  source ? src_indirect_instance : dst_indirect_instance;
               unstructured->is_ranges = both_are_range;
               unstructured->oor_possible = false; 
               unstructured->aliasing_possible =
@@ -11082,6 +11424,9 @@ namespace Legion {
             }
             field_indexes[fidx] = indirect_index;
           }
+          if (!shadow_preconditions.empty())
+            indirection_preconditions[idx] =
+              Runtime::merge_events(NULL, shadow_preconditions);
         }
         // Now we can swap in the new preimages
         preimages.swap(new_preimages);
@@ -11180,6 +11525,11 @@ namespace Legion {
           fields[fidx].indirect_index = indirect_index;
         }
       }
+      // If we have any residual old shadow instances that are no longer
+      // needed then we can delete them
+      for (std::map<Memory,ShadowInstance>::const_iterator
+            it = old_shadows.begin(); it != old_shadows.end(); it++)
+        it->second.instance.destroy(last_copy);
 #ifdef LEGION_SPY
       if (compute_preimages)
       {

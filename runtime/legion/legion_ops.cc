@@ -7134,7 +7134,9 @@ namespace Legion {
                                   collective_postcondition, true_guard,
                                   deferred_applied, deferred_src, deferred_dst,
                                   deferred_gather, deferred_scatter,
-                                  output.compute_preimages);
+                                  output.compute_preimages,
+                                  output.compute_preimages && 
+                                  output.shadow_indirections);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
           map_applied_conditions.insert(deferred_applied);
@@ -7148,7 +7150,9 @@ namespace Legion {
                               gather_targets.empty() ? NULL : &gather_targets,
                               scatter_targets.empty() ? NULL : &scatter_targets,
                               physical_trace_info, map_applied_conditions,
-                              output.compute_preimages);
+                              output.compute_preimages,
+                              output.compute_preimages &&
+                              output.shadow_indirections);
       } 
       if (is_recording())
         trace_info.record_complete_replay(map_applied_conditions);
@@ -7181,7 +7185,8 @@ namespace Legion {
                                      const InstanceSet *scatter_targets,
                                      const PhysicalTraceInfo &trace_info,
                                      std::set<RtEvent> &applied_conditions,
-                                     const bool compute_preimages)
+                                     const bool compute_preimages,
+                                     const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
       ApEvent copy_post;
@@ -7217,7 +7222,8 @@ namespace Legion {
               predication_guard, collective_precondition,
               collective_postcondition, local_precondition,
               copies[index].atomic_locks, trace_info, applied_conditions,
-              possible_src_indirect_out_of_range, compute_preimages);
+              possible_src_indirect_out_of_range, compute_preimages,
+              shadow_indirections);
         }
       }
       else
@@ -7239,7 +7245,8 @@ namespace Legion {
               collective_postcondition, local_precondition,
               copies[index].atomic_locks, trace_info, applied_conditions, 
               possible_dst_indirect_out_of_range,
-              possible_dst_indirect_aliasing, compute_preimages);
+              possible_dst_indirect_aliasing, compute_preimages,
+              shadow_indirections);
         }
         else
         {
@@ -7267,7 +7274,8 @@ namespace Legion {
               copies[index].atomic_locks, trace_info,
               applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
-              possible_dst_indirect_aliasing, compute_preimages);
+              possible_dst_indirect_aliasing, compute_preimages,
+              shadow_indirections);
         }
       }
       if (is_recording())
@@ -7303,7 +7311,9 @@ namespace Legion {
                             dargs->collective_postcondition, dargs->guard, 
                             *dargs->src_targets, *dargs->dst_targets, 
                             dargs->gather_targets, dargs->scatter_targets,
-                            *dargs,applied_conditions,dargs->compute_preimages);
+                            *dargs, applied_conditions,
+                            dargs->compute_preimages,
+                            dargs->shadow_indirections);
       if (!applied_conditions.empty())
         Runtime::trigger_event(dargs->applied, 
             Runtime::merge_events(applied_conditions));

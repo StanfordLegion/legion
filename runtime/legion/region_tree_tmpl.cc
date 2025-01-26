@@ -128,7 +128,7 @@ namespace Legion {
                                      ApEvent, \
                                      const bool); \
   template bool CopyAcrossUnstructuredT<INST_N1,T1>:: \
-    rebuild_indirections<INST_N2,T2>(const bool);
+    rebuild_indirections<INST_N2,T2>(Operation *, ApEvent, const bool);
 
   FOREACH_TT(DOIT_TT)
 #else
@@ -140,8 +140,8 @@ namespace Legion {
   template class Internal::IndexSpaceIntersection<INST_N1,T>; \
   template class Internal::IndexSpaceDifference<INST_N1,T>; \
   template class Internal::InternalExpression<INST_N1,T>; \
-  template class Internal::RemoteExpression<INST_N1,T>;
-  
+  template class Internal::RemoteExpression<INST_N1,T>; \
+  template class Internal::CopyAcrossUnstructuredT<INST_N1,T>;
 
   FOREACH_T(DOIT_T)
 #endif

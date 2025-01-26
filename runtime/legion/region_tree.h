@@ -551,7 +551,8 @@ namespace Legion {
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &map_applied_events,
                             const bool possible_src_out_of_range,
-                            const bool compute_preimages);
+                            const bool compute_preimages,
+                            const bool shadow_indirections);
       ApEvent scatter_across(const RegionRequirement &src_req,
                              const RegionRequirement &idx_req,
                              const RegionRequirement &dst_req,
@@ -575,7 +576,8 @@ namespace Legion {
                              std::set<RtEvent> &map_applied_events,
                              const bool possible_dst_out_of_range,
                              const bool possible_dst_aliasing,
-                             const bool compute_preimages);
+                             const bool compute_preimages,
+                             const bool shadow_indirections);
       ApEvent indirect_across(const RegionRequirement &src_req,
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
@@ -604,7 +606,8 @@ namespace Legion {
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing,
-                              const bool compute_preimages);
+                              const bool compute_preimages,
+                              const bool shadow_indirections);
       void fill_fields(FillOp *op,
                        const RegionRequirement &req,
                        const unsigned index, FillView *fill_view,
@@ -1019,6 +1022,7 @@ namespace Legion {
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
       virtual void record_trace_immutable_indirection(bool source) = 0;
+      virtual void release_shadow_instances(void) = 0;
     public:
       static void handle_deferred_copy_across(const void *args);
     public:
@@ -1059,6 +1063,7 @@ namespace Legion {
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
       virtual void record_trace_immutable_indirection(bool source) = 0;
+      virtual void release_shadow_instances(void) = 0;
     public:
       void initialize_source_fields(RegionTreeForest *forest,
                                     const RegionRequirement &req,
@@ -1084,7 +1089,7 @@ namespace Legion {
                                     const bool both_are_range,
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
-                                    const bool exclusive_redop);
+                                    const bool exclusive_redop); 
     public:
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
@@ -1103,6 +1108,17 @@ namespace Legion {
       LgEvent src_indirect_instance_event, dst_indirect_instance_event;
       TypeTag src_indirect_type, dst_indirect_type;
       std::vector<unsigned> nonempty_indexes;
+      // Shadow indirection instances
+      // Only one copy of this since we only do it in gather/scatter cases
+      // so we can use the same data structure for either kind of indirection
+      struct ShadowInstance {
+        PhysicalInstance instance;
+        ApEvent ready;
+        LgEvent unique_event;
+      };
+      std::map<Memory,ShadowInstance> shadow_instances;
+      // Zips with current_src/dst_preimages
+      std::vector<ApEvent> indirection_preconditions;
     public:
       RtEvent prev_done;
       ApEvent last_copy;
@@ -1145,15 +1161,20 @@ namespace Legion {
       };
       struct RebuildIndirectionsHelper {
       public:
-        RebuildIndirectionsHelper(CopyAcrossUnstructuredT<DIM,T> *u, bool s)
-          : unstructured(u), source(s), empty(true) { }
+        RebuildIndirectionsHelper(CopyAcrossUnstructuredT<DIM,T> *u,
+                                  Operation *o, ApEvent e, bool s)
+          : unstructured(u), op(o), indirection_event(e),
+            source(s), empty(true) { }
       public:
         template<typename N2, typename T2>
         static inline void demux(RebuildIndirectionsHelper *helper)
           { helper->empty = helper->unstructured->template 
-            rebuild_indirections<N2::N,T2>(helper->source); }
+            rebuild_indirections<N2::N,T2>(helper->op,
+                helper->indirection_event, helper->source); }
       public:
         CopyAcrossUnstructuredT<DIM,T> *const unstructured;
+        Operation *const op;
+        const ApEvent indirection_event;
         const bool source;
         bool empty;
       };
@@ -1163,7 +1184,8 @@ namespace Legion {
                               const DomainT<DIM,T> &domain,
                               ApEvent domain_ready,
                               const std::map<Reservation,bool> &rsrvs,
-                              const bool compute_preimages);
+                              const bool compute_preimages,
+                              const bool shadow_indirections);
       virtual ~CopyAcrossUnstructuredT(void);
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1175,18 +1197,28 @@ namespace Legion {
                               const bool recurrent_replay = false,
                               const unsigned stage = 0); 
       virtual void record_trace_immutable_indirection(bool source);
+      virtual void release_shadow_instances(void);
     public:
-      ApEvent issue_individual_copies(const ApEvent precondition,
-                      const Realm::ProfilingRequestSet &requests);
+      ApEvent issue_individual_copies(Operation *op, const ApEvent precondition,
+                                    const Realm::ProfilingRequestSet &requests);
       template<int D2, typename T2>
       ApEvent perform_compute_preimages(std::vector<DomainT<DIM,T> > &preimages,
                 Operation *op, ApEvent precondition, const bool source); 
       template<int D2, typename T2>
-      bool rebuild_indirections(const bool source);
+      bool rebuild_indirections(Operation *op,
+          ApEvent indirection_event, const bool source); 
+    protected:
+      Realm::InstanceLayoutGeneric* select_shadow_layout(bool source) const;
+      PhysicalInstance allocate_shadow_indirection(Memory memory, 
+          UniqueID creator_uid, bool source, LgEvent &unique_event);
+      ApEvent update_shadow_indirection(PhysicalInstance shadow,
+          LgEvent unique_event, ApEvent indirection_event,
+          Operation *op, size_t field_size, bool source) const;
     public:
       IndexSpaceExpression *const expr;
       const DomainT<DIM,T> copy_domain;
       const ApEvent copy_domain_ready;
+      const bool shadow_indirections;
     protected:
       mutable LocalLock preimage_lock;
       std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
@@ -1200,12 +1232,11 @@ namespace Legion {
       // we would need to do the full quadratic intersection between each of
       // the source and destination preimages.
       std::vector<std::vector<unsigned> > individual_field_indexes;
-      ApEvent src_indirect_spaces_precondition,dst_indirect_spaces_precondition;
+      // For help in creating shadow indirections
+      Realm::InstanceLayoutGeneric *shadow_layout;
 #ifdef LEGION_SPY
       std::deque<ApEvent> src_preimage_preconditions;
       std::deque<ApEvent> dst_preimage_preconditions;
-      ApEvent current_src_preimage_precondition;
-      ApEvent current_dst_preimage_precondition;
 #endif
       bool need_src_indirect_precondition, need_dst_indirect_precondition;
       bool src_indirect_immutable_for_tracing;
@@ -1350,7 +1381,8 @@ namespace Legion {
                            int priority = 0, bool replay = false) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
-                           const bool compute_preimages) = 0;
+                           const bool compute_preimages,
+                           const bool shadow_indirections) = 0;
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -1708,7 +1740,8 @@ namespace Legion {
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
-                           const bool compute_preimages);
+                           const bool compute_preimages,
+                           const bool shadow_indirections);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
@@ -2691,7 +2724,8 @@ namespace Legion {
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
-                           const bool compute_preimages);
+                           const bool compute_preimages,
+                           const bool shadow_indirections);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
