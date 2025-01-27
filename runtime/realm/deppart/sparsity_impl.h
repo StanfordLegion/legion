@@ -198,7 +198,8 @@ namespace Realm {
     static constexpr ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
-    SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator, bool report_leaks);
+    SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator,
+                           bool _report_leaks);
     ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
