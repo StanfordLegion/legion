@@ -222,9 +222,7 @@ namespace Realm {
     std::unique_ptr<SparsityWrapperCommunicator> communicator;
     bool report_leaks = false;
 
-    // need a type-erased deleter
-    typedef void (*Deleter)(void *);
-    Deleter map_deleter;
+    std::function<void(void *)> map_deleter;
 
     template <int N, typename T>
     SparsityMapImpl<N, T> *get_or_create(SparsityMap<N, T> me);

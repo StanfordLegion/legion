@@ -233,7 +233,7 @@ namespace Realm {
           assert(0);
         }
       }
-      (*map_deleter)(map_impl.load());
+      map_deleter(map_impl.load());
     }
   }
 
@@ -249,7 +249,7 @@ namespace Realm {
 
     if(impl != nullptr) {
       assert(map_deleter);
-      (*map_deleter)(impl);
+      map_deleter(impl);
       map_impl.store(0);
       type_tag.store(0);
     }
@@ -359,8 +359,9 @@ namespace Realm {
     SparsityMapImpl<N, T> *new_impl = new SparsityMapImpl<N, T>(me, subscribers);
 
     if(map_impl.compare_exchange(impl, new_impl)) {
-      // ours is the winner - return it
-      map_deleter = &delete_sparsity_map_impl<N, T>;
+      map_deleter = [](void *map_impl) {
+        delete static_cast<SparsityMapImpl<N, T> *>(map_impl);
+      };
       return new_impl;
     } else {
       // we lost the race - free the one we made and return the winner

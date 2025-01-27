@@ -33,7 +33,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
   }
 
   removed = subscribers;
-  for(const auto node : subscribers) {
+  for(const auto &node : subscribers) {
     wrapper->unsubscribe(node);
     removed.remove(node);
     if(removed.size() <= 1) {
@@ -76,7 +76,7 @@ TEST(SparistyMapImplWrapperTest, RemoveReferences)
   wrapper->remove_references(2, Event::NO_EVENT);
 
   ASSERT_NE(impl, nullptr);
-  for(const auto node : subscribers) {
+  for(const auto &node : subscribers) {
     ASSERT_TRUE(comm->unsubscribers.contains(node));
   }
 }
