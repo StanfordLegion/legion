@@ -5,7 +5,7 @@ using namespace Realm;
 
 class MockSparsityWrapperCommunicator : public SparsityWrapperCommunicator {
 public:
-  virtual void unsubscribe(SparsityMapImplWrapper *impl, NodeID sender, ID id)
+  void unsubscribe(SparsityMapImplWrapper *impl, NodeID sender, ID id) override
   {
     unsubscribers.add(sender);
   }
