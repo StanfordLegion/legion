@@ -1090,6 +1090,8 @@ namespace Legion {
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
                                     const bool exclusive_redop); 
+    protected:
+      mutable LocalLock preimage_lock;
     public:
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
@@ -1117,6 +1119,8 @@ namespace Legion {
         LgEvent unique_event;
       };
       std::map<Memory,ShadowInstance> shadow_instances;
+      // Only valid when profiling for looking up instance names
+      std::map<PhysicalInstance,LgEvent> profiling_shadow_instances;
       // Zips with current_src/dst_preimages
       std::vector<ApEvent> indirection_preconditions;
     public:
@@ -1220,7 +1224,6 @@ namespace Legion {
       const ApEvent copy_domain_ready;
       const bool shadow_indirections;
     protected:
-      mutable LocalLock preimage_lock;
       std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
       std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;

@@ -10930,12 +10930,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != layout->fields.end());
 #endif
-      const int field_size = finder->second.size_in_bytes;
-      Realm::InstanceLayout<DIM,T> *result = new Realm::InstanceLayout<DIM,T>();
-      result->space = copy_domain;
-      result->piece_lists.resize(1);
-      result->alignment_reqd = layout->alignment_reqd;
-      result->fields[fid] = { 0/*list idx*/, 0/*rel offset*/, field_size };
+      const size_t field_size = finder->second.size_in_bytes;
       // Don't use the base index space from the indirect instance because
       // it might be bigger than we need it to be. We could consider using
       // the preimage space, but we want this instance to be reusable even
@@ -10988,29 +10983,13 @@ namespace Legion {
           strides.erase(next);
         }
       }
-      // Make all the pieces for the layout
-      size_t size = 0;
-      for (typename std::vector<Rect<DIM,T> >::const_iterator it =
-            covering.begin(); it != covering.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(!it->empty());
-#endif
-        Realm::AffineLayoutPiece<DIM,T> *piece = 
-          new Realm::AffineLayoutPiece<DIM,T>();
-        size = round_up(size, result->alignment_reqd); 
-        piece->offset = size;
-        piece->bounds = *it;
-        size_t piece_size = field_size;
-        for (int d = 0; d < DIM; d++)
-        {
-          piece->strides[dim_order[d]] = piece_size;
-          piece_size *= ((it->hi[dim_order[d]] - it->lo[dim_order[d]]) + 1);
-        }
-        result->piece_lists.back().pieces.push_back(piece);
-        size += piece_size;
-      }
-      result->bytes_used = size;
+      const std::vector<Realm::FieldID> fields(1, fid);
+      const std::vector<size_t> sizes(1, field_size);
+      const Realm::InstanceLayoutConstraints constraints(fields, sizes, 0);
+      Realm::InstanceLayoutGeneric *result =
+        Realm::InstanceLayoutGeneric::choose_instance_layout<DIM,T>(
+            copy_domain, covering, constraints, dim_order);
+      result->alignment_reqd = layout->alignment_reqd;
       return result;
     }
 
@@ -11063,6 +11042,11 @@ namespace Legion {
             result.destroy(ready);
             return PhysicalInstance::NO_INST;
           }
+        }
+        if (runtime->profiler != NULL)
+        {
+          AutoLock p_lock(preimage_lock);
+          profiling_shadow_instances[result] = unique_event;
         }
         return result;
       }
@@ -11348,11 +11332,17 @@ namespace Legion {
                 new UnstructuredIndirection();
               unstructured->field_id = 
                 source ? src_indirect_field : dst_indirect_field;
-              if (shadow_indirections)
+              unstructured->inst = 
+                  source ? src_indirect_instance : dst_indirect_instance;
+              const Memory memory = instance.get_location(); 
+              // If we're doing shadow indirection instances check to see
+              // if the indirection is in the same memory as the source
+              // instance or not, if not make a shadow indirection
+              if (shadow_indirections &&
+                  (unstructured->inst.get_location() != memory))
               {
                 // First check to see if we already have a new shadow
                 // indirection instance to use
-                const Memory memory = instance.get_location(); 
                 std::map<Memory,ShadowInstance>::iterator
                   finder = shadow_instances.find(memory);
                 if (finder == shadow_instances.end())
@@ -11371,7 +11361,8 @@ namespace Legion {
                       // If we're successful issue a copy to it
                       ApEvent ready = update_shadow_indirection(shadow,
                           unique_event, indirection_event, op,
-                          sizeof(Point<D2,T2>), source);
+                          both_are_range ? sizeof(Rect<D2,T2>) :
+                            sizeof(Point<D2,T2>), source);
                       shadow_instances.emplace(std::make_pair(memory,
                             ShadowInstance{shadow, ready, unique_event}));
                       shadow_preconditions.push_back(ready);
@@ -11389,7 +11380,8 @@ namespace Legion {
                     ApEvent ready =
                       update_shadow_indirection(finder->second.instance, 
                           finder->second.unique_event, indirection_event,
-                          op, sizeof(Point<D2,T2>), source);
+                          op, both_are_range ? sizeof(Rect<D2,T2>) :
+                            sizeof(Point<D2,T2>), source);
                     // Update the new shadows instances
                     shadow_instances.emplace(std::make_pair(memory,
                           ShadowInstance{finder->second.instance, ready,
@@ -11404,10 +11396,7 @@ namespace Legion {
                   unstructured->inst = finder->second.instance;
                   shadow_preconditions.push_back(finder->second.ready);
                 }
-              }
-              else
-                unstructured->inst = 
-                  source ? src_indirect_instance : dst_indirect_instance;
+              } 
               unstructured->is_ranges = both_are_range;
               unstructured->oor_possible = false; 
               unstructured->aliasing_possible =
