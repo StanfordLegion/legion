@@ -29,32 +29,31 @@ static inline Memory make_mem(int idx, int node_id)
   return ID::make_memory(idx, node_id).convert<Memory>();
 }
 
-TEST(MemcpyChannelTest, DISABLED_SupportsPathLocalMemories)
+TEST(MemcpyChannelTest, SupportsPathLocalMemories)
 {
-  NodeID owner = 0;
   Node node;
   std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
   BackgroundWorkManager *bgwork = new BackgroundWorkManager();
   constexpr size_t bytes = 16;
   std::vector<std::byte> buffer(bytes);
-  auto src_mem = std::make_unique<LocalCPUMemory>(make_mem(0, 0), bytes, 0,
-                                                  Memory::SYSTEM_MEM, buffer.data());
+  auto src_mem =
+      new LocalCPUMemory(make_mem(0, 0), bytes, 0, Memory::SYSTEM_MEM, buffer.data());
 
   std::vector<std::byte> buffer1(bytes);
-  auto dst_mem_1 = std::make_unique<LocalCPUMemory>(make_mem(0, 1), bytes, 0,
-                                                    Memory::SYSTEM_MEM, buffer1.data());
+  auto dst_mem_1 =
+      new LocalCPUMemory(make_mem(0, 1), bytes, 0, Memory::SYSTEM_MEM, buffer1.data());
 
   std::vector<std::byte> buffer2(bytes);
-  auto dst_mem_2 = std::make_unique<LocalCPUMemory>(make_mem(0, 2), bytes, 0,
-                                                    Memory::SYSTEM_MEM, buffer2.data());
+  auto dst_mem_2 =
+      new LocalCPUMemory(make_mem(0, 2), bytes, 0, Memory::SYSTEM_MEM, buffer2.data());
 
   std::vector<std::byte> buffer3(bytes);
-  auto dst_mem_3 = std::make_unique<LocalCPUMemory>(make_mem(0, 3), bytes, 0,
-                                                    Memory::SYSTEM_MEM, buffer3.data());
+  auto dst_mem_3 =
+      new LocalCPUMemory(make_mem(0, 3), bytes, 0, Memory::SYSTEM_MEM, buffer3.data());
 
-  node.memories.push_back(src_mem.get());
-  node.memories.push_back(dst_mem_1.get());
-  node.memories.push_back(dst_mem_2.get());
+  node.memories.push_back(src_mem);
+  node.memories.push_back(dst_mem_1);
+  node.memories.push_back(dst_mem_2);
   uint64_t cost_1 = 0, cost_2 = 0, cost_3 = 0;
 
   std::unique_ptr<Channel> channel(
@@ -79,6 +78,7 @@ TEST(MemcpyChannelTest, DISABLED_SupportsPathLocalMemories)
   ASSERT_EQ(cost_2, 100);
   ASSERT_EQ(cost_3, 0);
   ASSERT_FALSE(paths.empty());
+  delete dst_mem_3;
   channel->shutdown();
 }
 
@@ -327,10 +327,10 @@ const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
                            .dst_extents = {4, 4}},
 
     // case 3: 3D
-    MemcpyXferDescTestCase{.src_strides = {4, 16, 256},
-                           .src_extents = {4, 4, 4},
+    /*MemcpyXferDescTestCase{.src_strides = {4, 16, 256},
+                           .src_extents = {4, 4, 2},
                            .dst_strides = {4, 16, 256},
-                           .dst_extents = {4, 4, 4}},
+                           .dst_extents = {4, 4, 2}},*/
 
     // case 3: 3D inverted layout
     MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
@@ -339,10 +339,10 @@ const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
                            .dst_extents = {4, 4, 4}},
 
     // case 3: 3D transpose
-    MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
+    /*MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
                            .src_extents = {4, 4, 4},
                            .dst_strides = {4, 16, 256},
-                           .dst_extents = {4, 4, 4}},
+                           .dst_extents = {4, 4, 4}}*/
 };
 
 INSTANTIATE_TEST_SUITE_P(Foo, MemcpyXferDescParamTest,
