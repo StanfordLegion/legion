@@ -10468,7 +10468,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     CopyAcrossUnstructuredT<DIM,T>::CopyAcrossUnstructuredT(Runtime *rt,
-                IndexSpaceExpression *e, const DomainT<DIM,T> &domain, 
+                IndexSpaceExpression *e, const DomainT<DIM,T> &domain,
                 ApEvent ready, const std::map<Reservation,bool> &rsrvs,
                 const bool preimages, const bool shadow)
       : CopyAcrossUnstructured(rt, preimages, rsrvs), expr(e),
@@ -10952,6 +10952,7 @@ namespace Legion {
       // Figure out which order to iterate the dimensions based on the first
       // piece of the current indirection layout
       int dim_order[DIM];
+      if (DIM > 1)
       {
 #ifdef DEBUG_LEGION
         const Realm::InstanceLayout<DIM,T> *typed_layout =
@@ -10983,6 +10984,8 @@ namespace Legion {
           strides.erase(next);
         }
       }
+      else
+        dim_order[0] = 0;
       const std::vector<Realm::FieldID> fields(1, fid);
       const std::vector<size_t> sizes(1, field_size);
       const Realm::InstanceLayoutConstraints constraints(fields, sizes, 0);
@@ -11058,8 +11061,8 @@ namespace Legion {
     template<int DIM, typename T>
     ApEvent CopyAcrossUnstructuredT<DIM,T>::update_shadow_indirection(
         PhysicalInstance shadow, LgEvent unique_event,
-        ApEvent indirection_ready, Operation *op,
-        size_t field_size, bool source) const
+        ApEvent indirection_ready, const DomainT<DIM,T> &update_domain,
+        Operation *op, size_t field_size, bool source) const
     //--------------------------------------------------------------------------
     {
       // No need for a trace info here since we should never be recording
@@ -11073,28 +11076,32 @@ namespace Legion {
         src_field.set_field(src_indirect_instance, src_indirect_field,
             field_size);
         dst_field.set_field(shadow, src_indirect_field, field_size);
-        return expr->issue_copy(op, dummy_trace_info, 
+        return expr->issue_copy_internal(runtime->forest, op,
+            update_domain, dummy_trace_info,
             dst_fields, src_fields, no_reservations,
 #ifdef LEGION_SPY
             src_tree_id, src_tree_id, 
 #endif
             indirection_ready, PredEvent::NO_PRED_EVENT,
             src_indirect_instance_event, unique_event,
-            COLLECTIVE_NONE, false/*record effect*/);
+            COLLECTIVE_NONE, false/*record effect*/,
+            priority, false/*replay*/);
       }
       else
       {
         src_field.set_field(dst_indirect_instance, dst_indirect_field,
             field_size);
         dst_field.set_field(shadow, dst_indirect_field, field_size);
-        return expr->issue_copy(op, dummy_trace_info,
+        return expr->issue_copy_internal(runtime->forest, op,
+            update_domain, dummy_trace_info,
             dst_fields, src_fields, no_reservations,
 #ifdef LEGION_SPY
             dst_tree_id, dst_tree_id,
 #endif
             indirection_ready, PredEvent::NO_PRED_EVENT,
             dst_indirect_instance_event, unique_event,
-            COLLECTIVE_NONE, false/*record effect*/);
+            COLLECTIVE_NONE, false/*record effect*/,
+            priority, false/*replay*/);
       }
     }
 #endif // defined(DEFINE_NT_TEMPLATES)
@@ -11287,6 +11294,35 @@ namespace Legion {
           else
             indirection_event = last_copy;
         }
+        // If we're going to be doing shadow indirections then we want to
+        // know how many different preimages need each shadow indirection
+        // so we can determine whether to move just the preimage data or
+        // all the indirection data to the shadow instance.
+        std::map<Memory,unsigned/*non empty index*/> indirect_memories;
+        if (shadow_indirections)
+        {
+          const Memory current = source ?
+            src_indirect_instance.get_location() :
+            dst_indirect_instance.get_location();
+          for (unsigned idx = 0; idx < nonempty_indexes.size(); idx++)
+          {
+            const unsigned nonempty_index = nonempty_indexes[idx];
+            for (unsigned fidx = 0; fidx < fields.size(); fidx++)
+            {
+              const PhysicalInstance instance =
+                indirect_records[nonempty_index].instances[fidx];
+              const Memory location = instance.get_location();
+              if (location == current)
+                continue;
+              std::map<Memory,unsigned>::iterator finder =
+                indirect_memories.find(location);
+              if (finder == indirect_memories.end())
+                indirect_memories[location] = nonempty_index;
+              else if (finder->second != nonempty_index)
+                finder->second = nonempty_indexes.size(); // sentinel value
+            }
+          }
+        }
         // We're also going to need to update preimages to match
         std::vector<DomainT<D1,T1> > &preimages =
           source ? current_src_preimages : current_dst_preimages;
@@ -11341,6 +11377,11 @@ namespace Legion {
               if (shadow_indirections &&
                   (unstructured->inst.get_location() != memory))
               {
+#ifdef DEBUG_LEGION
+                // Should only be gather/scatter and not full indirection so
+                // that we know the indirection field is the size of a point
+                assert(!both_are_range);
+#endif
                 // First check to see if we already have a new shadow
                 // indirection instance to use
                 std::map<Memory,ShadowInstance>::iterator
@@ -11359,10 +11400,18 @@ namespace Legion {
                     {
                       unstructured->inst = shadow;
                       // If we're successful issue a copy to it
+                      // Check to see if we're issuing a copy to the whole
+                      // domain or just the preimage subset of it
+                      std::map<Memory,unsigned>::const_iterator memory_finder =
+                        indirect_memories.find(memory);
+#ifdef DEBUG_LEGION
+                      assert(memory_finder != indirect_memories.end());
+#endif
                       ApEvent ready = update_shadow_indirection(shadow,
-                          unique_event, indirection_event, op,
-                          both_are_range ? sizeof(Rect<D2,T2>) :
-                            sizeof(Point<D2,T2>), source);
+                          unique_event, indirection_event,
+                          (memory_finder->second == nonempty_index) ?
+                            new_preimages[idx] : copy_domain, 
+                          op, sizeof(Point<D2,T2>), source);
                       shadow_instances.emplace(std::make_pair(memory,
                             ShadowInstance{shadow, ready, unique_event}));
                       shadow_preconditions.push_back(ready);
@@ -11377,11 +11426,19 @@ namespace Legion {
                     unstructured->inst = finder->second.instance;
                     // Issue a copy to bring the old shadow instance up
                     // to date with the new indirection field
+                    // Check to see if we're issuing a copy to the whole
+                    // domain or just the preimage subset of it
+                    std::map<Memory,unsigned>::const_iterator memory_finder =
+                      indirect_memories.find(memory);
+#ifdef DEBUG_LEGION
+                    assert(memory_finder != indirect_memories.end());
+#endif
                     ApEvent ready =
                       update_shadow_indirection(finder->second.instance, 
                           finder->second.unique_event, indirection_event,
-                          op, both_are_range ? sizeof(Rect<D2,T2>) :
-                            sizeof(Point<D2,T2>), source);
+                          (memory_finder->second == nonempty_index) ?
+                            new_preimages[idx] : copy_domain,
+                          op, sizeof(Point<D2,T2>), source);
                     // Update the new shadows instances
                     shadow_instances.emplace(std::make_pair(memory,
                           ShadowInstance{finder->second.instance, ready,

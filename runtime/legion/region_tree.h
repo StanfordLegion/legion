@@ -1217,6 +1217,7 @@ namespace Legion {
           UniqueID creator_uid, bool source, LgEvent &unique_event);
       ApEvent update_shadow_indirection(PhysicalInstance shadow,
           LgEvent unique_event, ApEvent indirection_event,
+          const DomainT<DIM,T> &update_domain,
           Operation *op, size_t field_size, bool source) const;
     public:
       IndexSpaceExpression *const expr;
@@ -1489,6 +1490,9 @@ namespace Legion {
                                ApEvent precondition, PredEvent pred_guard,
                                LgEvent unique_event, CollectiveKind collective,
                                bool record_effect, int priority, bool replay);
+    public:
+      // Make this one public so it can be accessed by CopyUnstructuredT
+      // Be careful using this directly
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,Operation*op,
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1504,6 +1508,7 @@ namespace Legion {
                                LgEvent src_unique, LgEvent dst_unique,
                                CollectiveKind collective, bool record_effect,
                                int priority, bool replay);
+    protected:
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
