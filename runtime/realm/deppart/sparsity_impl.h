@@ -25,6 +25,7 @@
 #include "realm/activemsg.h"
 #include "realm/nodeset.h"
 #include "realm/atomics.h"
+#include <limits>
 #include <memory>
 
 namespace Realm {
@@ -213,7 +214,7 @@ namespace Realm {
     }
 
     ID me = (ID::IDType)-1;
-    unsigned owner = (unsigned)-1;
+    unsigned owner = std::numeric_limits<unsigned>::max();
     SparsityMapImplWrapper *next_free{};
     atomic<DynamicTemplates::TagType> type_tag{};
     atomic<void *> map_impl{}; // actual implementation
