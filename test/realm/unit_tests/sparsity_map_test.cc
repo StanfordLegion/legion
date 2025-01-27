@@ -86,30 +86,29 @@ class MockSparsityMapCommunicator : public SparsityMapCommunicator<N, T> {
 public:
   virtual ~MockSparsityMapCommunicator() = default;
 
-  virtual void send_request(SparsityMap<N, T> me, bool request_precise,
-                            bool request_approx)
+  void send_request(SparsityMap<N, T> me, bool request_precise,
+                    bool request_approx) override
   {
     sent_requests++;
   }
 
-  virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
-                               size_t total_count, bool disjoint, const void *data,
-                               size_t datalen)
+  void send_contribute(SparsityMap<N, T> me, size_t piece_count, size_t total_count,
+                       bool disjoint, const void *data, size_t datalen) override
   {
     send_contribute(NodeID(ID(me).sparsity_creator_node()), me, piece_count, total_count,
                     disjoint, data, datalen);
   }
 
-  virtual void send_contribute(NodeID target, SparsityMap<N, T> me, size_t piece_count,
-                               size_t total_count, bool disjoint, const void *data,
-                               size_t datalen)
+  void send_contribute(NodeID target, SparsityMap<N, T> me, size_t piece_count,
+                       size_t total_count, bool disjoint, const void *data,
+                       size_t datalen) override
   {
     sent_contributions++;
     sent_piece_count += piece_count;
     sent_bytes += datalen;
   }
 
-  virtual size_t recommend_max_payload(NodeID owner, bool with_congestion)
+  size_t recommend_max_payload(NodeID owner, bool with_congestion) override
   {
     return sizeof(Rect<N, T>);
   }
