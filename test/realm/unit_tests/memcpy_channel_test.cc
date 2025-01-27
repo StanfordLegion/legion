@@ -238,33 +238,51 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
 }
 
 const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
+    // case 1 : 1D regular
     MemcpyXferDescTestCase{
         .src_strides = {4}, .src_extents = {4}, .dst_strides = {4}, .dst_extents = {4}},
 
+    // case 2 : 1D with several entries for address list
     MemcpyXferDescTestCase{.src_strides = {4},
                            .src_extents = {4},
                            .dst_strides = {4},
                            .dst_extents = {4},
                            .max_entries = 3},
 
-    MemcpyXferDescTestCase{.src_strides = {4, 16},
-                           .src_extents = {4, 4},
-                           .dst_strides = {16, 32},
-                           .dst_extents = {3, 4}},
-
+    // case 2 : 2D regular
     MemcpyXferDescTestCase{.src_strides = {4, 16},
                            .src_extents = {4, 4},
                            .dst_strides = {4, 16},
                            .dst_extents = {4, 4}},
 
-    MemcpyXferDescTestCase{.src_strides = {16, 4},
+    // case 3: 2D with different stride/extents for dst
+    MemcpyXferDescTestCase{.src_strides = {4, 16},
+                           .src_extents = {4, 4},
+                           .dst_strides = {16, 32},
+                           .dst_extents = {3, 4}},
+
+    // case 3: 2D transpose
+    MemcpyXferDescTestCase{.src_strides = {4, 16},
                            .src_extents = {4, 4},
                            .dst_strides = {16, 4},
                            .dst_extents = {4, 4}},
 
+    // case 3: 3D
+    MemcpyXferDescTestCase{.src_strides = {4, 16, 256},
+                           .src_extents = {4, 4, 4},
+                           .dst_strides = {4, 16, 256},
+                           .dst_extents = {4, 4, 4}},
+
+    // case 3: 3D inverted layout
     MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
                            .src_extents = {4, 4, 4},
                            .dst_strides = {256, 16, 4},
+                           .dst_extents = {4, 4, 4}},
+
+    // case 3: 3D transpose
+    MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
+                           .src_extents = {4, 4, 4},
+                           .dst_strides = {4, 16, 256},
                            .dst_extents = {4, 4, 4}},
 };
 
