@@ -21,7 +21,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-list(APPEND REALM_TEST
+list(APPEND REALM_TESTS
   barrier_test.cc
   event_test.cc
   path_cache_test.cc
