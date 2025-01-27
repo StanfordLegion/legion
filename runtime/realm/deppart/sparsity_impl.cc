@@ -209,11 +209,15 @@ namespace Realm {
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(void)
     : communicator(std::make_unique<SparsityWrapperCommunicator>())
-  {}
+  {
+    get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
+                                                           report_leaks);
+  }
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(
-      SparsityWrapperCommunicator *_communcator)
+      SparsityWrapperCommunicator *_communcator, bool _report_leaks)
     : communicator(_communcator)
+    , report_leaks(_report_leaks)
   {}
 
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
@@ -222,9 +226,6 @@ namespace Realm {
       // Only do this if we're single node for now since it is not safe with
       // Realm's quiescence code in multi-node at the moment
       if(Network::max_node_id == 0) {
-        bool report_leaks = false;
-        get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
-                                                               report_leaks);
         if(report_leaks) {
           log_part.fatal() << "leaking sparsity map me:" << me
                            << " refs:" << references.load()

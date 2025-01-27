@@ -197,7 +197,7 @@ namespace Realm {
     static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
-    SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator);
+    SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator, bool report_leaks);
     ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -220,6 +220,7 @@ namespace Realm {
     atomic<unsigned> references{};
     NodeSet subscribers;
     std::unique_ptr<SparsityWrapperCommunicator> communicator;
+    bool report_leaks = false;
 
     // need a type-erased deleter
     typedef void (*Deleter)(void *);

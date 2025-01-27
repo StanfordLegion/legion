@@ -18,7 +18,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
 {
   NodeSet subscribers, removed;
   MockSparsityWrapperCommunicator *comm = new MockSparsityWrapperCommunicator();
-  SparsityMapImplWrapper *wrapper = new SparsityMapImplWrapper(comm);
+  auto wrapper = std::make_unique<SparsityMapImplWrapper>(comm, /*report_leaks=*/false);
   SparsityMap<1, int> handle =
       (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<1, int>>();
 
@@ -49,7 +49,8 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
 TEST(SparistyMapImplWrapperTest, AddReferences)
 {
   constexpr int unsigned count = 2;
-  auto wrapper = std::make_unique<SparsityMapImplWrapper>();
+  auto wrapper =
+      std::make_unique<SparsityMapImplWrapper>(/*comm=*/nullptr, /*report_leaks=*/false);
 
   wrapper->add_references(count);
 
@@ -60,7 +61,7 @@ TEST(SparistyMapImplWrapperTest, RemoveReferences)
 {
   NodeSet subscribers;
   MockSparsityWrapperCommunicator *comm = new MockSparsityWrapperCommunicator();
-  SparsityMapImplWrapper *wrapper = new SparsityMapImplWrapper(comm);
+  auto wrapper = std::make_unique<SparsityMapImplWrapper>(comm, /*report_leaks=*/false);
   SparsityMap<1, int> handle =
       (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<1, int>>();
   subscribers.add(7);
