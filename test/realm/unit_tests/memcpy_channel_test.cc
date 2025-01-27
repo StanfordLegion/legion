@@ -1,3 +1,4 @@
+#include "realm/transfer/channel.h"
 #include "realm/transfer/memcpy_channel.h"
 #include <gtest/gtest.h>
 #include <cstring>
@@ -20,6 +21,64 @@ TEST(MemcpyChannelTest, CreateMemcpyChannel)
   EXPECT_EQ(channel_kind, XferDesKind::XFER_MEM_CPY);
   EXPECT_EQ(channel_owner, owner);
   EXPECT_TRUE(paths.empty());
+  channel->shutdown();
+}
+
+static inline Memory make_mem(int idx, int node_id)
+{
+  return ID::make_memory(idx, node_id).convert<Memory>();
+}
+
+TEST(MemcpyChannelTest, DISABLED_SupportsPathLocalMemories)
+{
+  NodeID owner = 0;
+  Node node;
+  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
+  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
+  constexpr size_t bytes = 16;
+  std::vector<std::byte> buffer(bytes);
+  auto src_mem = std::make_unique<LocalCPUMemory>(make_mem(0, 0), bytes, 0,
+                                                  Memory::SYSTEM_MEM, buffer.data());
+
+  std::vector<std::byte> buffer1(bytes);
+  auto dst_mem_1 = std::make_unique<LocalCPUMemory>(make_mem(0, 1), bytes, 0,
+                                                    Memory::SYSTEM_MEM, buffer1.data());
+
+  std::vector<std::byte> buffer2(bytes);
+  auto dst_mem_2 = std::make_unique<LocalCPUMemory>(make_mem(0, 2), bytes, 0,
+                                                    Memory::SYSTEM_MEM, buffer2.data());
+
+  std::vector<std::byte> buffer3(bytes);
+  auto dst_mem_3 = std::make_unique<LocalCPUMemory>(make_mem(0, 3), bytes, 0,
+                                                    Memory::SYSTEM_MEM, buffer3.data());
+
+  node.memories.push_back(src_mem.get());
+  node.memories.push_back(dst_mem_1.get());
+  node.memories.push_back(dst_mem_2.get());
+  uint64_t cost_1 = 0, cost_2 = 0, cost_3 = 0;
+
+  std::unique_ptr<Channel> channel(
+      new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
+  auto paths = channel->get_paths();
+
+  {
+    ChannelCopyInfo info(src_mem->me, dst_mem_1->me);
+    cost_1 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
+  }
+
+  {
+    ChannelCopyInfo info(src_mem->me, dst_mem_2->me);
+    cost_2 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
+  }
+  {
+    ChannelCopyInfo info(src_mem->me, dst_mem_3->me);
+    cost_3 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
+  }
+
+  EXPECT_EQ(cost_1, 100);
+  EXPECT_EQ(cost_2, 100);
+  EXPECT_EQ(cost_3, 0);
+  EXPECT_FALSE(paths.empty());
   channel->shutdown();
 }
 
