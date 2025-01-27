@@ -1,6 +1,7 @@
 #include "realm/event_impl.h"
 #include "realm/comp_queue_impl.h"
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 using namespace Realm;
 
@@ -121,70 +122,103 @@ TEST_F(CompQueueTest, AddAndCompleteEventRemote)
       event_a.trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive()));
 }
 
-TEST_F(CompQueueTest, PopEventsEmpty)
+struct PopEventsTestCase {
+  size_t max_queue_size;
+  size_t num_events;
+  size_t num_triggered_events;
+  size_t num_pop_events;
+  bool resizable = true;
+};
+
+class PopEventsTest : public ::testing::TestWithParam<PopEventsTestCase> {
+public:
+  void SetUp() override
+  {
+    event_comm = new MockEventCommunicator();
+    event_triggerer = new EventTriggerNotifier();
+  }
+
+  void TearDown() override {}
+
+  EventTriggerNotifier *event_triggerer;
+  MockEventCommunicator *event_comm;
+};
+
+TEST_P(PopEventsTest, Base)
 {
-  const NodeID owner = 0;
-  const int index = 0;
-  const size_t max_size = 12;
-  std::vector<Event> events;
-  CompQueueImpl compqueue;
-  GenEventImpl event_a(nullptr, event_comm);
-
-  event_a.init(ID::make_event(owner, index, 0), 0);
-  compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
-  compqueue.set_capacity(max_size, /*!resizable=*/false);
-
-  size_t size = compqueue.pop_events(events.data(), max_size);
-
-  EXPECT_EQ(size, 0);
-  EXPECT_TRUE(events.empty());
-}
-
-TEST_F(CompQueueTest, PopLessEvents)
-{
-  const NodeID owner = 0;
-  int index = 0;
-  const size_t max_size = 4;
-  const size_t untriggered = 2;
-  const GenEventImpl::gen_t trigger_gen = 1;
-  std::vector<Event> pop_events(max_size);
+  auto test_case = GetParam();
+  std::vector<Event> pop_events(test_case.max_queue_size);
   CompQueueImpl compqueue;
   std::vector<GenEventImpl *> events;
   std::vector<Event> completed_events;
+  NodeID owner = 0;
+  constexpr GenEventImpl::gen_t trigger_gen = 1;
 
-  for(size_t i = 0; i < max_size; i++) {
+  int index = 0;
+  for(size_t i = 0; i < test_case.num_events; i++) {
     events.push_back(new GenEventImpl(event_triggerer, new MockEventCommunicator));
     events[i]->init(ID::make_event(owner, index++, 0), 0);
     completed_events.push_back(events[i]->current_event());
   }
+
   compqueue.init(ID::make_compqueue(owner, index).convert<CompletionQueue>(), 0);
-  compqueue.set_capacity(max_size, /*!resizable=*/true);
-  for(size_t i = 0; i < max_size; i++) {
+  compqueue.set_capacity(test_case.max_queue_size, test_case.resizable);
+
+  for(size_t i = 0; i < test_case.num_events; i++) {
     compqueue.add_event(events[i]->current_event(), events[i], /*faultaware=*/false);
   }
-  for(size_t i = 0; i < max_size - untriggered; i++) {
+
+  for(size_t i = 0; i < test_case.num_triggered_events; i++) {
     events[i]->trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   }
-  size_t num_pending_events = compqueue.get_pending_events();
-  size_t pop_size = compqueue.pop_events(pop_events.data(), max_size);
 
-  EXPECT_EQ(num_pending_events, untriggered);
-  EXPECT_EQ(pop_size, max_size - untriggered);
-  for(size_t i = 0; i < max_size - untriggered; i++) {
+  size_t num_pending_events = compqueue.get_pending_events();
+  size_t pop_size = compqueue.pop_events(pop_events.data(), test_case.num_pop_events);
+
+  EXPECT_EQ(num_pending_events, test_case.num_events - test_case.num_triggered_events);
+  EXPECT_EQ(pop_size, test_case.num_triggered_events);
+
+  for(size_t i = 0; i < test_case.num_triggered_events; i++) {
     bool poisoned = false;
     EXPECT_TRUE(events[i]->has_triggered(trigger_gen, poisoned));
     EXPECT_FALSE(poisoned);
   }
+
   for(size_t i = 0; i < pop_size; i++) {
     EXPECT_EQ(pop_events[i].id, completed_events[i].id);
   }
-  for(size_t i = max_size - untriggered; i < max_size; i++) {
+
+  for(int i = test_case.num_triggered_events; i < test_case.num_events; i++) {
     events[i]->trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   }
-  for(size_t i = 0; i < max_size; i++) {
+
+  for(size_t i = 0; i < test_case.num_events; i++) {
     delete events[i];
   }
 }
+
+const static PopEventsTestCase kPopEventsTestCases[] = {
+    PopEventsTestCase{/*max_queue_size=*/0, /*num_events=*/0, /*num_triggered_events=*/0,
+                      /*num_pop_events=*/1},
+
+    PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/4, /*num_triggered_events=*/4,
+                      /*num_pop_events=*/4},
+
+    PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/3, /*num_triggered_events=*/3,
+                      /*num_pop_events=*/4},
+
+    PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/5, /*num_triggered_events=*/5,
+                      /*num_pop_events=*/5},
+
+    PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/5, /*num_triggered_events=*/2,
+                      /*num_pop_events=*/5},
+
+    // PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/5,
+    // /*num_triggered_events=*/5,
+    ///*num_pop_events=*/5, /*resizable=*/false},
+};
+
+INSTANTIATE_TEST_SUITE_P(Foo, PopEventsTest, testing::ValuesIn(kPopEventsTestCases));
 
 TEST_F(CompQueueTest, DISABLED_GetLocalProgressEvent)
 {
