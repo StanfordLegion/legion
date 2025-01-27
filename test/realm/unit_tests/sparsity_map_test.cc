@@ -28,7 +28,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
   wrapper->init(ID::make_sparsity(0, 0, 0), 0);
   auto impl = wrapper->get_or_create(handle);
   wrapper->add_references(subscribers.size() + 1);
-  for(const auto node : subscribers) {
+  for(const auto &node : subscribers) {
     impl->record_remote_contributor(node);
   }
 
