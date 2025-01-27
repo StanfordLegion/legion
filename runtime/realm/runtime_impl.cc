@@ -51,6 +51,7 @@
 #include <thread>
 #include <sstream>
 #include <fstream>
+#include <csignal>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
@@ -3352,7 +3353,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
                   << " raised inside realm signal handler, previous caught signal " << ThreadLocal::error_signal_value
                   << std::endl;
         unregister_error_signal_handler();
-        abort();
+        // We could just call exit or abort, but reraising the signal sets the return
+        // status from the process correctly.
+        std::raise(signal);
       }
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       assert((signal == SIGINT) || (signal == SIGFPE) ||
@@ -3453,7 +3456,10 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       //  their own deaths, and then exit
       sleep(1);
       // don't bother trying to clean things up
-      _exit(1);
+      unregister_error_signal_handler();
+      // We could just call exit or abort, but reraising the signal sets the return status
+      // from the process correctly.
+      std::raise(signal);
     }
 
   
