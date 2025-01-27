@@ -29,7 +29,7 @@ static inline Memory make_mem(int idx, int node_id)
   return ID::make_memory(idx, node_id).convert<Memory>();
 }
 
-TEST(MemcpyChannelTest, SupportsPathLocalMemories)
+TEST(MemcpyChannelTest, SupportsPathRemoteSharedMemories)
 {
   Node node;
   std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
@@ -38,6 +38,7 @@ TEST(MemcpyChannelTest, SupportsPathLocalMemories)
   std::vector<std::byte> buffer(bytes);
   auto src_mem =
       new LocalCPUMemory(make_mem(0, 0), bytes, 0, Memory::SYSTEM_MEM, buffer.data());
+  node.memories.push_back(src_mem);
 
   std::vector<std::byte> buffer1(bytes);
   auto dst_mem_1 =
@@ -51,6 +52,63 @@ TEST(MemcpyChannelTest, SupportsPathLocalMemories)
   auto dst_mem_3 =
       new LocalCPUMemory(make_mem(0, 3), bytes, 0, Memory::SYSTEM_MEM, buffer3.data());
 
+  remote_shared_memory_mappings.insert({dst_mem_1->me.id, SharedMemoryInfo()});
+  remote_shared_memory_mappings.insert({dst_mem_2->me.id, SharedMemoryInfo()});
+
+  uint64_t cost_1 = 0, cost_2 = 0, cost_3 = 0;
+
+  std::unique_ptr<Channel> channel(
+      new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
+
+  cost_1 =
+      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_1->me),
+                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
+                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+
+  cost_2 =
+      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_2->me),
+                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
+                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+
+  cost_3 =
+      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_3->me),
+                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
+                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+
+  ASSERT_EQ(cost_1, 100);
+  ASSERT_EQ(cost_2, 100);
+  ASSERT_EQ(cost_3, 0);
+  ASSERT_FALSE(channel->get_paths().empty());
+
+  delete dst_mem_1;
+  delete dst_mem_2;
+  delete dst_mem_3;
+
+  channel->shutdown();
+}
+
+TEST(MemcpyChannelTest, SupportsPathLocalMemories)
+{
+  Node node;
+  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
+  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
+  constexpr size_t bytes = 16;
+  std::vector<std::byte> buffer(bytes);
+  auto src_mem =
+      new LocalCPUMemory(make_mem(0, 0), bytes, 0, Memory::SYSTEM_MEM, buffer.data());
+
+  std::vector<std::byte> buffer1(bytes);
+  auto dst_mem_1 =
+      new LocalCPUMemory(make_mem(1, 1), bytes, 0, Memory::SYSTEM_MEM, buffer1.data());
+
+  std::vector<std::byte> buffer2(bytes);
+  auto dst_mem_2 =
+      new LocalCPUMemory(make_mem(2, 2), bytes, 0, Memory::SYSTEM_MEM, buffer2.data());
+
+  std::vector<std::byte> buffer3(bytes);
+  auto dst_mem_3 =
+      new LocalCPUMemory(make_mem(3, 3), bytes, 0, Memory::SYSTEM_MEM, buffer3.data());
+
   node.memories.push_back(src_mem);
   node.memories.push_back(dst_mem_1);
   node.memories.push_back(dst_mem_2);
@@ -58,26 +116,29 @@ TEST(MemcpyChannelTest, SupportsPathLocalMemories)
 
   std::unique_ptr<Channel> channel(
       new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
-  auto paths = channel->get_paths();
 
-  {
-    ChannelCopyInfo info(src_mem->me, dst_mem_1->me);
-    cost_1 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
-  }
+  cost_1 =
+      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_1->me),
+                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
+                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
 
-  {
-    ChannelCopyInfo info(src_mem->me, dst_mem_2->me);
-    cost_2 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
-  }
-  {
-    ChannelCopyInfo info(src_mem->me, dst_mem_3->me);
-    cost_3 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
-  }
+  cost_2 =
+      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_2->me),
+                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
+                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+
+  cost_3 =
+      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_3->me),
+                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
+                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
 
   ASSERT_EQ(cost_1, 100);
   ASSERT_EQ(cost_2, 100);
   ASSERT_EQ(cost_3, 0);
-  ASSERT_FALSE(paths.empty());
+  ASSERT_FALSE(channel->get_paths().empty());
+
+  // we only need to delete memories are not part of the 'node' since pointers will be
+  // deleted for us
   delete dst_mem_3;
   channel->shutdown();
 }
