@@ -249,6 +249,11 @@ const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
 
     MemcpyXferDescTestCase{.src_strides = {4, 16},
                            .src_extents = {4, 4},
+                           .dst_strides = {16, 32},
+                           .dst_extents = {3, 4}},
+
+    MemcpyXferDescTestCase{.src_strides = {4, 16},
+                           .src_extents = {4, 4},
                            .dst_strides = {4, 16},
                            .dst_extents = {4, 4}},
 
