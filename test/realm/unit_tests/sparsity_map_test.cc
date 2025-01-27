@@ -42,7 +42,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
   }
 
   for(const auto node : removed) {
-    EXPECT_TRUE(wrapper->subscribers.contains(node));
+    ASSERT_TRUE(wrapper->subscribers.contains(node));
   }
 }
 
@@ -53,7 +53,7 @@ TEST(SparistyMapImplWrapperTest, AddReferences)
 
   wrapper->add_references(count);
 
-  EXPECT_EQ(wrapper->references.load(), count);
+  ASSERT_EQ(wrapper->references.load(), count);
 }
 
 TEST(SparistyMapImplWrapperTest, RemoveReferences)
@@ -74,9 +74,9 @@ TEST(SparistyMapImplWrapperTest, RemoveReferences)
   }
   wrapper->remove_references(2, Event::NO_EVENT);
 
-  EXPECT_NE(impl, nullptr);
+  ASSERT_NE(impl, nullptr);
   for(const auto node : subscribers) {
-    EXPECT_TRUE(comm->unsubscribers.contains(node));
+    ASSERT_TRUE(comm->unsubscribers.contains(node));
   }
 }
 
@@ -165,8 +165,8 @@ TYPED_TEST_P(SparsityMapImplTest, AddRemoteWaiter)
 
   bool ok = impl->add_waiter(/*uop=*/nullptr, true);
 
-  EXPECT_TRUE(ok);
-  EXPECT_EQ(this->sparsity_comm->sent_requests, 1);
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(this->sparsity_comm->sent_requests, 1);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
@@ -186,9 +186,9 @@ TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
   impl->remote_data_reply(/*requestor=*/2, /*reply_precise=*/true,
                           /*reply_approx=*/false);
 
-  EXPECT_EQ(this->sparsity_comm->sent_contributions, num_rects);
-  EXPECT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
-  EXPECT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
+  ASSERT_EQ(this->sparsity_comm->sent_contributions, num_rects);
+  ASSERT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
+  ASSERT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
@@ -205,9 +205,9 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
   impl->contribute_dense_rect_list(rect_list,
                                    /*disjoint=*/false);
 
-  EXPECT_EQ(this->sparsity_comm->sent_contributions, num_rects);
-  EXPECT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
-  EXPECT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
+  ASSERT_EQ(this->sparsity_comm->sent_contributions, num_rects);
+  ASSERT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
+  ASSERT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, SetContributorCountRemote)
@@ -224,7 +224,7 @@ TYPED_TEST_P(SparsityMapImplTest, SetContributorCountRemote)
 
   impl->set_contributor_count(2);
 
-  EXPECT_EQ(this->sparsity_comm->sent_contributions, 1);
+  ASSERT_EQ(this->sparsity_comm->sent_contributions, 1);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
@@ -239,7 +239,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
 
   impl->contribute_nothing();
 
-  EXPECT_EQ(this->sparsity_comm->sent_contributions, 1);
+  ASSERT_EQ(this->sparsity_comm->sent_contributions, 1);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
@@ -259,12 +259,12 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
                                    /*disjoint=*/false);
 
   auto entries = public_impl->get_entries();
-  EXPECT_TRUE(public_impl->is_valid());
-  EXPECT_EQ(entries.size(), num_rects);
-  EXPECT_EQ(entries.size(), rect_list.size());
+  ASSERT_TRUE(public_impl->is_valid());
+  ASSERT_EQ(entries.size(), num_rects);
+  ASSERT_EQ(entries.size(), rect_list.size());
   for(size_t i = 0; i < entries.size(); i++) {
-    EXPECT_EQ(entries[i].bounds.lo, rect_list[i].lo);
-    EXPECT_EQ(entries[i].bounds.hi, rect_list[i].hi);
+    ASSERT_EQ(entries[i].bounds.lo, rect_list[i].lo);
+    ASSERT_EQ(entries[i].bounds.hi, rect_list[i].hi);
   }
 }
 
@@ -285,10 +285,10 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
 
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
   auto entries = public_impl->get_entries();
-  EXPECT_EQ(entries.size(), rect_list.size());
+  ASSERT_EQ(entries.size(), rect_list.size());
   for(size_t i = 0; i < entries.size(); i++) {
-    EXPECT_EQ(entries[i].bounds.lo, rect_list[i].lo);
-    EXPECT_EQ(entries[i].bounds.hi, rect_list[i].hi);
+    ASSERT_EQ(entries[i].bounds.lo, rect_list[i].lo);
+    ASSERT_EQ(entries[i].bounds.hi, rect_list[i].hi);
   }
 }
 
@@ -319,10 +319,10 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForOneRect)
   bool ok =
       public_impl->compute_covering(bounds, /*max_rects=*/1, max_overhead, covering);
 
-  EXPECT_TRUE(ok);
-  EXPECT_EQ(covering.size(), 1);
-  EXPECT_EQ(covering.front().lo, TypeParam(0));
-  EXPECT_EQ(covering.front().hi, TypeParam(offset - gap + 1));
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(covering.size(), 1);
+  ASSERT_EQ(covering.front().lo, TypeParam(0));
+  ASSERT_EQ(covering.front().hi, TypeParam(offset - gap + 1));
 }
 
 // TODO(apryakhin@): There are possible inputs for ::compute_covering, so consider making
@@ -346,12 +346,12 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForNRect)
   impl->contribute_nothing();
   bool ok = public_impl->compute_covering(bounds, max_rects, max_overhead, covering);
 
-  EXPECT_TRUE(ok);
-  EXPECT_EQ(covering.size(), max_rects);
-  EXPECT_EQ(covering[0].lo, TypeParam(0));
-  EXPECT_EQ(covering[0].hi, TypeParam(1));
-  EXPECT_EQ(covering[1].lo, TypeParam(3));
-  EXPECT_EQ(covering[1].hi, TypeParam(4));
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(covering.size(), max_rects);
+  ASSERT_EQ(covering[0].lo, TypeParam(0));
+  ASSERT_EQ(covering[0].hi, TypeParam(1));
+  ASSERT_EQ(covering[1].lo, TypeParam(3));
+  ASSERT_EQ(covering[1].hi, TypeParam(4));
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
@@ -384,7 +384,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
   Rect<N, T> bounds(TypeParam(0), TypeParam(10));
   bool ok = public_impl->overlaps(other_public_impl, bounds, /*approx=*/true);
 
-  EXPECT_TRUE(ok);
+  ASSERT_TRUE(ok);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
@@ -421,7 +421,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   Rect<N, T> bounds(TypeParam(0), TypeParam(1000));
   bool ok = public_impl->overlaps(other_public_impl, bounds, /*approx=*/false);
 
-  EXPECT_FALSE(ok);
+  ASSERT_FALSE(ok);
 }
 
 REGISTER_TYPED_TEST_SUITE_P(SparsityMapImplTest, AddRemoteWaiter, RemoteDataReply,
