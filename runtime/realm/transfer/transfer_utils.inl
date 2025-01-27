@@ -18,9 +18,9 @@
 namespace Realm {
 
   template <int N, typename T>
-  bool next_subrect(const Rect<N, T> &domain, const Point<N, T> &start,
-                    const Rect<N, T> &restriction, const int *dim_order,
-                    Rect<N, T> &subrect, Point<N, T> &next_start)
+  inline bool next_subrect(const Rect<N, T> &domain, const Point<N, T> &start,
+                           const Rect<N, T> &restriction, const int *dim_order,
+                           Rect<N, T> &subrect, Point<N, T> &next_start)
   {
     // special case for when we can do the whole domain in one subrect
     if((start == domain.lo) && restriction.contains(domain)) {
@@ -82,9 +82,9 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool compute_target_subrect(const Rect<N, T> &layout_bounds, const Rect<N, T> &cur_rect,
-                              Point<N, T> &cur_point, Rect<N, T> &target_subrect,
-                              const int *dim_order)
+  inline bool compute_target_subrect(const Rect<N, T> &layout_bounds,
+                                     const Rect<N, T> &cur_rect, Point<N, T> &cur_point,
+                                     Rect<N, T> &target_subrect, const int *dim_order)
   {
     target_subrect.lo = cur_point;
     target_subrect.hi = cur_point;
