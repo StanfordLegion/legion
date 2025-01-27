@@ -1,6 +1,7 @@
 #include "realm/transfer/transfer_utils.h"
 #include <variant>
 #include <vector>
+#include <numeric>
 #include <gtest/gtest.h>
 
 using namespace Realm;
@@ -23,9 +24,7 @@ protected:
   void SetUp() override
   {
     dim_order.resize(N);
-    for(int i = 0; i < N; i++) {
-      dim_order[i] = i;
-    }
+    std::iota(dim_order.begin(), dim_order.end(), 0);
   }
 
   std::vector<int> dim_order;
@@ -91,8 +90,6 @@ TYPED_TEST_P(NextRectTest, ContainsPartialSubrect)
 REGISTER_TYPED_TEST_SUITE_P(NextRectTest, EmptyDomain, ContainsFullSubrect,
                             ContainsPartialSubrect);
 
-#define TEST_POINT_TYPES(T) GeneratePointTypesForAllDims<T>()
-
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
 {
@@ -106,7 +103,7 @@ auto GeneratePointTypesForAllDims()
 }
 
 #define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX)                                        \
-  using N##SUFFIX = decltype(TEST_POINT_TYPES(BASE_TYPE));                               \
+  using N##SUFFIX = decltype(GeneratePointTypesForAllDims<BASE_TYPE>());                 \
   INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, NextRectTest, N##SUFFIX)
 
 INSTANTIATE_TEST_TYPES(int, Int);
