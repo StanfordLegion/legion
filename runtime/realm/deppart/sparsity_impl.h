@@ -195,7 +195,7 @@ namespace Realm {
   // we need a type-erased wrapper to store in the runtime's lookup table
   class SparsityMapImplWrapper {
   public:
-    static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
+    static constexpr ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
     SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator, bool report_leaks);
