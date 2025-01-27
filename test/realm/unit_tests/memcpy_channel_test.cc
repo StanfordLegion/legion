@@ -18,9 +18,9 @@ TEST(MemcpyChannelTest, CreateMemcpyChannel)
   XferDesKind channel_kind = channel->kind;
   auto paths = channel->get_paths();
 
-  EXPECT_EQ(channel_kind, XferDesKind::XFER_MEM_CPY);
-  EXPECT_EQ(channel_owner, owner);
-  EXPECT_TRUE(paths.empty());
+  ASSERT_EQ(channel_kind, XferDesKind::XFER_MEM_CPY);
+  ASSERT_EQ(channel_owner, owner);
+  ASSERT_TRUE(paths.empty());
   channel->shutdown();
 }
 
@@ -75,10 +75,10 @@ TEST(MemcpyChannelTest, DISABLED_SupportsPathLocalMemories)
     cost_3 = channel->supports_path(info, 0, 0, 0, bytes, 0, 0);
   }
 
-  EXPECT_EQ(cost_1, 100);
-  EXPECT_EQ(cost_2, 100);
-  EXPECT_EQ(cost_3, 0);
-  EXPECT_FALSE(paths.empty());
+  ASSERT_EQ(cost_1, 100);
+  ASSERT_EQ(cost_2, 100);
+  ASSERT_EQ(cost_3, 0);
+  ASSERT_FALSE(paths.empty());
   channel->shutdown();
 }
 
@@ -289,10 +289,10 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
     iterations++;
   }
 
-  EXPECT_EQ(iterations, 1);
+  ASSERT_EQ(iterations, 1);
 
   for(size_t i = 0; i < check_bytes * test_case.max_entries; i++) {
-    EXPECT_EQ(src_buffer[i], dst_buffer[i]);
+    ASSERT_EQ(src_buffer[i], dst_buffer[i]);
   }
 }
 
