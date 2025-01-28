@@ -67,13 +67,13 @@ protected:
   static constexpr int N = PointTraits<PointType>::DIM;
   using T = typename PointTraits<PointType>::value_type;
 
-  void SetUp() override
-  {
-    dim_order.resize(N);
-    std::iota(dim_order.begin(), dim_order.end(), 0);
-  }
+  void SetUp() override { std::iota(dim_order, dim_order + N, 0); }
 
-  std::vector<int> dim_order;
+  constexpr static size_t elem_size = 8;
+  std::vector<FieldID> field_ids{0};
+  std::vector<size_t> field_sizes{elem_size};
+  std::vector<size_t> field_offsets{0};
+  int dim_order[N];
 };
 
 TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
@@ -81,46 +81,44 @@ TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
 TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
 {
   constexpr int N = TestFixture::N;
-  constexpr size_t elem_size = 16;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
   AddressList addrlist;
   AddressListCursor cursor;
   const InstanceLayoutPieceBase *nonaffine;
 
-  std::vector<int> inverted_dim_order;
+  int inverted_dim_order[N];
   for(int i = N - 1; i >= 0; i--) {
-    inverted_dim_order.emplace_back(i);
+    inverted_dim_order[N - 1 - i] = i;
   }
 
-  auto it = new TransferIteratorIndexSpace<N, T>(
-      domain, create_inst<N, T>(domain, elem_size), inverted_dim_order.data(), {0}, {0},
-      /*field_sizes=*/{elem_size});
+  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
+      domain, create_inst<N, T>(domain, this->elem_size), inverted_dim_order,
+      this->field_ids, this->field_offsets, this->field_sizes);
 
   bool ok = it->get_addresses(addrlist, nonaffine);
 
   cursor.set_addrlist(&addrlist);
   ASSERT_TRUE(ok);
   ASSERT_TRUE(it->done());
-  ASSERT_EQ(cursor.remaining(0), N > 1 ? elem_size : elem_size * domain.volume());
+  ASSERT_EQ(cursor.remaining(0),
+            N > 1 ? this->elem_size : this->elem_size * domain.volume());
   for(int i = 1; i < N; i++) {
     int d = inverted_dim_order[i];
     size_t count = (domain.hi[d] - domain.lo[d] + 1);
     ASSERT_EQ(cursor.remaining(i), count);
   }
-  delete it;
 }
 
 TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
 {
   constexpr int N = TestFixture::N;
-  constexpr size_t elem_size = 16;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
 
-  auto it = new TransferIteratorIndexSpace<N, T>(
-      domain, create_inst<N, T>(domain, elem_size), this->dim_order.data(), {0}, {0},
-      /*field_sizes=*/{elem_size});
+  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
+      domain, create_inst<N, T>(domain, this->elem_size), this->dim_order,
+      this->field_ids, this->field_offsets, this->field_sizes);
   const InstanceLayoutPieceBase *nonaffine;
   AddressList addrlist;
 
@@ -132,24 +130,22 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
   ASSERT_TRUE(ok);
   ASSERT_TRUE(it->done());
   ASSERT_EQ(nonaffine, nullptr);
-  ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * elem_size);
-  ASSERT_EQ(cursor.remaining(0), domain.volume() * elem_size);
+  ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * this->elem_size);
+  ASSERT_EQ(cursor.remaining(0), domain.volume() * this->elem_size);
   ASSERT_EQ(cursor.get_offset(), 0);
   ASSERT_EQ(cursor.get_dim(), 1);
-  delete it;
 }
 
 TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
 {
   constexpr int N = TestFixture::N;
-  constexpr size_t elem_size = 8;
-  constexpr size_t max_bytes = elem_size * 2;
+  constexpr size_t max_bytes = this->elem_size * 2;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(3));
 
-  auto it = new TransferIteratorIndexSpace<N, T>(
-      domain, create_inst<N, T>(domain, elem_size), this->dim_order.data(), {0}, {0},
-      /*field_sizes=*/{elem_size});
+  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
+      domain, create_inst<N, T>(domain, this->elem_size), this->dim_order,
+      this->field_ids, this->field_offsets, this->field_sizes);
 
   size_t offset = 0;
   for(int i = 0; i < domain.volume() / 2; i++) {
@@ -164,8 +160,6 @@ TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
   }
 
   EXPECT_TRUE(it->done());
-
-  delete it;
 }
 
 REGISTER_TYPED_TEST_SUITE_P(IndexSpaceIteratorTest, GetAddressesDense,
