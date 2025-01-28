@@ -5361,6 +5361,11 @@ namespace Legion {
         // No need to check for deletions, we stil hold gc references
         (*it)->remove_base_valid_ref(TRACE_REF);
       }
+      // Also need to release any shadow instances we might have made as
+      // part of executing this template
+      for (std::vector<IssueAcross*>::const_iterator it =
+            across_copies.begin(); it != across_copies.end(); it++)
+        (*it)->executor->release_shadow_instances();
     }
 
     //--------------------------------------------------------------------------
@@ -5393,7 +5398,6 @@ namespace Legion {
               are_read_only_users(finder->second))
             (*it)->executor->record_trace_immutable_indirection(false/*dst*/);
         }
-        across_copies.clear();
       }
       std::vector<unsigned> gen;
       // Sync the idempotency computation 
@@ -9127,20 +9131,10 @@ namespace Legion {
             derez.deserialize(done);
             UniqueInst inst;
             inst.deserialize(derez);
-            PendingRemoteExpression pending;
-            RtEvent expr_ready;
             IndexSpaceExpression *user_expr = 
-              IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
-                                    source, pending, expr_ready);
-            if (expr_ready.exists())
-            {
-              DeferTraceUpdateArgs args(this, kind, done, inst, derez, pending);
-              runtime->issue_runtime_meta_task(args,
-                  LG_LATENCY_MESSAGE_PRIORITY, expr_ready);
-              return;
-            }
-            else if (handle_update_mutated_inst(inst, user_expr, 
-                                                derez, applied, done))
+              IndexSpaceExpression::unpack_expression(
+                  derez, runtime->forest, source);
+            if (handle_update_mutated_inst(inst,user_expr,derez,applied,done))
               return;
             break;
           }
@@ -9400,20 +9394,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-     ShardedPhysicalTemplate *t, UpdateKind k, RtUserEvent d, 
-     Deserializer &derez, const UniqueInst &i, RtUserEvent u)
-      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), inst(i), expr(NULL),
-        buffer_size(derez.get_remaining_bytes()), buffer(malloc(buffer_size)),
-        deferral_event(u)
-    //--------------------------------------------------------------------------
-    {
-      memcpy(buffer, derez.get_current_pointer(), buffer_size);
-      derez.advance_pointer(buffer_size);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
      ShardedPhysicalTemplate *t, UpdateKind k,RtUserEvent d,const UniqueInst &i,
      Deserializer &derez, IndexSpaceExpression *x, RtUserEvent u)
       : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t),
@@ -9429,30 +9409,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
-     ShardedPhysicalTemplate *t, UpdateKind k,RtUserEvent d,const UniqueInst &i,
-     Deserializer &derez, const PendingRemoteExpression &pend)
-      : LgTaskArgs<DeferTraceUpdateArgs>(implicit_provenance), target(t), 
-        kind(k), done(d), inst(i), expr(NULL),
-        pending(pend), buffer_size(derez.get_remaining_bytes()), 
-        buffer(malloc(buffer_size))
-    //--------------------------------------------------------------------------
-    {
-      memcpy(buffer, derez.get_current_pointer(), buffer_size);
-      derez.advance_pointer(buffer_size);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardedPhysicalTemplate::DeferTraceUpdateArgs::DeferTraceUpdateArgs(
         const DeferTraceUpdateArgs &rhs, RtUserEvent d, IndexSpaceExpression *e)
       : LgTaskArgs<DeferTraceUpdateArgs>(rhs.provenance), target(rhs.target),
         kind(rhs.kind), done(rhs.done), inst(rhs.inst), expr(e), 
-        pending(rhs.pending), buffer_size(rhs.buffer_size), buffer(rhs.buffer),
-        deferral_event(d)
+        buffer_size(rhs.buffer_size), buffer(rhs.buffer), deferral_event(d)
     //--------------------------------------------------------------------------
     {
       // Expression reference rolls over unless its new and we need a reference
-      if (rhs.expr != expr)
-        expr->add_base_expression_reference(META_TASK_REF);
+      expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -9467,20 +9431,9 @@ namespace Legion {
       {
         case UPDATE_MUTATED_INST:
           {
-            if (dargs->expr != NULL)
-            {
-              if (dargs->target->handle_update_mutated_inst(dargs->inst,
-                        dargs->expr, derez, applied, dargs->done, dargs))
-                return;
-            }
-            else
-            {
-              IndexSpaceExpression *expr = 
-                runtime->forest->find_remote_expression(dargs->pending);
-              if (dargs->target->handle_update_mutated_inst(dargs->inst,
-                              expr, derez, applied, dargs->done, dargs))
-                return;
-            }
+            if (dargs->target->handle_update_mutated_inst(dargs->inst,
+                      dargs->expr, derez, applied, dargs->done, dargs))
+              return;
             break;
           }
         default:
@@ -9495,8 +9448,7 @@ namespace Legion {
         Runtime::trigger_event(dargs->done);
       if (dargs->deferral_event.exists())
         Runtime::trigger_event(dargs->deferral_event);
-      if ((dargs->expr != NULL) && 
-          dargs->expr->remove_base_expression_reference(META_TASK_REF))
+      if (dargs->expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->expr;
       free(dargs->buffer);
     }

@@ -2248,8 +2248,8 @@ namespace Legion {
         // If we already have the targets there's no need to 
         // iterate over the source equivalence sets as we can just
         // build a standard CopyAcrossUnstructured object
-        CopyAcrossUnstructured *across = 
-         copy_expr->create_across_unstructured(reservations,false/*preimages*/);
+        CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+            reservations, false/*preimages*/, false/*shadow indirections*/);
         across->add_reference();
 #ifdef LEGION_SPY
         across->src_tree_id = src_req.region.get_tree_id();
@@ -2394,7 +2394,8 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_src_out_of_range,
-                                           const bool compute_preimages)
+                                           const bool compute_preimages,
+                                           const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2424,8 +2425,8 @@ namespace Legion {
       // Easy out if we're not moving anything
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
@@ -2445,8 +2446,6 @@ namespace Legion {
       if (dst_ready.exists())
         copy_preconditions.push_back(dst_ready);
       ApEvent src_indirect_ready = idx_ready;
-      if (src_indirect_ready.exists())
-        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
       {
         if (src_indirect_ready.exists())
@@ -2534,7 +2533,8 @@ namespace Legion {
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
                                              const bool possible_dst_aliasing,
-                                             const bool compute_preimages)
+                                             const bool compute_preimages,
+                                             const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2565,8 +2565,8 @@ namespace Legion {
       // Easy out if we're not going to move anything
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the sources
       across->initialize_source_fields(this, src_req, src_targets, trace_info);
@@ -2588,8 +2588,6 @@ namespace Legion {
       if (src_ready.exists())
         copy_preconditions.push_back(src_ready);
       ApEvent dst_indirect_ready = idx_ready;
-      if (dst_indirect_ready.exists())
-        copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
       {
         if (dst_indirect_ready.exists())
@@ -2681,7 +2679,8 @@ namespace Legion {
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing,
-                              const bool compute_preimages)
+                              const bool compute_preimages,
+                              const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2719,8 +2718,8 @@ namespace Legion {
       // Quick out if there is nothing we're going to copy
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &src_idx_target = src_idx_targets[0];
@@ -2742,8 +2741,6 @@ namespace Legion {
       else
         copy_preconditions.swap(local_preconditions);
       ApEvent src_indirect_ready = src_idx_ready;
-      if (src_indirect_ready.exists())
-        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
       {
         if (src_indirect_ready.exists())
@@ -2753,8 +2750,6 @@ namespace Legion {
           src_indirect_ready = init_precondition;
       }
       ApEvent dst_indirect_ready = dst_idx_ready;
-      if (dst_indirect_ready.exists())
-        copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
       {
         if (dst_indirect_ready.exists())
@@ -6211,47 +6206,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::find_remote_expression(
-                                         const PendingRemoteExpression &pending)
-    //--------------------------------------------------------------------------
-    {
-      if (pending.is_index_space)
-      {
-        IndexSpaceNode *node = get_node(pending.handle);
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        if (!pending.done_ref_counting)
-          node->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(node);
-        return node;
-      }
-      else
-      {
-        // Technically shouldn't happen anymore but if it does its still here
-        IndexSpaceExpression *result = NULL;
-        {
-          AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-            finder = remote_expressions.find(pending.remote_expr_id);
-#ifdef DEBUG_LEGION
-          assert(finder != remote_expressions.end());
-#endif
-          result = finder->second;
-        }
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        if (!pending.done_ref_counting)
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::unregister_remote_expression(
                                                 IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
@@ -6494,10 +6448,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->instances.size(); idx++)
           if (it->instances[idx] == instance)
             return it->instance_events[idx];
+      AutoLock p_lock(preimage_lock,1,false/*exclusive*/);
+      std::map<PhysicalInstance,LgEvent>::const_iterator finder =
+        profiling_shadow_instances.find(instance);
+      if (finder != profiling_shadow_instances.end())
+        return finder->second;
       // Should always have found it before this
       assert(false);
       return src_indirect_instance_event;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Index Space Expression 
@@ -6722,6 +6681,7 @@ namespace Legion {
           op->add_base_expression_reference(LIVE_EXPR_REF);
           op->unpack_global_ref();
         }
+        // Else LIVE_EXPR_REF added by pack_expression call
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
@@ -6754,85 +6714,10 @@ namespace Legion {
 #endif
         result->add_base_expression_reference(LIVE_EXPR_REF);
         if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          // Unpack the global reference that we had
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
-          Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source,
-          PendingRemoteExpression &pending, RtEvent &wait_for)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!pending.done_ref_counting);
-#endif
-      // Handle the special case where this is a local index space expression 
-      bool is_local;
-      derez.deserialize(is_local);
-      if (is_local)
-      {
-        IndexSpaceExpression *result;
-        derez.deserialize(result);
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = 
-          dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        op->add_base_expression_reference(LIVE_EXPR_REF);
-        if (source != forest->runtime->address_space)
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        pending.done_ref_counting = true;
-        return result;
-      }
-      derez.deserialize(pending.is_index_space);
-      // If this is an index space it is easy
-      if (pending.is_index_space)
-      {
-        derez.deserialize(pending.handle);
-        IndexSpaceNode *node = forest->get_node(pending.handle, &wait_for);
-        if (node == NULL)
-        {
-          pending.source = source;
-          return node;
-        }
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        node->unpack_global_ref();
-        pending.done_ref_counting = true;
-        ImplicitReferenceTracker::record_live_expression(node);
-        return node;
-      }
-      else
-      {
-        derez.deserialize(pending.remote_expr_id);
-        bool created = false;
-        IndexSpaceExpression *result =
-          forest->find_or_create_remote_expression(
-              pending.remote_expr_id, derez, created);
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          op->unpack_global_ref();
-        pending.done_ref_counting = true;
+          // Notify the owner of the new instance
+          op->send_remote_registration(true/*has global ref*/);
+        // Unpack the global reference that we had
+        op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }

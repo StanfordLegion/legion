@@ -1432,7 +1432,7 @@ namespace Legion {
                            ApEvent collective_post, PredEvent g, RtUserEvent a,
                            InstanceSet *src, InstanceSet *dst,
                            InstanceSet *gather, InstanceSet *scatter,
-                           const bool preimages)
+                           const bool preimages, const bool shadow)
           : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), 
             PhysicalTraceInfo(info), copy(op), index(idx),
             init_precondition(init), src_ready(sready), dst_ready(dready),
@@ -1441,7 +1441,8 @@ namespace Legion {
             collective_precondition(collective_pre), 
             collective_postcondition(collective_post), guard(g), applied(a),
             src_targets(src), dst_targets(dst), gather_targets(gather),
-            scatter_targets(scatter), compute_preimages(preimages)
+            scatter_targets(scatter), compute_preimages(preimages),
+            shadow_indirections(shadow)
           // This is kind of scary, Realm is about to make a copy of this
           // without our knowledge, but we need to preserve the correctness
           // of reference counting on PhysicalTraceRecorders, so just add
@@ -1469,6 +1470,7 @@ namespace Legion {
         InstanceSet *const gather_targets;
         InstanceSet *const scatter_targets;
         const bool compute_preimages;
+        const bool shadow_indirections;
       };
     public:
       CopyOp(Runtime *rt);
@@ -1547,7 +1549,8 @@ namespace Legion {
                                const InstanceSet *scatter_targets,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &applied_conditions,
-                               const bool compute_preimages);
+                               const bool compute_preimages,
+                               const bool shadow_indirections);
       void finalize_copy_profiling(void);
     protected:
       static void req_vector_reduce_to_readwrite(

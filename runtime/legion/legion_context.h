@@ -68,6 +68,8 @@ namespace Legion {
       inline SingleTask* get_owner_task(void) const { return owner_task; }
       inline bool is_priority_mutable(void) const { return mutable_priority; }
       inline int get_depth(void) const { return depth; }
+      inline uint64_t get_tunable_index(void)
+        { return total_tunable_count++; }
     public:
       virtual ShardID get_shard_id(void) const { return 0; }
       virtual DistributedID get_replication_id(void) const { return 0; }
@@ -676,6 +678,8 @@ namespace Legion {
       unsigned                                    inlined_tasks;
       RtUserEvent                                 inlining_done;
     protected:
+      uint64_t                              total_tunable_count;
+    protected:
       class OverheadProfiler : 
         public Mapping::ProfilingMeasurements::RuntimeOverhead {
       public:
@@ -962,9 +966,7 @@ namespace Legion {
       virtual ~InnerContext(void);
     public:
       InnerContext& operator=(const InnerContext &rhs) = delete;
-    public:
-      inline uint64_t get_tunable_index(void)
-        { return total_tunable_count++; }
+    public: 
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
       void record_physical_trace_replay(RtEvent ready, bool replay); 
@@ -1919,7 +1921,6 @@ namespace Legion {
       // Track whether this task has finished executing
       uint64_t total_children_count; // total number of sub-operations
       uint64_t next_blocking_index;
-      uint64_t total_tunable_count;
       std::deque<ReorderBufferEntry> reorder_buffer;
       // For tracking any operations that come from outside the
       // task like a garbage collector that need to be inserted

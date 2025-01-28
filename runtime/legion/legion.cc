@@ -1628,8 +1628,8 @@ namespace Legion {
         argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED),
         concurrent_functor(0), concurrent(false), must_parallelism(false),
         map_id(0), tag(0), static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        independent_requirements(false), silence_warnings(false),
+        elide_future_return(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1648,7 +1648,7 @@ namespace Legion {
         concurrent(false), must_parallelism(must), map_id(mid), tag(t),
         map_arg(marg), provenance(prov), static_dependences(NULL),
         enable_inlining(false), independent_requirements(false),
-        elide_future_return(false), silence_warnings(false)
+        silence_warnings(false), elide_future_return(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1668,7 +1668,7 @@ namespace Legion {
         concurrent(false), must_parallelism(must), map_id(mid), tag(t),
         map_arg(marg), provenance(prov), static_dependences(NULL),
         enable_inlining(false), independent_requirements(false),
-        elide_future_return(false), silence_warnings(false)
+        silence_warnings(false), elide_future_return(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -6528,7 +6528,7 @@ namespace Legion {
     {
       TimingLauncher launcher(LEGION_MEASURE_SECONDS);
       launcher.add_precondition(precondition);
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6537,7 +6537,7 @@ namespace Legion {
     {
       TimingLauncher launcher(LEGION_MEASURE_MICRO_SECONDS);
       launcher.add_precondition(pre);
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6546,7 +6546,7 @@ namespace Legion {
     {
       TimingLauncher launcher(LEGION_MEASURE_NANO_SECONDS);
       launcher.add_precondition(pre);
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6554,7 +6554,7 @@ namespace Legion {
                                              const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------

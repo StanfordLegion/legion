@@ -1436,7 +1436,8 @@ namespace Legion {
       if (!current.exists())
       {
         // Ignore mapper calls that happen from outside threads
-        if (implicit_context->owner_task == NULL)
+        if ((implicit_context == NULL) ||
+            (implicit_context->owner_task == NULL))
           return;
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor
@@ -1470,7 +1471,8 @@ namespace Legion {
       if (!current.exists())
       {
         // Ignore runtime calls that happen from outside threads
-        if (implicit_context->owner_task == NULL)
+        if ((implicit_context == NULL) ||
+            (implicit_context->owner_task == NULL))
           return;
         // Implicit top-level task case where we're not actually running
         // on a Realm processor so we need to get the proxy processor

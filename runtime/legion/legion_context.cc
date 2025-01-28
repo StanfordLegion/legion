@@ -49,8 +49,9 @@ namespace Legion {
       : DistributedCollectable(rt, id, perform_registration, mapping),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         executing_processor(Processor::NO_PROC), inlined_tasks(0),
-        overhead_profiler(NULL), implicit_task_profiler(NULL), 
-        task_executed(false), mutable_priority(false), inline_task(inline_t),
+        total_tunable_count(0), overhead_profiler(NULL),
+        implicit_task_profiler(NULL), task_executed(false),
+        mutable_priority(false), inline_task(inline_t),
         implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
@@ -1428,7 +1429,7 @@ namespace Legion {
         next_created_index(reqs.size()), context_configuration(config),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), next_blocking_index(0),
-        total_tunable_count(0), outstanding_prepipeline_tasks(0),
+        outstanding_prepipeline_tasks(0),
         enqueue_task_comp_queue(CompletionQueue::NO_QUEUE),
         trigger_execution_comp_queue(CompletionQueue::NO_QUEUE),
         deferred_execution_comp_queue(CompletionQueue::NO_QUEUE),
@@ -25050,6 +25051,7 @@ namespace Legion {
                                      std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       AutoProvenance provenance(launcher.provenance);
       if (launcher.enable_inlining)
       {
@@ -25078,6 +25080,7 @@ namespace Legion {
                                         std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       AutoProvenance provenance(launcher.provenance);
       if (!launcher.must_parallelism && launcher.enable_inlining)
       {
@@ -25111,6 +25114,7 @@ namespace Legion {
                                         std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       AutoProvenance provenance(launcher.provenance);
       if (!launcher.must_parallelism && launcher.enable_inlining)
       {
@@ -25399,20 +25403,70 @@ namespace Legion {
     Future LeafContext::issue_timing_measurement(const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_TIMING_MEASUREMENT,
-        "Illegal timing measurement operation in leaf task %s"
-                     "(ID %lld)", get_task_name(), get_unique_id())
-      return Future();
+      AutoRuntimeCall call(this);
+      AutoProvenance provenance(launcher.provenance);
+      // We can permit timing operations in leaf tasks since they should 
+      // just be done immediately. We can ignore any incoming futures on
+      // the launcher since we know they will have already triggered since
+      // the only futures made in leaf tasks are for inline execution.
+      FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
+          runtime->get_available_distributed_id(), provenance);
+      switch (launcher.measurement)
+      {
+        case LEGION_MEASURE_SECONDS:
+          {
+            double value = Realm::Clock::current_time();
+            future->set_local(&value, sizeof(value));
+            break;
+          }
+        case LEGION_MEASURE_MICRO_SECONDS:
+          {
+            long long value = Realm::Clock::current_time_in_microseconds();
+            future->set_local(&value, sizeof(value));
+            break;
+          }
+        case LEGION_MEASURE_NANO_SECONDS:
+          {
+            long long value = Realm::Clock::current_time_in_nanoseconds();
+            future->set_local(&value, sizeof(value));
+            break;
+          }
+        default:
+          std::abort();
+      }
+      return Future(future);
     }
 
     //--------------------------------------------------------------------------
     Future LeafContext::select_tunable_value(const TunableLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-        "Illegal tunable value operation request in leaf task %s (ID %lld)",
-        get_task_name(), get_unique_id())
-      return Future();
+      AutoRuntimeCall call(this);
+      AutoProvenance provenance(launcher.provenance);
+      // We can permit timing operations in leaf tasks since they should 
+      // just be done immediately. We can ignore any incoming futures on
+      // the launcher since we know they will have already triggered since
+      // the only futures made in leaf tasks are for inline execution.
+      FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
+          runtime->get_available_distributed_id(), provenance);
+      MapperManager *mapper =
+        runtime->find_mapper(get_executing_processor(), launcher.mapper);
+      Mapper::SelectTunableInput input;
+      Mapper::SelectTunableOutput output;
+      input.tunable_id = launcher.tunable;
+      input.mapping_tag = launcher.tag;
+      input.futures = launcher.futures;
+      input.args = launcher.arg.get_ptr();
+      input.size = launcher.arg.get_size();
+      output.value = NULL;
+      output.size = 0;
+      output.take_ownership = true;
+      mapper->invoke_select_tunable_value(owner_task, input, output);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_tunable_value(get_unique_id(),
+                        get_tunable_index(), output.value, output.size);
+      future->set_local(output.value, output.size, output.take_ownership);
+      return Future(future);
     }
 
     //--------------------------------------------------------------------------

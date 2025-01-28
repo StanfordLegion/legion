@@ -1324,28 +1324,18 @@ namespace Legion {
       public:
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
-                             Deserializer &derez, const UniqueInst &inst,
-                             RtUserEvent deferral = 
-                              RtUserEvent::NO_RT_USER_EVENT);
-        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
-                             UpdateKind kind, RtUserEvent done, 
                              const UniqueInst &inst, Deserializer &derez,
                              IndexSpaceExpression *expr,
                              RtUserEvent deferral = 
                               RtUserEvent::NO_RT_USER_EVENT);
-        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
-                             UpdateKind kind, RtUserEvent done, 
-                             const UniqueInst &inst, Deserializer &derez,
-                             const PendingRemoteExpression &pending);
         DeferTraceUpdateArgs(const DeferTraceUpdateArgs &args,
-                             RtUserEvent deferral,IndexSpaceExpression *expr);
+                             RtUserEvent deferral, IndexSpaceExpression *expr);
       public:
         ShardedPhysicalTemplate *const target;
         const UpdateKind kind;
         const RtUserEvent done;
         const UniqueInst inst;
         IndexSpaceExpression *const expr;
-        const PendingRemoteExpression pending;
         const size_t buffer_size;
         void *const buffer;
         const RtUserEvent deferral_event;
