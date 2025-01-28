@@ -139,7 +139,7 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
 TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
 {
   constexpr int N = TestFixture::N;
-  constexpr size_t max_bytes = this->elem_size * 2;
+  const size_t max_bytes = this->elem_size * 2;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(3));
 
