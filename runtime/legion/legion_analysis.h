@@ -131,22 +131,15 @@ namespace Legion {
       const RegionUsage usage;
       Operation *const op;
       const size_t ctx_index;
+      const UniqueID uid;
       // Since internal operations have the same ctx_index as their
       // creator we need a way to distinguish them from the creator
       const unsigned internal_idx;
       const unsigned idx;
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
-      Domain index_domain = Domain::NO_DOMAIN;
-      IndexSpaceNode *launch_space;
-    public:
-      unsigned op_kind;
-      bool point_wise_analysable;
-      bool has_collective;
-#ifdef LEGION_SPY
-      const UniqueID uid;
-#endif
-    };
+      const bool pointwise_analyzable;
+    }; 
 
     /**
      * \class VersionInfo
@@ -1072,6 +1065,7 @@ namespace Legion {
       virtual bool is_unique_shards(void) const = 0;
       virtual bool interferes(ProjectionNode *other,
           ShardID local, bool &dominates) const = 0;
+      virtual bool pointwise_dominates(const ProjectionNode *other) const = 0;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1098,6 +1092,7 @@ namespace Legion {
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other,
           ShardID local, bool &dominates) const;
+      virtual bool pointwise_dominates(const ProjectionNode *other) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1108,6 +1103,7 @@ namespace Legion {
           std::map<LogicalPartition,PartitionSummary> &partitions);
       bool has_interference(ProjectionRegion *other, ShardID local,
                             bool &dominates) const;
+      bool has_pointwise_dominance(const ProjectionRegion *other) const;
       void add_user(ShardID shard);
       void add_child(ProjectionPartition *child);
     public:
@@ -1135,6 +1131,7 @@ namespace Legion {
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other,
           ShardID local, bool &dominates) const;
+      virtual bool pointwise_dominates(const ProjectionNode *other) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1145,6 +1142,7 @@ namespace Legion {
           std::map<LogicalPartition,PartitionSummary> &partitions);
       bool has_interference(ProjectionPartition *other, ShardID local,
                             bool &dominates) const;
+      bool has_pointwise_dominance(const ProjectionPartition *other) const;
       void add_child(ProjectionRegion *child);
     public:
       PartitionNode *const partition;
@@ -1416,6 +1414,8 @@ namespace Legion {
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
           ProjectionSummary *one, ProjectionSummary *two, bool &dominates);
+      bool record_pointwise_dependence(LogicalAnalysis &analysis,
+          const LogicalUser &prev, const LogicalUser &next, bool &dominates);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1489,46 +1489,14 @@ namespace Legion {
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,
          std::pair<bool/*interferes*/,bool/*dominates*/> > > interfering_shards;
+      // Track which pairs of projection summaries have point-wise mapping
+      // dependences between them.
+      std::unordered_map<ProjectionSummary*,
+       std::unordered_map<ProjectionSummary*,
+       std::pair<bool/*pointwise*/,bool/*dominates*/> > > pointwise_dependences;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
-
-    struct PointWisePrevOpInfo : public LegionHeapify<PointWisePrevOpInfo> {
-      public:
-        PointWisePrevOpInfo(ProjectionFunction *projection,
-            ShardingFunction *sharding, IndexSpaceNode *sharding_domain, Domain &index_domain,
-            IndexSpaceNode *launch_space,
-            Operation *previous_index_task,
-            GenerationID previous_index_task_generation, size_t ctx_index,
-#ifdef LEGION_SPY
-            unsigned dep_type,
-#endif
-            unsigned region_idx)
-          : projection(projection), sharding(sharding), sharding_domain(sharding_domain),
-          index_domain(index_domain),
-          launch_space(launch_space),
-          previous_index_task(previous_index_task),
-          previous_index_task_generation(previous_index_task_generation),
-          ctx_index(ctx_index),
-#ifdef LEGION_SPY
-          dep_type(dep_type),
-#endif
-          region_idx(region_idx)
-      {}
-      public:
-        ProjectionFunction *projection;
-        ShardingFunction *sharding;
-        IndexSpaceNode *sharding_domain;
-        Domain index_domain;
-        IndexSpaceNode *launch_space;
-        Operation *previous_index_task;
-        GenerationID previous_index_task_generation;
-        size_t ctx_index;
-#ifdef LEGION_SPY
-        unsigned dep_type;
-#endif
-        unsigned region_idx;
-    };
 
     /**
      * \class LogicalAnalysis 
@@ -1543,8 +1511,6 @@ namespace Legion {
      * in an operation that touch the same fields of the same region tree.
      */
     class LogicalAnalysis {
-    public:
-      bool bail_point_wise_analysis = true;
     public:
       struct PendingClose : public LegionHeapify<PendingClose> {
       public:

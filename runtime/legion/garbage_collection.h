@@ -86,6 +86,7 @@ namespace Legion {
       PROJECTION_REF = 35,
       REFINEMENT_REF = 36,
       OUTPUT_REGION_REF = 37,
+      POINTWISE_DEPENDENCE_REF = 38,
       LAST_SOURCE_REF = 38,
     };
 
@@ -135,6 +136,7 @@ namespace Legion {
       "Projection Reference",                       \
       "Refinement Reference",                       \
       "Output Region Reference",                    \
+      "Pointwise Dependence Reference",             \
     }
 
     extern Realm::Logger log_garbage;

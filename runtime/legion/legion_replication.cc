@@ -955,106 +955,13 @@ namespace Legion {
             LG_LATENCY_DEFERRED_PRIORITY, output_bar);
     }
 
-
-    // Explicit instantiations
-    template class ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> >;
-
-    /////////////////////////////////////////////////////////////
-    // ReplPointWiseAnalysable
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
-    RtEvent ReplPointWiseAnalysable<OP>::find_point_wise_dependence(DomainPoint point,
-        LogicalRegion lr,
-        unsigned region_idx)
-    //--------------------------------------------------------------------------
-      {
-      AutoLock o_lock(this->op_lock);
-
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(this->parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(this->parent_ctx);
-#endif
-
-      if (this->should_connect_to_prev_point(region_idx))
-      {
-        // Find prev index task
-        std::map<unsigned,PointWisePrevOpInfo>::iterator finder =
-          this->prev_index_tasks.find(region_idx);
-        assert(finder != this->prev_index_tasks.end());
-
-        // find the point of the previous index_task
-        const RegionRequirement &req = this->get_requirement(region_idx);
-        std::vector<DomainPoint> previous_index_task_points;
-
-        Domain index_domain = finder->second.launch_space->get_tight_domain();
-
-        this->get_points(req, finder->second.projection,
-            lr, index_domain,
-            previous_index_task_points);
-
-        if (previous_index_task_points.size() > 1)
-        {
-          assert(false);
-        }
-        assert(!previous_index_task_points.empty());
-
-        // find shard of the point
-        const ShardID prev_shard =
-           finder->second.sharding->find_owner(previous_index_task_points[0],
-              index_domain);
-
-#ifdef LEGION_SPY
-        LegionSpy::log_mapping_point_wise_dependence(
-            this->get_context()->get_unique_id(),
-            LEGION_DISTRIBUTED_ID_FILTER(repl_ctx->shard_manager->did),
-            finder->second.ctx_index, previous_index_task_points[0],
-            finder->second.region_idx, prev_shard,
-            this->context_index, point,
-            region_idx, this->parent_ctx->get_shard_id(),
-            finder->second.dep_type);
-#endif
-
-        if (prev_shard != this->parent_ctx->get_shard_id())
-        {
-          // send to the shard where the point is
-          const RtUserEvent pending_event = Runtime::create_rt_user_event();
-
-          // A different shard owns it so send a message to that shard
-          // requesting it to fill in the dependence
-          Serializer rez;
-          rez.serialize(repl_ctx->shard_manager->did);
-          rez.serialize(prev_shard);
-          rez.serialize(finder->second.ctx_index);
-          rez.serialize(pending_event);
-          rez.serialize(previous_index_task_points[0]);
-          repl_ctx->shard_manager->send_point_wise_dependence(prev_shard, rez);
-          return pending_event;
-        }
-
-        if (finder->second.previous_index_task_generation <
-            finder->second.previous_index_task->get_generation())
-          return RtEvent::NO_RT_EVENT;
-
-        return this->parent_ctx->find_point_wise_dependence(
-            finder->second.ctx_index,
-            previous_index_task_points[0]);
-      }
-
-      assert(false);
-      return RtUserEvent::NO_RT_USER_EVENT;
-    }
-
     /////////////////////////////////////////////////////////////
     // Repl Index Task
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     ReplIndexTask::ReplIndexTask(Runtime *rt)
-      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexTask> >(rt)
+      : ReplCollectiveViewCreator<IndexTask>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -2138,20 +2045,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::find_intra_space_dependence(const DomainPoint &point)
+    RtEvent ReplIndexTask::find_intra_space_dependence(const DomainPoint &point,
+        RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      // Check to see if we already have it
-      std::map<DomainPoint,RtEvent>::const_iterator finder = 
-        intra_space_dependences.find(point);
-      if (finder != intra_space_dependences.end())
-        return finder->second;  
-      // Make a temporary event and then do different things depending on 
-      // whether we own this point or whether a remote shard owns it
-      const RtUserEvent pending_event = Runtime::create_rt_user_event();
-      intra_space_dependences[point] = pending_event;
-      // If not, check to see if this is a point that we expect to own
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -2165,98 +2062,50 @@ namespace Legion {
       else
         launch_domain = launch_space->get_tight_domain();
       const ShardID point_shard = 
-        sharding_function->find_owner(point, launch_domain); 
-      if (point_shard != repl_ctx->owner_shard->shard_id)
+        sharding_function->find_owner(point, launch_domain);
+      if (point_shard == repl_ctx->owner_shard->shard_id)
       {
-        // A different shard owns it so send a message to that shard 
-        // requesting it to fill in the dependence
-        Serializer rez;
-        rez.serialize(repl_ctx->shard_manager->did);
-        rez.serialize(point_shard);
-        rez.serialize(context_index);
-        rez.serialize(point);
-        rez.serialize(pending_event);
-        rez.serialize(repl_ctx->owner_shard->shard_id);
-        repl_ctx->shard_manager->send_intra_space_dependence(point_shard, rez);
-      }
-      else // We own it so do the normal thing
-        pending_intra_space_dependences[point] = pending_event;
-      return pending_event; 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexTask::record_intra_space_dependence(const DomainPoint &point,
-                                  const DomainPoint &next, RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // Determine if the next point is one that we own or is one that is
-      // going to be coming from a remote shard
-      Domain launch_domain;
-      if (sharding_space.exists())
-        runtime->forest->find_domain(sharding_space, launch_domain);
-      else
-        launch_domain = launch_space->get_tight_domain();
-      const ShardID next_shard = 
-        sharding_function->find_owner(next, launch_domain); 
-      if (next_shard != repl_ctx->owner_shard->shard_id)
-      {
-        // Make sure we only send this to the repl_ctx once for each 
-        // unique shard ID that we see for this point task
-        const std::pair<DomainPoint,ShardID> key(point, next_shard); 
-        bool record_dependence = true;
+        // Sharded locally to this shard
+        AutoLock o_lock(op_lock);
+        std::map<DomainPoint,RtEvent>::const_iterator finder =
+          point_mapped_events.find(point);
+        if (finder != point_mapped_events.end())
         {
-          AutoLock o_lock(op_lock);
-          std::set<std::pair<DomainPoint,ShardID> >::const_iterator finder = 
-            unique_intra_space_deps.find(key);
-          if (finder != unique_intra_space_deps.end())
-            record_dependence = false;
+          if (to_trigger.exists())
+          {
+            Runtime::trigger_event(to_trigger, finder->second);
+            return to_trigger;
+          }
           else
-            unique_intra_space_deps.insert(key);
-        }
-        if (record_dependence)
-          repl_ctx->record_intra_space_dependence(context_index, point, 
-                                                  point_mapped, next_shard);
-      }
-      else // The next shard is ourself, so we can do the normal thing
-        IndexTask::record_intra_space_dependence(point, next, point_mapped);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexTask::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        need_to_clear |= should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(op_lock);
-      if (need_to_clear)
-      {
-        Domain local_domain;
-        std::vector<DomainPoint> points;
-
-        if (internal_space.exists())
-        {
-          runtime->forest->find_domain(internal_space, local_domain);
+            return finder->second;
         }
         else
-          return;
-
-        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
         {
-          points.push_back((*dpi));
+          std::map<DomainPoint,RtUserEvent>::const_iterator pending_finder =
+            pending_pointwise_dependences.find(point);
+          if (pending_finder == pending_pointwise_dependences.end())
+          {
+            if (!to_trigger.exists())
+              to_trigger = Runtime::create_rt_user_event();
+            pending_pointwise_dependences.emplace(
+                std::make_pair(point, to_trigger));
+            return to_trigger;
+          }
+          else
+          {
+            if (to_trigger.exists())
+            {
+              Runtime::trigger_event(to_trigger, pending_finder->second);
+              return to_trigger;
+            }
+            else
+              return pending_finder->second;
+          }
         }
-        parent_ctx->clear_map(context_index, points);
       }
+      else // Send it off to the remote shard to find it
+        return repl_ctx->find_pointwise_dependence(
+            context_index, point, point_shard, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -2907,14 +2756,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(Runtime *rt)
-      : ReplPointWiseAnalysable<IndexFillOp>(rt)
+      : IndexFillOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexFillOp::ReplIndexFillOp(const ReplIndexFillOp &rhs)
-      : ReplPointWiseAnalysable<IndexFillOp>(rhs)
+      : IndexFillOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3168,32 +3017,6 @@ namespace Legion {
     {
       collective_id = ctx->get_next_collective_index(COLLECTIVE_LOC_93);
       fresh_did = fresh;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexFillOp::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        IndexSpaceNode *local_points = this->get_shard_points();
-        Domain local_domain = local_points->get_tight_domain();
-
-        std::vector<DomainPoint> points;
-
-        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
-        {
-          points.push_back((*dpi));
-        }
-        this->parent_ctx->clear_map(this->context_index, points);
-      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3550,14 +3373,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(Runtime *rt)
-      : ReplPointWiseAnalysable<IndexCopyOp>(rt)
+      : IndexCopyOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplIndexCopyOp::ReplIndexCopyOp(const ReplIndexCopyOp &rhs)
-      : ReplPointWiseAnalysable<IndexCopyOp>(rhs)
+      : IndexCopyOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4067,17 +3890,6 @@ namespace Legion {
                                                        const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      // Check to see if we already have it
-      std::map<DomainPoint,RtEvent>::const_iterator finder = 
-        intra_space_dependences.find(point);
-      if (finder != intra_space_dependences.end())
-        return finder->second;  
-      // Make a temporary event and then do different things depending on 
-      // whether we own this point or whether a remote shard owns it
-      const RtUserEvent pending_event = Runtime::create_rt_user_event();
-      intra_space_dependences[point] = pending_event;
-      // If not, check to see if this is a point that we expect to own
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -4091,67 +3903,12 @@ namespace Legion {
       else
         launch_domain = launch_space->get_tight_domain();
       const ShardID point_shard = 
-        sharding_function->find_owner(point, launch_domain); 
-      if (point_shard != repl_ctx->owner_shard->shard_id)
-      {
-        // A different shard owns it so send a message to that shard 
-        // requesting it to fill in the dependence
-        Serializer rez;
-        rez.serialize(repl_ctx->shard_manager->did);
-        rez.serialize(point_shard);
-        rez.serialize(context_index);
-        rez.serialize(point);
-        rez.serialize(pending_event);
-        rez.serialize(repl_ctx->owner_shard->shard_id);
-        repl_ctx->shard_manager->send_intra_space_dependence(point_shard, rez);
-      }
-      else // We own it so do the normal thing
-        pending_intra_space_dependences[point] = pending_event;
-      return pending_event; 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::record_intra_space_dependence(
-        const DomainPoint &point, const DomainPoint &next, RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // Determine if the next point is one that we own or is one that is
-      // going to be coming from a remote shard
-      Domain launch_domain;
-      if (sharding_space.exists())
-        runtime->forest->find_domain(sharding_space, launch_domain);
+        sharding_function->find_owner(point, launch_domain);
+      if (point_shard == repl_ctx->owner_shard->shard_id)
+        return IndexCopyOp::find_intra_space_dependence(point);
       else
-        launch_domain = launch_space->get_tight_domain();
-      const ShardID next_shard = 
-        sharding_function->find_owner(next, launch_domain); 
-      if (next_shard != repl_ctx->owner_shard->shard_id)
-      {
-        // Make sure we only send this to the repl_ctx once for each 
-        // unique shard ID that we see for this point task
-        const std::pair<DomainPoint,ShardID> key(point, next_shard); 
-        bool record_dependence = true;
-        {
-          AutoLock o_lock(op_lock);
-          std::set<std::pair<DomainPoint,ShardID> >::const_iterator finder = 
-            unique_intra_space_deps.find(key);
-          if (finder != unique_intra_space_deps.end())
-            record_dependence = false;
-          else
-            unique_intra_space_deps.insert(key);
-        }
-        if (record_dependence)
-          repl_ctx->record_intra_space_dependence(context_index, point,
-                                                  point_mapped, next_shard);
-      }
-      else // The next shard is ourself, so we can do the normal thing
-        IndexCopyOp::record_intra_space_dependence(point, next, point_mapped);
+        return repl_ctx->find_pointwise_dependence(
+            context_index, point, point_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -4167,32 +3924,6 @@ namespace Legion {
       else
         return sharding_function->find_shard_participants(launch_space,
                                           launch_space->handle, shards);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        IndexSpaceNode *local_points = this->get_shard_points();
-        Domain local_domain = local_points->get_tight_domain();
-
-        std::vector<DomainPoint> points;
-
-        for (Domain::DomainPointIterator dpi(local_domain); dpi; dpi.step())
-        {
-          points.push_back((*dpi));
-        }
-        this->parent_ctx->clear_map(this->context_index, points);
-      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -7513,7 +7244,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplIndexAttachOp::ReplIndexAttachOp(Runtime *rt)
-      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexAttachOp> >(rt)
+      : ReplCollectiveViewCreator<IndexAttachOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -7702,38 +7433,13 @@ namespace Legion {
       return participants->find_shard_participants(shards);  
     }
 
-    //--------------------------------------------------------------------------
-    void ReplIndexAttachOp::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        std::vector<DomainPoint> points;
-
-        for (std::vector<PointAttachOp*>::const_iterator pit =
-              this->points.begin(); pit != this->points.end(); pit++)
-        {
-          points.push_back((*pit)->index_point);
-        }
-
-        this->parent_ctx->clear_map(this->context_index, points);
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // Repl Index Detach Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     ReplIndexDetachOp::ReplIndexDetachOp(Runtime *rt)
-      : ReplPointWiseAnalysable<ReplCollectiveViewCreator<IndexDetachOp> >(rt)
+      : ReplCollectiveViewCreator<IndexDetachOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -7878,31 +7584,6 @@ namespace Legion {
       assert(participants != NULL);
 #endif
       return participants->find_shard_participants(shards);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndexDetachOp::clear_context_maps(void)
-    //--------------------------------------------------------------------------
-    {
-      unsigned req_count = this->get_region_count();
-      bool need_to_clear = false;
-      for (unsigned i = 0; i < req_count; i++)
-      {
-        need_to_clear |= this->should_connect_to_next_point(i);
-      }
-      AutoLock o_lock(this->op_lock);
-      if (need_to_clear)
-      {
-        std::vector<DomainPoint> points;
-
-        for (std::vector<PointDetachOp*>::const_iterator pit =
-              this->points.begin(); pit != this->points.end(); pit++)
-        {
-          points.push_back((*pit)->index_point);
-        }
-
-        this->parent_ctx->clear_map(this->context_index, points);
-      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -10262,6 +9943,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent ShardManager::find_pointwise_dependence(uint64_t context_index,
+        const DomainPoint &point, ShardID shard, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // See if it's local or not
+      for (std::vector<ShardTask*>::const_iterator it =
+            local_shards.begin(); it != local_shards.end(); it++)
+        if ((*it)->shard_id == shard)
+          return (*it)->handle_pointwise_dependence(
+              context_index, point, shard, to_trigger);
+      const AddressSpaceID target_space = (*address_spaces)[shard];
+#ifdef DEBUG_LEGION
+      assert(target_space != runtime->address_space);
+#endif
+      if (!to_trigger.exists())
+        to_trigger = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(context_index);
+        rez.serialize(point);
+        rez.serialize(shard);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_control_replicate_pointwise_dependence(target_space, rez);
+      return to_trigger;
+    }
+
+    //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx,
                   LogicalRegion handle, InnerContext *context, bool first_shard)
     //--------------------------------------------------------------------------
@@ -10853,7 +10564,8 @@ namespace Legion {
         // Didn't find it so make it
         ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, runtime,
                               domain, shard_domain, map_did, coordinate,
-                              provenance, collective_mapping);
+                              std::optional<uint64_t>(), provenance, 
+                              collective_mapping);
         // Add a reference to it to keep it from being deleted and then 
         // register it with the runtime
         result->add_nested_gc_ref(did);
@@ -10869,7 +10581,7 @@ namespace Legion {
       {
         ReplFutureMapImpl *impl = new ReplFutureMapImpl(ctx, this, runtime,
             domain, shard_domain, map_did, coordinate,
-            provenance, collective_mapping);
+            std::optional<uint64_t>(), provenance, collective_mapping);
         // Get a reference on it before we register it
         FutureMap result(impl);
         impl->register_with_runtime();
@@ -11529,92 +11241,6 @@ namespace Legion {
         if ((*it)->shard_id == target)
         {
           (*it)->handle_refine_equivalence_sets(derez);
-          return;
-        }
-      }
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::send_intra_space_dependence(ShardID target, 
-                                                   Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(target < address_spaces->size());
-#endif
-      AddressSpaceID target_space = (*address_spaces)[target];
-      // Check to see if this is a local shard
-      if (target_space == runtime->address_space)
-      {
-        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        // Have to unpack the preample we already know
-        DistributedID local_repl;
-        derez.deserialize(local_repl);     
-        handle_intra_space_dependence(derez);
-      }
-      else
-        runtime->send_control_replicate_intra_space_dependence(target_space,
-                                                               rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::handle_intra_space_dependence(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Figure out which shard we are going to
-      ShardID target;
-      derez.deserialize(target);
-      for (std::vector<ShardTask*>::const_iterator it = 
-            local_shards.begin(); it != local_shards.end(); it++)
-      {
-        if ((*it)->shard_id == target)
-        {
-          (*it)->handle_intra_space_dependence(derez);
-          return;
-        }
-      }
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::send_point_wise_dependence(ShardID target,
-                                                   Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(target < address_spaces->size());
-#endif
-      AddressSpaceID target_space = (*address_spaces)[target];
-      // Check to see if this is a local shard
-      if (target_space == runtime->address_space)
-      {
-        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        // Have to unpack the preample we already know
-        DistributedID local_repl;
-        derez.deserialize(local_repl);
-        handle_point_wise_dependence(derez);
-      }
-      else
-        runtime->send_control_replicate_point_wise_dependence(target_space,
-                                                               rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::handle_point_wise_dependence(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Figure out which shard we are going to
-      ShardID target;
-      derez.deserialize(target);
-      for (std::vector<ShardTask*>::const_iterator it =
-            local_shards.begin(); it != local_shards.end(); it++)
-      {
-        if ((*it)->shard_id == target)
-        {
-          (*it)->handle_point_wise_dependence(derez);
           return;
         }
       }
@@ -12383,6 +12009,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_pointwise_dependence(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      DistributedID did;
+      derez.deserialize(did);
+      uint64_t context_index;
+      derez.deserialize(context_index);
+      DomainPoint point;
+      derez.deserialize(point);
+      ShardID shard;
+      derez.deserialize(shard);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      ShardManager *manager = runtime->find_shard_manager(did);
+      manager->find_pointwise_dependence(
+          context_index, point, shard, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_distribution(Deserializer &derez, 
                                                       Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -12718,28 +12365,6 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_equivalence_set_notification(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_intra_space_dependence(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID repl_id;
-      derez.deserialize(repl_id);
-      ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_intra_space_dependence(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_point_wise_dependence(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID repl_id;
-      derez.deserialize(repl_id);
-      ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_point_wise_dependence(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -18363,6 +17988,47 @@ namespace Legion {
     {
       perform_collective_sync();
       return collective_sets;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Pointwise Allreduce
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointwiseAllreduce::PointwiseAllreduce(ReplicateContext *ctx,
+        CollectiveID id, std::pair<bool,bool> &loc)
+      : AllGatherCollective<false>(ctx, id), local(loc)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseAllreduce::~PointwiseAllreduce(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseAllreduce::pack_collective_stage(ShardID target,
+        Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(local.first);
+      rez.serialize(local.second);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseAllreduce::unpack_collective_stage(Deserializer &derez,
+                                                     int stage)
+    //--------------------------------------------------------------------------
+    {
+      bool next;
+      derez.deserialize(next);
+      if (!next)
+        local.first = false;
+      derez.deserialize(next);
+      if (!next)
+        local.second = false;
     }
 
     /////////////////////////////////////////////////////////////

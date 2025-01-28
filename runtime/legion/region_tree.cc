@@ -1643,10 +1643,6 @@ namespace Legion {
             static_cast<RegionTreeNode*>(get_node(req.region));
           shard_proj = destination->compute_projection_summary(op, idx, req,
                                                 logical_analysis, proj_info);
-          if(!shard_proj->is_disjoint() ||
-              !shard_proj->can_perform_name_based_self_analysis()) {
-            logical_analysis.bail_point_wise_analysis = true;
-          }
         }
       }
 
@@ -16322,7 +16318,6 @@ namespace Legion {
             FieldMask still_open;
             it->first->close_logical_node(user, close_mask, privilege_root,
                                           path_node, analysis, still_open);
-            analysis.bail_point_wise_analysis = true;
             if (!!still_open)
             {
               if (still_open != close_mask)
@@ -16367,7 +16362,6 @@ namespace Legion {
               FieldMask child_fields;
               next_child->close_logical_node(user, overlap, privilege_root,
                                              path_node, analysis, child_fields);
-              analysis.bail_point_wise_analysis = true;
               if (!!child_fields)
               {
                 open_below |= child_fields;
@@ -16401,7 +16395,6 @@ namespace Legion {
           FieldMask still_open;
           it->first->close_logical_node(user, close_mask, privilege_root,
                                         path_node, analysis, still_open);
-          analysis.bail_point_wise_analysis = true;
           if (!!still_open)
           {
             open_below |= still_open;
@@ -16581,7 +16574,6 @@ namespace Legion {
             continue;
           }
           const FieldMask overlap = check_mask & it->second;
-          bool skip_registering_region_dependence = false;
           if (!!overlap)
           {
             if (TRACK_DOM)
@@ -16601,13 +16593,26 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
-                  if (!runtime->disable_point_wise_analysis)
+                  // Check to see if we can record a point-wise dependence
+                  // between these two operations. We can only do this if
+                  // it they are both projections and we've arrived so 
+                  // they are both projecting from the same node in the
+                  // region tree.
+                  bool dominates = false;
+                  if (arrived && state.record_pointwise_dependence(
+                        logical_analysis, prev, user, dominates))
                   {
-                    skip_registering_region_dependence =
-                      user.op->analyze_point_wise_dependence(prev, user,
-                          logical_analysis, dtype);
+                    user.op->register_pointwise_dependence(user.idx, prev);
+                    // See if we the new user dominates or not
+                    if (!dominates)
+                      dominator_mask -= overlap;
+#ifdef LEGION_SPY
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype, true);
+#endif
                   }
-                  if (!skip_registering_region_dependence)
+                  else
                   {
                     // If we can validate a region record which of our
                     // predecessors regions we are validating, otherwise
@@ -16655,7 +16660,7 @@ namespace Legion {
                           assert(proj_info.is_sharding());
                         assert(user.shard_proj != NULL);
 #endif
-                        bool dominates = true;
+                        dominates = true;
                         if (!state.has_interfering_shards(logical_analysis,
                               prev.shard_proj, user.shard_proj, dominates))
                         {

@@ -4881,8 +4881,11 @@ namespace Legion {
        * for this operation return all of the points that alias
        * with it. Dependences will be resolved in the order that
        * they are returned to the runtime. The returned result 
-       * must not be empty because it must contain at least the
-       * point for the given operation.
+       * can only be empty if the region to be inverted is not
+       * actually in the range of the projection given the launch
+       * domain. If the region is in the range of the projection 
+       * then the returned result cannot be empty because it must
+       * contain at least the one point that maps to the particular region.
        */
       virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
                           const Domain &launch_domain,

@@ -817,7 +817,6 @@ namespace Legion {
       SLICE_CONCURRENT_ALLREDUCE_REQUEST,
       SLICE_CONCURRENT_ALLREDUCE_RESPONSE,
       SLICE_FIND_INTRA_DEP,
-      SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
       SLICE_REMOTE_VERSIONING_COLLECTIVE_RENDEZVOUS,
       SLICE_REMOTE_OUTPUT_EXTENTS,
@@ -891,11 +890,11 @@ namespace Legion {
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
+      SEND_FUTURE_MAP_POINTWISE,
       SEND_REPL_COMPUTE_EQUIVALENCE_SETS,
       SEND_REPL_OUTPUT_EQUIVALENCE_SET,
       SEND_REPL_REFINE_EQUIVALENCE_SETS,
       SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
-      SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
@@ -907,6 +906,7 @@ namespace Legion {
       SEND_REPL_FIND_TRACE_SETS,
       SEND_REPL_IMPLICIT_RENDEZVOUS,
       SEND_REPL_FIND_COLLECTIVE_VIEW,
+      SEND_REPL_POINTWISE_DEPENDENCE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -930,6 +930,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
       SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS,
+      SEND_REMOTE_CONTEXT_POINTWISE_DEPENDENCE,
       SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_RESPONSE,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
@@ -1070,15 +1071,12 @@ namespace Legion {
       SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE,
       SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE,
       SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION,
+      SEND_CONTROL_REPLICATION_POINTWISE_ALLREDUCE,
       SEND_CONTROL_REPLICATION_SLOW_BARRIER,
       SEND_PROFILER_EVENT_TRIGGER,
       SEND_PROFILER_EVENT_POISON,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
-      SLICE_FIND_POINT_WISE_DEP,
-      SLICE_RECORD_POINT_WISE_DEP,
-      SLICE_ADD_POINT_TO_COMPLETED_LIST,
-      SEND_REPL_POINT_WISE_DEP,
       LAST_SEND_KIND, // This one must be last
     };
 
@@ -1156,7 +1154,6 @@ namespace Legion {
         "Slice Concurrent Allreduce Request",                         \
         "Slice Concurrent Allreduce Response",                        \
         "Slice Find Intra-Space Dependence",                          \
-        "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
         "Slice Remote Collective Versioning Rendezvous",              \
         "Slice Remote Output Region Extents",                         \
@@ -1230,11 +1227,11 @@ namespace Legion {
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
+        "Send Future Map Find Pointwise Dependence",                  \
         "Send Replicate Compute Equivalence Sets",                    \
         "Send Replicate Register Output Equivalence Set",             \
         "Send Replicate Refine Equivalence Sets",                     \
         "Send Replicate Equivalence Set Notification",                \
-        "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Broadcast Update",                            \
         "Send Replicate Created Regions Return",                      \
         "Send Replicate Trace Event Request",                         \
@@ -1246,6 +1243,7 @@ namespace Legion {
         "Send Replicate Find Trace Local Sets",                       \
         "Send Replicate Implicit Rendezvous",                         \
         "Send Replicate Find or Create Collective View",              \
+        "Send Replicate Find Pointwise Dependence",                   \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1269,6 +1267,7 @@ namespace Legion {
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
         "Send Remote Context Refine Equivalence Sets",                \
+        "Send Remote Context Pointwise Dependence",                   \
         "Send Remote Context Find Trace Local Sets Request",          \
         "Send Remote Context Find Trace Local Sets Response",         \
         "Send Compute Equivalence Sets Request",                      \
@@ -1409,15 +1408,12 @@ namespace Legion {
         "Control Replication Collective Predicate Exchange",          \
         "Control Replication Collective Cross Product Exchange",      \
         "Control Replication Collective Tracing Set Deduplication",   \
+        "Control Replication Collective Pointwise Allreduce",         \
         "Control Replication Collective Slow Barrier",                \
         "Send Profiler Event Trigger",                                \
         "Send Profiler Event Poison",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
-        "Slice Find Point Wise Dep",                                  \
-        "Slice Record Point Wise Dep",                                \
-        "Slice Add Point To Completed List",                          \
-        "Send Repl Point Wise Dep",                                   \
       };
 
     // Runtime task numbering 
@@ -2025,6 +2021,8 @@ namespace Legion {
       COLLECTIVE_LOC_105 = 105,
       COLLECTIVE_LOC_106 = 106,
       COLLECTIVE_LOC_107 = 107,
+      COLLECTIVE_LOC_108 = 108,
+      COLLECTIVE_LOC_109 = 109,
     };
 
     // legion_types.h
@@ -2131,6 +2129,7 @@ namespace Legion {
     class Memoizable;
     template<typename OP>
     class Predicated;
+    struct PointwiseDependence;
 
 
     // legion_tasks.h
