@@ -192,7 +192,6 @@ namespace Realm {
 
     if(wants_timeline) {
       timeline.record_complete_time();
-      timeline_gpu.record_end_time();
     }
     send_profiling_data();
 
@@ -203,12 +202,31 @@ namespace Realm {
 
   void Operation::mark_gpu_work_start()
   {
-    if(wants_gpu_timeline)
-      timeline_gpu.record_start_time();
+    if(wants_gpu_timeline) {
+      add_gpu_work_start(Clock::current_time_in_nanoseconds());
+    }
   }
 
-  bool Operation::attempt_cancellation(int error_code,
-				       const void *reason_data, size_t reason_size)
+  void Operation::add_gpu_work_start(uint64_t timestamp)
+  {
+    using timestamp_t = ProfilingMeasurements::OperationTimelineGPU::timestamp_t;
+    const timestamp_t INVALID_TIMESTAMP =
+        ProfilingMeasurements::OperationTimelineGPU::INVALID_TIMESTAMP;
+
+    timeline_gpu.start_time =
+        std::min<timestamp_t>(timestamp, timeline_gpu.start_time == INVALID_TIMESTAMP
+                                             ? timestamp
+                                             : timeline_gpu.start_time);
+  }
+  void Operation::add_gpu_work_end(uint64_t timestamp)
+  {
+    using timestamp_t = ProfilingMeasurements::OperationTimelineGPU::timestamp_t;
+
+    timeline_gpu.end_time = std::max<timestamp_t>(timestamp, timeline_gpu.end_time);
+  }
+
+  bool Operation::attempt_cancellation(int error_code, const void *reason_data,
+                                       size_t reason_size)
   {
     // all we know how to do here is convert from WAITING or READY to CANCELLED
     // there's no mutex, so we'll attempt to update the status with a sequence of 

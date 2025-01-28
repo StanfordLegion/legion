@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2024 Stanford University
+# Copyright 2024 Stanford University, NVIDIA
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,8 +34,10 @@ add_subdirectory(performance/realm/task_ubench)
 add_subdirectory(performance/realm/memcpy)
 add_subdirectory(legion_redop_test)
 add_subdirectory(disjoint_complete)
+add_subdirectory(trie)
 add_subdirectory(nested_replication)
 add_subdirectory(mapper)
+add_subdirectory(prealm)
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)

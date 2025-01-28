@@ -1622,14 +1622,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTaskLauncher::IndexTaskLauncher(void)
-      : task_id(0), launch_domain(Domain::NO_DOMAIN), 
-        launch_space(IndexSpace::NO_SPACE), 
-        sharding_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()), 
-        argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
-        concurrent(false), must_parallelism(false), map_id(0), tag(0),
-        static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false), 
-        silence_warnings(false)
+      : task_id(0), launch_domain(Domain::NO_DOMAIN),
+        launch_space(IndexSpace::NO_SPACE),
+        sharding_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()),
+        argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED),
+        concurrent_functor(0), concurrent(false), must_parallelism(false),
+        map_id(0), tag(0), static_dependences(NULL), enable_inlining(false),
+        independent_requirements(false), silence_warnings(false),
+        elide_future_return(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1643,12 +1643,12 @@ namespace Legion {
                                      MappingTagID t /*=0*/, UntypedBuffer marg,
                                      const char *prov)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
-        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
-        argument_map(map), predicate(pred), concurrent(false), 
-        must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        provenance(prov), static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global),
+        argument_map(map), predicate(pred), concurrent_functor(0),
+        concurrent(false), must_parallelism(must), map_id(mid), tag(t),
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        enable_inlining(false), independent_requirements(false),
+        silence_warnings(false), elide_future_return(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1663,12 +1663,12 @@ namespace Legion {
                                      MappingTagID t /*=0*/, UntypedBuffer marg,
                                      const char *prov)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
-        sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
-        argument_map(map), predicate(pred), concurrent(false),
-        must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
-        provenance(prov), static_dependences(NULL), enable_inlining(false),
-        independent_requirements(false), elide_future_return(false),
-        silence_warnings(false)
+        sharding_space(IndexSpace::NO_SPACE), global_arg(global),
+        argument_map(map), predicate(pred), concurrent_functor(0),
+        concurrent(false), must_parallelism(must), map_id(mid), tag(t),
+        map_arg(marg), provenance(prov), static_dependences(NULL),
+        enable_inlining(false), independent_requirements(false),
+        silence_warnings(false), elide_future_return(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2507,6 +2507,55 @@ namespace Legion {
       assert(impl != NULL);
 #endif
       impl->report_incompatible_accessor(accessor_kind, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    static void sparsity_deletion_func(const Realm::ExternalInstanceResource &r)
+    //--------------------------------------------------------------------------
+    {
+      const Realm::ExternalMemoryResource *resource =
+        static_cast<const Realm::ExternalMemoryResource*>(&r);
+      assert(resource->size_in_bytes == sizeof(Domain));
+      Domain *domain = reinterpret_cast<Domain*>(resource->base);
+      domain->destroy();
+      delete domain;
+    }
+
+    struct AddReferenceFunctor {
+    public:
+      AddReferenceFunctor(const Domain &d) : domain(d) { }
+      template<typename N, typename T>
+      static inline void demux(AddReferenceFunctor *functor)
+      {
+        DomainT<N::N,T> is = functor->domain;
+        Internal::RtEvent wait_on(is.sparsity.add_reference());
+        wait_on.wait();
+      }
+    public:
+      const Domain &domain;
+    };
+
+    //--------------------------------------------------------------------------
+    /*static*/ Future Future::from_domain(const Domain &d, bool take_ownership,
+        const char *provenance, bool shard_local)
+    //--------------------------------------------------------------------------
+    {
+      if (!d.dense())
+      {
+        if (!take_ownership)
+        {
+          AddReferenceFunctor functor(d);
+          Internal::NT_TemplateHelper::demux<AddReferenceFunctor>(
+              d.is_type, &functor);
+        }
+        Domain *domain = new Domain(d);
+        Realm::ExternalMemoryResource resource(domain, sizeof(d));
+        return Future::from_value(domain, sizeof(d), true/*owned*/,
+            resource, sparsity_deletion_func, provenance, shard_local);
+      }
+      else
+        return from_untyped_pointer(&d, sizeof(d), false/*take ownership*/,
+            provenance, shard_local);
     }
 
     //--------------------------------------------------------------------------
@@ -3928,7 +3977,23 @@ namespace Legion {
           "Invocation of 'ShardingFunctor::invert_points' method "
           "without a user-provided override");
     }
-    
+
+    /////////////////////////////////////////////////////////////
+    // Concurrent Coloring Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor::ConcurrentColoringFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentColoringFunctor::~ConcurrentColoringFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -3952,25 +4017,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, const Domain &domain,
-                                           TypeTag type_tag, const char *prov)
+                        TypeTag type_tag, const char *prov, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       Internal::AutoProvenance provenance(prov);
-      switch (domain.get_dim())
+      if (type_tag == 0)
       {
+        switch (domain.get_dim())
+        {
 #define DIMFUNC(DIM) \
         case DIM:                       \
           {                             \
-            if (type_tag == 0) \
-              type_tag = TYPE_TAG_##DIM##D; \
-            return ctx->create_index_space(domain, type_tag, provenance); \
+            type_tag = TYPE_TAG_##DIM##D; \
+            break; \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
         default:
           assert(false);
+        }
       }
-      return IndexSpace::NO_SPACE;
+      return ctx->create_index_space(
+          domain, take_ownership, type_tag, provenance);
     }
 
     //--------------------------------------------------------------------------
@@ -4361,14 +4429,15 @@ namespace Legion {
     IndexPartition Runtime::create_partition_by_domain(Context ctx,
                  IndexSpace parent, const std::map<DomainPoint,Domain> &domains,
                  IndexSpace color_space, bool perform_intersections,
-                 PartitionKind part_kind, Color color, const char *prov)
+                 PartitionKind part_kind, Color color, const char *prov,
+                 bool take_ownership)
     //--------------------------------------------------------------------------
     {
       // Convert this into a future map and call that version of this method
       std::map<DomainPoint,Future> futures;
       for (std::map<DomainPoint,Domain>::const_iterator it =
             domains.begin(); it != domains.end(); it++)
-        futures[it->first] = Future::from_value(it->second);
+        futures[it->first] = Future::from_domain(it->second, take_ownership);
       FutureMap fm = construct_future_map(ctx, color_space, futures);
       return create_partition_by_domain(ctx, parent, fm, color_space,
           perform_intersections, part_kind, color, prov);
@@ -6459,7 +6528,7 @@ namespace Legion {
     {
       TimingLauncher launcher(LEGION_MEASURE_SECONDS);
       launcher.add_precondition(precondition);
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6468,7 +6537,7 @@ namespace Legion {
     {
       TimingLauncher launcher(LEGION_MEASURE_MICRO_SECONDS);
       launcher.add_precondition(pre);
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6477,7 +6546,7 @@ namespace Legion {
     {
       TimingLauncher launcher(LEGION_MEASURE_NANO_SECONDS);
       launcher.add_precondition(pre);
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6485,7 +6554,7 @@ namespace Legion {
                                              const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_timing_measurement(ctx, launcher);
+      return ctx->issue_timing_measurement(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6541,6 +6610,13 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         return 0;
       return ctx->query_available_memory(target);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_memory_pool(Context ctx, Memory target)
+    //--------------------------------------------------------------------------
+    {
+      ctx->release_memory_pool(target);
     }
 
     //--------------------------------------------------------------------------
@@ -6747,6 +6823,55 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_sharding_functor(sid);
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_dynamic_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_concurrent_id();
+    }
+
+    //--------------------------------------------------------------------------
+    ConcurrentID Runtime::generate_library_concurrent_ids(const char *name,
+                                                          size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_library_concurrent_ids(name, count);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentID Runtime::generate_static_concurrent_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_concurrent_id();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_concurrent_coloring_functor(ConcurrentID cid,
+                                            ConcurrentColoringFunctor *functor,
+                                            bool silence_warnings,
+                                            const char *warning_string)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_concurrent_functor(cid, functor, silence_warnings,
+                                           warning_string);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_concurrent_coloring_functor(
+                           ConcurrentID cid, ConcurrentColoringFunctor *functor)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::preregister_concurrent_functor(cid, functor);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ConcurrentColoringFunctor* 
+                      Runtime::get_concurrent_coloring_functor(ConcurrentID cid)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::get_concurrent_functor(cid);
     }
 
     //--------------------------------------------------------------------------
@@ -7077,7 +7202,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance)
+    void Runtime::destroy_task_local_instance(Realm::RegionInstance instance,
+                                              Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       if (Internal::implicit_context == NULL)
@@ -7085,8 +7211,13 @@ namespace Legion {
             "It is illegal to request the destruction of DeferredBuffer, "
             "Deferred Value, or DeferredReduction objects outside of "
             "Legion tasks.")
-      return
-         Internal::implicit_context->destroy_task_local_instance(instance);
+      // Don't trust events passed in by users to be safe from poison
+      if (precondition.exists())
+        return Internal::implicit_context->destroy_task_local_instance(instance,
+            Internal::RtEvent(Realm::Event::ignorefaults(precondition)));
+      else
+        return Internal::implicit_context->destroy_task_local_instance(
+            instance, Internal::RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -7203,13 +7334,15 @@ namespace Legion {
                 bool init_in_ext, int ext_participants, int legion_participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(ext_participants > 0);
-      assert(legion_participants > 0);
-#endif
-      LegionHandshake result(
-          new Internal::LegionHandshakeImpl(init_in_ext,
-                                       ext_participants, legion_participants));
+      if (ext_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'external_participants' different than '1'.")
+      if (legion_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'legion_participants' different than '1'.")
+      LegionHandshake result(new Internal::LegionHandshakeImpl(init_in_ext));
       Internal::Runtime::register_handshake(result);
       return result;
     }
@@ -7220,13 +7353,16 @@ namespace Legion {
                                                         int legion_participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(mpi_participants > 0);
-      assert(legion_participants > 0);
-#endif
+      if (mpi_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'mpi_participants' different than '1'.")
+      if (legion_participants != 1)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNSUPPORTED_HANDSHAKE_PARTICIPANTS,
+            "Legion does not currently suppport creating handshake with a "
+            "value for 'legion_participants' different than '1'.")
       MPILegionHandshake result(
-          new Internal::LegionHandshakeImpl(init_in_MPI,
-                                       mpi_participants, legion_participants));
+          new Internal::LegionHandshakeImpl(init_in_MPI));
       Internal::Runtime::register_handshake(result);
       return result;
     }
@@ -7527,6 +7663,31 @@ namespace Legion {
       ctx->end_task(ptr, size, owned, Realm::RegionInstance::NO_INST,
           NULL/*functor*/, &resource, freefunc, metadataptr, metadatasize,
           Internal::ApEvent::NO_AP_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_task_postamble(Context ctx,
+        const Domain &domain, bool take_ownership,
+        const void *metadataptr, size_t metadatasize)
+    //--------------------------------------------------------------------------
+    {
+      if (!domain.dense())
+      {
+        if (!take_ownership)
+        {
+          AddReferenceFunctor functor(domain);
+          Internal::NT_TemplateHelper::demux<AddReferenceFunctor>(
+              domain.is_type, &functor);
+        }
+        Domain *copy = new Domain(domain);
+        Realm::ExternalMemoryResource resource(copy, sizeof(domain));
+        Runtime::legion_task_postamble(ctx, copy, sizeof(domain), true/*owned*/,
+            resource, sparsity_deletion_func, metadataptr, metadatasize);
+      }
+      else
+        Runtime::legion_task_postamble(ctx, &domain, sizeof(domain),
+            false/*owned*/, Realm::RegionInstance::NO_INST,
+            metadataptr, metadatasize);
     }
 
     //--------------------------------------------------------------------------

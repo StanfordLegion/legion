@@ -1355,6 +1355,13 @@ namespace Legion {
       static inline Future from_value(Runtime *rt, const T &value);
       template<typename T>
       static inline Future from_value(const T &value);
+      /**
+       * If you are creating a future from a Domain then you need to
+       * use this method to construct the future in a way to ensure
+       * that the Domain maintains the right lifetime.
+       */
+      static Future from_domain(const Domain &d, bool take_ownership,
+          const char *provenance = NULL, bool shard_local = false);
 
       /**
        * Generates a future from an untyped pointer.  No
@@ -1635,6 +1642,10 @@ namespace Legion {
       // Instruct the runtime that it does not need to produce
       // a future or future map result for this index task
       bool                               elide_future_return;
+      // Provide an optional future return size. In general you
+      // shouldn't need to use this and should prefer specifying
+      // the future return size when you register a task variant.
+      std::optional<size_t>              future_return_size;
     public:
       bool                               silence_warnings;
     };
@@ -1715,7 +1726,8 @@ namespace Legion {
       // deadlock with other concurrent index launches which requires 
       // additional analysis. Currently concurrent index space launches
       // will only be allowed to map to leaf task variants currently.
-      bool                               concurrent;
+      ConcurrentID                       concurrent_functor; // = 0
+      bool                               concurrent; // = false
       // This will convert this index space launch into a must
       // epoch launch which supports interfering region requirements
       bool                               must_parallelism;
@@ -1754,11 +1766,15 @@ namespace Legion {
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
     public:
+      bool                               silence_warnings;
+    public:
       // Instruct the runtime that it does not need to produce
       // a future or future map result for this index task
       bool                               elide_future_return;
-    public:
-      bool                               silence_warnings;
+      // Provide an optional future return size. In general you
+      // shouldn't need to use this and should prefer specifying
+      // the future return size when you register a task variant.
+      std::optional<size_t>              future_return_size;
     public:
       // Initial value for reduction
       Future                             initial_value;
@@ -2496,15 +2512,22 @@ namespace Legion {
      */
     struct PoolBounds {
     public:
-      PoolBounds(UnboundPoolScope s) 
-        : size(0), alignment(0), scope(s) { }
+      PoolBounds(UnboundPoolScope u, size_t s = 0)
+        : size(s), alignment(0), scope(u) { }
       PoolBounds(size_t s = 0, uint32_t a = 16)
         : size(s), alignment(a), scope(LEGION_BOUNDED_POOL) { }
       PoolBounds(const PoolBounds&) = default;
       PoolBounds(PoolBounds&&) = default;
       PoolBounds& operator=(const PoolBounds&) = default;
       PoolBounds& operator=(PoolBounds&&) = default;
+      inline bool is_bounded(void) const
+        { return (scope == LEGION_BOUNDED_POOL); }
     public:
+      // If this is a bounded pool then size is the number of bytes in the pool 
+      // If it is an unbounded pool then size is how many free bytes the pool 
+      // is allowed to keep locally from freed instances without returning
+      // them back to the Realm allocator, zero means that all freed instances
+      // are immediately sent back to the Realm allocator
       size_t size; // upper bound of the pool in bytes
       uint32_t alignment; // maximum alignment supported
       UnboundPoolScope scope; // scope for unbound pools
@@ -3737,6 +3760,10 @@ namespace Legion {
       inline DeferredValue<T>& operator=(T value);
     public:
       inline void finalize(Context ctx) const;
+    public:
+      typedef T value_type;
+      typedef T& reference;
+      typedef const T& const_reference;
     protected:
       friend class UntypedDeferredValue;
       DeferredValue(void);
@@ -3763,6 +3790,10 @@ namespace Legion {
       inline void reduce(typename REDOP::RHS val) const;
       __CUDA_HD__
       inline void operator<<=(typename REDOP::RHS val) const;
+    public:
+      typedef typename REDOP::RHS value_type;
+      typedef typename REDOP::RHS& reference;
+      typedef const typename REDOP::RHS& const_reference;
     };
 
     /**
@@ -3790,7 +3821,7 @@ namespace Legion {
       inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
     public:
       void finalize(Context ctx) const;
-      Realm::RegionInstance get_instance() const;
+      Realm::RegionInstance get_instance(void) const;
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
       friend class FieldAccessor;
@@ -3873,10 +3904,10 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = std::alignment_of<T>());
     protected:
-      Memory get_memory_from_kind(Memory::Kind kind);
-      void initialize_layout(size_t alignment, bool fortran_order_dims);
-      void initialize(Memory memory,
-                      DomainT<DIM,COORD_T> bounds,
+      inline Memory get_memory_from_kind(Memory::Kind kind);
+      inline void initialize_layout(size_t alignment, bool fortran_order_dims);
+      inline void initialize(Memory memory,
+                             DomainT<DIM,COORD_T> bounds,
                       const T *initial_value);
     public:
       __CUDA_HD__
@@ -3892,18 +3923,23 @@ namespace Legion {
       __CUDA_HD__
       inline T& operator[](const Point<DIM,COORD_T> &p) const;
     public:
-      void destroy();
-      Realm::RegionInstance get_instance() const;
+      inline void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
+      __CUDA_HD__
+      inline Realm::RegionInstance get_instance(void) const;
+      __CUDA_HD__
+      inline Rect<DIM,COORD_T> get_bounds(void) const;
+    public:
+      typedef T value_type;
+      typedef T& reference;
+      typedef const T& const_reference;
     protected:
       friend class OutputRegion;
       friend class UntypedDeferredBuffer<COORD_T>;
       Realm::RegionInstance instance;
       Realm::AffineAccessor<T,DIM,COORD_T> accessor;
       std::array<DimensionKind,DIM> ordering;
+      Rect<DIM,COORD_T> bounds;
       size_t alignment;
-#ifdef LEGION_BOUNDS_CHECKS
-      DomainT<DIM,COORD_T> bounds;
-#endif
     };
 
     /**
@@ -3951,7 +3987,7 @@ namespace Legion {
       template<typename T, int DIM, bool BC>
       inline operator DeferredBuffer<T,DIM,COORD_T,BC>(void) const;
     public:
-      inline void destroy(void);
+      inline void destroy(Realm::Event precondition = Realm::Event::NO_EVENT);
       inline Realm::RegionInstance get_instance(void) const { return instance; }
     private:
       template<PrivilegeMode,typename,int,typename,typename,bool>
@@ -4988,6 +5024,31 @@ namespace Legion {
     };
 
     /**
+     * \class ConcurrentColoringFunctor
+     * A concurrent coloring functor provides a functor object for
+     * grouping together points in a concurrent index space task
+     * launch. All the point tasks mapped by the functor to the 
+     * same color will be grouped together and are guaranteed
+     * to execute concurrently. Point tasks mapped to different 
+     * colors will have no guarantee of concurrency.
+     */
+    class ConcurrentColoringFunctor {
+    public:
+      ConcurrentColoringFunctor(void);
+      virtual ~ConcurrentColoringFunctor(void);
+    public:
+      virtual Color color(const DomainPoint &index_point,
+                          const Domain &index_domain) = 0;
+    public:
+      // You can optionally implement these methods for better performance,
+      // but they are not required for correctness. If 'has_max_color' 
+      // returns 'true' then you must implement the 'max_color' method.
+      virtual bool supports_max_color(void) { return false; }
+      virtual Color max_color(const Domain &index_domain)
+        { return std::numeric_limits<Color>::max(); }
+    };
+
+    /**
      * \class FutureFunctor
      * A future functor object provides a callback interface
      * for applications that wants to serialize data for
@@ -5082,11 +5143,15 @@ namespace Legion {
        * @param type_tag optional type tag to use for the index space
        * @param provenance an optional string describing the provenance 
        *                   information for this index space
+       * @param take_ownership whether Legion should take ownership of the
+       *                       sparsity map or not, if not then Legion will
+       *                       add its own reference
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, const Domain &bounds,
                                     TypeTag type_tag = 0,
-                                    const char *provenance = NULL);
+                                    const char *provenance = NULL,
+                                    const bool take_ownership = false);
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
@@ -5095,7 +5160,8 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
                                     const DomainT<DIM,COORD_T> &bounds,
-                                    const char *provenance = NULL);
+                                    const char *provenance = NULL,
+                                    const bool take_ownership = false);
       ///@}
       ///@{
       /**
@@ -5791,6 +5857,8 @@ namespace Legion {
        * @param color the color of the result of the partition
        * @param provenance an optional string describing the provenance 
        *                   information for this operation
+       * @param take_ownership whether Legion should take ownership of the
+       *                       domains or not
        * @return a new index partition of the parent index space
        */
       IndexPartition create_partition_by_domain(Context ctx,
@@ -5800,7 +5868,8 @@ namespace Legion {
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
-                                  const char *provenance = NULL);
+                                  const char *provenance = NULL,
+                                  bool take_ownership = false);
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_domain(Context ctx,
                                   IndexSpaceT<DIM,COORD_T> parent,
@@ -5812,7 +5881,8 @@ namespace Legion {
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
-                                  const char *provenance = NULL);
+                                  const char *provenance = NULL,
+                                  bool take_ownership = false);
       /**
        * This is an alternate version of create_partition_by_domain that
        * instead takes a future map for the list of domains to be used.
@@ -8455,8 +8525,22 @@ namespace Legion {
        * that you can create an instance of this size as the memory 
        * may be fragmented and the largest hole might be much smaller
        * than the size returned by this function.
+       * @param ctx enclosing task context
+       * @param target the memory being queried
+       * @return the instantaneous remaining size in the target memory
        */
       size_t query_available_memory(Context ctx, Memory target);
+
+      /**
+       * Inform the runtime that a task is done performing memory
+       * allocations in a given memory ahead of the completion of
+       * the task. This will allow the runtime to free up the memory
+       * pool for additional allocations earlier than waiting for
+       * the completion of the task. 
+       * @param ctx enclosing task context
+       * @param memory the memory in which allocations are finished
+       */
+      void release_memory_pool(Context ctx, Memory target);
 
       /**
        * Indicate that data in a particular physical region
@@ -9104,6 +9188,73 @@ namespace Legion {
        * @return a pointer o the sharding functor if it exists
        */
       static ShardingFunctor* get_sharding_functor(ShardingID sid);
+
+      /**
+       * Dynamically generate a unique concurrent ID for use across the machine
+       * @return a ConcurrentID that is globally unique across the machine
+       */
+      ConcurrentID generate_dynamic_concurrent_id(void);
+
+      /** 
+       * Generate a contiguous set of ConcurrentIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of concurrent IDs that should be generated
+       * @return the first concurrent ID that is allocated to the library
+       */
+      ConcurrentID generate_library_concurrent_ids(const char *name, 
+                                                   size_t count);
+
+      /**
+       * Statically generate a unique Concurrent ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return ConcurrentID that is globally unique across the machine
+       */
+      static ConcurrentID generate_static_concurrent_id(void);
+
+      /**
+       * Register a concurrent coloring functor for handling grouping of
+       * concurrent index space task launches into subsets of points that
+       * can execute concurrently. The ConcurrentID must be non-zero because
+       * zero is the special built-in "map all points to the same color"
+       * functor which should be the default for most concurrent index
+       * space task launches. The runtime takes ownership of the functor and
+       * will delete it upon runtime shutdown.
+       * @param cid the concurrent ID to use for the registration
+       * @param functor the object to register for handling concurrent grouping 
+       * @param silence_warnings disable warnings about dynamic registration
+       * @param warning_string a string to be reported with any warnings
+       */
+      void register_concurrent_coloring_functor(ConcurrentID cid,
+                                     ConcurrentColoringFunctor *functor,
+                                     bool silence_warnings = false,
+                                     const char *warning_string = NULL);
+
+      /**
+       * Register a concurrent coloring functor before the runtime has 
+       * started only. The concurrent coloring functor will be invoked to
+       * group points in a concurrent index space task launch into 
+       * subsets of points that can be executed concurrently. The runtime
+       * take ownership for the functor and will delete it upon shutdown. 
+       * @param cid the concurrent ID to use for the registration
+       * @param functor the object to register for handling concurrent grouping
+       */
+      static void preregister_concurrent_coloring_functor(ConcurrentID cid,
+                                       ConcurrentColoringFunctor *functor);
+
+      /**
+       * Return a pointer to a given concurrent coloring functor object.
+       * The runtime retains ownership of this object.
+       * @param cid ID of the concurrent coloring functor to find
+       * @return a pointer to the concurrent coloring functor if it exists
+       */
+      static ConcurrentColoringFunctor* get_concurrent_coloring_functor(
+                                                        ConcurrentID cid);
     public:
       /**
        * Dynamically generate a unique reduction ID for use across the machine
@@ -9357,6 +9508,24 @@ namespace Legion {
        *              required for using tracing.
        * -lg:local <int> Specify the maximum number of local fields
        *              permitted in any field space within a context.
+       * ---------------------
+       *  Tracing
+       * ---------------------
+       * -lg:no_tracing Disable execution with tracing of any kind. All calls
+       *              to begin and end traces will be ignored.
+       * -lg:no_physical_tracing Disable physical tracing. All calls to begin
+       *              and end traces will only be performed with regards to
+       *              logical dependence analysis.
+       * -lg:no_auto_tracing Disable auto-tracing by default so that Legion
+       *              is not trying to find traces inside tasks. Mappers can
+       *              still override this default value and set it to true 
+       *              to opt-in to auto-tracing
+       * -lg:no_trace_optimization Turn off all trace optimizations
+       * -lg:no_fence_elision Turn off the fence elision optimization that
+       *              improves the performance of back-to-back idempotent
+       *              trace replays
+       * -lg:no_transitive_reduction Turn off the transitive reduction
+       *              optimization that is performed on captured traces
        * ---------------------
        *  Resiliency
        * ---------------------
@@ -10110,6 +10279,24 @@ namespace Legion {
       static void legion_task_postamble(Context ctx,
                                         FutureFunctor *callback_functor,
                                         bool owned = false);
+
+      /**
+       * This is a special variant of Legion task postamble for returning
+       * a Domain as a value from a task. Clients can specify whether Legion
+       * should take ownership of the sparsity map of the domain or not. If
+       * not, then Legion will add its own reference to keep the sparsity
+       * map for the domain alive if necessary.
+       * @param ctx the context for the task
+       * @param domain the domain to return as a reuslt
+       * @param take_ownership whether Legion takes ownership of the domain
+       * @param metadataptr a pointer to host memory that contains metadata
+       *              for the future. The runtime will always make a copy
+       *              of this data if it is not NULL.
+       * @param metadatasize the size of the metadata buffer if non-NULL
+       */
+      static void legion_task_postamble(Context ctx,
+          const Domain &domain, bool take_ownership,
+          const void *metadataptr = NULL, size_t metadatasize = 0);
     public:
       // ------------------ Deprecated task registration -----------------------
       /**
@@ -10318,7 +10505,8 @@ namespace Legion {
       friend class UntypedDeferredBuffer;
       Realm::RegionInstance create_task_local_instance(Memory memory,
                                 Realm::InstanceLayoutGeneric *layout);
-      void destroy_task_local_instance(Realm::RegionInstance instance);
+      void destroy_task_local_instance(Realm::RegionInstance instance,
+                                Realm::Event precondition);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some

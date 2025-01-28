@@ -904,7 +904,7 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
           [cache_init]
           [cache_success_var] =
             c.bishop_instance_cache_register_instances([instance_cache_var], [idx - 1],
-              [region_var], [target.value], [inst_var])
+              [region_var], [target.value], [inst_var], 1)
         end
 
         body = quote
@@ -928,11 +928,24 @@ function codegen.map_task(rules, automata, state_id, signature, mapper_state_typ
               c.bishop_logger_debug(
                 "[map_task] initialize instance cache for region %d", [idx - 1])
             end
+            if not[cache_success_var] then
+              -- Failed to cache which means something else beat us to the cache
+              -- Free up our allocation and get the new cached values
+              -- This should happen very rarely and only really at start-up
+              c.free([inst_var])
+              [inst_var] = c.bishop_instance_cache_get_cached_instances(
+                [instance_cache_var], [idx - 1], [region_var], [target.value])
+              -- This better have succeeded now
+              std.assert([inst_var] ~= [&c.legion_physical_instance_t](nil), "must hit in cache")
+              -- Probably don't need to acquire again but since this happens
+              -- rarely let's just do it to be safe
+              var success =
+                c.legion_mapper_runtime_acquire_instances([rt_var], [ctx_var],
+                    [inst_var], 1)
+              std.assert(success, "instance acquire must succeed")
+            end
             c.legion_map_task_output_chosen_instances_add([map_task_output_var],
               [inst_var], 1)
-            if not[cache_success_var] then
-              c.free([inst_var])
-            end
           end
         end
       end
@@ -972,6 +985,7 @@ function codegen.mapper_init(assignments, automata, signatures)
   })
   local mapper_state_var = terralib.newsymbol(&mapper_state_type)
   local mapper_init
+  local mapper_destroy
 
   local max_state_id = 0
   for state, _ in pairs(automata.states) do
@@ -990,6 +1004,11 @@ function codegen.mapper_init(assignments, automata, signatures)
     [mapper_state_var].[slice_field_name] =
       [&c.bishop_slice_cache_t](
         c.malloc([sizeof(c.bishop_instance_cache_t)] * [max_state_id]))
+  end
+  local cache_destroy = quote
+    c.free([mapper_state_var].[layout_field_name])
+    c.free([mapper_state_var].[instance_field_name])
+    c.free([mapper_state_var].[slice_field_name])
   end
   for state, _ in pairs(automata.states) do
     if state ~= automata.initial then
@@ -1010,8 +1029,16 @@ function codegen.mapper_init(assignments, automata, signatures)
             [&opaque](0)
         end
       end
+      cache_destroy = quote
+        c.free([mapper_state_var].[layout_field_name][ [state.id] ])
+        c.bishop_instance_cache_destroy(
+          [mapper_state_var].[instance_field_name][ [state.id] ])
+        c.bishop_slice_cache_destroy(
+          [mapper_state_var].[slice_field_name][ [state.id] ])
+        [cache_destroy]
+      end
     end
-  end
+  end 
 
   terra mapper_init(ptr : &&opaque)
     @ptr = c.malloc([sizeof(mapper_state_type)])
@@ -1029,9 +1056,15 @@ function codegen.mapper_init(assignments, automata, signatures)
       end
     end)]
     [cache_init]
+  end 
+
+  terra mapper_destroy(ptr: &&opaque)
+    var [mapper_state_var] = [&mapper_state_type](@ptr)
+    [cache_destroy]
+    c.free(@ptr)
   end
 
-  return mapper_init, mapper_state_type
+  return mapper_init, mapper_state_type, mapper_destroy
 end
 
 local function hash_tags(tags)
@@ -1136,7 +1169,7 @@ function codegen.automata(automata)
 end
 
 function codegen.mapper(node)
-  local mapper_init, mapper_state_type =
+  local mapper_init, mapper_state_type, mapper_destroy =
     codegen.mapper_init(node.assignments, node.automata, node.task_signatures)
 
   local state_to_mapper_impl = codegen.rules(node.rules, node.automata,
@@ -1168,6 +1201,7 @@ function codegen.mapper(node)
 
   return {
     mapper_init = mapper_init,
+    mapper_destroy = mapper_destroy,
     state_to_transition_impl = state_to_transition_impl,
     state_to_mapper_impl = state_to_mapper_impl,
   }

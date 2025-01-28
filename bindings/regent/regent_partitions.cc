@@ -595,7 +595,8 @@ create_cross_product_complete_unstructured(
     IndexSpace index_color_space = runtime->create_index_space(ctx, color_space);
     IndexPartition ip = runtime->create_partition_by_domain(ctx, rh_space, domains,
         index_color_space, true/*perform intersections*/, 
-        lhs_part_disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND);
+        lhs_part_disjoint ? LEGION_DISJOINT_KIND : LEGION_ALIASED_KIND,
+        LEGION_AUTO_GENERATE_ID, nullptr/*provenance*/, true/*take ownership*/);
     rh_partitions[it->first] = ip;
   }
 

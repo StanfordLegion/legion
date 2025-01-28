@@ -174,7 +174,7 @@ function std.make_entry()
     [register_body]
     c.register_bishop_mappers([mapper_impls], num_mapper_impls,
                               [transitions], num_transitions,
-                              [mapper.mapper_init])
+                              [mapper.mapper_init], [mapper.mapper_destroy])
   end
 
   return register

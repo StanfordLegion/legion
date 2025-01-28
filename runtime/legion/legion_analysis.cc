@@ -27,12 +27,73 @@
 #include "legion/legion_analysis.h"
 #include "legion/legion_context.h"
 #include "legion/legion_replication.h"
-#include "legion/index_space_value.h"
 
 namespace Legion {
   namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
+
+    /////////////////////////////////////////////////////////////
+    // Task Tree Coordinates
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    bool TaskTreeCoordinates::operator==(const TaskTreeCoordinates &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (coordinates.size() != rhs.size())
+        return false;
+      for (unsigned idx = 0; idx < coordinates.size(); idx++)
+        if (coordinates[idx] != rhs[idx])
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskTreeCoordinates::operator!=(const TaskTreeCoordinates &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskTreeCoordinates::same_index_space(
+                                           const TaskTreeCoordinates &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (coordinates.size() != rhs.size())
+        return false;
+      // Must the same coordinates for all but the last level
+      for (unsigned idx = 0; idx < (coordinates.size()-1); idx++)
+        if (coordinates[idx] != rhs[idx])
+          return false;
+      // Last leve just needs to have the same context index
+      if (coordinates.back().context_index != rhs.back().context_index)
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskTreeCoordinates::serialize(Serializer &rez) const 
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(coordinates.size());
+      for (std::vector<ContextCoordinate>::const_iterator it =
+            coordinates.begin(); it != coordinates.end(); it++)
+        it->serialize(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskTreeCoordinates::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_coordinates;
+      derez.deserialize(num_coordinates);
+      coordinates.resize(num_coordinates);
+      for (std::vector<ContextCoordinate>::iterator it =
+            coordinates.begin(); it != coordinates.end(); it++)
+        it->deserialize(derez);
+    }
 
     /////////////////////////////////////////////////////////////
     // Users and Info 
@@ -67,24 +128,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
-                               UniqueID id, unsigned x, bool cpy, bool cov)
-      : usage(u), expr(e), op_id(id), index(x), copy_user(cpy), covers(cov)
+        ApEvent term, UniqueID id, unsigned x, bool cpy, bool cov)
+      : usage(u), expr(e), term_event(term), op_id(id), index(x),
+        copy_user(cpy), covers(cov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
       expr->add_base_expression_reference(PHYSICAL_USER_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
-      : usage(rhs.usage), expr(rhs.expr), op_id(rhs.op_id), index(rhs.index),
-        copy_user(rhs.copy_user), covers(rhs.covers)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -96,49 +148,6 @@ namespace Legion {
 #endif
       if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalUser& PhysicalUser::operator=(const PhysicalUser &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalUser::pack_user(Serializer &rez, 
-                                 const AddressSpaceID target) const
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(usage);
-      expr->pack_expression(rez, target);
-      rez.serialize(op_id);
-      rez.serialize(index);
-      rez.serialize<bool>(copy_user);
-      rez.serialize<bool>(covers);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
-                          RegionTreeForest *forest, const AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      bool copy_user, covers;
-      derez.deserialize<bool>(copy_user);
-      derez.deserialize<bool>(covers);
-      return new PhysicalUser(usage, expr, op_id, index, copy_user, covers);
     }
 
     /////////////////////////////////////////////////////////////
@@ -312,10 +321,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                                 const TraceLocalID &tlid, PhysicalTemplate *tpl,
-                                DistributedID did, TraceID tid,
-                                std::set<RtEvent> &applied)
+                                DistributedID did, TraceID tid)
       : runtime(rt), origin_space(origin), remote_tpl(tpl), repl_did(did),
-        trace_id(tid), applied_events(applied)
+        trace_id(tid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -356,7 +364,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_replay_mapping(ApEvent lhs,
-                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
+                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo,
+                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -374,11 +383,11 @@ namespace Legion {
           rez.serialize<bool>(register_memo);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo);
+        remote_tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo,
+                                          applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -435,7 +444,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                                   const TraceLocalID &tlid)
+        const TraceLocalID &tlid, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -452,11 +461,10 @@ namespace Legion {
           tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_trigger_event(lhs, rhs, tlid);
+        remote_tpl->record_trigger_event(lhs, rhs, tlid, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -928,7 +936,7 @@ namespace Legion {
                                              const RegionUsage &usage,
                                              const FieldMask &user_mask,
                                              bool update_validity,
-                                             std::set<RtEvent> &effects)
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -949,12 +957,11 @@ namespace Legion {
           rez.serialize<bool>(update_validity);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
         remote_tpl->record_op_inst(tlid, parent_req_index, inst, node, usage,
-                                   user_mask, update_validity, effects);
+                                   user_mask, update_validity, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -987,7 +994,8 @@ namespace Legion {
     void RemoteTraceRecorder::record_mapper_output(const TraceLocalID &tlid,
                               const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
-                              std::set<RtEvent> &external_applied)
+                              bool is_leaf, bool has_return_size,
+                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -1007,6 +1015,14 @@ namespace Legion {
           rez.serialize<size_t>(output.future_locations.size());
           for (unsigned idx = 0; idx < output.future_locations.size(); idx++)
             rez.serialize(output.future_locations[idx]);
+          rez.serialize<size_t>(output.leaf_pool_bounds.size());
+          for (std::map<Memory,PoolBounds>::const_iterator it =
+                output.leaf_pool_bounds.begin(); it !=
+                output.leaf_pool_bounds.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
           rez.serialize<bool>(output.postmap_task);
@@ -1014,19 +1030,20 @@ namespace Legion {
           for (std::deque<InstanceSet>::const_iterator it = 
                physical_instances.begin(); it != physical_instances.end(); it++)
             it->pack_references(rez);
+          rez.serialize<bool>(is_leaf);
+          rez.serialize<bool>(has_return_size);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
         remote_tpl->record_mapper_output(tlid, output, physical_instances,
-                                         external_applied);
+            is_leaf, has_return_size, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_complete_replay(const TraceLocalID &tlid, 
-                                  ApEvent pre, std::set<RtEvent> &local_applied)
+                                 ApEvent pre, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -1042,11 +1059,10 @@ namespace Legion {
           rez.serialize(pre);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        // Don't use the applied_events!
-        local_applied.insert(applied);
+        applied_events.insert(applied);
       }
       else
-        remote_tpl->record_complete_replay(tlid, pre, local_applied);
+        remote_tpl->record_complete_replay(tlid, pre, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1092,8 +1108,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ 
       PhysicalTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
-                Deserializer &derez, Runtime *runtime, const TraceLocalID &tlid,
-                std::set<RtEvent> &applied_events)
+                Deserializer &derez, Runtime *runtime, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
       AddressSpaceID origin_space;
@@ -1115,7 +1130,7 @@ namespace Legion {
         }
       }
       return new RemoteTraceRecorder(runtime, origin_space, tlid,
-          remote_tpl, did, trace_id, applied_events);
+          remote_tpl, did, trace_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1142,8 +1157,14 @@ namespace Legion {
             tlid.deserialize(derez);
             bool register_memo;
             derez.deserialize<bool>(register_memo);
-            tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo);
-            Runtime::trigger_event(applied);
+            std::set<RtEvent> applied_events;
+            tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo,
+                                       applied_events);
+            if (!applied_events.empty())
+              Runtime::trigger_event(applied,
+                  Runtime::merge_events(applied_events));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_REQUEST_TERM_EVENT:
@@ -1202,8 +1223,10 @@ namespace Legion {
             derez.deserialize(rhs);
             TraceLocalID tlid;
             tlid.deserialize(derez);
-            tpl->record_trigger_event(lhs, rhs, tlid);
-            Runtime::trigger_event(applied);
+            std::set<RtEvent> applied_events;
+            tpl->record_trigger_event(lhs, rhs, tlid, applied_events);
+            Runtime::trigger_event(applied,
+                Runtime::merge_events(applied_events));
             break;
           }
         case REMOTE_TRACE_MERGE_EVENTS:
@@ -1566,6 +1589,14 @@ namespace Legion {
               for (unsigned idx = 0; idx < num_future_locations; idx++)
                 derez.deserialize(output.future_locations[idx]);
             }
+            size_t num_pool_bounds;
+            derez.deserialize(num_pool_bounds);
+            for (unsigned idx = 0; idx < num_pool_bounds; idx++)
+            {
+              Memory memory;
+              derez.deserialize(memory);
+              derez.deserialize(output.leaf_pool_bounds[memory]);
+            }
             derez.deserialize(output.chosen_variant);
             derez.deserialize(output.task_priority);
             derez.deserialize<bool>(output.postmap_task);
@@ -1576,15 +1607,19 @@ namespace Legion {
             for (unsigned idx = 0; idx < num_phy_instances; idx++)
               physical_instances[idx].unpack_references(runtime, derez,
                                                         ready_events);
+            bool is_leaf, has_return_size;
+            derez.deserialize<bool>(is_leaf);
+            derez.deserialize<bool>(has_return_size);
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
+            
             std::set<RtEvent> applied_events;
             tpl->record_mapper_output(tlid, output, physical_instances,
-                                      applied_events);
+                is_leaf, has_return_size, applied_events);
             if (!applied_events.empty())
               Runtime::trigger_event(applied, 
                   Runtime::merge_events(applied_events));
@@ -1932,7 +1967,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ PhysicalTraceInfo PhysicalTraceInfo::unpack_trace_info(
-       Deserializer &derez, Runtime *runtime, std::set<RtEvent> &applied_events)
+       Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       bool recording;
@@ -1947,8 +1982,7 @@ namespace Legion {
         bool update_validity;
         derez.deserialize(update_validity);
         PhysicalTraceRecorder *recorder = 
-          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, tlid,
-                                                      applied_events);
+          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, tlid);
         return PhysicalTraceInfo(tlid, index, dst_index,
                                  update_validity, recorder);
       }
@@ -6987,7 +7021,7 @@ namespace Legion {
         summary = Runtime::merge_events(&trace_info, events);
         if (summary_event.exists())
         {
-          Runtime::trigger_event(&trace_info, summary_event, summary);
+          Runtime::trigger_event(summary_event, summary, trace_info, effects);
           // Pull this onto the stack in case the object is deleted
           summary = summary_event;
         }
@@ -7568,16 +7602,17 @@ namespace Legion {
                        deferral_events, applied_events, already_deferred);
         else if (!set->set_expr->is_empty())
         {
-          IndexSpaceValue expr = IndexSpaceValue(set->set_expr) & analysis_expr;
-          if (expr.is_empty())
+          IndexSpaceExpression *expr = runtime->forest->intersect_index_spaces(
+              set->set_expr, analysis_expr);
+          if (expr->is_empty())
             return;
           // Check to see this expression covers the equivalence set
           // If it does then we can use original set expression
-          if (expr.get_volume() == set->set_expr->get_volume())
+          if (expr->get_volume() == set->set_expr->get_volume())
             set->analyze(*this, set->set_expr, true/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
           else
-            set->analyze(*this, *expr, false/*covers*/, mask,
+            set->analyze(*this, expr, false/*covers*/, mask,
                          deferral_events, applied_events, already_deferred);
         }
         else
@@ -8112,8 +8147,8 @@ namespace Legion {
       const RtEvent done = dargs->analysis->perform_registration(
         RtEvent::NO_RT_EVENT, dargs->usage, applied_events,
         dargs->precondition, dargs->termination, insts_ready, dargs->symbolic);
-      Runtime::trigger_event(dargs->trace_info,
-          dargs->instances_ready, insts_ready);
+      Runtime::trigger_event(dargs->instances_ready, insts_ready,
+          *(dargs->trace_info), applied_events);
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
         dargs->analysis->record_deferred_applied_events(applied_events);
@@ -8144,7 +8179,8 @@ namespace Legion {
         dargs->analysis->perform_output(
             RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
       if (dargs->effects_event.exists())
-        Runtime::trigger_event(dargs->trace_info, dargs->effects_event, result);
+        Runtime::trigger_event(dargs->effects_event, result,
+            *(dargs->trace_info), applied_events);
       if (!applied_events.empty())
         dargs->analysis->record_deferred_applied_events(applied_events);
       if (on_heap && dargs->analysis->remove_reference())
@@ -8387,12 +8423,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteCollectiveAnalysis::RemoteCollectiveAnalysis(size_t ctx_index,
                           unsigned req_index, IndexSpaceID match, RemoteOp *op,
-                          Deserializer &derez, Runtime *runtime,
-                          std::set<RtEvent> &applied_events)
+                          Deserializer &derez, Runtime *runtime)
       : context_index(ctx_index), requirement_index(req_index),
         match_space(match), operation(op),
-        trace_info(PhysicalTraceInfo::unpack_trace_info(derez, runtime,
-                                                        applied_events))
+        trace_info(PhysicalTraceInfo::unpack_trace_info(derez, runtime))
     //--------------------------------------------------------------------------
     {
     }
@@ -8413,7 +8447,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteCollectiveAnalysis* RemoteCollectiveAnalysis::unpack(
-       Deserializer &derez, Runtime *runtime, std::set<RtEvent> &applied_events)
+       Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       size_t context_index;
@@ -8424,7 +8458,7 @@ namespace Legion {
       derez.deserialize(match_space);
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       return new RemoteCollectiveAnalysis(context_index, requirement_index,
-          match_space, op, derez, runtime, applied_events);
+          match_space, op, derez, runtime);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9529,7 +9563,7 @@ namespace Legion {
       }
       std::set<RtEvent> deferral_events, applied_events; 
       PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       bool first_local = true;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
@@ -9785,7 +9819,7 @@ namespace Legion {
       derez.deserialize(target);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *mapping = ((collective_mapping_size) > 0) ?
@@ -10104,7 +10138,7 @@ namespace Legion {
       derez.deserialize(target);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *mapping = ((collective_mapping_size) > 0) ?
@@ -10549,7 +10583,7 @@ namespace Legion {
       derez.deserialize(copy);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       std::vector<CopyAcrossHelper*> across_helpers;
       RegionNode *dst_node = runtime->forest->get_node(dst_handle);
@@ -10589,7 +10623,7 @@ namespace Legion {
           analysis->perform_updates(remote_ready, applied_events); 
       const ApEvent result = 
         analysis->perform_output(updates_ready, applied_events);
-      Runtime::trigger_event(&trace_info, copy, result);
+      Runtime::trigger_event(copy, result, trace_info, applied_events);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
@@ -11031,7 +11065,7 @@ namespace Legion {
       }
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -11264,7 +11298,7 @@ namespace Legion {
       derez.deserialize(remove_restriction);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       bool first_local = true;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
@@ -13900,18 +13934,17 @@ namespace Legion {
       // At this point we've decided to do the migration
       log_migration.info("Migrating Equivalence Set %llx from %d to %d",
           did, local_space, new_logical_owner);
-      logical_owner_space = new_logical_owner;
       const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       // Do the migration
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        pack_state(rez, logical_owner_space, did, set_expr, set_expr,
+        pack_state(rez, new_logical_owner, did, set_expr, set_expr,
           true/*covers*/, all_ones, true/*pack guards*/, true/*pack invalids*/);
         pack_global_ref();
       }
-      runtime->send_equivalence_set_migration(logical_owner_space, rez);
+      runtime->send_equivalence_set_migration(new_logical_owner, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones, false/*record*/);
       // Also invalidate the partial invalidations since we know we migrated
       // them all to the new owner node
@@ -13921,6 +13954,8 @@ namespace Legion {
         if (it->first->remove_nested_expression_reference(did))
           delete it->first;
       partial_invalidations.clear();
+      // Now we can change the logical owner space 
+      logical_owner_space = new_logical_owner;
 #endif // LEGION_DISABLE_EQUIVALENCE_SET MIGRATION
     }
 
@@ -19729,8 +19764,7 @@ namespace Legion {
     void EquivalenceSet::clone_from(EquivalenceSet *src, const FieldMask &mask,
                                     IndexSpaceExpression *clone_expr,
                                     const bool record_invalidate,
-                                    std::vector<RtEvent> &applied_events,
-                                    const bool invalidate_overlap)
+                                    std::vector<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -19744,7 +19778,7 @@ namespace Legion {
         // other fiedls and expressions
         eq.release();
         src->clone_to_local(this, mask, clone_expr, applied_events,
-            invalidate_overlap, record_invalidate);
+            record_invalidate);
       }
       else
       {
@@ -19752,7 +19786,7 @@ namespace Legion {
         const AddressSpaceID logical_owner = logical_owner_space;
         eq.release();
         src->clone_to_remote(did, logical_owner, set_expr, clone_expr,
-             mask, applied_events, invalidate_overlap, record_invalidate);
+             mask, applied_events, record_invalidate);
       }
     }
 
@@ -19895,7 +19929,8 @@ namespace Legion {
            invalid_updates, reduction_updates, restricted_updates, 
            released_updates, &read_only_guards, &reduction_fill_guards, 
            precondition_updates, anticondition_updates,
-           postcondition_updates, dirty_updates, true/*pack refs*/);
+           postcondition_updates, dirty_updates, true/*pack refs*/,
+           true/*pack tracing reference*/);
       if (precondition_updates != NULL)
         delete precondition_updates;
       if (anticondition_updates != NULL)
@@ -19925,7 +19960,7 @@ namespace Legion {
               const TraceViewSet *anticondition_updates,
               const TraceViewSet *postcondition_updates,
               const FieldMaskSet<IndexSpaceExpression> *dirty_updates,
-              const bool pack_references)
+              const bool pack_references, const bool pack_tracing_references)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(valid_updates.size());
@@ -20034,15 +20069,15 @@ namespace Legion {
       else
         rez.serialize<size_t>(0);
       if (precondition_updates != NULL)
-        precondition_updates->pack(rez, target, pack_references); 
+        precondition_updates->pack(rez, target, pack_tracing_references);
       else
         rez.serialize<size_t>(0);
       if (anticondition_updates != NULL)
-        anticondition_updates->pack(rez, target, pack_references); 
+        anticondition_updates->pack(rez, target, pack_tracing_references);
       else
         rez.serialize<size_t>(0);
       if (postcondition_updates != NULL)
-        postcondition_updates->pack(rez, target, pack_references); 
+        postcondition_updates->pack(rez, target, pack_tracing_references);
       else
         rez.serialize<size_t>(0);
       if (dirty_updates != NULL)
@@ -20294,7 +20329,7 @@ namespace Legion {
                   precondition_updates, anticondition_updates,
                   postcondition_updates, dirty_updates, &read_only_updates,
                   &reduction_fill_updates, applied_events, true/*need lock*/,
-                  forward_to_owner, true/*unpack references*/); 
+                  forward_to_owner, true/*unpack tracing references*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -20391,7 +20426,7 @@ namespace Legion {
           dargs->anticondition_updates, dargs->postcondition_updates,
           dargs->dirty_updates, dargs->read_only_updates, 
           dargs->reduction_fill_updates, applied_events, true/*needs lock*/, 
-          dargs->forward_to_owner, true/*unpack refs*/);
+          dargs->forward_to_owner, true/*unpack tracing refs*/);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(applied_events));
@@ -20418,6 +20453,9 @@ namespace Legion {
        const bool expr_covers, const FieldMask &mask, bool record_invalidations)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
       filter_valid_instances(expr, expr_covers, mask); 
       filter_reduction_instances(expr, expr_covers, mask); 
       filter_initialized_data(expr, expr_covers, mask);
@@ -20550,7 +20588,6 @@ namespace Legion {
     void EquivalenceSet::clone_to_local(EquivalenceSet *dst, FieldMask mask,
                      IndexSpaceExpression *overlap,
                      std::vector<RtEvent> &applied_events, 
-                     const bool invalidate_overlap,
                      const bool record_invalidate,
                      const bool need_dst_lock)
     //--------------------------------------------------------------------------
@@ -20568,9 +20605,10 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       TraceViewSet *postcondition_updates = NULL;
       FieldMaskSet<IndexSpaceExpression> *dirty_updates = NULL;
+      std::vector<IndexSpaceExpression*> temp_refs;
       {
-        // Lock in exclusive mode if we're doing an invalidate
-        AutoLock eq(eq_lock, 1, false/*exclusive*/);
+        // Lock in exclusive mode since we're doing an invalidate
+        AutoLock eq(eq_lock);
         if (!is_logical_owner())
         {
           const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -20584,13 +20622,13 @@ namespace Legion {
             overlap->pack_expression(rez, logical_owner_space);
             rez.serialize(mask);
             rez.serialize(done_event);
-            rez.serialize<bool>(invalidate_overlap);
             rez.serialize<bool>(record_invalidate);
           }
           runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
           applied_events.push_back(done_event);
           return;
         }
+        bool overlap_covers = true;;
         // If we get here, we're performing the clone locally for these fields
         if (!set_expr->is_empty())
         {
@@ -20598,45 +20636,148 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(overlap_volume > 0);
 #endif
-          const bool overlap_covers = 
-            (overlap_volume == set_expr->get_volume());
-          find_overlap_updates(overlap, overlap_covers, mask, false/*invalids*/,
+          overlap_covers = (overlap_volume == set_expr->get_volume());
+          find_overlap_updates(overlap_covers ? set_expr : overlap,
+                               overlap_covers, mask, false/*invalids*/,
                                valid_updates, initialized_updates,
-                               invalid_updates, reduction_updates, 
+                               invalid_updates, reduction_updates,
                                restricted_updates, released_updates,
                                NULL/*guards*/,NULL/*guards*/,
                                precondition_updates, anticondition_updates,
                                postcondition_updates, dirty_updates,
                                dst->did, dst->set_expr);
         }
+        // Don't need to get updates if this equivalence set is empty
+        // and the destination equivalence set is not empty
         else if (dst->set_expr->is_empty())
-          find_overlap_updates(set_expr, true/*covers*/, mask,false/*invalids*/,
+          find_overlap_updates(set_expr, true/*covers*/, mask,
+                               false/*invalids*/,
                                valid_updates, initialized_updates,
-                               invalid_updates, reduction_updates, 
+                               invalid_updates, reduction_updates,
                                restricted_updates, released_updates,
                                NULL/*guards*/,NULL/*guards*/,
                                precondition_updates, anticondition_updates,
                                postcondition_updates, dirty_updates,
                                dst->did, dst->set_expr);
+        // Save references on everything to keep it alive since we're about
+        // to do an invalidation of the state, pack references to views in
+        // case they ultimately need to be forwarded to a remote node when
+        // we end up calling apply_state
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<LogicalView> >::const_iterator vit =
+              valid_updates.begin(); vit != valid_updates.end(); vit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),vit->first))
+          {
+            vit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(vit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<LogicalView>::const_iterator it =
+                vit->second.begin(); it != vit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              initialized_updates.begin(); it !=
+              initialized_updates.end(); it++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(), it->first))
+          {
+            it->first->add_nested_expression_reference(did);
+            temp_refs.push_back(it->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              invalid_updates.begin(); it != invalid_updates.end(); it++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(), it->first))
+          {
+            it->first->add_nested_expression_reference(did);
+            temp_refs.push_back(it->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+        }
+        for (std::map<unsigned,std::list<std::pair<InstanceView*,
+              IndexSpaceExpression*> > >::const_iterator rit =
+              reduction_updates.begin(); rit != reduction_updates.end(); rit++)
+        {
+          for (std::list<std::pair<InstanceView*,
+                IndexSpaceExpression*> >::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            it->first->pack_valid_ref();
+            if (!std::binary_search(temp_refs.begin(),
+                  temp_refs.end(), it->second))
+            {
+              it->second->add_nested_expression_reference(did);
+              temp_refs.push_back(it->second);
+              std::sort(temp_refs.begin(), temp_refs.end());
+            }
+          }
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::const_iterator rit =
+              restricted_updates.begin(); rit != 
+              restricted_updates.end(); rit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),rit->first))
+          {
+            rit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(rit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        for (LegionMap<IndexSpaceExpression*,
+              FieldMaskSet<InstanceView> >::const_iterator rit =
+              released_updates.begin(); rit != released_updates.end(); rit++)
+        {
+          if (!std::binary_search(temp_refs.begin(),temp_refs.end(),rit->first))
+          {
+            rit->first->add_nested_expression_reference(did);
+            temp_refs.push_back(rit->first);
+            std::sort(temp_refs.begin(), temp_refs.end());
+          }
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+                rit->second.begin(); it != rit->second.end(); it++)
+            it->first->pack_valid_ref();
+        }
+        // No need to do anything for the tracing data structures as they
+        // are already keeping their own references to everything
+        if (dirty_updates != NULL)
+        {
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                dirty_updates->begin(); it != dirty_updates->end(); it++)
+          {
+            if (!std::binary_search(temp_refs.begin(),
+                  temp_refs.end(), it->first))
+            {
+              it->first->add_nested_expression_reference(did);
+              temp_refs.push_back(it->first);
+              std::sort(temp_refs.begin(), temp_refs.end());
+            }
+          }
+        }
+        // Now we can do the invalidation
+        if (overlap_covers)
+          invalidate_state(set_expr, true/*covers*/, mask, record_invalidate);
+        else
+          invalidate_state(overlap, false/*covers*/, mask, record_invalidate);
       }
-      // We hold the lock so calling back into the destination is safe
+      // Call back to the destination to apply the state
       dst->apply_state(valid_updates, initialized_updates, invalid_updates,
             reduction_updates, restricted_updates, released_updates, 
             precondition_updates, anticondition_updates, postcondition_updates,
             dirty_updates, NULL/*guards*/, NULL/*guards*/, applied_events, 
-            need_dst_lock, true/*forward to owner*/,false/*unpack references*/);
-      if (invalidate_overlap)
-      {
-        AutoLock eq(eq_lock); // Retake the lock in exclusive mode
-        if (!set_expr->is_empty())
-        {
-          const bool overlap_covers = 
-            (overlap->get_volume() == set_expr->get_volume());
-          invalidate_state(overlap, overlap_covers, mask, record_invalidate);
-        }
-        else
-          invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
-      }
+            need_dst_lock, true/*forward to owner*/, false/*unpack tracing*/);
+      // Remove the temporary references that we added to keep everything alive
+      for (std::vector<IndexSpaceExpression*>::const_iterator it =
+            temp_refs.begin(); it != temp_refs.end(); it++)
+        if ((*it)->remove_nested_expression_reference(did))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -20645,7 +20786,6 @@ namespace Legion {
                      IndexSpaceExpression *target_expr, 
                      IndexSpaceExpression *overlap,
                      FieldMask mask, std::vector<RtEvent> &applied_events, 
-                     const bool invalidate_overlap,
                      const bool record_invalidate)
     //--------------------------------------------------------------------------
     {
@@ -20657,8 +20797,8 @@ namespace Legion {
       const bool overlap_covers = (overlap_volume == set_volume); 
       if (overlap_covers)
         overlap = set_expr;
-      // Lock in exclusive mode if we're doing an invalidate
-      AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
+      // Lock in exclusive mode since we're doing an invalidate
+      AutoLock eq(eq_lock);
       if (!is_logical_owner())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -20672,7 +20812,6 @@ namespace Legion {
           overlap->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
-          rez.serialize<bool>(invalidate_overlap);
           rez.serialize<bool>(record_invalidate);
         }
         runtime->send_equivalence_set_clone_request(logical_owner_space, rez);
@@ -20692,14 +20831,11 @@ namespace Legion {
             overlap_covers, mask, false/*pack guards*/, false/*pack invalids*/);
         }
         runtime->send_equivalence_set_clone_response(target_space, rez);
-        if (invalidate_overlap)
-        {
-          if (!set_expr->is_empty())
-            invalidate_state(overlap, overlap_covers, mask, record_invalidate);
-          else
-            invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
-        }
         applied_events.push_back(done_event);
+        if (!set_expr->is_empty())
+          invalidate_state(overlap, overlap_covers, mask, record_invalidate);
+        else
+          invalidate_state(set_expr, true/*cover*/, mask, record_invalidate);
       }
     }
 
@@ -21109,7 +21245,7 @@ namespace Legion {
                   FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
                   std::vector<RtEvent> &applied_events, 
                   const bool needs_lock, const bool forward_to_owner,
-                  const bool unpack_references)
+                  const bool unpack_tracing_references)
     //--------------------------------------------------------------------------
     {
       if (needs_lock)
@@ -21121,7 +21257,7 @@ namespace Legion {
                     postcondition_updates, dirty_updates, 
                     read_only_guard_updates, reduction_fill_guard_updates, 
                     applied_events, false/*needs lock*/, forward_to_owner,
-                    unpack_references);
+                    unpack_tracing_references);
         return;
       }
       if (!is_logical_owner() && forward_to_owner)
@@ -21174,7 +21310,8 @@ namespace Legion {
                      released_updates, read_only_guard_updates, 
                      reduction_fill_guard_updates, precondition_updates,
                      anticondition_updates, postcondition_updates, 
-                     dirty_updates, !unpack_references);
+                     dirty_updates, false/*pack references*/,
+                     !unpack_tracing_references);
         }
         runtime->send_equivalence_set_clone_response(logical_owner_space, rez);
         applied_events.push_back(done_event);
@@ -21191,12 +21328,9 @@ namespace Legion {
         else
           record_instances(it->first, false/*covers*/,
               it->second.get_valid_mask(), it->second);
-        if (unpack_references)
-        {
-          for (FieldMaskSet<LogicalView>::const_iterator vit =
-                it->second.begin(); vit != it->second.end(); vit++)
-            vit->first->unpack_valid_ref();
-        }
+        for (FieldMaskSet<LogicalView>::const_iterator vit =
+              it->second.begin(); vit != it->second.end(); vit++)
+          vit->first->unpack_valid_ref();
       }
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             initialized_updates.begin(); it != initialized_updates.end(); it++)
@@ -21224,24 +21358,19 @@ namespace Legion {
             std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
             it = reduction_updates.begin(); it != reduction_updates.end(); it++)
       {
-        if (unpack_references)
-        {
-          // Need to make a local copy here since this can destroy the list
-          std::vector<InstanceView*> local_reductions;
-          local_reductions.reserve(it->second.size());
-          for (std::list<std::pair<InstanceView*,
-                                   IndexSpaceExpression*> >::const_iterator
-                vit = it->second.begin(); vit != it->second.end(); vit++)
-            local_reductions.push_back(vit->first);
-          // Update the reductions
-          update_reductions(it->first, it->second);
-          // Then unpack our valid references
-          for (std::vector<InstanceView*>::const_iterator it =
-                local_reductions.begin(); it != local_reductions.end(); it++)
-            (*it)->unpack_valid_ref();
-        }
-        else
-          update_reductions(it->first, it->second);
+        // Need to make a local copy here since this can destroy the list
+        std::vector<InstanceView*> local_reductions;
+        local_reductions.reserve(it->second.size());
+        for (std::list<std::pair<InstanceView*,
+                                 IndexSpaceExpression*> >::const_iterator
+              vit = it->second.begin(); vit != it->second.end(); vit++)
+          local_reductions.push_back(vit->first);
+        // Update the reductions
+        update_reductions(it->first, it->second);
+        // Then unpack our valid references
+        for (std::vector<InstanceView*>::const_iterator it =
+              local_reductions.begin(); it != local_reductions.end(); it++)
+          (*it)->unpack_valid_ref();
       }
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::const_iterator rit =
@@ -21253,8 +21382,7 @@ namespace Legion {
         {
           record_restriction(covers ? set_expr : rit->first, covers,
                              it->second, it->first);
-          if (unpack_references)
-            it->first->unpack_valid_ref();
+          it->first->unpack_valid_ref();
         }
       }
       for (LegionMap<IndexSpaceExpression*,
@@ -21263,12 +21391,9 @@ namespace Legion {
       {
         update_released(it->first, (it->first->get_volume() == dst_volume),
                         it->second);
-        if (unpack_references)
-        {
-          for (FieldMaskSet<InstanceView>::const_iterator vit =
-                it->second.begin(); vit != it->second.end(); vit++)
-            vit->first->unpack_valid_ref();
-        }
+        for (FieldMaskSet<InstanceView>::const_iterator vit =
+              it->second.begin(); vit != it->second.end(); vit++)
+          vit->first->unpack_valid_ref();
       }
       if (precondition_updates != NULL)
       {
@@ -21280,13 +21405,13 @@ namespace Legion {
         if (tracing_preconditions == NULL)
         {
           tracing_preconditions = precondition_updates;
-          if (unpack_references)
+          if (unpack_tracing_references)
             tracing_preconditions->unpack_references();
         }
         else
         {
           precondition_updates->merge(*tracing_preconditions);
-          if (unpack_references)
+          if (unpack_tracing_references)
             precondition_updates->unpack_references();
           delete precondition_updates;
         }
@@ -21301,13 +21426,13 @@ namespace Legion {
         if (tracing_anticonditions == NULL)
         {
           tracing_anticonditions = anticondition_updates;
-          if (unpack_references)
+          if (unpack_tracing_references)
             tracing_anticonditions->unpack_references();
         }
         else
         {
           anticondition_updates->merge(*tracing_anticonditions);
-          if (unpack_references)
+          if (unpack_tracing_references)
             anticondition_updates->unpack_references();
           delete anticondition_updates;
         }
@@ -21322,13 +21447,13 @@ namespace Legion {
         if (tracing_postconditions == NULL)
         {
           tracing_postconditions = postcondition_updates;
-          if (unpack_references)
+          if (unpack_tracing_references)
             tracing_postconditions->unpack_references();
         }
         else
         {
           postcondition_updates->merge(*tracing_postconditions);
-          if (unpack_references)
+          if (unpack_tracing_references)
             postcondition_updates->unpack_references();
           delete postcondition_updates;
         }
@@ -21374,8 +21499,7 @@ namespace Legion {
       derez.deserialize(mask);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      bool invalidate_overlap, record_invalidate;
-      derez.deserialize<bool>(invalidate_overlap);
+      bool record_invalidate;
       derez.deserialize<bool>(record_invalidate);
       std::vector<RtEvent> applied_events;   
       if (ready.exists() && !ready.has_triggered())
@@ -21389,12 +21513,11 @@ namespace Legion {
           runtime->find_or_request_equivalence_set(target, ready);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        dst->clone_from(set, mask, overlap, record_invalidate, applied_events,
-            invalidate_overlap);
+        dst->clone_from(set, mask, overlap, record_invalidate, applied_events);
       }
       else
         set->clone_to_remote(target, target_space, target_expr, overlap, mask,
-            applied_events, invalidate_overlap, record_invalidate);
+            applied_events, record_invalidate);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -22730,7 +22853,7 @@ namespace Legion {
             const bool record_invalidate = 
              (target->context->get_depth() == eit->first->context->get_depth());
             target->clone_from(eit->first, overlap, expression,
-                record_invalidate, ready_events, true/*invalidate overlap*/);
+                record_invalidate, ready_events);
           }
           sit->set_mask -= overlap;
           if (!sit->set_mask)

@@ -951,8 +951,7 @@ namespace Legion {
         use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
             Runtime::create_rt_user_event() : RtUserEvent::NO_RT_USER_EVENT),
-        kind(k), external_pointer(-1UL), producer_event(p_event),
-        gc_state(init), pending_changes(0),
+        kind(k), producer_event(p_event), gc_state(init), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
         received_valid_references(0), padded_reservations(NULL)
@@ -965,7 +964,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
-        Runtime::trigger_event(NULL,use_event,fetch_metadata(instance,u_event));
+        Runtime::trigger_event_untraced(use_event,
+            fetch_metadata(instance,u_event));
       }
       else // add a resource reference to remove once this manager is set
         add_base_valid_ref(PENDING_UNBOUND_REF);
@@ -1421,6 +1421,9 @@ namespace Legion {
         if (gc_events.insert(user_event).second && 
             (++added_gc_events == runtime->gc_epoch_size))
         {
+          // We don't prune these when doing detailed legion spy so that we
+          // can check that there are no use-after-delete errors
+#ifndef LEGION_SPY
           // Go through and prune out any events that have triggered
           for (std::set<ApEvent>::iterator it = gc_events.begin();
                 it != gc_events.end(); /*nothing*/)
@@ -1433,6 +1436,7 @@ namespace Legion {
             else
               it++;
           }
+#endif
           added_gc_events = 0;
         }
       }
@@ -1794,12 +1798,12 @@ namespace Legion {
       if (!is_external_instance() || (gc_state != COLLECTED_GC_STATE))
       {
         gc_state = COLLECTABLE_GC_STATE;
-        // If we're an eagerly allocated instance start the collection
-        // immediately since there's no point in re-use
-        if (kind == EAGER_INSTANCE_KIND)
+        // If this instance is set to eager collection priority
+        // then we try to do that now
+        if (min_gc_priority == LEGION_GC_EAGER_PRIORITY)
         {
           RtEvent dummy_ready;
-          collect(dummy_ready, &i_lock);
+          collect(dummy_ready, NULL, &i_lock);
         }
       }
       return remove_base_gc_ref(INTERNAL_VALID_REF);
@@ -2046,13 +2050,16 @@ namespace Legion {
       derez.deserialize(result);
       RtEvent *target;
       derez.deserialize(target);
+      PhysicalInstance *hole;
+      derez.deserialize(hole);
       RtUserEvent done;
       derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
       RtEvent ready;
-      if (manager->collect(ready))
+      PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
+      if (manager->collect(ready, (hole == NULL) ? NULL : &hole_instance))
       {
         Serializer rez;
         {
@@ -2060,6 +2067,9 @@ namespace Legion {
           rez.serialize(result);
           rez.serialize(target);
           rez.serialize(ready);
+          rez.serialize(hole);
+          if (hole != NULL)
+            rez.serialize(hole_instance);
           rez.serialize(done);
         }
         runtime->send_gc_response(source, rez);
@@ -2080,6 +2090,10 @@ namespace Legion {
       RtEvent *target;
       derez.deserialize(target);
       derez.deserialize(*target);
+      PhysicalInstance *hole;
+      derez.deserialize(hole);
+      if (hole != NULL)
+        derez.deserialize(*hole);
       RtUserEvent done;
       derez.deserialize(done);
 
@@ -2339,13 +2353,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::collect(RtEvent &ready, AutoLock *i_lock)
+    bool PhysicalManager::collect(RtEvent &ready, PhysicalInstance *hole, 
+                                  AutoLock *i_lock)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert((hole == NULL) || !hole->exists());
+#endif
       if (i_lock == NULL)
       {
         AutoLock i2_lock(inst_lock);
-        return collect(ready, &i2_lock);
+        return collect(ready, hole, &i2_lock);
       }
       // Do a quick to check to see if we can do a collection on the local node
       if (gc_state == VALID_GC_STATE)
@@ -2495,7 +2513,11 @@ namespace Legion {
                 // Notify the subscribers if we've been collected
                 to_notify.swap(subscribers);
                 // Now we can perform the deletion which will release the lock
-                perform_deletion(runtime->address_space, i_lock);
+                RtEvent hole_ready = 
+                  perform_deletion(runtime->address_space, hole, i_lock);
+                // Only save the event for the whole being ready if we have one
+                if ((hole != NULL) && hole->exists())
+                  ready = hole_ready;
                 // Send notification messages to the remote nodes to tell
                 // them that this instance has been deleted, this is needed
                 // so that we can invalidate any subscribers on those nodes
@@ -2589,6 +2611,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(&result);
           rez.serialize(&ready);
+          rez.serialize(hole);
           rez.serialize(done);
         }
         pack_global_ref();
@@ -2601,82 +2624,95 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent PhysicalManager::set_garbage_collection_priority(MapperID mapper_id,
-                        Processor p, AddressSpaceID source, GCPriority priority)
+                                               Processor p, GCPriority priority)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_external_instance());
 #endif
-      RtEvent wait_on;
       RtUserEvent done_event;
+      RtEvent wait_on, updated;
       bool remove_never_reference = false;
+      bool broadcast_priority_update = false;
       { 
         const std::pair<MapperID,Processor> key(mapper_id, p);
         AutoLock i_lock(inst_lock);
         // If this thing is already deleted then there is nothing to do
         if (gc_state == COLLECTED_GC_STATE)
           return RtEvent::NO_RT_EVENT;
-        std::map<std::pair<MapperID,Processor>,GCPriority>::iterator finder =
-          mapper_gc_priorities.find(key);
-        if (finder == mapper_gc_priorities.end())
+        if (mapper_gc_priorities.empty())
         {
-          mapper_gc_priorities[key] = priority;
-          if (min_gc_priority <= priority)
-            return RtEvent::NO_RT_EVENT;
+          // First mapper priority to be set which means we need to update
+          // the min_gc_priority to be the initial value
+          mapper_gc_priorities.emplace(std::make_pair(key, priority));
+          // Always fall through to send the update because we were
+          // effectively in an uninitialized state before
         }
         else
         {
-          // See if we're the minimum priority
-          if (min_gc_priority < finder->second)
+          std::map<std::pair<MapperID,Processor>,GCPriority>::iterator finder =
+            mapper_gc_priorities.find(key);
+          if (finder == mapper_gc_priorities.end())
           {
-            // We weren't one of the minimum priorities before
-            finder->second = priority;
+            mapper_gc_priorities[key] = priority;
             if (min_gc_priority <= priority)
               return RtEvent::NO_RT_EVENT;
-            // Otherwise fall through and update the min priority
           }
           else
           {
-            // We were one of the minimum priorities before
-#ifdef DEBUG_LEGION
-            assert(finder->second == min_gc_priority);
-#endif
-            // If things don't change then there is nothing to do
-            if (finder->second == priority)
-              return RtEvent::NO_RT_EVENT;
-            finder->second = priority;
-            if (min_gc_priority < priority)
+            // See if we're the minimum priority
+            if (min_gc_priority < finder->second)
             {
-              // Raising one of the old minimum priorities
-              // See what the new min priority is
-              for (std::map<std::pair<MapperID,Processor>,GCPriority>::
-                    const_iterator it = mapper_gc_priorities.begin(); it !=
-                    mapper_gc_priorities.end(); it++)
-              {
-                // If the new minimum priority is still the same we're done
-                if (it->second == min_gc_priority)
-                  return RtEvent::NO_RT_EVENT;
-                if (it->second < priority)
-                  priority = it->second;
-              }
-#ifdef DEBUG_LEGION
-              // If we get here then we're increasing the minimum priority
-              assert(min_gc_priority < priority);
-#endif
+              // We weren't one of the minimum priorities before
+              finder->second = priority;
+              if (min_gc_priority <= priority)
+                return RtEvent::NO_RT_EVENT;
+              // Otherwise fall through and update the min priority
             }
-            // Else lowering the minimum priority
-          }
-        }
-        // If we get here then we're changing the minimum priority
+            else
+            {
+              // We were one of the minimum priorities before
 #ifdef DEBUG_LEGION
-        assert(priority != min_gc_priority);
+              assert(finder->second == min_gc_priority);
 #endif
+              // If things don't change then there is nothing to do
+              if (finder->second == priority)
+                return RtEvent::NO_RT_EVENT;
+              finder->second = priority;
+              if (min_gc_priority < priority)
+              {
+                // Raising one of the old minimum priorities
+                // See what the new min priority is
+                for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                      const_iterator it = mapper_gc_priorities.begin(); it !=
+                      mapper_gc_priorities.end(); it++)
+                {
+                  // If the new minimum priority is still the same we're done
+                  if (it->second == min_gc_priority)
+                    return RtEvent::NO_RT_EVENT;
+                  if (it->second < priority)
+                    priority = it->second;
+                }
+#ifdef DEBUG_LEGION
+                // If we get here then we're increasing the minimum priority
+                assert(min_gc_priority < priority);
+#endif
+              }
+              // Else lowering the minimum priority
+            }
+          }
+#ifdef DEBUG_LEGION
+          // If we get here then we're changing the minimum priority
+          assert(priority != min_gc_priority);
+#endif
+        }
         // Only deal with never collection refs on the owner node where
         // the ultimate garbage collection decisions are to be made
         if (is_owner())
         {
           if (priority < min_gc_priority)
           {
+            // Transitioning to a smaller priority
 #ifdef DEBUG_LEGION
             assert(LEGION_GC_NEVER_PRIORITY < min_gc_priority);
 #endif
@@ -2715,12 +2751,30 @@ namespace Legion {
               valid_references.fetch_add(1);
 #endif
             }
+            if (min_gc_priority == LEGION_GC_EAGER_PRIORITY)
+              // Tell the remote nodes they no longer need to
+              // check for each deletion
+              broadcast_priority_update = true;
           }
-          else
+          else if (min_gc_priority < priority)
           {
+            // Transitioning to a larger priority 
+            if (priority == LEGION_GC_EAGER_PRIORITY)
+            {
+              // If we're eagerly collectable then we try 
+              // to delete this now, otherwise eager priority 
+              // needs to be broadcasted out to all other nodes
+              // in case they become locally valid and then 
+              // invalid they need to know to check for that 
+              // as soon as they see it
+              if (!collect(updated, NULL, &i_lock))
+                broadcast_priority_update = true;
+            }
             if (min_gc_priority == LEGION_GC_NEVER_PRIORITY)
               remove_never_reference = true;
           }
+          // Else we were uninitialize before and this is the
+          // first time a mapper has set the priority
         }
         min_gc_priority = priority;
         // Make an event for when the priority updates are done
@@ -2731,9 +2785,28 @@ namespace Legion {
       // If we make it here then we need to do the update
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
-      // Record the priority update
-      const RtEvent updated = 
-        update_garbage_collection_priority(source, priority);
+      // Perform any updates for this priority
+      if (is_owner())
+      {
+        memory_manager->set_garbage_collection_priority(this, priority); 
+        if (broadcast_priority_update)
+          updated = broadcast_garbage_collection_priority_update(priority);
+      }
+      else
+      {
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(priority);
+          rez.serialize(done);
+          rez.serialize<bool>(false); // broadcast
+        }
+        pack_global_ref();
+        runtime->send_gc_priority_update(owner_space, rez);
+        updated = done;
+      }
       if (remove_never_reference && remove_base_valid_ref(NEVER_GC_REF))
         assert(false); // should never end up deleting ourselves
       Runtime::trigger_event(done_event, updated);
@@ -2752,24 +2825,32 @@ namespace Legion {
       derez.deserialize(priority);
       RtUserEvent done;
       derez.deserialize(done);
+      bool broadcast;
+      derez.deserialize<bool>(broadcast);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
 
-      // To avoid collisiions with existing local mappers which could lead
-      // to aliasing of priority updates, we use "invalid" processor IDs
-      // here that will never conflict with existing processor IDs
-      // Note that the NO_PROC is a valid processor ID for mappers in the
-      // case where the mapper handles all the processors in a node. We
-      // therefore always add the owner address space to the source to 
-      // produce a non-zero processor ID. Note that this formulation also
-      // avoid conflicts from different remote sources.
-      const Processor fake_proc = { source + manager->owner_space };
+      if (!broadcast)
+      {
+        // To avoid collisiions with existing local mappers which could lead
+        // to aliasing of priority updates, we use "invalid" processor IDs
+        // here that will never conflict with existing processor IDs
+        // Note that the NO_PROC is a valid processor ID for mappers in the
+        // case where the mapper handles all the processors in a node. We
+        // therefore always add the owner address space to the source to 
+        // produce a non-zero processor ID. Note that this formulation also
+        // avoid conflicts from different remote sources.
+        const Processor fake_proc = { source + manager->owner_space };
 #ifdef DEBUG_LEGION
-      assert(fake_proc.id != 0);
+        assert(fake_proc.id != 0);
 #endif
-      Runtime::trigger_event(done, manager->set_garbage_collection_priority(
-                        0/*default mapper ID*/, fake_proc, source, priority));
+        Runtime::trigger_event(done, manager->set_garbage_collection_priority(
+                                0/*default mapper ID*/, fake_proc, priority));
+      }
+      else
+        Runtime::trigger_event(done,
+            manager->broadcast_garbage_collection_priority_update(priority));
       manager->unpack_global_ref();
     }
 
@@ -3000,11 +3081,8 @@ namespace Legion {
       derez.deserialize(inst);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
-      PendingRemoteExpression pending;
-      RtEvent domain_ready;
       IndexSpaceExpression *inst_domain = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-                                                pending, domain_ready);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       size_t piece_list_size;
       derez.deserialize(piece_list_size);
       void *piece_list = NULL;
@@ -3036,15 +3114,15 @@ namespace Legion {
       GarbageCollectionState gc_state;
       derez.deserialize(gc_state);
 
-      if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
+      if (fs_ready.exists() || layout_ready.exists())
       {
         const RtEvent precondition = 
-          Runtime::merge_events(domain_ready, fs_ready, layout_ready);
+          Runtime::merge_events(fs_ready, layout_ready);
         if (precondition.exists() && !precondition.has_triggered())
         {
           // We need to defer this instance creation
           DeferPhysicalManagerArgs args(did, mem, inst,
-              inst_footprint, inst_domain, pending, 
+              inst_footprint, inst_domain,
               handle, tree_id, layout_id, use_event, unique_event, kind,
               redop, piece_list, piece_list_size, gc_state);
           runtime->issue_runtime_meta_task(args,
@@ -3052,8 +3130,6 @@ namespace Legion {
           return;
         }
         // If we fall through we need to refetch things that we didn't get
-        if (domain_ready.exists())
-          inst_domain = runtime->forest->find_remote_expression(pending);
         if (fs_ready.exists())
           space_node = runtime->forest->get_node(handle);
         if (layout_ready.exists())
@@ -3070,20 +3146,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager::DeferPhysicalManagerArgs::DeferPhysicalManagerArgs(
             DistributedID d, Memory m, PhysicalInstance i, 
-            size_t f, IndexSpaceExpression *lx, 
-            const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
+            size_t f, IndexSpaceExpression *lx, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent use, LgEvent unique, InstanceKind k, 
             ReductionOpID r, const void *pl, size_t pl_size,
             GarbageCollectionState gc)
       : LgTaskArgs<DeferPhysicalManagerArgs>(implicit_provenance),
-            did(d), mem(m), inst(i), footprint(f), pending(p),
+            did(d), mem(m), inst(i), footprint(f),
             local_expr(lx), handle(h), tree_id(tid), layout_id(l), 
             use_event(use), unique_event(unique), kind(k), redop(r),
             piece_list(pl), piece_list_size(pl_size), state(gc)
     //--------------------------------------------------------------------------
     {
-      if (local_expr != NULL)
-        local_expr->add_base_expression_reference(META_TASK_REF);
+      local_expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3102,20 +3176,16 @@ namespace Legion {
     {
       const DeferPhysicalManagerArgs *dargs = 
         (const DeferPhysicalManagerArgs*)args; 
-      IndexSpaceExpression *inst_domain = dargs->local_expr;
-      if (inst_domain == NULL)
-        inst_domain = runtime->forest->find_remote_expression(dargs->pending);
       FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(dargs->layout_id);
       create_remote_manager(runtime, dargs->did, dargs->mem,
-          dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
+          dargs->inst, dargs->footprint, dargs->local_expr, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
           dargs->use_event, dargs->unique_event, dargs->kind,
           dargs->redop, dargs->state);
       // Remove the local expression reference if necessary
-      if ((dargs->local_expr != NULL) &&
-          dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
+      if (dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->local_expr;
     }
 
@@ -3165,8 +3235,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::perform_deletion(AddressSpaceID source,
-                                           AutoLock *i_lock /* = NULL*/)
+    RtEvent PhysicalManager::perform_deletion(AddressSpaceID source,
+                           PhysicalInstance *hole, AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3176,8 +3246,7 @@ namespace Legion {
       if (i_lock == NULL)
       {
         AutoLock instance_lock(inst_lock);
-        perform_deletion(source, &instance_lock);
-        return;
+        return perform_deletion(source, hole, &instance_lock);
       }
 #ifdef DEBUG_LEGION
       assert(pending_views.empty());
@@ -3202,19 +3271,30 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
 #else
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, deferred_deletion);
+      // We can't escape instances with serdez fields since we need to
+      // delete them explicity but everything else we can escape
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields, deferred_deletion);
+      else if (hole != NULL)
+        *hole = instance; // escape the hole to use for redistricting
       else
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_deletion);
-        else
-          instance.destroy(deferred_deletion);
-      }
+        instance.destroy(deferred_deletion);
 #endif
 #else
       // Release the i_lock since we're done with the atomic updates
       i_lock->release();
+#endif
+#ifdef LEGION_SPY
+      if (!deferred_deletion.exists())
+      {
+        const Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        deferred_deletion = RtEvent(rename);
+      }
+      for (std::set<ApEvent>::const_iterator it = gc_events.begin();
+            it != gc_events.end(); it++)
+        LegionSpy::log_event_dependence(*it, deferred_deletion);
+      LegionSpy::log_instance_deletion(unique_event, deferred_deletion);
 #endif
       // Once the deletion is actually done then we can tell the memory
       // manager that the deletion is finished and it is safe to remove
@@ -3227,6 +3307,7 @@ namespace Legion {
       }
       else
         memory_manager->unregister_deleted_instance(this);
+      return deferred_deletion;
     }
 
     //--------------------------------------------------------------------------
@@ -3250,44 +3331,104 @@ namespace Legion {
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #else
-      // If this is an eager allocation, return it back to the eager pool
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
       else
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields);
-        else
-          instance.destroy();
-      }
+        instance.destroy();
 #endif
 #endif
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalManager::update_garbage_collection_priority(
-                                     AddressSpaceID source, GCPriority priority)
+    RtEvent PhysicalManager::broadcast_garbage_collection_priority_update(
+                                                            GCPriority priority)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
+      std::vector<RtEvent> done_events;
+      // Send out the messages to perform the broadcast
+      if ((collective_mapping != NULL) && 
+          collective_mapping->contains(local_space))
       {
-        const RtUserEvent done = Runtime::create_rt_user_event();
-        Serializer rez;
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(owner_space, local_space, children);
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
         {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(priority);
-          rez.serialize(done);
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(priority);
+            rez.serialize(done);
+            rez.serialize<bool>(true); // broadcast
+          }
+          pack_global_ref();
+          runtime->send_gc_priority_update(*it, rez);
+          done_events.push_back(done);
         }
-        pack_global_ref();
-        runtime->send_gc_priority_update(owner_space, rez);
-        return done;
       }
-      else
+      if (is_owner() && (count_remote_instances() > 0))
       {
-        memory_manager->set_garbage_collection_priority(this, priority);
-        return RtEvent::NO_RT_EVENT;
+        struct UpdateFunctor {
+          UpdateFunctor(PhysicalManager *m, Runtime *rt, 
+                        std::vector<RtEvent> &d, GCPriority p)
+            : manager(m), runtime(rt), done_events(d), priority(p) { }
+          inline void apply(AddressSpaceID target)
+          {
+            if (target == runtime->address_space)
+              return;
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(manager->did);
+              rez.serialize(priority);
+              rez.serialize(done);
+              rez.serialize<bool>(true); // broadcast
+            }
+            manager->pack_global_ref();
+            runtime->send_gc_priority_update(target, rez);
+            done_events.push_back(done);
+          }
+          PhysicalManager *const manager;
+          Runtime *const runtime;
+          std::vector<RtEvent> &done_events;
+          const GCPriority priority;
+        };
+        UpdateFunctor functor(this, runtime, done_events, priority);
+        map_over_remote_instances(functor);
       }
+      RtEvent result;
+      if (!done_events.empty())
+        result = Runtime::merge_events(done_events);
+      // Take the lock and perform our local update
+      AutoLock i_lock(inst_lock);
+      if (priority != LEGION_GC_EAGER_PRIORITY)
+      {
+        // If we have mapper opinions we can reset this to whatever their
+        // current opinions are, otherwise we set it to whatever the new
+        // priority is
+        if (!mapper_gc_priorities.empty())
+        {
+          for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                const_iterator it = mapper_gc_priorities.begin(); it !=
+                mapper_gc_priorities.end(); it++)
+            if (it->second < min_gc_priority)
+              min_gc_priority = it->second;
+        }
+        else
+          min_gc_priority = priority;
+      }
+      else if (mapper_gc_priorities.empty())
+      {
+        // Only need to set the to eager priority if there are no mapper
+        // opinions because if there are mapper opinions either they 
+        // already set us to eager priority or they've changed their
+        // minds in between and we've lost the race
+        min_gc_priority = LEGION_GC_EAGER_PRIORITY;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -3332,9 +3473,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::update_physical_instance(
-                                                  PhysicalInstance new_instance,
-                                                  size_t new_footprint,
-                                                  uintptr_t new_pointer)
+             PhysicalInstance new_instance, RtEvent ready, size_t new_footprint)
     //--------------------------------------------------------------------------
     {
       {
@@ -3344,15 +3483,10 @@ namespace Legion {
         assert(instance_footprint == -1U);
 #endif
         instance = new_instance;
-        kind = EAGER_INSTANCE_KIND;
-        external_pointer = new_pointer;
-#ifdef DEBUG_LEGION
-        assert(external_pointer != -1UL);
-#endif
+        kind = INTERNAL_INSTANCE_KIND;
+        instance_footprint = new_footprint;
 
-        update_instance_footprint(new_footprint);
-
-        Runtime::trigger_event(instance_ready);
+        Runtime::trigger_event(instance_ready, ready);
 
         if (runtime->legion_spy_enabled)
         {
@@ -3365,8 +3499,8 @@ namespace Legion {
         if (is_owner() && has_remote_instances())
           broadcast_manager_update();
 
-        Runtime::trigger_event(
-            NULL, use_event, fetch_metadata(instance, producer_event));
+        Runtime::trigger_event_untraced(
+            use_event, fetch_metadata(instance, producer_event));
       }
       return remove_base_valid_ref(PENDING_UNBOUND_REF);
     }
@@ -3380,6 +3514,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(instance);
+        rez.serialize(instance_ready);
         rez.serialize(instance_footprint);
       }
       BroadcastFunctor functor(context->runtime, rez);
@@ -3396,6 +3531,8 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalInstance instance;
       derez.deserialize(instance);
+      RtEvent ready;
+      derez.deserialize(ready);
       size_t footprint;
       derez.deserialize(footprint);
 
@@ -3405,7 +3542,7 @@ namespace Legion {
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
 
-      if (manager->update_physical_instance(instance, footprint))
+      if (manager->update_physical_instance(instance, ready, footprint))
         delete manager;
     }
 
@@ -3661,7 +3798,7 @@ namespace Legion {
         creator_id(cid), instance(PhysicalInstance::NO_INST), 
         field_space_node(node), instance_domain(expr), tree_id(tid), 
         redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-        piece_list_size(0), valid(true)
+        piece_list_size(0), valid(true), allocated(false)
     //--------------------------------------------------------------------------
     {
       if (pl != NULL)
@@ -3686,7 +3823,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
         RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
-        unsigned *unsat_index, size_t *footprint, RtEvent precondition)
+        unsigned *unsat_index, size_t *footprint, RtEvent precondition,
+        PhysicalInstance hole)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -3745,7 +3883,8 @@ namespace Legion {
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
-      Realm::InstanceLayoutGeneric *inst_layout = realm_layout->clone();
+      Realm::InstanceLayoutGeneric *inst_layout = 
+        hole.exists() ? realm_layout : realm_layout->clone();
 #ifdef DEBUG_LEGION
       assert(inst_layout != NULL);
 #endif
@@ -3761,21 +3900,22 @@ namespace Legion {
       ProfilingResponseBase base(this, creator_id, false/*completion*/);
 #ifndef LEGION_MALLOC_INSTANCES
       Realm::ProfilingRequest &req = requests.add_request(
-          runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+          runtime->find_local_group(), LG_LEGION_PROFILING_ID,
           &base, sizeof(base), LG_RESOURCE_PRIORITY);
       req.add_measurement<Realm::ProfilingMeasurements::InstanceAllocResult>();
       // Create a user event to wait on for the result of the profiling response
       profiling_ready = Runtime::create_rt_user_event();
 #endif
 #ifdef DEBUG_LEGION
+      assert(!allocated);
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       LgEvent unique_event;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
-        RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
-        unique_event = unique;
+        Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique);
       }
       ApEvent ready;
       if (runtime->profiler != NULL)
@@ -3784,8 +3924,12 @@ namespace Legion {
         current_unique_event = unique_event;
       }
 #ifndef LEGION_MALLOC_INSTANCES
-      ready = ApEvent(PhysicalInstance::create_instance(instance,
-            memory_manager->memory, inst_layout, requests, precondition));
+      if (hole.exists())
+        ready = ApEvent(
+            hole.redistrict(instance, inst_layout, requests, precondition));
+      else
+        ready = ApEvent(PhysicalInstance::create_instance(instance,
+              memory_manager->memory, inst_layout, requests, precondition));
       if (ready.exists() && (implicit_profiler != NULL))
         implicit_profiler->record_instance_ready(ready, unique_event);
       // Wait for the profiling response
@@ -3796,18 +3940,17 @@ namespace Legion {
         precondition.wait();
       ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
             requests, instance, unique_event));
-      if (!instance.exists())
-      {
-        if (unsat_kind != NULL)
-          *unsat_kind = LEGION_MEMORY_CONSTRAINT;
-        if (unsat_index != NULL)
-          *unsat_index = 0;
-        return NULL;
-      }
+      allocated = instance.exists();
 #endif
       // If we couldn't make it then we are done
-      if (!instance.exists())
+      if (!allocated)
       {
+        if (instance.exists())
+        {
+          // Destroy the instance ID so Realm can reclaim the ID
+          instance.destroy();
+          instance = PhysicalInstance::NO_INST;
+        }
         if (unsat_kind != NULL)
           *unsat_kind = LEGION_MEMORY_CONSTRAINT;
         if (unsat_index != NULL)
@@ -3914,7 +4057,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool InstanceBuilder::handle_profiling_response(
         const Realm::ProfilingResponse &response, const void *orig,
-        size_t orig_length, LgEvent &fevent)
+        size_t orig_length, LgEvent &fevent, bool &failed_alloc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3934,14 +4077,10 @@ namespace Legion {
       assert(measured);
 #endif
       // If we failed then clear the instance name since it is not valid
-      if (!result.success)
-      {
-        // Destroy the instance first so that Realm can reclaim the ID
-        instance.destroy();
-        instance = PhysicalInstance::NO_INST;
-        if (runtime->profiler != NULL)
-          runtime->profiler->handle_failed_instance_allocation();
-      }
+      if (result.success)
+        allocated = true;
+      else
+        failed_alloc = true;
       fevent = current_unique_event;
       // No matter what trigger the event
       // Can't read anything after trigger the event as the object
