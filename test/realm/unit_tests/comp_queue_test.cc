@@ -188,7 +188,7 @@ TEST_P(PopEventsTest, Base)
     EXPECT_EQ(pop_events[i].id, completed_events[i].id);
   }
 
-  for(int i = test_case.num_triggered_events; i < test_case.num_events; i++) {
+  for(size_t i = test_case.num_triggered_events; i < test_case.num_events; i++) {
     events[i]->trigger(trigger_gen, 0, /*poisoned=*/false, TimeLimit::responsive());
   }
 
