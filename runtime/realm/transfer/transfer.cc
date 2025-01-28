@@ -492,7 +492,6 @@ namespace Realm {
 #ifdef DEBUG_REALM
     assert(!tentative_valid);
 #endif
-
     nonaffine = 0;
 
     const InstanceLayout<N, T> *inst_layout =

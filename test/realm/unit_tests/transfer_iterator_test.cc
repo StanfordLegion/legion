@@ -1,51 +1,16 @@
-#include "realm/transfer/transfer_utils.h"
 #include "realm/transfer/transfer.h"
 #include "realm/inst_layout.h"
+#include <numeric>
 #include <tuple>
 #include <gtest/gtest.h>
 
 using namespace Realm;
-
-struct IteratorTestCase {
-  TransferIterator *it;
-  std::vector<TransferIterator::AddressInfo> infos;
-  std::vector<size_t> max_bytes;
-  std::vector<size_t> exp_bytes;
-  int num_steps;
-};
-
-class TransferIteratorParamTest : public ::testing::TestWithParam<IteratorTestCase> {};
-
-TEST_P(TransferIteratorParamTest, Base)
-{
-  IteratorTestCase test_case = GetParam();
-
-  for(int i = 0; i < test_case.num_steps; i++) {
-    TransferIterator::AddressInfo info;
-    size_t bytes = test_case.it->step(test_case.max_bytes[i], info, 0, 0);
-
-    EXPECT_EQ(bytes, test_case.exp_bytes[i]);
-
-    if(!test_case.infos.empty()) {
-      EXPECT_EQ(info.base_offset, test_case.infos[i].base_offset);
-      EXPECT_EQ(info.bytes_per_chunk, test_case.infos[i].bytes_per_chunk);
-      EXPECT_EQ(info.num_lines, test_case.infos[i].num_lines);
-      EXPECT_EQ(info.line_stride, test_case.infos[i].line_stride);
-      EXPECT_EQ(info.num_planes, test_case.infos[i].num_planes);
-      // EXPECT_FALSE(it.done());
-    }
-  }
-}
 
 template <int N, typename T>
 static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
                                            size_t bytes_per_element = 8)
 {
   InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
-
-  // RegionInstance inst = make_inst();
-  // RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
-
   InstanceLayoutGeneric::FieldLayout field_layout;
   field_layout.list_idx = 0;
   field_layout.rel_offset = 0;
@@ -87,11 +52,149 @@ static RegionInstanceImpl *create_inst(Rect<N, T> bounds, size_t bytes_per_eleme
   return impl;
 }
 
-const static size_t kByteSize = sizeof(int);
+template <typename PointType>
+struct PointTraits;
 
-const static IteratorTestCase kIteratorTestCases[] = {
+template <int N, typename T>
+struct PointTraits<Realm::Point<N, T>> {
+  static constexpr int DIM = N;
+  using value_type = T;
+};
+
+template <typename PointType>
+class IndexSpaceIteratorTest : public ::testing::Test {
+protected:
+  static constexpr int N = PointTraits<PointType>::DIM;
+  using T = typename PointTraits<PointType>::value_type;
+
+  void SetUp() override
+  {
+    dim_order.resize(N);
+    std::iota(dim_order.begin(), dim_order.end(), 0);
+  }
+
+  std::vector<int> dim_order;
+};
+
+TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
+
+TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
+{
+  constexpr int N = TestFixture::N;
+  constexpr size_t bytes = 16;
+  using T = typename TestFixture::T;
+  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
+  AddressList addrlist;
+  AddressListCursor cursor;
+  const InstanceLayoutPieceBase *nonaffine;
+
+  std::vector<int> inverted_dim_order;
+  for(int i = N - 1; i >= 0; i--) {
+    inverted_dim_order.emplace_back(i);
+  }
+
+  auto it = new TransferIteratorIndexSpace<N, T>(domain, create_inst<N, T>(domain, bytes),
+                                                 inverted_dim_order.data(), {0}, {0},
+                                                 /*field_sizes=*/{bytes}, 0);
+
+  bool ok = it->get_addresses(addrlist, nonaffine);
+
+  cursor.set_addrlist(&addrlist);
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(cursor.remaining(0), N > 1 ? bytes : bytes * domain.volume());
+  for(int i = 1; i < N; i++) {
+    int d = inverted_dim_order[i];
+    size_t count = (domain.hi[d] - domain.lo[d] + 1);
+    ASSERT_EQ(cursor.remaining(i), count);
+  }
+  delete it;
+}
+
+TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
+{
+  constexpr int N = TestFixture::N;
+  constexpr size_t bytes = 16;
+  using T = typename TestFixture::T;
+  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
+
+  auto it = new TransferIteratorIndexSpace<N, T>(domain, create_inst<N, T>(domain, bytes),
+                                                 this->dim_order.data(), {0}, {0},
+                                                 /*field_sizes=*/{bytes}, 0);
+  const InstanceLayoutPieceBase *nonaffine;
+  AddressList addrlist;
+
+  bool ok = it->get_addresses(addrlist, nonaffine);
+
+  AddressListCursor cursor;
+  cursor.set_addrlist(&addrlist);
+
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(nonaffine, nullptr);
+  ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * 16);
+  ASSERT_EQ(cursor.remaining(0), domain.volume() * 16);
+  ASSERT_EQ(cursor.get_offset(), 0);
+  ASSERT_EQ(cursor.get_dim(), 1);
+  delete it;
+}
+
+REGISTER_TYPED_TEST_SUITE_P(IndexSpaceIteratorTest, GetAddressesDense,
+                            GetAddressesDenseInvertedDims);
+
+template <typename T, int... Ns>
+auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
+{
+  return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
+}
+
+template <typename T>
+auto GeneratePointTypesForAllDims()
+{
+  return GeneratePointTypes<T>(std::make_integer_sequence<int, REALM_MAX_DIM>{});
+}
+
+#define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX)                                        \
+  using N##SUFFIX = decltype(GeneratePointTypesForAllDims<BASE_TYPE>());                 \
+  INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, IndexSpaceIteratorTest, N##SUFFIX)
+
+INSTANTIATE_TEST_TYPES(int, Int);
+INSTANTIATE_TEST_TYPES(long long, LongLong);
+
+constexpr static size_t kByteSize = sizeof(int);
+
+struct IteratorStepTestCase {
+  TransferIterator *it;
+  std::vector<TransferIterator::AddressInfo> infos;
+  std::vector<size_t> max_bytes;
+  std::vector<size_t> exp_bytes;
+  int num_steps;
+};
+
+class TransferIteratorStepTest : public ::testing::TestWithParam<IteratorStepTestCase> {};
+
+TEST_P(TransferIteratorStepTest, Base)
+{
+
+  IteratorStepTestCase test_case = GetParam();
+
+  for(int i = 0; i < test_case.num_steps; i++) {
+    TransferIterator::AddressInfo info;
+    size_t bytes = test_case.it->step(test_case.max_bytes[i], info, 0, 0);
+
+    ASSERT_EQ(bytes, test_case.exp_bytes[i]);
+
+    if(!test_case.infos.empty()) {
+      ASSERT_EQ(info.base_offset, test_case.infos[i].base_offset);
+      ASSERT_EQ(info.bytes_per_chunk, test_case.infos[i].bytes_per_chunk);
+      ASSERT_EQ(info.num_lines, test_case.infos[i].num_lines);
+      ASSERT_EQ(info.line_stride, test_case.infos[i].line_stride);
+      ASSERT_EQ(info.num_planes, test_case.infos[i].num_planes);
+    }
+  }
+}
+
+const static IteratorStepTestCase kIteratorStepTestCases[] = {
     // Case 0: step through 1D layout with 2 elements
-    IteratorTestCase{
+    IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<1, int>(
             Rect<1, int>(0, 1), create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0,
             {0}, {0},
@@ -114,7 +217,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
 
 // Case 1: step through 2D layout with 4 elements
 #if REALM_MAX_DIM > 1
-    IteratorTestCase{
+    IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
@@ -138,7 +241,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     },
 
     // Case 2: step through 2D layout at once
-    IteratorTestCase{
+    IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
@@ -156,7 +259,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     },
 
     // Case 3: step through 2D layout at once requesting more bytes
-    IteratorTestCase{
+    IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
@@ -174,7 +277,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
     },
 
     // Case 3: Partial steps through 2D layout
-    IteratorTestCase{
+    IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)),
@@ -202,7 +305,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
 
 #if REALM_MAX_DIM > 2
     // Case 5: step through 3D layout at once
-    IteratorTestCase{
+    IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<3, int>(
             Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
             create_inst<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
@@ -221,18 +324,19 @@ const static IteratorTestCase kIteratorTestCases[] = {
 #endif
 
     // Case 6: step with empty rect
-    IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
-                         Rect<1, int>::make_empty(),
-                         create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, {0}, {0},
-                         /*field_sizes=*/{kByteSize}, 0),
-                     .max_bytes = {0},
-                     .exp_bytes = {0},
-                     .num_steps = 1},
+    IteratorStepTestCase{.it = new TransferIteratorIndexSpace<1, int>(
+                             Rect<1, int>::make_empty(),
+                             create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, {0},
+                             {0},
+                             /*field_sizes=*/{kByteSize}, 0),
+                         .max_bytes = {0},
+                         .exp_bytes = {0},
+                         .num_steps = 1},
 
     // TODO(apryakhin): This currently hits an assert which should be
     // converted into an error.
     // Case 7: step with non-overlapping rectangle
-    /*IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
+    /*IteratorStepTestCase{.it = new TransferIteratorIndexSpace<1, int>(
                          Rect<1, int>(2, 3),
                          create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, 0, {0},
                          {0},
@@ -248,5 +352,5 @@ const static IteratorTestCase kIteratorTestCases[] = {
     // 3. Step through instance layout with multiple affine pieces
 };
 
-INSTANTIATE_TEST_SUITE_P(Foo, TransferIteratorParamTest,
-                         testing::ValuesIn(kIteratorTestCases));
+INSTANTIATE_TEST_SUITE_P(Foo, TransferIteratorStepTest,
+                         testing::ValuesIn(kIteratorStepTestCases));
