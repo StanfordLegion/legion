@@ -20106,7 +20106,7 @@ namespace Legion {
 #endif
         safe_tracing(config.safe_tracing),
         disable_independence_tests(config.disable_independence_tests),
-        disable_point_wise_analysis(config.disable_point_wise_analysis),
+        enable_pointwise_analysis(config.enable_pointwise_analysis),
         legion_spy_enabled(config.legion_spy_enabled),
         supply_default_mapper(default_mapper),
         enable_test_mapper(config.enable_test_mapper),
@@ -20327,7 +20327,7 @@ namespace Legion {
         unsafe_mapper(rhs.unsafe_mapper),
         safe_tracing(rhs.safe_tracing),
         disable_independence_tests(rhs.disable_independence_tests),
-        disable_point_wise_analysis(rhs.disable_point_wise_analysis),
+        enable_pointwise_analysis(rhs.enable_pointwise_analysis),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
         enable_test_mapper(rhs.enable_test_mapper),
@@ -34268,8 +34268,8 @@ namespace Legion {
         .add_option_int("-lg:parallel_replay", 
                         config.max_replay_parallelism, !filter)
         .add_option_bool("-lg:no_dyn",config.disable_independence_tests,!filter)
-        .add_option_bool("-lg:disable_point_wise_analysis",
-            config.disable_point_wise_analysis, !filter)
+        .add_option_bool("-lg:enable_pointwise_analysis",
+            config.enable_pointwise_analysis, !filter)
         .add_option_bool("-lg:spy",config.legion_spy_enabled, !filter)
         .add_option_bool("-lg:test",config.enable_test_mapper, !filter)
         .add_option_int("-lg:delay", config.delay_start, !filter)
@@ -34314,8 +34314,6 @@ namespace Legion {
         .add_option_int("-hl:message",config.max_message_size, !filter)
         .add_option_int("-hl:epoch", config.gc_epoch_size, !filter)
         .add_option_bool("-hl:no_dyn",config.disable_independence_tests,!filter)
-        .add_option_bool("-hl:disable_point_wise_analysis",
-            config.disable_point_wise_analysis, !filter)
         .add_option_bool("-hl:spy",config.legion_spy_enabled, !filter)
         .add_option_bool("-hl:test",config.enable_test_mapper, !filter)
         .add_option_int("-hl:delay", config.delay_start, !filter)

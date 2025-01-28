@@ -4181,7 +4181,7 @@ namespace Legion {
     bool PointwiseAnalyzable<OP>::is_pointwise_analyzable(void) const
     //--------------------------------------------------------------------------
     {
-      return !this->runtime->disable_point_wise_analysis;
+      return this->runtime->enable_pointwise_analysis;
     }
 
     //--------------------------------------------------------------------------

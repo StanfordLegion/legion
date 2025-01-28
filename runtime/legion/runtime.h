@@ -2790,7 +2790,7 @@ namespace Legion {
             safe_mapper(false),
             safe_tracing(false),
             disable_independence_tests(false),
-            disable_point_wise_analysis(false),
+            enable_pointwise_analysis(false),
 #ifdef LEGION_SPY
             legion_spy_enabled(true),
 #else
@@ -2855,7 +2855,7 @@ namespace Legion {
         bool safe_mapper;
         bool safe_tracing;
         bool disable_independence_tests;
-        bool disable_point_wise_analysis;
+        bool enable_pointwise_analysis;
         bool legion_spy_enabled;
         bool enable_test_mapper;
         std::string replay_file;
@@ -2983,7 +2983,7 @@ namespace Legion {
       const bool unsafe_mapper;
       const bool safe_tracing;
       const bool disable_independence_tests;
-      const bool disable_point_wise_analysis;
+      const bool enable_pointwise_analysis;
       const bool legion_spy_enabled;
       const bool supply_default_mapper;
       const bool enable_test_mapper;

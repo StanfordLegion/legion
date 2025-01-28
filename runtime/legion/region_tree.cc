@@ -1619,7 +1619,16 @@ namespace Legion {
       ProjectionSummary *shard_proj = NULL;
       if (proj_info.is_projecting())
       {
-        if (runtime->disable_point_wise_analysis)
+        if (runtime->enable_pointwise_analysis)
+        {
+          RegionTreeNode *destination = 
+            (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+            static_cast<RegionTreeNode*>(get_node(req.partition)) :
+            static_cast<RegionTreeNode*>(get_node(req.region));
+          shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                logical_analysis, proj_info);
+        }
+        else
         {
           if(proj_info.is_sharding())
           {
@@ -1634,15 +1643,6 @@ namespace Legion {
             shard_proj = destination->compute_projection_summary(op, idx, req,
                                                   logical_analysis, proj_info);
           }
-        }
-        else
-        {
-          RegionTreeNode *destination = 
-            (req.handle_type == LEGION_PARTITION_PROJECTION) ?
-            static_cast<RegionTreeNode*>(get_node(req.partition)) :
-            static_cast<RegionTreeNode*>(get_node(req.region));
-          shard_proj = destination->compute_projection_summary(op, idx, req,
-                                                logical_analysis, proj_info);
         }
       }
 
@@ -16541,8 +16541,8 @@ namespace Legion {
                         // each other and see if we can prove that they are
                         // disjoint in which case we don't need a close
 #ifdef DEBUG_LEGION
-                        if (runtime->disable_point_wise_analysis)
-                          assert(proj_info.is_sharding());
+                        assert(runtime->enable_pointwise_analysis ||
+                            proj_info.is_sharding());
                         assert(user.shard_proj != NULL);
 #endif
                         dominates = true;
