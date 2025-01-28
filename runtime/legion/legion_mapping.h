@@ -1020,6 +1020,16 @@ namespace Legion {
        * of instances that must be investigated for performing the indirect
        * copies which can improve overall performance and scalability. The
        * default is not to compute the preimages.
+       *
+       * If the mapper has opted to compute preimages, a further option is
+       * available to create shadow indirection instances in the same memory
+       * as the source/destination instances being gather/scattered to/from.
+       * This incurs some additional latency for the instance allocation but
+       * may result in better Realm gather/scatter performance for the copies.
+       * We recommend only enabling this mode when running with tracing. The
+       * default is for this to be disabled. Note that if there is not enough
+       * space in the memory where the source/destination instance is then
+       * this will silently fall back to using the original indirect instance.
        */
       struct MapCopyInput {
         std::vector<std::vector<PhysicalInstance> >   src_instances;
@@ -1048,6 +1058,7 @@ namespace Legion {
         RealmPriority                                 profiling_priority;
         RealmPriority                                 copy_fill_priority;
         bool                                          compute_preimages;
+        bool                                          shadow_indirections;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(MapperContext            ctx,

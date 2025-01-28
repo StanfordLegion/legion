@@ -2232,8 +2232,8 @@ namespace Legion {
         // If we already have the targets there's no need to 
         // iterate over the source equivalence sets as we can just
         // build a standard CopyAcrossUnstructured object
-        CopyAcrossUnstructured *across = 
-         copy_expr->create_across_unstructured(reservations,false/*preimages*/);
+        CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+            reservations, false/*preimages*/, false/*shadow indirections*/);
         across->add_reference();
 #ifdef LEGION_SPY
         across->src_tree_id = src_req.region.get_tree_id();
@@ -2378,7 +2378,8 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_src_out_of_range,
-                                           const bool compute_preimages)
+                                           const bool compute_preimages,
+                                           const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2408,8 +2409,8 @@ namespace Legion {
       // Easy out if we're not moving anything
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
@@ -2429,8 +2430,6 @@ namespace Legion {
       if (dst_ready.exists())
         copy_preconditions.push_back(dst_ready);
       ApEvent src_indirect_ready = idx_ready;
-      if (src_indirect_ready.exists())
-        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
       {
         if (src_indirect_ready.exists())
@@ -2518,7 +2517,8 @@ namespace Legion {
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
                                              const bool possible_dst_aliasing,
-                                             const bool compute_preimages)
+                                             const bool compute_preimages,
+                                             const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2549,8 +2549,8 @@ namespace Legion {
       // Easy out if we're not going to move anything
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the sources
       across->initialize_source_fields(this, src_req, src_targets, trace_info);
@@ -2572,8 +2572,6 @@ namespace Legion {
       if (src_ready.exists())
         copy_preconditions.push_back(src_ready);
       ApEvent dst_indirect_ready = idx_ready;
-      if (dst_indirect_ready.exists())
-        copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
       {
         if (dst_indirect_ready.exists())
@@ -2665,7 +2663,8 @@ namespace Legion {
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing,
-                              const bool compute_preimages)
+                              const bool compute_preimages,
+                              const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2703,8 +2702,8 @@ namespace Legion {
       // Quick out if there is nothing we're going to copy
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &src_idx_target = src_idx_targets[0];
@@ -2726,8 +2725,6 @@ namespace Legion {
       else
         copy_preconditions.swap(local_preconditions);
       ApEvent src_indirect_ready = src_idx_ready;
-      if (src_indirect_ready.exists())
-        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
       {
         if (src_indirect_ready.exists())
@@ -2737,8 +2734,6 @@ namespace Legion {
           src_indirect_ready = init_precondition;
       }
       ApEvent dst_indirect_ready = dst_idx_ready;
-      if (dst_indirect_ready.exists())
-        copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
       {
         if (dst_indirect_ready.exists())
@@ -6437,10 +6432,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->instances.size(); idx++)
           if (it->instances[idx] == instance)
             return it->instance_events[idx];
+      AutoLock p_lock(preimage_lock,1,false/*exclusive*/);
+      std::map<PhysicalInstance,LgEvent>::const_iterator finder =
+        profiling_shadow_instances.find(instance);
+      if (finder != profiling_shadow_instances.end())
+        return finder->second;
       // Should always have found it before this
       assert(false);
       return src_indirect_instance_event;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Index Space Expression 

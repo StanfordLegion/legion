@@ -5300,6 +5300,11 @@ namespace Legion {
         // No need to check for deletions, we stil hold gc references
         (*it)->remove_base_valid_ref(TRACE_REF);
       }
+      // Also need to release any shadow instances we might have made as
+      // part of executing this template
+      for (std::vector<IssueAcross*>::const_iterator it =
+            across_copies.begin(); it != across_copies.end(); it++)
+        (*it)->executor->release_shadow_instances();
     }
 
     //--------------------------------------------------------------------------
@@ -5332,7 +5337,6 @@ namespace Legion {
               are_read_only_users(finder->second))
             (*it)->executor->record_trace_immutable_indirection(false/*dst*/);
         }
-        across_copies.clear();
       }
       std::vector<unsigned> gen;
       // Sync the idempotency computation 
