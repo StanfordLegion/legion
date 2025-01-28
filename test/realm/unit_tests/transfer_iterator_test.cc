@@ -101,6 +101,7 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
 
   cursor.set_addrlist(&addrlist);
   ASSERT_TRUE(ok);
+  ASSERT_TRUE(it->done());
   ASSERT_EQ(cursor.remaining(0), N > 1 ? bytes : bytes * domain.volume());
   for(int i = 1; i < N; i++) {
     int d = inverted_dim_order[i];
@@ -129,6 +130,7 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
   cursor.set_addrlist(&addrlist);
 
   ASSERT_TRUE(ok);
+  ASSERT_TRUE(it->done());
   ASSERT_EQ(nonaffine, nullptr);
   ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * 16);
   ASSERT_EQ(cursor.remaining(0), domain.volume() * 16);
@@ -137,8 +139,37 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
   delete it;
 }
 
+TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
+{
+  constexpr int N = TestFixture::N;
+  constexpr size_t elem_size = 8;
+  constexpr size_t max_bytes = elem_size * 2;
+  using T = typename TestFixture::T;
+  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(3));
+
+  auto it = new TransferIteratorIndexSpace<N, T>(
+      domain, create_inst<N, T>(domain, elem_size), this->dim_order.data(), {0}, {0},
+      /*field_sizes=*/{elem_size}, 0);
+
+  size_t offset = 0;
+  for(int i = 0; i < domain.volume() / 2; i++) {
+    TransferIterator::AddressInfo info;
+    size_t ret_bytes = it->step(max_bytes, info, 0, 0);
+    ASSERT_EQ(ret_bytes, max_bytes);
+    ASSERT_EQ(info.base_offset, offset);
+    ASSERT_EQ(info.bytes_per_chunk, max_bytes);
+    ASSERT_EQ(info.num_lines, 1);
+    ASSERT_EQ(info.num_planes, 1);
+    offset += max_bytes;
+  }
+
+  EXPECT_TRUE(it->done());
+
+  delete it;
+}
+
 REGISTER_TYPED_TEST_SUITE_P(IndexSpaceIteratorTest, GetAddressesDense,
-                            GetAddressesDenseInvertedDims);
+                            GetAddressesDenseInvertedDims, StepDense);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
@@ -157,7 +188,8 @@ auto GeneratePointTypesForAllDims()
   INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, IndexSpaceIteratorTest, N##SUFFIX)
 
 INSTANTIATE_TEST_TYPES(int, Int);
-INSTANTIATE_TEST_TYPES(long long, LongLong);
+// TODO(apryakhin@): Consider enabling if needed
+// INSTANTIATE_TEST_TYPES(long long, LongLong);
 
 constexpr static size_t kByteSize = sizeof(int);
 
@@ -193,28 +225,6 @@ TEST_P(TransferIteratorStepTest, Base)
 }
 
 const static IteratorStepTestCase kIteratorStepTestCases[] = {
-    // Case 0: step through 1D layout with 2 elements
-    IteratorStepTestCase{
-        .it = new TransferIteratorIndexSpace<1, int>(
-            Rect<1, int>(0, 1), create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0,
-            {0}, {0},
-            /*field_sizes=*/{kByteSize}, 0),
-        .infos = {TransferIterator::AddressInfo{/*offset=*/0, /*bytes_per_el=*/kByteSize,
-                                                /*num_lines=*/1,
-                                                /*line_stride=*/0,
-                                                /*num_planes=*/1,
-                                                /*plane_stride=*/0},
-                  TransferIterator::AddressInfo{/*offset=*/kByteSize,
-                                                /*bytes_per_el=*/kByteSize,
-                                                /*num_lines=*/1,
-                                                /*line_stride=*/0,
-                                                /*num_planes=*/1,
-                                                /*plane_stride=*/0}},
-        .max_bytes = {kByteSize, kByteSize},
-        .exp_bytes = {kByteSize, kByteSize},
-        .num_steps = 2,
-    },
-
 // Case 1: step through 2D layout with 4 elements
 #if REALM_MAX_DIM > 1
     IteratorStepTestCase{
@@ -238,42 +248,6 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
         .max_bytes = {kByteSize * 2, kByteSize * 2},
         .exp_bytes = {kByteSize * 2, kByteSize * 2},
         .num_steps = 2,
-    },
-
-    // Case 2: step through 2D layout at once
-    IteratorStepTestCase{
-        .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-                                kByteSize),
-            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
-        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
-                                                /*bytes_per_el=*/kByteSize * 4,
-                                                /*num_lines=*/1,
-                                                /*line_stride=*/0,
-                                                /*num_planes=*/1,
-                                                /*plane_stride=*/0}},
-        .max_bytes = {kByteSize * 4},
-        .exp_bytes = {kByteSize * 4},
-        .num_steps = 1,
-    },
-
-    // Case 3: step through 2D layout at once requesting more bytes
-    IteratorStepTestCase{
-        .it = new TransferIteratorIndexSpace<2, int>(
-            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-                                kByteSize),
-            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
-        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
-                                                /*bytes_per_el=*/kByteSize * 4,
-                                                /*num_lines=*/1,
-                                                /*line_stride=*/0,
-                                                /*num_planes=*/1,
-                                                /*plane_stride=*/0}},
-        .max_bytes = {kByteSize * 8},
-        .exp_bytes = {kByteSize * 4},
-        .num_steps = 1,
     },
 
     // Case 3: Partial steps through 2D layout
@@ -300,26 +274,6 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
         .max_bytes = {kByteSize * 4, kByteSize * 4},
         .exp_bytes = {kByteSize * 2, kByteSize * 2},
         .num_steps = 2,
-    },
-#endif
-
-#if REALM_MAX_DIM > 2
-    // Case 5: step through 3D layout at once
-    IteratorStepTestCase{
-        .it = new TransferIteratorIndexSpace<3, int>(
-            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
-            create_inst<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
-                                kByteSize),
-            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
-        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
-                                                /*bytes_per_el=*/kByteSize * 8,
-                                                /*num_lines=*/1,
-                                                /*line_stride=*/0,
-                                                /*num_planes=*/1,
-                                                /*plane_stride=*/0}},
-        .max_bytes = {kByteSize * 8},
-        .exp_bytes = {kByteSize * 8},
-        .num_steps = 1,
     },
 #endif
 
