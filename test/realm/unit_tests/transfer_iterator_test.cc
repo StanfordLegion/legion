@@ -81,7 +81,7 @@ TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
 TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
 {
   constexpr int N = TestFixture::N;
-  constexpr size_t bytes = 16;
+  constexpr size_t elem_size = 16;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
   AddressList addrlist;
@@ -93,16 +93,16 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
     inverted_dim_order.emplace_back(i);
   }
 
-  auto it = new TransferIteratorIndexSpace<N, T>(domain, create_inst<N, T>(domain, bytes),
-                                                 inverted_dim_order.data(), {0}, {0},
-                                                 /*field_sizes=*/{bytes}, 0);
+  auto it = new TransferIteratorIndexSpace<N, T>(
+      domain, create_inst<N, T>(domain, elem_size), inverted_dim_order.data(), {0}, {0},
+      /*field_sizes=*/{elem_size});
 
   bool ok = it->get_addresses(addrlist, nonaffine);
 
   cursor.set_addrlist(&addrlist);
   ASSERT_TRUE(ok);
   ASSERT_TRUE(it->done());
-  ASSERT_EQ(cursor.remaining(0), N > 1 ? bytes : bytes * domain.volume());
+  ASSERT_EQ(cursor.remaining(0), N > 1 ? elem_size : elem_size * domain.volume());
   for(int i = 1; i < N; i++) {
     int d = inverted_dim_order[i];
     size_t count = (domain.hi[d] - domain.lo[d] + 1);
@@ -114,13 +114,13 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
 TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
 {
   constexpr int N = TestFixture::N;
-  constexpr size_t bytes = 16;
+  constexpr size_t elem_size = 16;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
 
-  auto it = new TransferIteratorIndexSpace<N, T>(domain, create_inst<N, T>(domain, bytes),
-                                                 this->dim_order.data(), {0}, {0},
-                                                 /*field_sizes=*/{bytes}, 0);
+  auto it = new TransferIteratorIndexSpace<N, T>(
+      domain, create_inst<N, T>(domain, elem_size), this->dim_order.data(), {0}, {0},
+      /*field_sizes=*/{elem_size});
   const InstanceLayoutPieceBase *nonaffine;
   AddressList addrlist;
 
@@ -132,8 +132,8 @@ TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
   ASSERT_TRUE(ok);
   ASSERT_TRUE(it->done());
   ASSERT_EQ(nonaffine, nullptr);
-  ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * 16);
-  ASSERT_EQ(cursor.remaining(0), domain.volume() * 16);
+  ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * elem_size);
+  ASSERT_EQ(cursor.remaining(0), domain.volume() * elem_size);
   ASSERT_EQ(cursor.get_offset(), 0);
   ASSERT_EQ(cursor.get_dim(), 1);
   delete it;
@@ -149,7 +149,7 @@ TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
 
   auto it = new TransferIteratorIndexSpace<N, T>(
       domain, create_inst<N, T>(domain, elem_size), this->dim_order.data(), {0}, {0},
-      /*field_sizes=*/{elem_size}, 0);
+      /*field_sizes=*/{elem_size});
 
   size_t offset = 0;
   for(int i = 0; i < domain.volume() / 2; i++) {
@@ -232,7 +232,7 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
                                 kByteSize),
-            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
                                                 /*num_lines=*/1,
@@ -256,7 +256,7 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
             create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)),
                                 kByteSize),
-            0, {0}, {0}, /*field_sizes=*/{kByteSize}, 0),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
                                                 /*num_lines=*/1,
@@ -282,7 +282,7 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
                              Rect<1, int>::make_empty(),
                              create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, {0},
                              {0},
-                             /*field_sizes=*/{kByteSize}, 0),
+                             /*field_sizes=*/{kByteSize}),
                          .max_bytes = {0},
                          .exp_bytes = {0},
                          .num_steps = 1},

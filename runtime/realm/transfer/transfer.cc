@@ -630,12 +630,10 @@ namespace Realm {
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
       const IndexSpace<N, T> &_is, RegionInstanceImpl *_inst_impl,
       const int _dim_order[N], const std::vector<FieldID> &_fields,
-      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
-      size_t _extra_elems)
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
     , field_idx(0)
-    , extra_elems(_extra_elems)
   {
     if(is.is_valid()) {
       iter.reset(is);
@@ -668,12 +666,10 @@ namespace Realm {
     RegionInstance inst;
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
-    size_t extra_elems;
     int dim_order[N];
 
     if(!((deserializer >> is) && (deserializer >> inst) && (deserializer >> fields) &&
-         (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
-         (deserializer >> extra_elems))) {
+         (deserializer >> fld_offsets) && (deserializer >> fld_sizes))) {
       return 0;
     }
 
@@ -683,9 +679,9 @@ namespace Realm {
       }
     }
 
-    TransferIteratorIndexSpace<N, T> *tiis = new TransferIteratorIndexSpace<N, T>(
-        is, get_runtime()->get_instance_impl(inst), dim_order, fields, fld_offsets,
-        fld_sizes, extra_elems);
+    TransferIteratorIndexSpace<N, T> *tiis =
+        new TransferIteratorIndexSpace<N, T>(is, get_runtime()->get_instance_impl(inst),
+                                             dim_order, fields, fld_offsets, fld_sizes);
     return tiis;
   }
 
@@ -761,7 +757,7 @@ namespace Realm {
   {
     if(!((serializer << iter.space) && (serializer << this->inst_impl->me) &&
          (serializer << fields) && (serializer << fld_offsets) &&
-         (serializer << fld_sizes) && (serializer << extra_elems))) {
+         (serializer << fld_sizes))) {
       return false;
     }
 
@@ -2033,11 +2029,10 @@ namespace Realm {
       const std::vector<FieldID> &fields, const std::vector<size_t> &fld_offsets,
       const std::vector<size_t> &fld_sizes) const
   {
-    size_t extra_elems = 0;
     assert(dim_order.size() == N);
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
     return new TransferIteratorIndexSpace<N, T>(is, impl, dim_order.data(), fields,
-                                                fld_offsets, fld_sizes, extra_elems);
+                                                fld_offsets, fld_sizes);
   }
 
   template <int N, typename T>

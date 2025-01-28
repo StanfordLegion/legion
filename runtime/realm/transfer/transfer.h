@@ -175,8 +175,7 @@ namespace Realm {
                                RegionInstanceImpl *_inst_impl, const int _dim_order[N],
                                const std::vector<FieldID> &_fields,
                                const std::vector<size_t> &_fld_offsets,
-                               const std::vector<size_t> &_fld_sizes,
-                               size_t _extra_elems);
+                               const std::vector<size_t> &_fld_sizes);
 
     template <typename S>
     static TransferIterator *deserialize_new(S &deserializer);
@@ -204,7 +203,6 @@ namespace Realm {
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
     size_t field_idx;
-    size_t extra_elems;
   };
 
   class TransferDomain {
