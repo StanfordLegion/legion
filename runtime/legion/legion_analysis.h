@@ -51,6 +51,8 @@ namespace Legion {
       inline bool operator==(const ContextCoordinate &rhs) const
         { return ((context_index == rhs.context_index) && 
                   (index_point == rhs.index_point)); }
+      inline bool operator!=(const ContextCoordinate &rhs) const
+        { return !((*this) == rhs); }
       inline bool operator<(const ContextCoordinate &rhs) const
         { if (context_index < rhs.context_index) return true;
           if (context_index > rhs.context_index) return false;
@@ -61,6 +63,39 @@ namespace Legion {
         { derez.deserialize(context_index); derez.deserialize(index_point); }
       uint64_t context_index;
       DomainPoint index_point;
+    };
+
+    /**
+     * \class TaskTreeCoordinates
+     * This represents a stack of context coordinates at every level of the
+     * task tree from the root down to the current task or operation
+     */
+    class TaskTreeCoordinates {
+    public:
+      bool operator==(const TaskTreeCoordinates &rhs) const;
+      bool operator!=(const TaskTreeCoordinates &rhs) const;
+      bool same_index_space(const TaskTreeCoordinates &rhs) const;
+    public:
+      inline void clear(void) { coordinates.clear(); }
+      inline bool empty(void) const { return coordinates.empty(); }
+      inline size_t size(void) const { return coordinates.size(); }
+      inline ContextCoordinate& back(void) { return coordinates.back(); }
+      inline const ContextCoordinate& back(void) const
+        { return coordinates.back(); }
+      inline ContextCoordinate& operator[](unsigned idx) 
+        { return coordinates[idx]; }
+      inline const ContextCoordinate& operator[](unsigned idx) const
+        { return coordinates[idx]; }
+      inline void emplace_back(ContextCoordinate &&coordinate)
+        { coordinates.emplace_back(coordinate); }
+      inline void reserve(size_t size) { coordinates.reserve(size); }
+      inline void swap(TaskTreeCoordinates &coords)
+        { coordinates.swap(coords.coordinates); }
+    public:
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
+    private:
+      std::vector<ContextCoordinate> coordinates;
     };
 
     /**
@@ -96,16 +131,15 @@ namespace Legion {
       const RegionUsage usage;
       Operation *const op;
       const size_t ctx_index;
+      const UniqueID uid;
       // Since internal operations have the same ctx_index as their
       // creator we need a way to distinguish them from the creator
       const unsigned internal_idx;
       const unsigned idx;
       const GenerationID gen;
       ProjectionSummary *const shard_proj;
-#ifdef LEGION_SPY
-      const UniqueID uid;
-#endif
-    };
+      const bool pointwise_analyzable;
+    }; 
 
     /**
      * \class VersionInfo
@@ -209,12 +243,14 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez) = 0;
     public:
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
-                           const TraceLocalID &tlid, bool register_memo) = 0;
+                           const TraceLocalID &tlid, bool register_memo,
+                           std::set<RtEvent> &applied_events) = 0;
       virtual void request_term_event(ApUserEvent &term_event) = 0;
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid) = 0;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                        const TraceLocalID &tlid) = 0;
+                                        const TraceLocalID &tlid,
+                                        std::set<RtEvent> &applied) = 0;
     public:
       virtual void record_merge_events(ApEvent &lhs, ApEvent rhs,
                                        const TraceLocalID &tlid) = 0;
@@ -313,6 +349,7 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                          const Mapper::MapTaskOutput &output,
                          const std::deque<InstanceSet> &physical_instances,
+                         bool is_leaf, bool has_return_size,
                          std::set<RtEvent> &applied_events) = 0;
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent pre,
@@ -354,8 +391,7 @@ namespace Legion {
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                           const TraceLocalID &tlid, PhysicalTemplate *tpl, 
-                          DistributedID repl_did, TraceID tid,
-                          std::set<RtEvent> &applied_events);
+                          DistributedID repl_did, TraceID tid);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs) = delete;
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -367,12 +403,14 @@ namespace Legion {
       virtual void pack_recorder(Serializer &rez); 
     public:
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
-                           const TraceLocalID &tlid, bool register_memo);
+                           const TraceLocalID &tlid, bool register_memo,
+                           std::set<RtEvent> &applied_events);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &hs, 
                                                const TraceLocalID &tlid);
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                        const TraceLocalID &tlid);
+                                        const TraceLocalID &tlid,
+                                        std::set<RtEvent> &applied);
     public:
       virtual void record_merge_events(ApEvent &lhs, ApEvent rhs,
                                        const TraceLocalID &tlid);
@@ -466,6 +504,7 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          bool is_leaf, bool has_return_size,
                           std::set<RtEvent> &applied_events);
       virtual void record_complete_replay(const TraceLocalID &tlid,
                                           ApEvent pre,
@@ -477,8 +516,7 @@ namespace Legion {
           const std::vector<Memory> &target_memories, size_t future_size);
     public:
       static PhysicalTraceRecorder* unpack_remote_recorder(Deserializer &derez,
-                                    Runtime *runtime, const TraceLocalID &tlid,
-                                    std::set<RtEvent> &applied_events);
+                                    Runtime *runtime, const TraceLocalID &tlid);
       static void handle_remote_update(Deserializer &derez, 
                   Runtime *runtime, AddressSpaceID source);
       static void handle_remote_response(Deserializer &derez);
@@ -491,9 +529,6 @@ namespace Legion {
       PhysicalTemplate *const remote_tpl;
       const DistributedID repl_did;
       const TraceID trace_id;
-    protected:
-      mutable LocalLock applied_lock;
-      std::set<RtEvent> &applied_events;
     };
 
     /**
@@ -511,10 +546,11 @@ namespace Legion {
                 const TraceLocalID &tlid);
     public:
       inline void record_replay_mapping(ApEvent lhs, unsigned op_kind,
-                                        bool register_memo) const
+          bool register_memo, std::set<RtEvent> &applied_events) const
         {
           base_sanity_check();
-          rec->record_replay_mapping(lhs, op_kind, tlid, register_memo);
+          rec->record_replay_mapping(lhs, op_kind, tlid, register_memo,
+                                     applied_events);
         }
       inline void request_term_event(ApUserEvent &term_event) const
         {
@@ -526,10 +562,11 @@ namespace Legion {
           base_sanity_check();
           rec->record_create_ap_user_event(result, tlid);
         }
-      inline void record_trigger_event(ApUserEvent result, ApEvent rhs) const
+      inline void record_trigger_event(ApUserEvent result, ApEvent rhs,
+          std::set<RtEvent> &applied_events) const
         {
           base_sanity_check();
-          rec->record_trigger_event(result, rhs, tlid);
+          rec->record_trigger_event(result, rhs, tlid, applied_events);
         }
       inline void record_merge_events(PredEvent &result,
                                       PredEvent e1, PredEvent e2) const
@@ -587,10 +624,12 @@ namespace Legion {
       inline void record_mapper_output(const TraceLocalID &tlid, 
                           const Mapper::MapTaskOutput &output,
                           const std::deque<InstanceSet> &physical_instances,
+                          bool is_leaf, bool has_return_size,
                           std::set<RtEvent> &applied)
         {
           base_sanity_check();
-          rec->record_mapper_output(tlid, output, physical_instances, applied);
+          rec->record_mapper_output(tlid, output, physical_instances,
+              is_leaf, has_return_size, applied);
         }
       inline void record_complete_replay(std::set<RtEvent> &applied,
                                   ApEvent pre = ApEvent::NO_AP_EVENT) const
@@ -767,7 +806,7 @@ namespace Legion {
     public:
       void pack_trace_info(Serializer &rez) const;
       static PhysicalTraceInfo unpack_trace_info(Deserializer &derez,
-          Runtime *runtime, std::set<RtEvent> &applied_events);
+          Runtime *runtime);
     private:
       inline void sanity_check(void) const
         {
@@ -1026,6 +1065,7 @@ namespace Legion {
       virtual bool is_unique_shards(void) const = 0;
       virtual bool interferes(ProjectionNode *other,
           ShardID local, bool &dominates) const = 0;
+      virtual bool pointwise_dominates(const ProjectionNode *other) const = 0;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1052,6 +1092,7 @@ namespace Legion {
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other,
           ShardID local, bool &dominates) const;
+      virtual bool pointwise_dominates(const ProjectionNode *other) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1062,6 +1103,7 @@ namespace Legion {
           std::map<LogicalPartition,PartitionSummary> &partitions);
       bool has_interference(ProjectionRegion *other, ShardID local,
                             bool &dominates) const;
+      bool has_pointwise_dominance(const ProjectionRegion *other) const;
       void add_user(ShardID shard);
       void add_child(ProjectionPartition *child);
     public:
@@ -1089,6 +1131,7 @@ namespace Legion {
       virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other,
           ShardID local, bool &dominates) const;
+      virtual bool pointwise_dominates(const ProjectionNode *other) const;
       virtual void extract_shard_summaries(bool supports_name_based_analysis,
           ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
@@ -1099,6 +1142,7 @@ namespace Legion {
           std::map<LogicalPartition,PartitionSummary> &partitions);
       bool has_interference(ProjectionPartition *other, ShardID local,
                             bool &dominates) const;
+      bool has_pointwise_dominance(const ProjectionPartition *other) const;
       void add_child(ProjectionRegion *child);
     public:
       PartitionNode *const partition;
@@ -1370,6 +1414,8 @@ namespace Legion {
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
           ProjectionSummary *one, ProjectionSummary *two, bool &dominates);
+      bool record_pointwise_dependence(LogicalAnalysis &analysis,
+          const LogicalUser &prev, const LogicalUser &next, bool &dominates);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1443,6 +1489,11 @@ namespace Legion {
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,
          std::pair<bool/*interferes*/,bool/*dominates*/> > > interfering_shards;
+      // Track which pairs of projection summaries have point-wise mapping
+      // dependences between them.
+      std::unordered_map<ProjectionSummary*,
+       std::unordered_map<ProjectionSummary*,
+       std::pair<bool/*pointwise*/,bool/*dominates*/> > > pointwise_dependences;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -2301,8 +2352,7 @@ namespace Legion {
     public:
       RemoteCollectiveAnalysis(size_t ctx_index, unsigned req_index,
                                IndexSpaceID match_space, RemoteOp *op,
-                               Deserializer &derez, Runtime *runtime,
-                               std::set<RtEvent> &applied_events);
+                               Deserializer &derez, Runtime *runtime);
       virtual ~RemoteCollectiveAnalysis(void);
       virtual size_t get_context_index(void) const { return context_index; }
       virtual unsigned get_requirement_index(void) const
@@ -2315,7 +2365,7 @@ namespace Legion {
       virtual bool remove_analysis_reference(void) 
         { return remove_reference(); }
       static RemoteCollectiveAnalysis* unpack(Deserializer &derez,
-          Runtime *runtime, std::set<RtEvent> &applied_events);
+          Runtime *runtime);
     public:
       const size_t context_index;
       const unsigned requirement_index;

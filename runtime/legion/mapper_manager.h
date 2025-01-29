@@ -241,6 +241,10 @@ namespace Legion {
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
     public:
+      virtual bool is_safe_for_unbounded_pools(void) = 0;
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind) = 0;
+    public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
       static void handle_deferred_message(const void *args);
@@ -301,6 +305,10 @@ namespace Legion {
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    public:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the mapper reservation
       RtUserEvent complete_pending_pause_mapper_call(void);
@@ -359,6 +367,10 @@ namespace Legion {
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    public:
+      virtual bool is_safe_for_unbounded_pools(void);
+      virtual void report_unsafe_allocation_in_unbounded_pool(
+          const MappingCallInfo *info, Memory memory, RuntimeCallKind kind);
     protected:
       // Must be called while holding the lock
       void release_lock(std::vector<RtUserEvent> &to_trigger); 
@@ -375,29 +387,38 @@ namespace Legion {
                       Operation *op, bool prioritize = false);
       ~MappingCallInfo(void);
     public:
-      inline void begin_wait(void)
+      inline void begin_runtime_call(bool eager_pause)
         {
-          if (!paused)
+#ifdef DEBUG_LEGION
+          assert(!paused);
+          assert(!runtime_call);
+#endif
+          runtime_call = true;
+          if (eager_pause)
           {
             manager->pause_mapper_call(this);
             paused = true;
           }
         }
-      inline void pause_mapper_call(void)
+      inline void begin_wait(void)
         {
-#ifdef DEBUG_LEGION
-          assert(!paused);
-#endif
-          manager->pause_mapper_call(this);
-          paused = true;
+          if (!paused && runtime_call)
+          {
+            manager->pause_mapper_call(this);
+            paused = true;
+          }
         }
       inline void resume_mapper_call(void)
         { 
+#ifdef DEBUG_LEGION
+          assert(runtime_call);
+#endif
           if (paused)
           {
             manager->resume_mapper_call(this);
             paused = false;
           }
+          runtime_call = false;
         }
       inline const char* get_mapper_name(void) const
         { return manager->get_mapper_name(); }
@@ -414,8 +435,11 @@ namespace Legion {
       inline void enable_reentrant(void)
         { manager->enable_reentrant(this); }
       inline void disable_reentrant(void)
-        { manager->disable_reentrant(this); } 
-      void record_acquired_instance(InstanceManager *manager, bool created);
+        { manager->disable_reentrant(this); }
+      inline void report_unsafe_allocation_in_unbounded_pool(
+          Memory m, RuntimeCallKind k)
+        { manager->report_unsafe_allocation_in_unbounded_pool(this, m, k); }
+      void record_acquired_instance(InstanceManager *manager);
       void release_acquired_instance(InstanceManager *manager);
       bool perform_acquires(
           const std::vector<MappingInstance> &instances,
@@ -433,6 +457,9 @@ namespace Legion {
       long long                         start_time;
       bool                              reentrant;
       bool                              paused;
+      // Whether we're inside a runtime call from the mapper
+      bool                              runtime_call;
+      const bool                        priority;
     };
 
   };

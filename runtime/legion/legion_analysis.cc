@@ -14,6 +14,7 @@
  */
 
 #include <cmath>
+#include <cstring>
 #include "legion.h"
 #include "legion/runtime.h"
 #include "legion/legion_ops.h"
@@ -34,6 +35,68 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Task Tree Coordinates
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    bool TaskTreeCoordinates::operator==(const TaskTreeCoordinates &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (coordinates.size() != rhs.size())
+        return false;
+      for (unsigned idx = 0; idx < coordinates.size(); idx++)
+        if (coordinates[idx] != rhs[idx])
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskTreeCoordinates::operator!=(const TaskTreeCoordinates &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskTreeCoordinates::same_index_space(
+                                           const TaskTreeCoordinates &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (coordinates.size() != rhs.size())
+        return false;
+      // Must the same coordinates for all but the last level
+      for (unsigned idx = 0; idx < (coordinates.size()-1); idx++)
+        if (coordinates[idx] != rhs[idx])
+          return false;
+      // Last leve just needs to have the same context index
+      if (coordinates.back().context_index != rhs.back().context_index)
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskTreeCoordinates::serialize(Serializer &rez) const 
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(coordinates.size());
+      for (std::vector<ContextCoordinate>::const_iterator it =
+            coordinates.begin(); it != coordinates.end(); it++)
+        it->serialize(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskTreeCoordinates::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_coordinates;
+      derez.deserialize(num_coordinates);
+      coordinates.resize(num_coordinates);
+      for (std::vector<ContextCoordinate>::iterator it =
+            coordinates.begin(); it != coordinates.end(); it++)
+        it->deserialize(derez);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Users and Info 
     /////////////////////////////////////////////////////////////
 
@@ -41,11 +104,12 @@ namespace Legion {
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
                              ProjectionSummary *p, unsigned internal)
       : Collectable(), usage(u), op(o), ctx_index(op->get_context_index()),
+        uid(o->get_unique_op_id()),
         internal_idx(internal), idx(id), gen(o->get_generation()),
-        shard_proj(p)
-#ifdef LEGION_SPY
-        , uid(o->get_unique_op_id())
-#endif
+        shard_proj(p), pointwise_analyzable(op->is_pointwise_analyzable() &&
+            (shard_proj != NULL) &&
+             ((shard_proj->projection->projection_id == 0) ||
+               shard_proj->projection->is_invertible))
     //--------------------------------------------------------------------------
     {
       if (op != NULL)
@@ -86,6 +150,211 @@ namespace Legion {
 #endif
       if (expr->remove_base_expression_reference(PHYSICAL_USER_REF))
         delete expr;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Pointwise Dependence
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(void)
+      : context_index(0), unique_id(0), kind(Operation::LAST_OP_KIND),
+        region_index(0), domain(NULL), projection(NULL), sharding(NULL),
+        sharding_id(0), sharding_domain(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(const LogicalUser &user)
+      : context_index(user.ctx_index), unique_id(user.uid),
+        kind(user.op->get_operation_kind()), region_index(user.idx),
+        domain(user.shard_proj->domain),
+        projection(user.shard_proj->projection),
+        sharding((user.shard_proj->sharding == NULL) ? NULL :
+            user.shard_proj->sharding->functor),
+        sharding_id((user.shard_proj->sharding == NULL) ? 0 : 
+            user.shard_proj->sharding->sharding_id),
+        sharding_domain(user.shard_proj->sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(const PointwiseDependence &rhs)
+      : context_index(rhs.context_index), unique_id(rhs.unique_id),
+        kind(rhs.kind), region_index(rhs.region_index), domain(rhs.domain),
+        projection(rhs.projection), sharding(rhs.sharding),
+        sharding_id(rhs.sharding_id), sharding_domain(rhs.sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      if (domain != NULL)
+        domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::PointwiseDependence(PointwiseDependence &&rhs)
+      : context_index(rhs.context_index), unique_id(rhs.unique_id),
+        kind(rhs.kind), region_index(rhs.region_index), domain(rhs.domain),
+        projection(rhs.projection), sharding(rhs.sharding),
+        sharding_id(rhs.sharding_id), sharding_domain(rhs.sharding_domain)
+    //--------------------------------------------------------------------------
+    {
+      // Move references to ourselves
+      rhs.domain = NULL;
+      rhs.sharding_domain = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence::~PointwiseDependence(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence& PointwiseDependence::operator=(
+                                                 const PointwiseDependence &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+      context_index = rhs.context_index;
+      unique_id = rhs.unique_id;
+      kind = rhs.kind;
+      region_index = rhs.region_index;
+      domain = rhs.domain;
+      projection = rhs.projection;
+      sharding = rhs.sharding;
+      sharding_id = rhs.sharding_id;
+      sharding_domain = rhs.sharding_domain;
+      if (domain != NULL)
+        domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      if (sharding_domain != NULL)
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PointwiseDependence& PointwiseDependence::operator=(
+                                                      PointwiseDependence &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+      context_index = rhs.context_index;
+      unique_id = rhs.unique_id;
+      kind = rhs.kind;
+      region_index = rhs.region_index;
+      domain = rhs.domain;
+      projection = rhs.projection;
+      sharding = rhs.sharding;
+      sharding_id = rhs.sharding_id;
+      sharding_domain = rhs.sharding_domain;
+      // Just move over the references
+      rhs.domain = NULL;
+      rhs.sharding_domain = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointwiseDependence::matches(const LogicalUser &user) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(user.shard_proj != NULL);
+#endif
+      if (context_index != user.ctx_index)
+        return false;
+      if (region_index != user.idx)
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseDependence::find_dependences(const RegionRequirement &req,
+        const std::vector<LogicalRegion> &point_regions,
+        std::map<LogicalRegion,std::vector<DomainPoint> > &dependences) const
+    //--------------------------------------------------------------------------
+    {
+      projection->find_inversions(kind, unique_id, region_index, req,
+          domain, point_regions, dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseDependence::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(context_index);
+      rez.serialize(unique_id);
+      rez.serialize(kind);
+      rez.serialize(region_index);
+      rez.serialize(domain->handle);
+      rez.serialize(projection->projection_id);
+      rez.serialize(sharding_id);
+      if (sharding_domain != NULL)
+        rez.serialize(sharding_domain->handle);
+      else
+        rez.serialize(IndexSpace::NO_SPACE);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointwiseDependence::deserialize(Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      if ((domain != NULL) && 
+          domain->remove_base_expression_reference(POINTWISE_DEPENDENCE_REF))
+        delete domain;
+      if ((sharding_domain != NULL) &&
+          sharding_domain->remove_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF))
+        delete sharding_domain;
+      derez.deserialize(context_index);
+      derez.deserialize(unique_id);
+      derez.deserialize(kind);
+      derez.deserialize(region_index);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      domain = runtime->forest->get_node(handle); 
+      domain->add_base_expression_reference(POINTWISE_DEPENDENCE_REF);
+      ProjectionID pid;
+      derez.deserialize(pid);
+      projection = runtime->find_projection_function(pid);
+      derez.deserialize(sharding_id);
+      sharding = runtime->find_sharding_functor(sharding_id);
+      derez.deserialize(handle);
+      if (handle.exists())
+      {
+        sharding_domain = runtime->forest->get_node(handle);
+        sharding_domain->add_base_expression_reference(
+            POINTWISE_DEPENDENCE_REF);
+      }
+      else
+        sharding_domain = NULL;
     }
 
     /////////////////////////////////////////////////////////////
@@ -259,10 +528,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                                 const TraceLocalID &tlid, PhysicalTemplate *tpl,
-                                DistributedID did, TraceID tid,
-                                std::set<RtEvent> &applied)
+                                DistributedID did, TraceID tid)
       : runtime(rt), origin_space(origin), remote_tpl(tpl), repl_did(did),
-        trace_id(tid), applied_events(applied)
+        trace_id(tid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -303,7 +571,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_replay_mapping(ApEvent lhs,
-                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
+                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo,
+                 std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -321,11 +590,11 @@ namespace Legion {
           rez.serialize<bool>(register_memo);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo);
+        remote_tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo,
+                                          applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -382,7 +651,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                                   const TraceLocalID &tlid)
+        const TraceLocalID &tlid, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -399,11 +668,10 @@ namespace Legion {
           tlid.serialize(rez);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_trigger_event(lhs, rhs, tlid);
+        remote_tpl->record_trigger_event(lhs, rhs, tlid, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -875,7 +1143,7 @@ namespace Legion {
                                              const RegionUsage &usage,
                                              const FieldMask &user_mask,
                                              bool update_validity,
-                                             std::set<RtEvent> &effects)
+                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -896,12 +1164,11 @@ namespace Legion {
           rez.serialize<bool>(update_validity);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
         remote_tpl->record_op_inst(tlid, parent_req_index, inst, node, usage,
-                                   user_mask, update_validity, effects);
+                                   user_mask, update_validity, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -934,7 +1201,8 @@ namespace Legion {
     void RemoteTraceRecorder::record_mapper_output(const TraceLocalID &tlid,
                               const Mapper::MapTaskOutput &output,
                               const std::deque<InstanceSet> &physical_instances,
-                              std::set<RtEvent> &external_applied)
+                              bool is_leaf, bool has_return_size,
+                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -954,6 +1222,14 @@ namespace Legion {
           rez.serialize<size_t>(output.future_locations.size());
           for (unsigned idx = 0; idx < output.future_locations.size(); idx++)
             rez.serialize(output.future_locations[idx]);
+          rez.serialize<size_t>(output.leaf_pool_bounds.size());
+          for (std::map<Memory,PoolBounds>::const_iterator it =
+                output.leaf_pool_bounds.begin(); it !=
+                output.leaf_pool_bounds.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
           rez.serialize(output.chosen_variant);
           rez.serialize(output.task_priority);
           rez.serialize<bool>(output.postmap_task);
@@ -961,19 +1237,20 @@ namespace Legion {
           for (std::deque<InstanceSet>::const_iterator it = 
                physical_instances.begin(); it != physical_instances.end(); it++)
             it->pack_references(rez);
+          rez.serialize<bool>(is_leaf);
+          rez.serialize<bool>(has_return_size);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        AutoLock a_lock(applied_lock);
         applied_events.insert(applied);
       }
       else
         remote_tpl->record_mapper_output(tlid, output, physical_instances,
-                                         external_applied);
+            is_leaf, has_return_size, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_complete_replay(const TraceLocalID &tlid, 
-                                  ApEvent pre, std::set<RtEvent> &local_applied)
+                                 ApEvent pre, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (runtime->address_space != origin_space)
@@ -989,11 +1266,10 @@ namespace Legion {
           rez.serialize(pre);
         }
         runtime->send_remote_trace_update(origin_space, rez);
-        // Don't use the applied_events!
-        local_applied.insert(applied);
+        applied_events.insert(applied);
       }
       else
-        remote_tpl->record_complete_replay(tlid, pre, local_applied);
+        remote_tpl->record_complete_replay(tlid, pre, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1039,8 +1315,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ 
       PhysicalTraceRecorder* RemoteTraceRecorder::unpack_remote_recorder(
-                Deserializer &derez, Runtime *runtime, const TraceLocalID &tlid,
-                std::set<RtEvent> &applied_events)
+                Deserializer &derez, Runtime *runtime, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
       AddressSpaceID origin_space;
@@ -1062,7 +1337,7 @@ namespace Legion {
         }
       }
       return new RemoteTraceRecorder(runtime, origin_space, tlid,
-          remote_tpl, did, trace_id, applied_events);
+          remote_tpl, did, trace_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1089,8 +1364,14 @@ namespace Legion {
             tlid.deserialize(derez);
             bool register_memo;
             derez.deserialize<bool>(register_memo);
-            tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo);
-            Runtime::trigger_event(applied);
+            std::set<RtEvent> applied_events;
+            tpl->record_replay_mapping(lhs, op_kind, tlid, register_memo,
+                                       applied_events);
+            if (!applied_events.empty())
+              Runtime::trigger_event(applied,
+                  Runtime::merge_events(applied_events));
+            else
+              Runtime::trigger_event(applied);
             break;
           }
         case REMOTE_TRACE_REQUEST_TERM_EVENT:
@@ -1149,8 +1430,10 @@ namespace Legion {
             derez.deserialize(rhs);
             TraceLocalID tlid;
             tlid.deserialize(derez);
-            tpl->record_trigger_event(lhs, rhs, tlid);
-            Runtime::trigger_event(applied);
+            std::set<RtEvent> applied_events;
+            tpl->record_trigger_event(lhs, rhs, tlid, applied_events);
+            Runtime::trigger_event(applied,
+                Runtime::merge_events(applied_events));
             break;
           }
         case REMOTE_TRACE_MERGE_EVENTS:
@@ -1513,6 +1796,14 @@ namespace Legion {
               for (unsigned idx = 0; idx < num_future_locations; idx++)
                 derez.deserialize(output.future_locations[idx]);
             }
+            size_t num_pool_bounds;
+            derez.deserialize(num_pool_bounds);
+            for (unsigned idx = 0; idx < num_pool_bounds; idx++)
+            {
+              Memory memory;
+              derez.deserialize(memory);
+              derez.deserialize(output.leaf_pool_bounds[memory]);
+            }
             derez.deserialize(output.chosen_variant);
             derez.deserialize(output.task_priority);
             derez.deserialize<bool>(output.postmap_task);
@@ -1523,15 +1814,19 @@ namespace Legion {
             for (unsigned idx = 0; idx < num_phy_instances; idx++)
               physical_instances[idx].unpack_references(runtime, derez,
                                                         ready_events);
+            bool is_leaf, has_return_size;
+            derez.deserialize<bool>(is_leaf);
+            derez.deserialize<bool>(has_return_size);
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
               if (wait_on.exists() && !wait_on.has_triggered())
                 wait_on.wait();
             }
+            
             std::set<RtEvent> applied_events;
             tpl->record_mapper_output(tlid, output, physical_instances,
-                                      applied_events);
+                is_leaf, has_return_size, applied_events);
             if (!applied_events.empty())
               Runtime::trigger_event(applied, 
                   Runtime::merge_events(applied_events));
@@ -1879,7 +2174,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ PhysicalTraceInfo PhysicalTraceInfo::unpack_trace_info(
-       Deserializer &derez, Runtime *runtime, std::set<RtEvent> &applied_events)
+       Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       bool recording;
@@ -1894,8 +2189,7 @@ namespace Legion {
         bool update_validity;
         derez.deserialize(update_validity);
         PhysicalTraceRecorder *recorder = 
-          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, tlid,
-                                                      applied_events);
+          RemoteTraceRecorder::unpack_remote_recorder(derez, runtime, tlid);
         return PhysicalTraceInfo(tlid, index, dst_index,
                                  update_validity, recorder);
       }
@@ -2758,6 +3052,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ProjectionRegion::pointwise_dominates(
+                                              const ProjectionNode *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      const ProjectionRegion *rhs = 
+        dynamic_cast<const ProjectionRegion*>(other);
+      assert(rhs != NULL);
+      assert(region == rhs->region);
+      return has_pointwise_dominance(rhs);
+#else
+      return has_pointwise_dominance(
+          static_cast<const ProjectionRegion*>(other));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void ProjectionRegion::extract_shard_summaries(bool supports_name_based,
         ShardID local_shard, size_t total_shards,
         std::map<LogicalRegion,RegionSummary> &region_summaries,
@@ -2856,6 +3167,44 @@ namespace Legion {
           return true;
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::has_pointwise_dominance(
+                                            const ProjectionRegion *other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other->shard_users.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(!other->local_children.empty());
+#endif
+        if (!shard_users.empty())
+          return false;
+        for (std::unordered_map<LegionColor,
+              ProjectionPartition*>::const_iterator it =
+              other->local_children.begin(); it !=
+              other->local_children.end(); it++)
+        {
+          std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            finder = local_children.find(it->first);
+          if (finder == local_children.end())
+            return false;
+          if (!finder->second->has_pointwise_dominance(it->second))
+            return false;
+        }
+        return true;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        // Would violate name-based analysis
+        assert(other->local_children.empty());
+#endif
+        // If we don't have any other local children then we can do 
+        // pointwise analysis regardless of where the shards are
+        return local_children.empty(); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2967,6 +3316,23 @@ namespace Legion {
 #else
       return has_interference(static_cast<ProjectionPartition*>(other),
                               local_shard, dominates);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::pointwise_dominates(
+                                              const ProjectionNode *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      const ProjectionPartition *rhs =
+        dynamic_cast<const ProjectionPartition*>(other);
+      assert(rhs != NULL);
+      assert(partition == rhs->partition);
+      return has_pointwise_dominance(rhs);
+#else
+      return has_pointwise_dominance(
+          static_cast<const ProjectionPartition*>(other));
 #endif
     }
 
@@ -3114,6 +3480,29 @@ namespace Legion {
         }
         return false;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::has_pointwise_dominance(
+                                         const ProjectionPartition *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Should be disjoint or would violate name-based-self-analysis
+      assert(partition->row_source->is_disjoint(false/*from app*/));
+#endif
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            it = other->local_children.begin(); 
+            it != other->local_children.end(); it++)
+      {
+        std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+          finder = local_children.find(it->first);
+        if (finder == local_children.end())
+          return false;
+        if (!finder->second->has_pointwise_dominance(it->second))
+          return false;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4525,6 +4914,7 @@ namespace Legion {
       assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
       assert(interfering_shards.empty());
+      assert(pointwise_dependences.empty());
 #endif
     }
 
@@ -4794,6 +5184,21 @@ namespace Legion {
           finder++;
         }
       }
+      if (summary->can_perform_name_based_self_analysis())
+      {
+        std::unordered_map<ProjectionSummary*,
+          std::unordered_map<ProjectionSummary*,
+            std::pair<bool,bool> > >::iterator finder =
+              pointwise_dependences.find(summary);
+        if (finder != pointwise_dependences.end())
+        {
+          for (std::unordered_map<ProjectionSummary*,
+                std::pair<bool,bool> >::const_iterator it =
+                  finder->second.begin(); it != finder->second.end(); it++)
+            pointwise_dependences[it->first].erase(summary);
+          pointwise_dependences.erase(finder);
+        }
+      }
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,
           std::pair<bool,bool> > >::iterator finder =
@@ -4844,6 +5249,109 @@ namespace Legion {
         analysis.context->has_interfering_shards(one, two, dominates);
       interfering_shards[one][two] = std::make_pair(result, dominates);
       interfering_shards[two][one] = std::make_pair(result, dominates);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalState::record_pointwise_dependence(LogicalAnalysis &analysis,
+        const LogicalUser &prev, const LogicalUser &next, bool &dominates)
+    //--------------------------------------------------------------------------
+    {
+      if (!prev.pointwise_analyzable)
+        return false;
+      if (!next.pointwise_analyzable)
+        return false;
+      ProjectionSummary *one = prev.shard_proj;
+      ProjectionSummary *two = next.shard_proj;
+#ifdef DEBUG_LEGION
+      assert(one != NULL);
+      assert(two != NULL);
+      assert(one->owner == this);
+      assert(two->owner == this);
+#endif
+      // In order to do pointwise analysis then each of them have to support
+      // name based self-analysis meaning all the points are accessing
+      // disjoint data and all the accesses are at the leaves
+      if (!one->can_perform_name_based_self_analysis())
+        return false;
+      if (!two->can_perform_name_based_self_analysis())
+        return false;
+      // If they're the same summary then we can do pointiwse analysis
+      if (one == two)
+      {
+        dominates = true;
+        return true;
+      }
+      // Before we do the local analysis, see if we can find the result
+      // in the cache from a prior computation
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> > >::const_iterator
+          one_finder = pointwise_dependences.find(one);
+      if (one_finder != pointwise_dependences.end())
+      {
+        std::unordered_map<ProjectionSummary*,
+          std::pair<bool,bool> >::const_iterator two_finder =
+            one_finder->second.find(two);
+        if (two_finder != one_finder->second.end())
+        {
+          dominates = two_finder->second.second;
+          return two_finder->second.first;
+        }
+      }
+      // If they are different summaries, but are using the same projection
+      // function and either one's launch domain is a (non-strict) subset of
+      // the other's launch domain then we can do pointwise dependence 
+      // analysis. This follows from the fact that we know that both launches
+      // can do intra-space named based dependence analysis so their is no
+      // aliasing between the subregions of either projection. Therefore 
+      // whichever points exist in one launch domain but not in the other
+      // cannot alias with the ones that overlap (or alias in a way that
+      // supports name-based analysis with other points). However, if both
+      // launch domains are just overlapping with neither dominating then
+      // the non-overlapping points in each projection could map to aliasing
+      // regions and therefore not be safe for name-based analysis.
+      if ((one->projection == two->projection) &&
+          ((one->args == two->args) || ((one->arglen == two->arglen) &&
+            (std::memcmp(one->args, two->args, one->arglen) == 0))))
+      {
+        if (one->domain == two->domain)
+        {
+          // If they both have the same domain then this is easy
+          pointwise_dependences[one][two] = std::make_pair(true,true);
+          pointwise_dependences[two][one] = std::make_pair(true,true);
+          dominates = true;
+          return true;
+        }
+        else
+        {
+          const bool one_dominates = one->domain->dominates(two->domain);
+          dominates = two->domain->dominates(one->domain);
+          const bool result = one_dominates || dominates;
+          pointwise_dependences[one][two] =
+            std::make_pair(result, dominates);
+          // Keep the data structure symmetric for when we go to
+          // prune out projection summaries
+          pointwise_dependences[two][one] =
+            std::make_pair(result, one_dominates);
+          return result; 
+        }
+      }
+      // If we get here, do the more expensive check to see if we can do
+      // point-wise analysis locally between the two summaries in our
+      // local address space and then all-reduce the result between any
+      // shards to see if they are all local and then save the result
+      // in the cache for future cases.
+      const std::pair<bool,bool> dominance =
+        analysis.context->has_pointwise_dominance(one, two);
+      // Same logic applies here as above: if either dominates then you
+      // can do pointwise dependence analysis
+      const bool result = dominance.first || dominance.second;
+      pointwise_dependences[one][two] =
+        std::make_pair(result, dominance.second);
+      pointwise_dependences[two][one] =
+        std::make_pair(result, dominance.first);
+      dominates = dominance.second;
       return result;
     }
 
@@ -6934,7 +7442,7 @@ namespace Legion {
         summary = Runtime::merge_events(&trace_info, events);
         if (summary_event.exists())
         {
-          Runtime::trigger_event(&trace_info, summary_event, summary);
+          Runtime::trigger_event(summary_event, summary, trace_info, effects);
           // Pull this onto the stack in case the object is deleted
           summary = summary_event;
         }
@@ -8060,8 +8568,8 @@ namespace Legion {
       const RtEvent done = dargs->analysis->perform_registration(
         RtEvent::NO_RT_EVENT, dargs->usage, applied_events,
         dargs->precondition, dargs->termination, insts_ready, dargs->symbolic);
-      Runtime::trigger_event(dargs->trace_info,
-          dargs->instances_ready, insts_ready);
+      Runtime::trigger_event(dargs->instances_ready, insts_ready,
+          *(dargs->trace_info), applied_events);
       Runtime::trigger_event(dargs->done_event, done);
       if (!applied_events.empty())
         dargs->analysis->record_deferred_applied_events(applied_events);
@@ -8092,7 +8600,8 @@ namespace Legion {
         dargs->analysis->perform_output(
             RtEvent::NO_RT_EVENT, applied_events, true/*already deferred*/);
       if (dargs->effects_event.exists())
-        Runtime::trigger_event(dargs->trace_info, dargs->effects_event, result);
+        Runtime::trigger_event(dargs->effects_event, result,
+            *(dargs->trace_info), applied_events);
       if (!applied_events.empty())
         dargs->analysis->record_deferred_applied_events(applied_events);
       if (on_heap && dargs->analysis->remove_reference())
@@ -8335,12 +8844,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteCollectiveAnalysis::RemoteCollectiveAnalysis(size_t ctx_index,
                           unsigned req_index, IndexSpaceID match, RemoteOp *op,
-                          Deserializer &derez, Runtime *runtime,
-                          std::set<RtEvent> &applied_events)
+                          Deserializer &derez, Runtime *runtime)
       : context_index(ctx_index), requirement_index(req_index),
         match_space(match), operation(op),
-        trace_info(PhysicalTraceInfo::unpack_trace_info(derez, runtime,
-                                                        applied_events))
+        trace_info(PhysicalTraceInfo::unpack_trace_info(derez, runtime))
     //--------------------------------------------------------------------------
     {
     }
@@ -8361,7 +8868,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteCollectiveAnalysis* RemoteCollectiveAnalysis::unpack(
-       Deserializer &derez, Runtime *runtime, std::set<RtEvent> &applied_events)
+       Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       size_t context_index;
@@ -8372,7 +8879,7 @@ namespace Legion {
       derez.deserialize(match_space);
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       return new RemoteCollectiveAnalysis(context_index, requirement_index,
-          match_space, op, derez, runtime, applied_events);
+          match_space, op, derez, runtime);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9477,7 +9984,7 @@ namespace Legion {
       }
       std::set<RtEvent> deferral_events, applied_events; 
       PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       bool first_local = true;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
@@ -9733,7 +10240,7 @@ namespace Legion {
       derez.deserialize(target);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *mapping = ((collective_mapping_size) > 0) ?
@@ -10052,7 +10559,7 @@ namespace Legion {
       derez.deserialize(target);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);
       CollectiveMapping *mapping = ((collective_mapping_size) > 0) ?
@@ -10497,7 +11004,7 @@ namespace Legion {
       derez.deserialize(copy);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info =
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
 
       std::vector<CopyAcrossHelper*> across_helpers;
       RegionNode *dst_node = runtime->forest->get_node(dst_handle);
@@ -10537,7 +11044,7 @@ namespace Legion {
           analysis->perform_updates(remote_ready, applied_events); 
       const ApEvent result = 
         analysis->perform_output(updates_ready, applied_events);
-      Runtime::trigger_event(&trace_info, copy, result);
+      Runtime::trigger_event(copy, result, trace_info, applied_events);
       // Now we can trigger our applied event
       if (!applied_events.empty())
         Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
@@ -10979,7 +11486,7 @@ namespace Legion {
       }
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -11212,7 +11719,7 @@ namespace Legion {
       derez.deserialize(remove_restriction);
       std::set<RtEvent> deferral_events, applied_events;
       const PhysicalTraceInfo trace_info = 
-        PhysicalTraceInfo::unpack_trace_info(derez, runtime, applied_events);
+        PhysicalTraceInfo::unpack_trace_info(derez, runtime);
       bool first_local = true;
       size_t collective_mapping_size;
       derez.deserialize(collective_mapping_size);

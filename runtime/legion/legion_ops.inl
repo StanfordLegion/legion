@@ -128,6 +128,9 @@ namespace Legion {
           ready = true;
         }
 #endif
+        // Hold the lock while doing this to prevent races on checking
+        // the predication state
+        AutoLock o_lock(this->op_lock);
         // We do the mapping if we resolve true or if the predicate isn't ready
         // If it's already resolved false then we can take the easy way out
         if (ready && !value)
@@ -146,6 +149,26 @@ namespace Legion {
       }
       else
         Memoizable<OP>::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    bool Predicated<OP>::record_trace_hash(TraceRecognizer &recognizer,
+                                           uint64_t opidx)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Right now we don't support tracing of predicated operations
+      // so we need to disable auto tracing of operations with predicates
+      // We can remove this function once tracing supports predicated ops
+      switch (this->predication_state)
+      {
+        case OP::PREDICATED_TRUE_STATE:
+          break;
+        case OP::PENDING_PREDICATE_STATE:
+        case OP::PREDICATED_FALSE_STATE:
+          return Operation::record_trace_hash(recognizer, opidx);
+      }
+      return OP::record_trace_hash(recognizer, opidx);
     }
 
   }; // namespace Internal

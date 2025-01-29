@@ -599,6 +599,8 @@ void do_gather_copy(Runtime *runtime, Context ctx,
 				 false /*!range*/);
       icl.possible_src_indirect_out_of_range = false;
       icl.collective_src_indirect_points = true;
+      // Set the tag to 1 to signal the mapper to do preimages and shadow instances
+      icl.tag = 1;
 
       runtime->issue_copy_operation(ctx, icl);
       break;
@@ -998,7 +1000,8 @@ void top_level_task(const Task *task,
       domain_map[it->first] = Domain(DomainT<1>(it->second));
 
     IndexPartition ip = runtime->create_partition_by_domain(ctx, is_owned,
-                                                            domain_map, is_pieces);
+        domain_map, is_pieces, true, LEGION_COMPUTE_KIND, LEGION_AUTO_GENERATE_ID,
+        nullptr/*provenance*/, true/*take ownership*/);
     runtime->attach_name(ip, "ip_bloated");
     lp_owned_image_bloated = runtime->get_logical_partition(ctx, lr_owned, ip);
     runtime->attach_name(lp_owned_image_bloated, "lp_bloated");
@@ -1345,6 +1348,11 @@ public:
       inst = choose_instance(ctx, dst_index, num_points,
 			     copy.src_indirect_requirements[0]);
       output.src_indirect_instances[0] = inst;
+    }
+    if (copy.tag == 1)
+    {
+      output.compute_preimages = true;
+      output.shadow_indirections = true;
     }
   }
 

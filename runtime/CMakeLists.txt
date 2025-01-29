@@ -740,7 +740,7 @@ set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}
 target_include_directories(RealmRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
@@ -753,7 +753,7 @@ target_include_directories(RealmRuntime
 target_include_directories(RealmStatic
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
@@ -810,6 +810,8 @@ list(APPEND LEGION_SRC
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
+  legion/legion_auto_trace.h              legion/legion_auto_trace.cc
+  legion/trie.h
   legion/legion_types.h
   legion/legion_utilities.h
   legion/legion_views.h                   legion/legion_views.cc
@@ -995,8 +997,8 @@ target_include_directories(LegionRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mappers>
-    $<INSTALL_INTERFACE:include>
-    $<INSTALL_INTERFACE:include/mappers>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mappers>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
