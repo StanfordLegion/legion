@@ -171,16 +171,16 @@ namespace Realm {
     static ActiveMessageHandlerReg<RemoteSparsityContrib> remote_sparsity_contrib_reg;
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
 
-    atomic<int> remaining_contributor_count{};
-    atomic<int> total_piece_count{}, remaining_piece_count{};
+    atomic<int> remaining_contributor_count{0};
+    atomic<int> total_piece_count{0}, remaining_piece_count{0};
     Mutex mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
-    bool precise_requested{}, approx_requested{};
+    bool precise_requested{0}, approx_requested{0};
     Event precise_ready_event = Event::NO_EVENT;
     Event approx_ready_event = Event::NO_EVENT;
     NodeSet remote_precise_waiters, remote_approx_waiters;
     NodeSet &remote_subscribers;
-    size_t sizeof_precise{};
+    size_t sizeof_precise{0};
 
     std::unique_ptr<SparsityMapCommunicator<N, T>> sparsity_comm;
   };
@@ -216,10 +216,10 @@ namespace Realm {
 
     ID me = (ID::IDType)-1;
     unsigned owner = std::numeric_limits<unsigned>::max();
-    SparsityMapImplWrapper *next_free{};
-    atomic<DynamicTemplates::TagType> type_tag{};
-    atomic<void *> map_impl{}; // actual implementation
-    atomic<unsigned> references{};
+    SparsityMapImplWrapper *next_free{0};
+    atomic<DynamicTemplates::TagType> type_tag{0};
+    atomic<void *> map_impl{0}; // actual implementation
+    atomic<unsigned> references{0};
     NodeSet subscribers;
     std::unique_ptr<SparsityWrapperCommunicator> communicator;
     bool report_leaks = false;
