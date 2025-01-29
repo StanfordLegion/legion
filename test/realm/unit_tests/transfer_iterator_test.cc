@@ -148,7 +148,7 @@ TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
       this->field_ids, this->field_offsets, this->field_sizes);
 
   size_t offset = 0;
-  for(int i = 0; i < domain.volume() / 2; i++) {
+  for(size_t i = 0; i < domain.volume() / 2; i++) {
     TransferIterator::AddressInfo info;
     size_t ret_bytes = it->step(max_bytes, info, 0, 0);
     ASSERT_EQ(ret_bytes, max_bytes);
