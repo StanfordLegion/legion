@@ -46,6 +46,8 @@ set(REALM_SOURCES
     shm.cc
     transfer/lowlevel_disk.cc
     transfer/address_list.cc
+    transfer/channel_common.cc
+    transfer/memcpy_channel.cc
     transfer/channel.cc
     transfer/channel_disk.cc
     transfer/transfer.cc
