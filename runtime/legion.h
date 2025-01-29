@@ -1642,6 +1642,10 @@ namespace Legion {
       // Instruct the runtime that it does not need to produce
       // a future or future map result for this index task
       bool                               elide_future_return;
+      // Provide an optional future return size. In general you
+      // shouldn't need to use this and should prefer specifying
+      // the future return size when you register a task variant.
+      std::optional<size_t>              future_return_size;
     public:
       bool                               silence_warnings;
     };
@@ -1762,11 +1766,15 @@ namespace Legion {
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
     public:
+      bool                               silence_warnings;
+    public:
       // Instruct the runtime that it does not need to produce
       // a future or future map result for this index task
       bool                               elide_future_return;
-    public:
-      bool                               silence_warnings;
+      // Provide an optional future return size. In general you
+      // shouldn't need to use this and should prefer specifying
+      // the future return size when you register a task variant.
+      std::optional<size_t>              future_return_size;
     public:
       // Initial value for reduction
       Future                             initial_value;
@@ -4881,8 +4889,11 @@ namespace Legion {
        * for this operation return all of the points that alias
        * with it. Dependences will be resolved in the order that
        * they are returned to the runtime. The returned result 
-       * must not be empty because it must contain at least the
-       * point for the given operation.
+       * can only be empty if the region to be inverted is not
+       * actually in the range of the projection given the launch
+       * domain. If the region is in the range of the projection 
+       * then the returned result cannot be empty because it must
+       * contain at least the one point that maps to the particular region.
        */
       virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
                           const Domain &launch_domain,

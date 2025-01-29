@@ -86,6 +86,7 @@ namespace Legion {
       PROJECTION_REF = 35,
       REFINEMENT_REF = 36,
       OUTPUT_REGION_REF = 37,
+      POINTWISE_DEPENDENCE_REF = 38,
       LAST_SOURCE_REF = 38,
     };
 
@@ -135,6 +136,7 @@ namespace Legion {
       "Projection Reference",                       \
       "Refinement Reference",                       \
       "Output Region Reference",                    \
+      "Pointwise Dependence Reference",             \
     }
 
     extern Realm::Logger log_garbage;
@@ -307,7 +309,8 @@ namespace Legion {
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
-      RtEvent send_remote_registration(bool passing_global_ref = false);
+      // Can ignore return result if you hold a global reference
+      RtEvent send_remote_registration(bool has_global_reference);
       static void handle_did_remote_registration(Runtime *runtime,
                                                  Deserializer &derez,
                                                  AddressSpaceID source);

@@ -322,7 +322,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::is_forward_progress_task(void) const
+    bool TaskOp::is_forward_progress_task(void)
     //--------------------------------------------------------------------------
     {
       // A forward progress task is any task that needs to have some or all
@@ -416,6 +416,7 @@ namespace Legion {
       atomic_locks.clear(); 
       parent_req_indexes.clear();
       version_infos.clear();
+      future_return_size.reset();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
     }
@@ -475,6 +476,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < check_collective_regions.size(); idx++)
           rez.serialize(check_collective_regions[idx]);
       }
+      rez.serialize(future_return_size);
       rez.serialize(request_valid_instances);
       rez.serialize(execution_fence_event);
       rez.serialize(elide_future_return);
@@ -526,6 +528,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_check_collective_regions; idx++)
           derez.deserialize(check_collective_regions[idx]);
       }
+      derez.deserialize(future_return_size);
       derez.deserialize(request_valid_instances);
       derez.deserialize(execution_fence_event);
       derez.deserialize(elide_future_return);
@@ -1367,6 +1370,7 @@ namespace Legion {
       this->replicate = rhs->replicate;
       this->sharding_space = rhs->sharding_space;
       this->request_valid_instances = rhs->request_valid_instances;
+      this->future_return_size = rhs->future_return_size;
       // From TaskOp
       this->check_collective_regions = rhs->check_collective_regions;
       this->atomic_locks = rhs->atomic_locks;
@@ -1408,57 +1412,6 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_phase_barrier_arrival(unique_op_id, it->phase_barrier);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::compute_point_region_requirements(void)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, COMPUTE_POINT_REQUIREMENTS_CALL);
-      // Update the region requirements for this point
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].handle_type != LEGION_SINGULAR_PROJECTION)
-        {
-          ProjectionFunction *function = 
-            runtime->find_projection_function(regions[idx].projection);
-          if (function->is_invertible)
-            assert(false); // TODO: implement dependent launches for inline
-          regions[idx].region = function->project_point(this, idx, runtime, 
-                                                index_domain, index_point);
-          // Update the region requirement kind 
-          regions[idx].handle_type = LEGION_SINGULAR_PROJECTION;
-        }
-        // Check to see if the region is a NO_REGION,
-        // if it is then switch the privilege to NO_ACCESS
-        if (regions[idx].region == LogicalRegion::NO_REGION)
-        {
-          regions[idx].privilege = LEGION_NO_ACCESS;
-          continue;
-        }
-      }
-      complete_point_projection(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::complete_point_projection(void)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask *single_task = dynamic_cast<SingleTask*>(this);
-      if (single_task != NULL)
-        single_task->update_no_access_regions();
-      // Log our requirements that we computed
-      if (runtime->legion_spy_enabled)
-      {
-        UniqueID our_uid = get_unique_id();
-        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
-          log_requirement(our_uid, idx, logical_regions[idx]);
-      }
-#ifdef DEBUG_LEGION
-      {
-        perform_intra_task_alias_analysis();
-      }
-#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -2192,7 +2145,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Single Task 
+    // Single Task
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -2201,7 +2154,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
-    
+
     //--------------------------------------------------------------------------
     SingleTask::~SingleTask(void)
     //--------------------------------------------------------------------------
@@ -2460,7 +2413,7 @@ namespace Legion {
         }
       }
       update_no_access_regions();
-    } 
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::shard_off(RtEvent mapped_precondition)
@@ -2946,8 +2899,16 @@ namespace Legion {
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id())
       // Record the future output size
-      handle_future_size(variant_impl->return_type_size,
-          variant_impl->has_return_type_size, map_applied_conditions);
+      if (!elide_future_return)
+      {
+        if (future_return_size)
+          handle_future_size(*future_return_size, map_applied_conditions);
+        else if (variant_impl->has_return_type_size)
+        {
+          future_return_size = variant_impl->return_type_size;
+          handle_future_size(*future_return_size, map_applied_conditions);  
+        }
+      }
       // Create ny memory pools if this is a leaf task variant
       // Note this has to come AFTER we create the future instances or we
       // could accidentally end up blocking ourselves from doing memory 
@@ -3479,14 +3440,19 @@ namespace Legion {
       // Make sure to propagate any future sizes that we know about here
       if (!elide_future_return)
       {
-        VariantImpl *variant_impl = 
-          runtime->find_variant_impl(task_id, selected_variant);
+        if (future_return_size)
+          handle_future_size(*future_return_size, map_applied_conditions);
+        else
+        {
+          VariantImpl *variant_impl = 
+            runtime->find_variant_impl(task_id, selected_variant);
 #ifdef DEBUG_LEGION
-        assert(variant_impl->has_return_type_size);
+          assert(variant_impl->has_return_type_size);
 #endif
-        // Record the future output size
-        handle_future_size(variant_impl->return_type_size,
-            variant_impl->has_return_type_size, map_applied_conditions);
+          future_return_size = variant_impl->return_type_size;
+          // Record the future output size
+          handle_future_size(*future_return_size, map_applied_conditions);
+        }
       }
       if (!single_task_termination.exists())
       {
@@ -4634,10 +4600,7 @@ namespace Legion {
     void SingleTask::check_future_return_bounds(FutureInstance *instance) const
     //--------------------------------------------------------------------------
     {
-      VariantImpl *var_impl = 
-        runtime->find_variant_impl(task_id, selected_variant);
-      if (var_impl->has_return_type_size &&
-          (var_impl->return_type_size < instance->size))
+      if (future_return_size && (*future_return_size < instance->size))
       {
         Provenance *provenance = get_provenance();
         if (provenance != NULL)
@@ -4646,14 +4609,13 @@ namespace Legion {
               "variant with a maximum return size of %zd but "
               "returned a result of %zd bytes.",
               get_task_name(), get_unique_id(), int(provenance->human.length()),
-              provenance->human.data(),
-              var_impl->return_type_size, instance->size)
+              provenance->human.data(), *future_return_size, instance->size)
         else
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
               "Task %s (UID %lld) used a task variant with a maximum "
               "return size of %zd but returned a result of %zd bytes.",
               get_task_name(), get_unique_id(),
-              var_impl->return_type_size, instance->size)
+              *future_return_size, instance->size)
       }
     }
 
@@ -5738,11 +5700,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MultiTask::MultiTask(Runtime *rt)
-      : CollectiveViewCreator<TaskOp>(rt)
+      : PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
-    
+
     //--------------------------------------------------------------------------
     MultiTask::~MultiTask(void)
     //--------------------------------------------------------------------------
@@ -5754,7 +5716,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
-      CollectiveViewCreator<TaskOp>::activate();
+      PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >::activate();
       launch_space = NULL;
       future_map_coordinate = 0;
       future_handles = NULL;
@@ -5786,7 +5748,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, DEACTIVATE_MULTI_CALL);
       if (implicit_profiler != NULL)
         implicit_profiler->register_multi_task(this, task_id);
-      CollectiveViewCreator<TaskOp>::deactivate(freeop);
+      PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >::deactivate(freeop);
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       if ((future_handles != NULL) && future_handles->remove_reference())
@@ -5824,7 +5786,7 @@ namespace Legion {
         predicate_false_size = 0;
       }
       predicate_false_future = Future();
-      intra_space_dependences.clear();
+      point_mapped_events.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -6019,6 +5981,7 @@ namespace Legion {
       this->future_map = rhs->future_map;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
+      this->pointwise_dependences = rhs->pointwise_dependences; 
       this->redop = rhs->redop;
       if (this->redop != 0)
       {
@@ -6135,6 +6098,21 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    bool MultiTask::is_pointwise_analyzable(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (concurrent_task)
+        return false;
+      if (!check_collective_regions.empty())
+        return false;
+      // TODO: relax this to support pointwse output regions
+      if (!output_regions.empty())
+        return false;
+      return PointwiseAnalyzable<
+        CollectiveViewCreator<TaskOp> >::is_pointwise_analyzable();
+    }
+
+    //--------------------------------------------------------------------------
     void MultiTask::pack_multi_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -6205,6 +6183,21 @@ namespace Legion {
             rez.serialize(it->second.precondition.traced);
           else
             rez.serialize(it->second.precondition.interpreted);
+        }
+      }
+      if (!is_origin_mapped())
+      {
+        rez.serialize<size_t>(pointwise_dependences.size());
+        for (std::map<unsigned,
+              std::vector<PointwiseDependence> >::const_iterator pit =
+              pointwise_dependences.begin(); pit !=
+              pointwise_dependences.end(); pit++)
+        {
+          rez.serialize(pit->first);
+          rez.serialize<size_t>(pit->second.size());
+          for (std::vector<PointwiseDependence>::const_iterator it =
+                pit->second.begin(); it != pit->second.end(); it++)
+            it->serialize(rez);
         }
       }
     }
@@ -6282,6 +6275,23 @@ namespace Legion {
           else
             derez.deserialize(
                 concurrent_groups[color].precondition.interpreted);
+        }
+      }
+      if (!is_origin_mapped())
+      {
+        size_t num_pointwise;
+        derez.deserialize(num_pointwise);
+        for (unsigned idx1 = 0; idx1 < num_pointwise; idx1++)
+        {
+          unsigned index;
+          derez.deserialize(index);
+          std::vector<PointwiseDependence> &dependences =
+            pointwise_dependences[index];
+          size_t num_dependences;
+          derez.deserialize(num_dependences);
+          dependences.resize(num_dependences);
+          for (unsigned idx2 = 0; idx2 < num_dependences; idx2++)
+            dependences[idx2].deserialize(derez, runtime);
         }
       }
     }
@@ -6567,8 +6577,12 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       if (launcher.elide_future_return)
         elide_future_return = true;
-      else if (!must_epoch_launch)
-        result = create_future();
+      else
+      {
+        future_return_size = launcher.future_return_size;
+        if (!must_epoch_launch)
+          result = create_future();
+      }
       validate_region_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -6784,6 +6798,8 @@ namespace Legion {
         hasher.hash<bool>(must_epoch_task);
         hasher.hash(index_domain);
       }
+      if (future_return_size)
+        hasher.hash(*future_return_size);
       return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
@@ -6915,11 +6931,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      if (elide_future_return)
-        return;
+#ifdef DEBUG_LEGION
+      assert(!elide_future_return);
+#endif
       if (is_remote())
       {
         const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -6928,13 +6945,12 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(orig_task);
           rez.serialize(return_type_size);
-          rez.serialize(has_return_type_size);
           rez.serialize(done_event);
         }
         runtime->send_individual_remote_future_size(orig_proc, rez);
         applied_events.insert(done_event);
       }
-      else if (has_return_type_size)
+      else
         result.impl->set_future_result_size(return_type_size,
                                             runtime->address_space);
     }
@@ -7023,15 +7039,7 @@ namespace Legion {
       bool poisoned;
       derez.deserialize(poisoned);
       local->finish_concurrent_allreduce(lamport_clock, poisoned);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::perform_inlining(VariantImpl *variant,
-                                  const std::deque<InstanceSet> &parent_regions)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask::perform_inlining(variant, parent_regions);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool IndividualTask::is_stealable(void) const
@@ -7582,13 +7590,10 @@ namespace Legion {
       derez.deserialize(task);
       size_t return_type_size;
       derez.deserialize(return_type_size);
-      bool has_return_type_size;
-      derez.deserialize(has_return_type_size);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       std::set<RtEvent> applied_events;
-      task->handle_future_size(return_type_size, 
-          has_return_type_size, applied_events);
+      task->handle_future_size(return_type_size, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event,
             Runtime::merge_events(applied_events));
@@ -7688,7 +7693,7 @@ namespace Legion {
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       SingleTask::deactivate(false/*free*/);
-      intra_space_mapping_dependences.clear();
+      pointwise_mapping_dependences.clear();
       if (freeop)
         runtime->free_point_task(this);
     } 
@@ -7719,9 +7724,9 @@ namespace Legion {
     void PointTask::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_point_mapped(get_mapped_event());
       tpl->register_operation(this);
       SingleTask::trigger_replay();
+      slice_owner->record_point_mapped(this, get_mapped_event());
     }
 
     //--------------------------------------------------------------------------
@@ -7901,10 +7906,19 @@ namespace Legion {
       // Pul this on the stack to avoid querying it after we pass control
       // over to the slice owner
       const bool is_origin = is_origin_mapped();
-      slice_owner->record_point_mapped(get_mapped_event());
+      slice_owner->record_point_mapped(this, get_mapped_event());
       // Only return true if we're not origin-mapped, otherwise the slice
       // will end up taking care of us once it knows we're mapped
       return !is_origin;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::perform_inlining(VariantImpl *variant,
+                                  const std::deque<InstanceSet> &parent_regions)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::perform_inlining(variant, parent_regions);
+      slice_owner->record_point_mapped(this, get_mapped_event());
     }
 
     //--------------------------------------------------------------------------
@@ -7951,20 +7965,19 @@ namespace Legion {
       const RtEvent event = get_mapped_event();
       const bool result = SingleTask::replicate_task();
       if (result)
-        owner->record_point_mapped(event);
+        owner->record_point_mapped(this, event);
       return result;
     }
 
     //--------------------------------------------------------------------------
     void PointTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+                                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      if (elide_future_return)
-        return;
-      if (has_return_type_size)
-        slice_owner->handle_future_size(return_type_size,
-                                        index_point, applied_events);
+#ifdef DEBUG_LEGION
+      assert(!elide_future_return);
+#endif
+      slice_owner->handle_future_size(return_type_size, index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -7987,7 +8000,12 @@ namespace Legion {
     void PointTask::shard_off(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
-      slice_owner->record_point_mapped(mapped_precondition, true/*shard off*/);
+#ifdef DEBUG_LEGION
+      // Should only be happening for must-epoch operations
+      assert(must_epoch != NULL);
+#endif
+      slice_owner->record_point_mapped(this,
+          mapped_precondition, true/*shard off*/);
       SingleTask::shard_off(mapped_precondition);
     }
 
@@ -8160,7 +8178,7 @@ namespace Legion {
         }
         else
           complete_mapping();
-        slice_owner->record_point_mapped(get_mapped_event());
+        slice_owner->record_point_mapped(this, get_mapped_event());
       }
       if (implicit_profiler != NULL)
         implicit_profiler->register_operation(this);
@@ -8357,7 +8375,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
                              const FutureMap &point_arguments, bool inline_task,
-                             const std::vector<FutureMap> &point_futures)
+                             const std::vector<FutureMap> &point_futures,
+                             bool record_future_pointwise_dependences)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
@@ -8401,9 +8420,30 @@ namespace Legion {
       }
       if (!point_futures.empty())
       {
+        const int context_depth = parent_ctx->get_depth();
         for (std::vector<FutureMap>::const_iterator it = 
               point_futures.begin(); it != point_futures.end(); it++)
+        {
+          if (!it->impl->future_map_domain->contains_point(point))
+          {
+            this->futures.push_back(Future());
+            continue;
+          }
           this->futures.push_back(it->impl->get_future(point,true/*internal*/));
+          if (record_future_pointwise_dependences)
+          {
+            const RtEvent pre = 
+              it->impl->find_pointwise_dependence(point, context_depth);
+            if (pre.exists() && !std::binary_search(
+                  pointwise_mapping_dependences.begin(),
+                  pointwise_mapping_dependences.end(), pre))
+            {
+              pointwise_mapping_dependences.push_back(pre);
+              std::sort(pointwise_mapping_dependences.begin(),
+                  pointwise_mapping_dependences.end());
+            }
+          }
+        }
       }
     }
 
@@ -8411,7 +8451,7 @@ namespace Legion {
     RtEvent PointTask::perform_pointwise_analysis(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::merge_events(intra_space_mapping_dependences);
+      return Runtime::merge_events(pointwise_mapping_dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -8581,12 +8621,12 @@ namespace Legion {
           {
             const DomainPoint &prev = dependences[idx-1];
             const RtEvent pre = slice_owner->find_intra_space_dependence(prev);
-            if (!std::binary_search(intra_space_mapping_dependences.begin(),
-                  intra_space_mapping_dependences.end(), pre))
+            if (!std::binary_search(pointwise_mapping_dependences.begin(),
+                  pointwise_mapping_dependences.end(), pre))
             {
-              intra_space_mapping_dependences.push_back(pre);
-              std::sort(intra_space_mapping_dependences.begin(),
-                        intra_space_mapping_dependences.end());
+              pointwise_mapping_dependences.push_back(pre);
+              std::sort(pointwise_mapping_dependences.begin(),
+                        pointwise_mapping_dependences.end());
             }
             if (runtime->legion_spy_enabled)
             {
@@ -8598,17 +8638,26 @@ namespace Legion {
                                                       dependences[idx2]);
             }
           }
-          // If we're not the last dependence, then send our mapping event
-          // so that others can record a dependence on us
-          if (idx < (dependences.size()-1))
-            slice_owner->record_intra_space_dependence(index_point,
-                                                       dependences[idx+1], 
-                                                       get_mapped_event());
           return;
         }
       }
       // We should never get here
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_pointwise_dependence(uint64_t previous_context_index,
+        const DomainPoint &previous_point, ShardID shard)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent pre = parent_ctx->find_pointwise_dependence(
+          previous_context_index, previous_point, shard);
+      if (pre.exists())
+      {
+        pointwise_mapping_dependences.push_back(pre);
+        std::sort(pointwise_mapping_dependences.begin(),
+            pointwise_mapping_dependences.end());
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -8794,7 +8843,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
+                                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // do nothing 
@@ -9252,6 +9301,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent ShardTask::handle_pointwise_dependence(uint64_t context_index,
+        const DomainPoint &point, ShardID shard, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      return get_replicate_context()->find_pointwise_dependence(
+          context_index, point, shard, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
     ReplicateContext* ShardTask::get_replicate_context(void) const
     //--------------------------------------------------------------------------
     {
@@ -9284,12 +9342,12 @@ namespace Legion {
                    std::map<RtEvent,std::vector<PointTask*> > &event_deps) const
     //--------------------------------------------------------------------------
     {
-      if (intra_space_mapping_dependences.empty())
+      if (pointwise_mapping_dependences.empty())
         return false;
       unsigned count = 0;
       for (std::vector<RtEvent>::const_iterator it =
-            intra_space_mapping_dependences.begin(); it !=
-            intra_space_mapping_dependences.end(); it++)
+            pointwise_mapping_dependences.begin(); it !=
+            pointwise_mapping_dependences.end(); it++)
       {
         if (it->has_triggered())
           continue;
@@ -9303,6 +9361,23 @@ namespace Legion {
       }
       else
         return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::complete_point_projection(void)
+    //--------------------------------------------------------------------------
+    {
+      update_no_access_regions();
+      // Log our requirements that we computed
+      if (runtime->legion_spy_enabled)
+      {
+        UniqueID our_uid = get_unique_id();
+        for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+          log_requirement(our_uid, idx, logical_regions[idx]);
+      }
+#ifdef DEBUG_LEGION
+      perform_intra_task_alias_analysis();
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -9388,6 +9463,7 @@ namespace Legion {
       serdez_redop_targets.clear();
       // Remove our reference to the reduction future
       reduction_future = Future();
+      reduction_future_size.reset();
       map_applied_conditions.clear();
       output_preconditions.clear();
       commit_preconditions.clear();
@@ -9395,7 +9471,7 @@ namespace Legion {
       interfering_requirements.clear();
       point_requirements.clear();
 #ifdef DEBUG_LEGION
-      assert(pending_intra_space_dependences.empty());
+      assert(pending_pointwise_dependences.empty());
 #endif
       if (freeop)
         runtime->free_index_task(this);
@@ -9692,6 +9768,7 @@ namespace Legion {
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
+
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
@@ -9765,8 +9842,9 @@ namespace Legion {
         if (launcher.predicate != Predicate::TRUE_PRED)
           initialize_predicate(launcher.predicate_false_future,
                                launcher.predicate_false_result);
-        future_map = 
+        future_map =
           create_future_map(ctx, launch_space->handle, launcher.sharding_space);
+        future_return_size = launcher.future_return_size;
       }
       else
         elide_future_return = true;
@@ -9823,6 +9901,7 @@ namespace Legion {
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
+
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
@@ -9908,8 +9987,17 @@ namespace Legion {
           true/*register*/, runtime->get_available_distributed_id(),
           provenance, this));
       if (serdez_redop_fns == NULL)
+      {
+        reduction_future_size = reduction_op->sizeof_rhs;
         reduction_future.impl->set_future_result_size(
-            reduction_op->sizeof_rhs, runtime->address_space);
+            *reduction_future_size, runtime->address_space);
+      }
+      else if (launcher.future_return_size)
+      {
+        reduction_future_size = launcher.future_return_size;
+        reduction_future.impl->set_future_result_size(
+            *reduction_future_size, runtime->address_space);
+      }
       validate_region_requirements();
       if (concurrent_task && parent_ctx->is_concurrent_context())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
@@ -10207,12 +10295,34 @@ namespace Legion {
           it->impl->register_dependence(this);
       if (predicate_false_future.impl != NULL)
         predicate_false_future.impl->register_dependence(this);
-      // Register mapping dependences on any future maps also
+      // Always have to register a full dependence on this since we need
+      // to have the producer mapped by the time we're enumerating points
       if (point_arguments.impl != NULL)
         point_arguments.impl->register_dependence(this);
-      for (std::vector<FutureMap>::const_iterator it = 
-            point_futures.begin(); it != point_futures.end(); it++)
-        it->impl->register_dependence(this);
+      // Register mapping dependences on any future maps also
+      // if we're not pointwise analyzable. If we are then we'll
+      // do pointwise analysis on these when we enumerate the points
+      if (!is_pointwise_analyzable())
+      {
+        for (std::vector<FutureMap>::const_iterator it = 
+              point_futures.begin(); it != point_futures.end(); it++)
+          it->impl->register_dependence(this);
+      }
+#ifdef LEGION_SPY
+      else
+      {
+        // Record pointwise dependences on the point futures
+        for (std::vector<FutureMap>::const_iterator it = 
+              point_futures.begin(); it != point_futures.end(); it++)
+        {
+          if (!it->impl->context_index)
+            continue;
+          LegionSpy::log_future_dependence(
+              parent_ctx->get_unique_id(), it->impl->op_uid,
+              unique_op_id, true/*pointwise*/);
+        }
+      }
+#endif
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                   wait_barriers, arrive_barriers, must_epoch);
@@ -10257,6 +10367,10 @@ namespace Legion {
       hasher.hash<bool>(concurrent_task);
       hasher.hash<bool>(must_epoch_task);
       hasher.hash(index_domain);
+      if (future_return_size)
+        hasher.hash(*future_return_size);
+      if (reduction_future_size)
+        hasher.hash(*reduction_future_size);
       return recognizer.record_operation_hash(this, hasher, opidx);
     }
 
@@ -10645,6 +10759,17 @@ namespace Legion {
                                              reduction_op->sizeof_rhs);
         }
       }
+      // Can check this without the lock since we know the predication state
+      // has been marked correctly while holding the lock
+      if (!pending_pointwise_dependences.empty())
+      {
+        // Just trigger these since the points won't be mapped anyway
+        for (std::map<DomainPoint,RtUserEvent>::const_iterator it =
+              pending_pointwise_dependences.begin(); it !=
+              pending_pointwise_dependences.end(); it++)
+          Runtime::trigger_event(it->second);
+        pending_pointwise_dependences.clear();
+      }
       // Then clean up this task execution
       complete_mapping();
       complete_execution(execution_condition);
@@ -10886,6 +11011,31 @@ namespace Legion {
       // Set the future if we actually ran the task or we speculated
       if ((redop > 0) && (predication_state != PREDICATED_FALSE_STATE))
       {
+        if (reduction_future_size &&
+            (*reduction_future_size < reduction_instances.front()->size))
+        {
+#ifdef DEBUG_LEGION
+          // This failure mode should only happen with serdez redops fns
+          // since we should do the other reductions correctly ourself
+          assert(serdez_redop_fns != NULL);
+#endif
+          Provenance *provenance = get_provenance();
+          if (provenance != NULL)
+            REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+                "Index Task %s (UID %lld, provenance: %.*s) produced a "
+                "reduced future value of %zd bytes which is larger than "
+                "the dynamically specified bounds of %zd bytes.",
+                get_task_name(), get_unique_id(), 
+                int(provenance->human.length()), provenance->human.data(),
+                reduction_instances.front()->size, *reduction_future_size)
+          else
+            REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+                "Index Task %s (UID %lld) produced a reduced future value "
+                "of %zd bytes which is larger than the dynamically "
+                "specified bounds of %zd bytes.",
+                get_task_name(), get_unique_id(), 
+                reduction_instances.front()->size, *reduction_future_size)
+        }
         reduction_future.impl->set_results(effects,
             reduction_instances, reduction_metadata, reduction_metasize);
         // Clear this since we no longer own the buffer
@@ -11149,47 +11299,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexTask::find_intra_space_dependence(const DomainPoint &point)
+    RtEvent IndexTask::find_intra_space_dependence(const DomainPoint &point,
+                                                   RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // We're not control replicated so this is just a pointwise dependence
+      return find_pointwise_dependence(point, get_generation(), to_trigger);
+    } 
+
+    //--------------------------------------------------------------------------
+    RtEvent IndexTask::find_pointwise_dependence(const DomainPoint &point,
+        GenerationID needed_gen, RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      // Check to see if we already have it
-      std::map<DomainPoint,RtEvent>::const_iterator finder = 
-        intra_space_dependences.find(point);
-      if (finder != intra_space_dependences.end())
-        return finder->second;
-      // Otherwise make a temporary one and record it for now
-      const RtUserEvent pending_event = Runtime::create_rt_user_event();
-      intra_space_dependences[point] = pending_event;
-      pending_intra_space_dependences[point] = pending_event;
-      return pending_event;
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndexTask::record_intra_space_dependence(const DomainPoint &point,
-                                                  const DomainPoint &next,
-                                                  RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      std::map<DomainPoint,RtEvent>::iterator finder = 
-        intra_space_dependences.find(point);
-      if (finder != intra_space_dependences.end())
-      {
-        if (finder->second != point_mapped)
-        {
-          std::map<DomainPoint,RtUserEvent>::iterator pending_finder = 
-            pending_intra_space_dependences.find(point);
 #ifdef DEBUG_LEGION
-          assert(pending_finder != pending_intra_space_dependences.end());
+      assert(needed_gen <= gen);
 #endif
-          Runtime::trigger_event(pending_finder->second, point_mapped);
-          pending_intra_space_dependences.erase(pending_finder);
-          finder->second = point_mapped;
+      if ((needed_gen < gen) || mapped ||
+          (predication_state == PREDICATED_FALSE_STATE))
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return RtEvent::NO_RT_EVENT;
+      }
+      // See if we can find this in the point mapped events data structure
+      std::map<DomainPoint,RtEvent>::const_iterator finder =
+        point_mapped_events.find(point);
+      if (finder != point_mapped_events.end())
+      {
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger, finder->second);
+          return to_trigger;
         }
+        else
+          return finder->second;
       }
       else
-        intra_space_dependences[point] = point_mapped;
+      {
+        // Create a pending pointwise dependence for this point
+        std::map<DomainPoint,RtUserEvent>::const_iterator pending_finder =
+          pending_pointwise_dependences.find(point);
+        if (pending_finder != pending_pointwise_dependences.end())
+        {
+          if (to_trigger.exists())
+          {
+            Runtime::trigger_event(to_trigger, pending_finder->second);
+            return to_trigger;
+          }
+          else
+            return pending_finder->second;
+        }
+        if (!to_trigger.exists())
+          to_trigger = Runtime::create_rt_user_event();
+        pending_pointwise_dependences.emplace(std::make_pair(point,to_trigger));
+        return to_trigger;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11201,8 +11367,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::return_slice_mapped(unsigned points,
-                                        RtEvent applied_condition)
+    void IndexTask::return_point_mapped(const DomainPoint &point,
+                                        RtEvent mapped_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_MAPPED_CALL);
@@ -11210,11 +11376,23 @@ namespace Legion {
       bool trigger_children_commit = false;
       {
         AutoLock o_lock(op_lock);
-        mapped_points += points;
-        if (applied_condition.exists())
-          map_applied_conditions.insert(applied_condition);
-        // Already know that mapped points is the same as total points
-        if (mapped_points == total_points)
+#ifdef DEBUG_LEGION
+        assert(point_mapped_events.find(point) == point_mapped_events.end());
+#endif
+        point_mapped_events.emplace(std::make_pair(point, mapped_event));
+        std::map<DomainPoint,RtUserEvent>::iterator finder =
+          pending_pointwise_dependences.find(point);
+        if (finder != pending_pointwise_dependences.end())
+        {
+          Runtime::trigger_event(finder->second, mapped_event);
+          pending_pointwise_dependences.erase(finder);
+        }
+        if (mapped_event.exists())
+          map_applied_conditions.insert(mapped_event);
+#ifdef DEBUG_LEGION
+        assert(mapped_points < total_points);
+#endif
+        if (++mapped_points == total_points)
         {
           // Don't complete this yet if we have redop serdez fns because
           // we still need to map the output future instance before we
@@ -11460,32 +11638,23 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void IndexTask::unpack_slice_mapped(Deserializer &derez, 
+    void IndexTask::unpack_point_mapped(Deserializer &derez, 
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      size_t points;
-      derez.deserialize(points);
-      RtEvent applied_condition;
-      derez.deserialize(applied_condition);
+      DomainPoint point;
+      derez.deserialize(point);
+      RtEvent mapped_event;
+      derez.deserialize(mapped_event);
 #ifdef DEBUG_LEGION
-      if (!is_origin_mapped())
-      {
-        std::map<DomainPoint,std::vector<LogicalRegion> > local_requirements;
-        for (unsigned idx = 0; idx < points; idx++)
-        {
-          DomainPoint point;
-          derez.deserialize(point);
-          std::vector<LogicalRegion> &reqs = local_requirements[point];
-          reqs.resize(regions.size());
-          for (unsigned idx2 = 0; idx2 < regions.size(); idx2++)
-            derez.deserialize(reqs[idx2]);
-        }
-        check_point_requirements(local_requirements);
-      }
+      assert(!is_origin_mapped());
+      std::vector<LogicalRegion> point_regions(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        derez.deserialize(point_regions[idx]);
+      check_point_requirements(point, point_regions);
 #endif
-      return_slice_mapped(points, applied_condition);
+      return_point_mapped(point, mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -11715,7 +11884,7 @@ namespace Legion {
     {
       IndexTask *task;
       derez.deserialize(task);
-      task->unpack_slice_mapped(derez, source);
+      task->unpack_point_mapped(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -11748,30 +11917,13 @@ namespace Legion {
       derez.deserialize(point);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      const RtEvent result = task->find_intra_space_dependence(point);
-      Runtime::trigger_event(to_trigger, result);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexTask::process_slice_record_intra_dependence(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexTask *task;
-      derez.deserialize(task);
-      DomainPoint point, next;
-      derez.deserialize(point);
-      derez.deserialize(next);
-      RtEvent mapped_event;
-      derez.deserialize(mapped_event);
-      task->record_intra_space_dependence(point, next, mapped_event);
+      task->find_intra_space_dependence(point, to_trigger);
     }
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void IndexTask::check_point_requirements(
-            const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs)
+    void IndexTask::check_point_requirements(const DomainPoint &point,
+        const std::vector<LogicalRegion> &point_regions)
     //--------------------------------------------------------------------------
     {
       // Need to run this if we haven't run it yet in order to populate
@@ -11800,228 +11952,223 @@ namespace Legion {
       // Nothing to do if there are no interfering requirements
       if (local_interfering.empty())
         return;
-      // Make sure that all the slices coming back here are serialized
+      // Make sure that all the points coming back here are serialized
       AutoLock o_lock(op_lock);
-      for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
-            pit = point_reqs.begin(); pit != point_reqs.end(); pit++)
-      { 
-        const std::vector<LogicalRegion> &point_reqs = pit->second;
-        for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
-              oit = point_requirements.begin(); 
-              oit != point_requirements.end(); oit++)
+      for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
+            oit = point_requirements.begin(); 
+            oit != point_requirements.end(); oit++)
+      {
+        const std::vector<LogicalRegion> &other_regions = oit->second;
+        const bool same_point = (point == oit->first);
+        // Now check for interference with any other points
+        for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
+              local_interfering.begin(); it !=
+              local_interfering.end(); it++)
         {
-          const std::vector<LogicalRegion> &other_reqs = oit->second;
-          const bool same_point = (pit->first == oit->first);
-          // Now check for interference with any other points
-          for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
-                local_interfering.begin(); it !=
-                local_interfering.end(); it++)
+          // Skip same region requireemnt for same point
+          if (same_point && (it->first == it->second))
+            continue;
+          // If either one are the NO_REGION then there is no interference
+          if (!point_regions[it->first].exists() || 
+              !other_regions[it->second].exists())
+            continue;
+          // If the user marked this region requirement as collective
+          // and this is the same region requirement for both points
+          // and the region name is the same then we allow that
+          if (!same_point && (it->first == it->second) &&
+              IS_COLLECTIVE(regions[it->first]) &&
+              (point_regions[it->first] == other_regions[it->second]))
+            continue;
+          if (!runtime->forest->are_disjoint(
+                point_regions[it->first].get_index_space(), 
+                other_regions[it->second].get_index_space()))
           {
-            // Skip same region requireemnt for same point
-            if (same_point && (it->first == it->second))
-              continue;
-            // If either one are the NO_REGION then there is no interference
-            if (!point_reqs[it->first].exists() || 
-                !other_reqs[it->second].exists())
-              continue;
-            // If the user marked this region requirement as collective
-            // and this is the same region requirement for both points
-            // and the region name is the same then we allow that
-            if (!same_point && (it->first == it->second) &&
-                IS_COLLECTIVE(regions[it->first]) &&
-                (point_reqs[it->first] == other_reqs[it->second]))
-              continue;
-            if (!runtime->forest->are_disjoint(
-                  point_reqs[it->first].get_index_space(), 
-                  other_reqs[it->second].get_index_space()))
+            switch (point.get_dim())
             {
-              switch (pit->first.get_dim())
-              {
-                case 1:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point %lld and region "
-                              "requirement %d of point %lld of %s (UID %lld) "
-                              "in parent task %s (UID %lld) are interfering.",
-                              it->first, pit->first[0], it->second,
-                              oit->first[0], get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 1:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point %lld and region "
+                            "requirement %d of point %lld of %s (UID %lld) "
+                            "in parent task %s (UID %lld) are interfering.",
+                            it->first, point[0], it->second,
+                            oit->first[0], get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #if LEGION_MAX_DIM >= 2
-                case 2:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point (%lld,%lld) and "
-                              "region requirement %d of point (%lld,%lld) of "
-                              "%s (UID %lld) in parent task %s (UID %lld) are "
-                              "interfering.", it->first, pit->first[0],
-                              pit->first[1], it->second, oit->first[0],
-                              oit->first[1], get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 2:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point (%lld,%lld) and "
+                            "region requirement %d of point (%lld,%lld) of "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "interfering.", it->first, point[0],
+                            point[1], it->second, oit->first[0],
+                            oit->first[1], get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 3
-                case 3:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point (%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld) of %s (UID %lld) in parent "
-                              "task %s (UID %lld) are interfering.", it->first,
-                              pit->first[0], pit->first[1], pit->first[2],
-                              it->second, oit->first[0], oit->first[1],
-                              oit->first[2], get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 3:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point (%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld) of %s (UID %lld) in parent "
+                            "task %s (UID %lld) are interfering.", it->first,
+                            point[0], point[1], point[2],
+                            it->second, oit->first[0], oit->first[1],
+                            oit->first[2], get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 4
-                case 4:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point "
-                              "(%lld,%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld,%lld) of %s (UID %lld) in parent"
-                              " task %s (UID %lld) are interfering.", it->first,
-                              pit->first[0], pit->first[1], pit->first[2],
-                              pit->first[3], it->second, oit->first[0], 
-                              oit->first[1], oit->first[2], oit->first[3],
-                              get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 4:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point "
+                            "(%lld,%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld,%lld) of %s (UID %lld) in parent"
+                            " task %s (UID %lld) are interfering.", it->first,
+                            point[0], point[1], point[2],
+                            point[3], it->second, oit->first[0], 
+                            oit->first[1], oit->first[2], oit->first[3],
+                            get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 5
-                case 5:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld) of %s (UID %lld) "
-                              "in parent task %s (UID %lld) are interfering.",
-                              it->first, pit->first[0], pit->first[1], 
-                              pit->first[2], pit->first[3], pit->first[4],
-                              it->second, oit->first[0], oit->first[1], 
-                              oit->first[2], oit->first[3], oit->first[4],
-                              get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 5:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld) of %s (UID %lld) "
+                            "in parent task %s (UID %lld) are interfering.",
+                            it->first, point[0], point[1], 
+                            point[2], point[3], point[4],
+                            it->second, oit->first[0], oit->first[1], 
+                            oit->first[2], oit->first[3], oit->first[4],
+                            get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 6
-                case 6:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld) of %s " 
-                              "(UID %lld) in parent task %s (UID %lld) "
-                              "are interfering.",
-                              it->first, pit->first[0], pit->first[1], 
-                              pit->first[2], pit->first[3], pit->first[4],
-                              pit->first[5], it->second, oit->first[0], 
-                              oit->first[1], oit->first[2], oit->first[3], 
-                              oit->first[4], oit->first[5],
-                              get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 6:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld) of %s " 
+                            "(UID %lld) in parent task %s (UID %lld) "
+                            "are interfering.",
+                            it->first, point[0], point[1], 
+                            point[2], point[3], point[4],
+                            point[5], it->second, oit->first[0], 
+                            oit->first[1], oit->first[2], oit->first[3], 
+                            oit->first[4], oit->first[5],
+                            get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 7
-                case 7:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld) of %s "
-                              "(UID %lld) in parent task %s (UID %lld) "
-                              "are interfering.",
-                              it->first, pit->first[0], pit->first[1], 
-                              pit->first[2], pit->first[3], pit->first[4],
-                              pit->first[5], pit->first[6], it->second, 
-                              oit->first[0], oit->first[1], oit->first[2], 
-                              oit->first[3], oit->first[4], oit->first[5],
-                              oit->first[6], get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 7:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld) of %s "
+                            "(UID %lld) in parent task %s (UID %lld) "
+                            "are interfering.",
+                            it->first, point[0], point[1], 
+                            point[2], point[3], point[4],
+                            point[5], point[6], it->second, 
+                            oit->first[0], oit->first[1], oit->first[2], 
+                            oit->first[3], oit->first[4], oit->first[5],
+                            oit->first[6], get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 8
-                case 8:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
-                              "of %s (UID %lld) in parent task %s (UID %lld) "
-                              "are interfering.",
-                              it->first, pit->first[0], pit->first[1], 
-                              pit->first[2], pit->first[3], pit->first[4],
-                              pit->first[5], pit->first[6], pit->first[7],
-                              it->second, oit->first[0], oit->first[1], 
-                              oit->first[2], oit->first[3], oit->first[4], 
-                              oit->first[5], oit->first[6], oit->first[7],
-                              get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 8:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                            "of %s (UID %lld) in parent task %s (UID %lld) "
+                            "are interfering.",
+                            it->first, point[0], point[1], 
+                            point[2], point[3], point[4],
+                            point[5], point[6], point[7],
+                            it->second, oit->first[0], oit->first[1], 
+                            oit->first[2], oit->first[3], oit->first[4], 
+                            oit->first[5], oit->first[6], oit->first[7],
+                            get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
 #if LEGION_MAX_DIM >= 9
-                case 9:
-                  {
-                    REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
-                              "Index space task launch has intefering "
-                              "region requirements %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
-                              " and region requirement %d of point "
-                              "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
-                              "of %s (UID %lld) in parent task %s (UID %lld) "
-                              "are interfering.",
-                              it->first, pit->first[0], pit->first[1], 
-                              pit->first[2], pit->first[3], pit->first[4],
-                              pit->first[5], pit->first[6], pit->first[7],
-                              pit->first[8], it->second, oit->first[0], 
-                              oit->first[1], oit->first[2], oit->first[3], 
-                              oit->first[4], oit->first[5], oit->first[6], 
-                              oit->first[7], oit->first[8],
-                              get_task_name(), get_unique_id(),
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-                    break;
-                  }
+              case 9:
+                {
+                  REPORT_LEGION_ERROR(ERROR_INDEX_SPACE_TASK,
+                            "Index space task launch has intefering "
+                            "region requirements %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)"
+                            " and region requirement %d of point "
+                            "(%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld) "
+                            "of %s (UID %lld) in parent task %s (UID %lld) "
+                            "are interfering.",
+                            it->first, point[0], point[1], 
+                            point[2], point[3], point[4],
+                            point[5], point[6], point[7],
+                            point[8], it->second, oit->first[0], 
+                            oit->first[1], oit->first[2], oit->first[3], 
+                            oit->first[4], oit->first[5], oit->first[6], 
+                            oit->first[7], oit->first[8],
+                            get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+                  break;
+                }
 #endif
-                default:
-                  assert(false);
-              }
+              default:
+                assert(false);
             }
           }
         }
-        // Add it to the set of point requirements
-        point_requirements.insert(*pit);
       }
+      // Add it to the set of point requirements
+      point_requirements.emplace(std::make_pair(point, point_regions));
     }
 #endif
 
@@ -12099,14 +12246,12 @@ namespace Legion {
       assert(local_regions.empty());
       assert(local_fields.empty());
 #endif
-      map_applied_conditions.clear();
       commit_preconditions.clear();
       created_regions.clear();
       created_fields.clear();
       created_field_spaces.clear();
       created_index_spaces.clear();
       created_index_partitions.clear();
-      unique_intra_space_deps.clear();
       if (freeop)
         runtime->free_slice_task(this);
     }
@@ -12455,7 +12600,7 @@ namespace Legion {
               finder->second.poisoned);
       }
       if (trigger_mapped)
-        trigger_slice_mapped();
+        complete_mapping();
       const unsigned remaining = 
         num_uncompleted_points.fetch_sub(to_send.size());
 #ifdef DEBUG_LEGION
@@ -12697,8 +12842,6 @@ namespace Legion {
         assert(found);
 #endif
       }
-      // Record that we've mapped and executed this slice
-      trigger_slice_mapped();
     } 
 
     //--------------------------------------------------------------------------
@@ -12836,8 +12979,10 @@ namespace Legion {
         assert(finder != future_handles->handles.end());
 #endif
         const ContextCoordinate coordinate(future_map_coordinate, point);
+        RtEvent registered;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->did, coordinate, get_provenance());
+            parent_ctx->did, coordinate, get_provenance(),
+            false/*has global reference*/, registered);
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -12848,6 +12993,11 @@ namespace Legion {
         }
         else
           impl->set_result(effects, instance, metadata, metasize);
+        if (registered.exists())
+        {
+          AutoLock o_lock(op_lock);
+          commit_preconditions.insert(registered);
+        }
       }
     }
 
@@ -12884,8 +13034,8 @@ namespace Legion {
       result->index_domain = this->index_domain;
       result->version_infos.resize(logical_regions.size());
       // Now figure out our local point information
-      result->initialize_point(this, point, point_arguments,
-                               inline_task, point_futures);
+      result->initialize_point(this, point, point_arguments, inline_task,
+          point_futures, is_pointwise_analyzable());
       if (concurrent_task)
       {
         // Find the color for this point task
@@ -12946,7 +13096,11 @@ namespace Legion {
           continue;
         ProjectionFunction *function = 
           runtime->find_projection_function(req.projection);
-        function->project_points(req, idx, runtime, index_domain, points);
+        std::map<unsigned,std::vector<PointwiseDependence> >::const_iterator
+          finder = pointwise_dependences.find(idx);
+        function->project_points(req, idx, runtime, index_domain, points,
+            (finder == pointwise_dependences.end()) ? NULL : &finder->second,
+            parent_ctx->get_total_shards(), is_replaying());
       }
       // Update the no access regions
       for (unsigned idx = 0; idx < num_points; idx++)
@@ -12994,8 +13148,10 @@ namespace Legion {
       assert(finder != future_handles->handles.end());
 #endif
       const ContextCoordinate coordinate(future_map_coordinate, point);
+      RtEvent registered;
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-          parent_ctx->did, coordinate, get_provenance());
+          parent_ctx->did, coordinate, get_provenance(),
+          false/*has global reference*/, registered);
       if (predicate_false_future.impl == NULL)
       {
         if (predicate_false_size > 0)
@@ -13006,6 +13162,11 @@ namespace Legion {
       }
       else
         impl->set_result(execution_context, predicate_false_future.impl);
+      if (registered.exists())
+      {
+        AutoLock o_lock(op_lock);
+        commit_preconditions.insert(registered);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13080,24 +13241,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_point_mapped(RtEvent child_mapped, bool shard_off)
+    void SliceTask::record_point_mapped(PointTask *point,
+                                        RtEvent child_mapped, bool shard_off)
     //--------------------------------------------------------------------------
     {
-      bool needs_trigger = false;
+      bool done_mapping;
       {
         AutoLock o_lock(op_lock);
-        if (child_mapped.exists())
-          map_applied_conditions.insert(child_mapped);
+        // Can safely overwrite if there is already an event from a call
+        // to find_intra_space_dependence
+        point_mapped_events.emplace(
+            std::make_pair(point->index_point, child_mapped));
 #ifdef DEBUG_LEGION
         assert(num_unmapped_points > 0);
 #endif
-        num_unmapped_points--;
-        if (num_unmapped_points == 0)
-          needs_trigger = true;
+        done_mapping = (--num_unmapped_points == 0);
       }
-      if (needs_trigger)
+      // Send this point back to the index owner task
+      if (!is_remote())
       {
-        trigger_slice_mapped();
+#ifdef DEBUG_LEGION
+        assert(regions.size() == point->regions.size());
+        std::vector<LogicalRegion> point_regions(regions.size());
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          point_regions[idx] = point->regions[idx].region;
+        index_owner->check_point_requirements(point->index_point,point_regions);
+#endif
+        index_owner->return_point_mapped(point->index_point, child_mapped);
+      }
+      // Only need to send something back if we're not origin mapped
+      else if (!is_origin_mapped())
+      {
+        Serializer rez;
+        rez.serialize(index_owner);
+        {
+          RezCheck z(rez);
+          rez.serialize(point->index_point);
+          rez.serialize(child_mapped);
+#ifdef DEBUG_LEGION
+          assert(regions.size() == point->regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(point->regions[idx].region);
+#endif
+        }
+        runtime->send_slice_remote_mapped(orig_proc, rez);
+      }
+      if (done_mapping)
+      {
+        complete_mapping();
+        // Check to see if we need to handle the remaining stage of
+        // execution for this slice when origin mapped
         if (!shard_off && is_origin_mapped() && !is_remote() &&
             !is_replaying() && distribute_task())
           launch_task();
@@ -13143,7 +13336,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::handle_future_size(size_t future_size,
-                const DomainPoint &point, std::set<RtEvent> &applied_conditions)
+                                       const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       if (redop > 0)
@@ -13160,9 +13353,16 @@ namespace Legion {
       assert(finder != handles.end());
 #endif
       const ContextCoordinate coordinate(future_map_coordinate, point);
+      RtEvent registered;
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->did, coordinate, get_provenance());
+        parent_ctx->did, coordinate, get_provenance(),
+        false/*has global reference*/, registered);
       impl->set_future_result_size(future_size, runtime->address_space);
+      if (registered.exists())
+      {
+        AutoLock o_lock(op_lock);
+        commit_preconditions.insert(registered);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13438,11 +13638,11 @@ namespace Legion {
           collective_lamport_clock_ready = Runtime::create_rt_user_event();
           rez.serialize(collective_lamport_clock_ready);
           rez.serialize<bool>(false); // need result;
-          // Put this in the map applied data structure since it we need
-          // to capture it as part of the effects of this task in case
-          // nothing ends up needing it
+          // Put this in the commit preconditions data structure since 
+          // we need to capture it as part of the effects of this task 
+          // in case nothing ends up needing it
           AutoLock o_lock(op_lock);
-          map_applied_conditions.insert(collective_lamport_clock_ready);
+          commit_preconditions.insert(collective_lamport_clock_ready);
         }
         else
         {
@@ -13640,75 +13840,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::trigger_slice_mapped(void)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SLICE_MAPPED_CALL);
-      RtEvent applied_condition;
-      if (!map_applied_conditions.empty())
-        applied_condition = Runtime::merge_events(map_applied_conditions);
-      if (is_remote())
-      {
-        // Only need to send something back if this wasn't origin mapped 
-        if (!is_origin_mapped())
-        {
-          Serializer rez;
-          pack_remote_mapped(rez, applied_condition);
-          runtime->send_slice_remote_mapped(orig_proc, rez);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        // In debug mode, get all our point region requirements and
-        // then pass them back to the index space task
-        std::map<DomainPoint,std::vector<LogicalRegion> > local_requirements;
-        for (std::vector<PointTask*>::const_iterator it = 
-              points.begin(); it != points.end(); it++)
-        {
-          std::vector<LogicalRegion> &reqs = 
-            local_requirements[(*it)->index_point];
-          reqs.resize(regions.size());
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            reqs[idx] = (*it)->regions[idx].region;
-        }
-        index_owner->check_point_requirements(local_requirements);
-#endif
-        index_owner->return_slice_mapped(points.size(), applied_condition); 
-      }
-      complete_mapping(applied_condition);
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::forward_completion_effects(void)
     //--------------------------------------------------------------------------
     {
       for (std::vector<PointTask*>::const_iterator it =
             points.begin(); it != points.end(); it++)
         (*it)->forward_completion_effects(index_owner);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::pack_remote_mapped(Serializer &rez, 
-                                       RtEvent applied_condition)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(index_owner);
-      RezCheck z(rez);
-      rez.serialize(points.size());
-      rez.serialize(applied_condition);
-#ifdef DEBUG_LEGION
-      if (!is_origin_mapped())
-      {
-        for (std::vector<PointTask*>::const_iterator it = 
-              points.begin(); it != points.end(); it++)
-        {
-          rez.serialize((*it)->index_point);
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            rez.serialize((*it)->regions[idx].region);
-        }
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13902,13 +14039,13 @@ namespace Legion {
     RtEvent SliceTask::find_intra_space_dependence(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      // See if we can find or make it
+      if (is_remote())
       {
         AutoLock o_lock(op_lock);
         std::map<DomainPoint,RtEvent>::const_iterator finder = 
-          intra_space_dependences.find(point);
+          point_mapped_events.find(point);
         // If we've already got it then we're done
-        if (finder != intra_space_dependences.end())
+        if (finder != point_mapped_events.end())
           return finder->second;
 #ifdef DEBUG_LEGION
         assert(!points.empty());
@@ -13929,78 +14066,22 @@ namespace Legion {
           return (*it)->get_mapped_event();
         }
 #endif
-        // If we're remote, make up an event and send a message to go find it
-        if (is_remote())
-        {
-          const RtUserEvent temp_event = Runtime::create_rt_user_event();
-          // Send the message to the owner to go find it
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(index_owner);
-            rez.serialize(point);
-            rez.serialize(temp_event);
-          }
-          runtime->send_slice_find_intra_space_dependence(orig_proc, rez);
-          // Save this is for ourselves
-          intra_space_dependences[point] = temp_event;
-          return temp_event;
-        }
-      }
-      // If we make it down here then we're on the same node as the 
-      // index_owner so we can just as it what the answer and save it
-      const RtEvent result = index_owner->find_intra_space_dependence(point);
-      AutoLock o_lock(op_lock);
-      intra_space_dependences[point] = result;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::record_intra_space_dependence(const DomainPoint &point,
-                                                  const DomainPoint &next,
-                                                  RtEvent point_mapped)
-    //--------------------------------------------------------------------------
-    {
-      // Check to see if we already sent it already
-      {
-        const std::pair<DomainPoint,DomainPoint> key(point, next);
-        AutoLock o_lock(op_lock);
-        std::map<DomainPoint,RtEvent>::const_iterator finder = 
-          intra_space_dependences.find(point);
-        if (finder != intra_space_dependences.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second == point_mapped);
-#endif
-          // For control replication we need the index owner to see all
-          // the unique sets of dependences, see if we've seen this 
-          // combination before, if not, allow it to be sent back
-          // to the index owner for it's own visibility
-          std::set<std::pair<DomainPoint,DomainPoint> >::const_iterator
-            key_finder = unique_intra_space_deps.find(key);
-          if (key_finder != unique_intra_space_deps.end())
-            return;
-        }
-        else
-          // Otherwise save it and then let it flow back to the index owner
-          intra_space_dependences[point] = point_mapped;
-        // Always save this if we make it here
-        unique_intra_space_deps.insert(key);
-      }
-      if (is_remote())
-      {
+        const RtUserEvent temp_event = Runtime::create_rt_user_event();
+        // Send the message to the owner to go find it
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(index_owner);
           rez.serialize(point);
-          rez.serialize(next);
-          rez.serialize(point_mapped);
+          rez.serialize(temp_event);
         }
-        runtime->send_slice_record_intra_space_dependence(orig_proc, rez);
+        runtime->send_slice_find_intra_space_dependence(orig_proc, rez);
+        // Save this is for ourselves
+        point_mapped_events[point] = temp_event;
+        return temp_event;
       }
       else
-        index_owner->record_intra_space_dependence(point, next, point_mapped);
+        return index_owner->find_intra_space_dependence(point);
     }
 
     //--------------------------------------------------------------------------
@@ -14103,7 +14184,8 @@ namespace Legion {
           // there before the index task is cleaned up
           const RtUserEvent done_event = Runtime::create_rt_user_event();
           rez.serialize(done_event);
-          map_applied_conditions.insert(done_event);  
+          AutoLock o_lock(op_lock);
+          commit_preconditions.insert(done_event);  
         }
       }
       runtime->send_slice_remote_versioning_rendezvous(orig_proc, rez);

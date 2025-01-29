@@ -3081,11 +3081,8 @@ namespace Legion {
       derez.deserialize(inst);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
-      PendingRemoteExpression pending;
-      RtEvent domain_ready;
       IndexSpaceExpression *inst_domain = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-                                                pending, domain_ready);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       size_t piece_list_size;
       derez.deserialize(piece_list_size);
       void *piece_list = NULL;
@@ -3117,15 +3114,15 @@ namespace Legion {
       GarbageCollectionState gc_state;
       derez.deserialize(gc_state);
 
-      if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
+      if (fs_ready.exists() || layout_ready.exists())
       {
         const RtEvent precondition = 
-          Runtime::merge_events(domain_ready, fs_ready, layout_ready);
+          Runtime::merge_events(fs_ready, layout_ready);
         if (precondition.exists() && !precondition.has_triggered())
         {
           // We need to defer this instance creation
           DeferPhysicalManagerArgs args(did, mem, inst,
-              inst_footprint, inst_domain, pending, 
+              inst_footprint, inst_domain,
               handle, tree_id, layout_id, use_event, unique_event, kind,
               redop, piece_list, piece_list_size, gc_state);
           runtime->issue_runtime_meta_task(args,
@@ -3133,8 +3130,6 @@ namespace Legion {
           return;
         }
         // If we fall through we need to refetch things that we didn't get
-        if (domain_ready.exists())
-          inst_domain = runtime->forest->find_remote_expression(pending);
         if (fs_ready.exists())
           space_node = runtime->forest->get_node(handle);
         if (layout_ready.exists())
@@ -3151,20 +3146,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalManager::DeferPhysicalManagerArgs::DeferPhysicalManagerArgs(
             DistributedID d, Memory m, PhysicalInstance i, 
-            size_t f, IndexSpaceExpression *lx, 
-            const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
+            size_t f, IndexSpaceExpression *lx, FieldSpace h, RegionTreeID tid,
             LayoutConstraintID l, ApEvent use, LgEvent unique, InstanceKind k, 
             ReductionOpID r, const void *pl, size_t pl_size,
             GarbageCollectionState gc)
       : LgTaskArgs<DeferPhysicalManagerArgs>(implicit_provenance),
-            did(d), mem(m), inst(i), footprint(f), pending(p),
+            did(d), mem(m), inst(i), footprint(f),
             local_expr(lx), handle(h), tree_id(tid), layout_id(l), 
             use_event(use), unique_event(unique), kind(k), redop(r),
             piece_list(pl), piece_list_size(pl_size), state(gc)
     //--------------------------------------------------------------------------
     {
-      if (local_expr != NULL)
-        local_expr->add_base_expression_reference(META_TASK_REF);
+      local_expr->add_base_expression_reference(META_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3183,20 +3176,16 @@ namespace Legion {
     {
       const DeferPhysicalManagerArgs *dargs = 
         (const DeferPhysicalManagerArgs*)args; 
-      IndexSpaceExpression *inst_domain = dargs->local_expr;
-      if (inst_domain == NULL)
-        inst_domain = runtime->forest->find_remote_expression(dargs->pending);
       FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(dargs->layout_id);
       create_remote_manager(runtime, dargs->did, dargs->mem,
-          dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
+          dargs->inst, dargs->footprint, dargs->local_expr, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
           dargs->use_event, dargs->unique_event, dargs->kind,
           dargs->redop, dargs->state);
       // Remove the local expression reference if necessary
-      if ((dargs->local_expr != NULL) &&
-          dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
+      if (dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
         delete dargs->local_expr;
     }
 

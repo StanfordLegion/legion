@@ -177,8 +177,6 @@ REGISTER_TYPED_TEST_SUITE_P(RectListTest, AddPoints, AddDisjointPoints, AddDisjo
                             HybridAddDisjointRects, HybridAddPoints,
                             HybridAddDisjointPoints, CoverageCounter);
 
-#define TEST_POINT_TYPES(T) GeneratePointTypesForAllDims<T>()
-
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
 {
@@ -192,7 +190,7 @@ auto GeneratePointTypesForAllDims()
 }
 
 #define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX, SUITE)                                 \
-  using N##SUFFIX = decltype(TEST_POINT_TYPES(BASE_TYPE));                               \
+  using N##SUFFIX = decltype(GeneratePointTypesForAllDims<BASE_TYPE>());                 \
   INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, SUITE, N##SUFFIX)
 
 INSTANTIATE_TEST_TYPES(int, Int, RectListTest);

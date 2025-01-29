@@ -494,7 +494,8 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-              InnerContext::NO_BLOCKING_INDEX, provenance, true/*reg now*/));
+              InnerContext::NO_BLOCKING_INDEX, std::optional<uint64_t>(),
+              provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
       else
@@ -2719,8 +2720,10 @@ namespace Legion {
       if (collective_mapping != NULL)
         collective_mapping->add_reference();
       AutoProvenance provenance(Provenance::deserialize(derez));
+      RtEvent dummy;
       Future result(runtime->find_or_create_future(future_did, ctx_did,
                                             coordinate, provenance,
+                                            true/*has global ref*/, dummy,
                                             op, op_gen, op_uid, op_depth,
                                             collective_mapping));
       result.impl->unpack_global_ref();
@@ -2752,9 +2755,9 @@ namespace Legion {
         {
           consumer_op->register_dependence(producer_op, op_gen);
 #ifdef LEGION_SPY
-          LegionSpy::log_mapping_dependence(
-              context->get_unique_id(), producer_uid, 0,
-              consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+          LegionSpy::log_future_dependence(
+              context->get_unique_id(), producer_uid,
+              consumer_op->get_unique_op_id());
 #endif
         }
         else
@@ -3128,7 +3131,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::record_future_registered(void)
+    RtEvent FutureImpl::record_future_registered(bool has_global_reference)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -3140,7 +3143,7 @@ namespace Legion {
       registered_with_runtime = true;
       RtEvent result;
       if (!is_owner())
-        result = send_remote_registration();
+        result = send_remote_registration(has_global_reference);
       return result;
     }
 
@@ -4130,7 +4133,8 @@ namespace Legion {
         context(ctx), op(o), op_gen(o->get_generation()),
         op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
         blocking_index(o->get_context()->get_next_blocking_index()),
-        provenance(prov), future_map_domain(domain)
+        provenance(prov), future_map_domain(domain),
+        context_index(o->get_context_index())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4148,13 +4152,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, uint64_t blocking,
+                                 const std::optional<uint64_t> &index,
                                  Provenance *prov,
                                  bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
           register_now, mapping),
         context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
-        blocking_index(blocking), provenance(prov), future_map_domain(d)
+        blocking_index(blocking), provenance(prov), future_map_domain(d),
+        context_index(index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4173,11 +4179,13 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t index,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, Provenance *prov)
+                                 DistributedID did, Provenance *prov,
+                                 const std::optional<uint64_t> &ctx_index)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
-        blocking_index(index), provenance(prov), future_map_domain(domain)
+        blocking_index(index), provenance(prov), future_map_domain(domain),
+        context_index(ctx_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4374,6 +4382,7 @@ namespace Legion {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
         rez.serialize(blocking_index);
+        rez.serialize(context_index);
         if (provenance != NULL)
           provenance->serialize(rez);
         else
@@ -4407,9 +4416,11 @@ namespace Legion {
       derez.deserialize(future_map_domain);
       uint64_t coordinate;
       derez.deserialize(coordinate);
+      std::optional<uint64_t> index;
+      derez.deserialize(index);
       AutoProvenance provenance(Provenance::deserialize(derez));
       FutureMap result(runtime->find_or_create_future_map(future_map_did, ctx, 
-                      coordinate, future_map_domain, provenance));
+                      coordinate, future_map_domain, provenance, index));
       result.impl->unpack_global_ref();
       return result;
     }
@@ -4505,7 +4516,7 @@ namespace Legion {
       // We know futures can never flow up the task tree so the
       // only way they have the same depth is if they are from 
       // the same parent context
-      TaskContext *context = consumer_op->get_context();
+      InnerContext *context = consumer_op->get_context();
       const int consumer_depth = context->get_depth();
 #ifdef DEBUG_LEGION
       assert(consumer_depth >= op_depth);
@@ -4514,15 +4525,49 @@ namespace Legion {
       {
         consumer_op->register_dependence(op, op_gen);
 #ifdef LEGION_SPY
-        LegionSpy::log_mapping_dependence(
-            context->get_unique_id(), op_uid, 0,
-            consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+        LegionSpy::log_future_dependence(
+            context->get_unique_id(), op_uid, consumer_op->get_unique_op_id());
 #endif
       }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureMapImpl::record_future_map_registered(void)
+    RtEvent FutureMapImpl::find_pointwise_dependence(const DomainPoint &point,
+        int context_depth, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(context_depth >= op_depth);
+#endif
+      if (!context_index || (context_depth != op_depth))
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return RtEvent::NO_RT_EVENT;
+      }
+      if (!is_owner())
+      {
+        // Make an event and send it back to the owner node
+        if (!to_trigger.exists())
+          to_trigger = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(point);
+          rez.serialize(context_depth);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_future_map_find_pointwise(owner_space, rez);
+        return to_trigger;
+      }
+      else
+        return context->find_pointwise_dependence(*context_index,
+            point, 0/*shard*/, to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureMapImpl::record_future_map_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -4532,10 +4577,13 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
-      RtEvent result;
+      // We always have a global unpack reference from 
+      // FutureMapImpl::unpack_future_map and that ensures that we can
+      // send the registration method without blocking since the 
+      // distributed collectable cannot collect itself until it finds
+      // the unpacked global reference
       if (!is_owner())
-        result = send_remote_registration();
-      return result;
+        send_remote_registration(true/*has global reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4584,9 +4632,11 @@ namespace Legion {
       derez.deserialize(coordinate.index_point);
       DistributedID future_did;
       derez.deserialize(future_did);
+      RtEvent dummy;
       FutureImpl *impl = runtime->find_or_create_future(future_did,
                                     context->did, coordinate,
-                                    provenance, op, op_gen,
+                                    provenance, true/*has global ref*/,
+                                    dummy, op, op_gen,
 #ifdef LEGION_SPY
                                     op_uid,
 #endif
@@ -4619,6 +4669,31 @@ namespace Legion {
       Runtime::trigger_event(done);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void FutureMapImpl::handle_future_map_find_pointwise(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      // Should always find it since this is the source node
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      FutureMapImpl *impl = dynamic_cast<FutureMapImpl*>(dc);
+      assert(impl != NULL);
+#else
+      FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
+#endif
+      DomainPoint point;
+      derez.deserialize(point);
+      int context_depth;
+      derez.deserialize(context_depth);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      impl->find_pointwise_dependence(point, context_depth, to_trigger);
+    }
+
     /////////////////////////////////////////////////////////////
     // Transform Future Map Impl 
     /////////////////////////////////////////////////////////////
@@ -4630,7 +4705,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prov),
+          prov, prev->context_index),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
@@ -4645,7 +4720,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prov),
+          prov, prev->context_index),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
@@ -4842,6 +4917,37 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent TransformFutureMapImpl::find_pointwise_dependence(
+        const DomainPoint &point, int context_depth, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(future_map_domain->contains_point(point));
+#endif
+      const Domain domain = future_map_domain->get_tight_domain();
+      const Domain range = previous->future_map_domain->get_tight_domain();
+      if (is_functor)
+      {
+        const DomainPoint transformed = 
+          transform.functor->transform_point(point, domain, range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->find_pointwise_dependence(transformed,
+            context_depth, to_trigger);
+      }
+      else
+      {
+        const DomainPoint transformed = (*transform.fnptr)(point,domain,range);
+#ifdef DEBUG_LEGION
+        assert(previous->future_map_domain->contains_point(transformed));
+#endif
+        return previous->find_pointwise_dependence(transformed,
+            context_depth, to_trigger);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Future Map Impl 
     /////////////////////////////////////////////////////////////
@@ -4870,9 +4976,9 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
                             Runtime *rt, IndexSpaceNode *domain,
                             IndexSpaceNode *shard_dom, DistributedID did, 
-                            uint64_t coord,
+                            uint64_t coord, std::optional<uint64_t> ctx_index,
                             Provenance *prov, CollectiveMapping *mapping)
-      : FutureMapImpl(ctx, rt, domain, did, coord, prov, 
+      : FutureMapImpl(ctx, rt, domain, did, coord, ctx_index, prov,
                       false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), sharding_function(NULL),
@@ -5114,6 +5220,33 @@ namespace Legion {
       }
       else
         return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplFutureMapImpl::find_pointwise_dependence(
+        const DomainPoint &point, int context_depth, RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(context_depth >= op_depth);
+#endif
+      if (!context_index || (context_depth != op_depth))
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return RtEvent::NO_RT_EVENT;
+      }
+      const Domain sharding_domain = shard_domain->get_tight_domain();
+      if (sharding_function.load() == NULL)
+      {
+        RtEvent wait_on = get_sharding_function_ready();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      const ShardID owner_shard = 
+        sharding_function.load()->find_owner(point, sharding_domain);
+      return context->find_pointwise_dependence(*context_index,
+          point, owner_shard, to_trigger);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8775,9 +8908,7 @@ namespace Legion {
 #endif
       if (remaining_bytes < size)
         return NULL;
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      size_t alignment = std::min<size_t>(size & ~(size-1), 128);
+      size_t alignment = manager->compute_future_alignment(size);
       uintptr_t start = 0;
       const unsigned range_index = allocate(size, alignment, start);
       if (range_index == SENTINEL)
@@ -9213,7 +9344,8 @@ namespace Legion {
           Range& r_before = ranges[pf_idx];
           grow_hole(pf_idx, r_before, r.last, false/*before*/);
           r_before.next = r.next;
-          ranges[r.next].prev = pf_idx;
+          if (r.next != SENTINEL)
+            ranges[r.next].prev = pf_idx;
           free_range(index);
         }
       } 
@@ -9226,7 +9358,8 @@ namespace Legion {
           Range& r_after = ranges[nf_idx];
           grow_hole(nf_idx, r_after, r.first, true/*before*/);
           r_after.prev = r.prev;
-          ranges[r.prev].next = nf_idx;
+          if (r.prev != SENTINEL)
+            ranges[r.prev].next = nf_idx;
           free_range(index);
         } 
         else 
@@ -9242,7 +9375,6 @@ namespace Legion {
           r_before.next = r_after.next;
           if (r_after.next != SENTINEL)
             ranges[r_after.next].prev = pf_idx;
-
           free_range(index);
           free_range(nf_idx);
         }
@@ -13725,6 +13857,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t MemoryManager::compute_future_alignment(size_t size) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(size > 0);
+#endif
+      // Default max alignment is 32 bytes
+      size_t max_alignment = 32;
+      const Memory::Kind kind = memory.kind();
+      // See if this is a GPU memory, if it is then we increase the maximum
+      // alignment up to 128 bytes since GPUs tend to like that
+      if ((kind == Memory::GPU_FB_MEM) || (kind == Memory::GPU_MANAGED_MEM) ||
+          (kind == Memory::GPU_DYNAMIC_MEM))
+        max_alignment = 128;
+      static_assert((sizeof(size_t) == 4) || (sizeof(size_t) == 8));
+      // Round up to the nearest power of 2
+      size--;
+      size |= size >> 1;
+      size |= size >> 2;
+      size |= size >> 4;
+      size |= size >> 8;
+      size |= size >> 16;
+      if (sizeof(size_t) == 8)
+        size |= size >> 32;
+      size++;
+      return std::min<size_t>(size, max_alignment);
+    }
+
+    //--------------------------------------------------------------------------
     FutureInstance* MemoryManager::create_future_instance(UniqueID creator_uid,
                             const TaskTreeCoordinates &coordinates, size_t size,
                             RtEvent *safe_for_unbounded_pools)
@@ -13784,9 +13945,7 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       // Create the layout for the future
-      // Align futures on the largest power of 2 that divides the size of 
-      // field, but cap at 128 bytes for GPUs
-      ilg->alignment_reqd = std::min<size_t>(size & ~(size-1), 128);
+      ilg->alignment_reqd = compute_future_alignment(size);
       LgEvent unique_event;
       if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
@@ -15304,11 +15463,6 @@ namespace Legion {
               runtime->handle_slice_find_intra_dependence(derez);
               break;
             }
-          case SLICE_RECORD_INTRA_DEP:
-            {
-              runtime->handle_slice_record_intra_dependence(derez);
-              break;
-            }
           case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
             {
               runtime->handle_slice_remote_collective_rendezvous(derez,
@@ -15696,6 +15850,11 @@ namespace Legion {
               runtime->handle_future_map_future_response(derez);
               break;
             }
+          case SEND_FUTURE_MAP_POINTWISE:
+            {
+              runtime->handle_future_map_find_pointwise(derez);
+              break;
+            }
           case SEND_REPL_COMPUTE_EQUIVALENCE_SETS:
             {
               runtime->handle_control_replicate_compute_equivalence_sets(
@@ -15717,11 +15876,6 @@ namespace Legion {
             {
               runtime->handle_control_replicate_equivalence_set_notification(
                                                                       derez);
-              break;
-            }
-          case SEND_REPL_INTRA_SPACE_DEP:
-            {
-              runtime->handle_control_replicate_intra_space_dependence(derez);
               break;
             }
           case SEND_REPL_BROADCAST_UPDATE:
@@ -15781,6 +15935,11 @@ namespace Legion {
           case SEND_REPL_FIND_COLLECTIVE_VIEW:
             {
               runtime->handle_control_replicate_find_collective_view(derez);
+              break;
+            }
+          case SEND_REPL_POINTWISE_DEPENDENCE:
+            {
+              runtime->handle_control_replicate_pointwise_dependence(derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -15912,6 +16071,11 @@ namespace Legion {
           case SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS:
             {
               runtime->handle_remote_context_refine_equivalence_sets(derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_POINTWISE_DEPENDENCE:
+            {
+              runtime->handle_remote_context_pointwise_dependence(derez);
               break;
             }
           case SEND_REMOTE_CONTEXT_FIND_TRACE_LOCAL_SETS_REQUEST:
@@ -16462,6 +16626,7 @@ namespace Legion {
           case SEND_CONTROL_REPLICATION_PREDICATE_EXCHANGE:
           case SEND_CONTROL_REPLICATION_CROSS_PRODUCT_EXCHANGE:
           case SEND_CONTROL_REPLICATION_TRACING_SET_DEDUPLICATION:
+          case SEND_CONTROL_REPLICATION_POINTWISE_ALLREDUCE:
           case SEND_CONTROL_REPLICATION_SLOW_BARRIER:
             {
               ShardManager::handle_collective_message(derez, runtime);
@@ -18496,6 +18661,9 @@ namespace Legion {
                          std::vector<DomainPoint> &ordered_points)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(region == upper_bound);
+#endif
       // This is a special case for the ordered mapping of point tasks in 
       // the case where we used to try to premap regions for an index task
       // launch where all the points mapped the same region with read-write
@@ -18511,8 +18679,13 @@ namespace Legion {
                       std::vector<DomainPoint> &ordered_points)
     //--------------------------------------------------------------------------
     {
-      // This should never get called
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(runtime->get_parent_logical_partition(region) == upper_bound);
+#endif
+      const DomainPoint point = runtime->get_logical_region_color_point(region);
+      // Need to check if it is in the launch domain
+      if (launch_domain.contains(point))
+        ordered_points.push_back(point);
     }
 
     //--------------------------------------------------------------------------
@@ -18652,12 +18825,14 @@ namespace Legion {
           return result;
         }
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::project_points(const RegionRequirement &req, 
-                  unsigned idx, Runtime *runtime, const Domain &launch_domain,
-                  const std::vector<PointTask*> &point_tasks)
+                  unsigned index, Runtime *runtime, const Domain &launch_domain,
+                  const std::vector<PointTask*> &point_tasks,
+                  const std::vector<PointwiseDependence> *pointwise_dependences,
+                  const size_t total_shards, bool replaying)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18666,6 +18841,7 @@ namespace Legion {
       size_t arglen = 0;
       const void *args = req.get_projection_args(&arglen);
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
+      std::vector<LogicalRegion> pointwise_regions;
       // We used to support the case of the identity projection function
       // on logical regions special with the premap case, but it is really
       // just another case of having dependences between points on a region
@@ -18673,8 +18849,13 @@ namespace Legion {
       // it here inside the runtime since we control the implementation of
       // the identity projection function
       const bool find_dependences = IS_WRITE(req) && !IS_COLLECTIVE(req) &&
-        (is_invertible || ((projection_id == 0) && 
+        !replaying && (is_invertible || ((projection_id == 0) && 
                            (req.handle_type == LEGION_REGION_PROJECTION)));
+      // Can skip pointwise analysis if we're replaying
+      if (replaying)
+        pointwise_dependences = NULL;
+      if (find_dependences || (pointwise_dependences != NULL))
+        pointwise_regions.reserve(point_tasks.size());
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
@@ -18684,27 +18865,29 @@ namespace Legion {
                 point_tasks.begin(); it != point_tasks.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(*it, idx, req.partition, 
+              functor->project(*it, index, req.partition, 
                                (*it)->get_domain_point()) : (args == NULL) ?
               functor->project(req.partition,
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.partition,
                   (*it)->get_domain_point(), launch_domain, args, arglen);
             check_projection_partition_result(req.partition,
-                static_cast<Task*>(*it), idx, result, runtime);
-            (*it)->set_projection_result(idx, result);
+                static_cast<Task*>(*it), index, result, runtime);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion((*it), idx, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
-              else
-                check_containment((*it), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              check_containment((*it), index, region_deps);
             }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -18713,26 +18896,28 @@ namespace Legion {
                 point_tasks.begin(); it != point_tasks.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(*it, idx, req.region,(*it)->get_domain_point()) :
-              (args == NULL) ? functor->project(req.region, 
+              functor->project(*it, index, req.region,(*it)->get_domain_point())
+                : (args == NULL) ? functor->project(req.region, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.region, (*it)->get_domain_point(),
                   launch_domain, args, arglen);
             check_projection_region_result(req.region, static_cast<Task*>(*it),
-                                           idx, result, runtime);
-            (*it)->set_projection_result(idx, result);
+                                           index, result, runtime);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion((*it), idx, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
-              else
-                check_containment((*it), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              check_containment((*it), index, region_deps);
             }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
           }
         }
       }
@@ -18744,27 +18929,29 @@ namespace Legion {
                 point_tasks.begin(); it != point_tasks.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(*it, idx, req.partition, 
+              functor->project(*it, index, req.partition, 
                               (*it)->get_domain_point()) : (args == NULL) ?
               functor->project(req.partition, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.partition,
                   (*it)->get_domain_point(), launch_domain, args, arglen);
             check_projection_partition_result(req.partition,
-                static_cast<Task*>(*it), idx, result, runtime);
-            (*it)->set_projection_result(idx, result);
+                static_cast<Task*>(*it), index, result, runtime);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion((*it), idx, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
               }
-              else
-                check_containment((*it), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              check_containment((*it), index, region_deps);
             }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -18773,25 +18960,87 @@ namespace Legion {
                 point_tasks.begin(); it != point_tasks.end(); it++)
           {
             LogicalRegion result = !is_functional ? 
-              functor->project(*it, idx, req.region,(*it)->get_domain_point()) :
-              (args == NULL) ? functor->project(req.region, 
+              functor->project(*it, index, req.region,(*it)->get_domain_point())
+                : (args == NULL) ? functor->project(req.region, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.region, (*it)->get_domain_point(),
                   launch_domain, args, arglen);
             check_projection_region_result(req.region, static_cast<Task*>(*it),
-                                           idx, result, runtime);
-            (*it)->set_projection_result(idx, result);
+                                           index, result, runtime);
+            (*it)->set_projection_result(index, result);
+
+            if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion((*it), idx, region_deps);
+                check_inversion((*it), index, region_deps, launch_domain);
+              }
+              check_containment((*it), index, region_deps);
+            }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
+          }
+        }
+      }
+      if (!pointwise_regions.empty())
+      {
+        if (find_dependences)
+        {
+          // Record these now that we're no longer holding the lock
+          for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
+          {
+            std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+              finder = dependences.find(pointwise_regions[idx]);
+#ifdef DEBUG_LEGION
+            assert(finder != dependences.end());
+#endif
+            point_tasks[idx]->record_intra_space_dependences(
+                index, finder->second);
+          }
+        }
+        if (pointwise_dependences != NULL)
+        {
+          for (std::vector<PointwiseDependence>::const_iterator pit =
+                pointwise_dependences->begin(); pit !=
+                pointwise_dependences->end(); pit++)
+          {
+            dependences.clear();
+            // Careful! Not using the same region requirement as was originally
+            // used for this projection but it has the same upper bound
+            // which is good enough for us
+            pit->find_dependences(req, pointwise_regions, dependences);
+            for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
+            {
+              std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+                finder = dependences.find(pointwise_regions[idx]);
+              if (finder == dependences.end())
+                continue;
+              if (total_shards > 1)
+              {
+                const Domain shard_domain = (pit->sharding_domain == NULL) ?
+                  launch_domain : pit->sharding_domain->get_tight_domain();
+                for (std::vector<DomainPoint>::const_iterator it =
+                      finder->second.begin(); it != finder->second.end(); it++)
+                {
+                  ShardID shard = pit->sharding->shard(
+                      *it, shard_domain, total_shards); 
+                  point_tasks[idx]->record_pointwise_dependence(
+                      pit->context_index, *it, shard);
+                }
               }
               else
-                check_containment((*it), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              {
+                for (std::vector<DomainPoint>::const_iterator it =
+                      finder->second.begin(); it != finder->second.end(); it++)
+                  point_tasks[idx]->record_pointwise_dependence(
+                      pit->context_index, *it, 0/*shard ID*/);
+              }
             }
           }
         }
@@ -18799,10 +19048,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::project_points(Operation *op, unsigned idx,
-                         const RegionRequirement &req, 
-                         Runtime *runtime, const Domain &launch_domain, 
-                         const std::vector<ProjectionPoint*> &points)
+    void ProjectionFunction::project_points(Operation *op, unsigned index,
+                  const RegionRequirement &req, 
+                  Runtime *runtime, const Domain &launch_domain, 
+                  const std::vector<ProjectionPoint*> &points,
+                  const std::vector<PointwiseDependence> *pointwise_dependences,
+                  const size_t total_shards, bool replaying)
     //--------------------------------------------------------------------------
     {
       Mappable *mappable = op->get_mappable();
@@ -18812,8 +19063,15 @@ namespace Legion {
 #endif
       size_t arglen = 0;
       const void *args = req.get_projection_args(&arglen);
-      const bool find_dependences = is_invertible && IS_WRITE(req);
+      const bool find_dependences =
+        !replaying && is_invertible && IS_WRITE(req);
       std::map<LogicalRegion,std::vector<DomainPoint> > dependences;
+      std::vector<LogicalRegion> pointwise_regions;
+      // Can skip pointwise analysis if we're replaying
+      if (replaying)
+        pointwise_dependences = NULL;
+      if (find_dependences || (pointwise_dependences != NULL))
+        pointwise_regions.reserve(points.size());
       if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
@@ -18823,27 +19081,29 @@ namespace Legion {
                 points.begin(); it != points.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(mappable, idx, req.partition, 
+              functor->project(mappable, index, req.partition, 
                                 (*it)->get_domain_point()) : (args == NULL) ?
               functor->project(req.partition, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.partition,
                   (*it)->get_domain_point(), launch_domain, args, arglen);
-            check_projection_partition_result(req.partition, op, idx,
+            check_projection_partition_result(req.partition, op, index,
                                               result, runtime);
-            (*it)->set_projection_result(idx, result);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion((*it)->as_mappable(), idx, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
-              else
-                check_containment((*it)->as_mappable(), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              check_containment(*it, index, region_deps);
             }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -18852,26 +19112,29 @@ namespace Legion {
                 points.begin(); it != points.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(mappable, idx, req.region,
+              functor->project(mappable, index, req.region,
                                (*it)->get_domain_point()) : (args == NULL) ?
               functor->project(req.region, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.region,
                   (*it)->get_domain_point(), launch_domain, args, arglen);
-            check_projection_region_result(req.region, op, idx, result,runtime);
-            (*it)->set_projection_result(idx, result);
+            check_projection_region_result(req.region, op, index,
+                result, runtime);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion((*it)->as_mappable(), idx, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
-              else
-                check_containment((*it)->as_mappable(), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              check_containment(*it, index, region_deps);
             }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
           }
         }
       }
@@ -18883,27 +19146,29 @@ namespace Legion {
                 points.begin(); it != points.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(mappable, idx, req.partition, 
+              functor->project(mappable, index, req.partition, 
                                (*it)->get_domain_point()) : (args == NULL) ?
               functor->project(req.partition, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.partition,
                   (*it)->get_domain_point(), launch_domain, args, arglen);
-            check_projection_partition_result(req.partition, op, idx,
+            check_projection_partition_result(req.partition, op, index,
                                               result, runtime);
-            (*it)->set_projection_result(idx, result);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result,req.partition,launch_domain,region_deps);
-                check_inversion((*it)->as_mappable(), idx, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
               }
-              else
-                check_containment((*it)->as_mappable(), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              check_containment(*it, index, region_deps);
             }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
           }
         }
         else
@@ -18912,26 +19177,156 @@ namespace Legion {
                 points.begin(); it != points.end(); it++)
           {
             LogicalRegion result = !is_functional ?
-              functor->project(mappable, idx, req.region,
+              functor->project(mappable, index, req.region,
                                (*it)->get_domain_point()) : (args == NULL) ?
               functor->project(req.region, 
                   (*it)->get_domain_point(), launch_domain) :
               functor->project(req.region,
                   (*it)->get_domain_point(), launch_domain, args, arglen);
-            check_projection_region_result(req.region, op, idx, result,runtime);
-            (*it)->set_projection_result(idx, result);
+            check_projection_region_result(req.region, op, index,
+                result, runtime);
+            (*it)->set_projection_result(index, result);
+
             if (find_dependences)
             {
+              pointwise_regions.emplace_back(result);
               std::vector<DomainPoint> &region_deps = dependences[result];
               if (region_deps.empty())
               {
                 functor->invert(result, req.region, launch_domain, region_deps);
-                check_inversion((*it)->as_mappable(), idx, region_deps);
+                check_inversion(*it, index, region_deps, launch_domain);
+              }
+              check_containment(*it, index, region_deps);
+            }
+            else if (pointwise_dependences != NULL)
+              pointwise_regions.emplace_back(result);
+          }
+        }
+      }
+      if (!pointwise_regions.empty())
+      {
+        if (find_dependences)
+        {
+          // Record these now that we're no longer holding the lock
+          for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
+          {
+            std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+              finder = dependences.find(pointwise_regions[idx]);
+#ifdef DEBUG_LEGION
+            assert(finder != dependences.end());
+#endif
+            points[idx]->record_intra_space_dependences(
+                index, finder->second);
+          }
+        }
+        if (pointwise_dependences != NULL)
+        {
+          for (std::vector<PointwiseDependence>::const_iterator pit =
+                pointwise_dependences->begin(); pit !=
+                pointwise_dependences->end(); pit++)
+          {
+            dependences.clear();
+            // Careful! Not using the same region requirement as was originally
+            // used for this projection but it has the same upper bound
+            // which is good enough for us
+            pit->find_dependences(req, pointwise_regions, dependences);
+            for (unsigned idx = 0; idx < pointwise_regions.size(); idx++)
+            {
+              std::map<LogicalRegion,std::vector<DomainPoint> >::const_iterator
+                finder = dependences.find(pointwise_regions[idx]);
+#ifdef DEBUG_LEGION
+              assert(finder != dependences.end());
+#endif
+              if (total_shards > 1)
+              {
+                const Domain shard_domain = (pit->sharding_domain == NULL) ?
+                  launch_domain : pit->sharding_domain->get_tight_domain();
+                for (std::vector<DomainPoint>::const_iterator it =
+                      finder->second.begin(); it != finder->second.end(); it++)
+                {
+                  ShardID shard = pit->sharding->shard(
+                      *it, shard_domain, total_shards); 
+                  points[idx]->record_pointwise_dependence(
+                      pit->context_index, *it, shard);
+                }
               }
               else
-                check_containment((*it)->as_mappable(), idx, region_deps);
-              (*it)->record_intra_space_dependences(idx, region_deps);
+              {
+                for (std::vector<DomainPoint>::const_iterator it =
+                      finder->second.begin(); it != finder->second.end(); it++)
+                  points[idx]->record_pointwise_dependence(
+                      pit->context_index, *it, 0/*Shard ID*/);
+              }
             }
+          }
+        }
+      }
+    } 
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::find_inversions(unsigned op_kind, UniqueID uid,
+        unsigned region_index, const RegionRequirement &req,
+        IndexSpaceNode *domain, const std::vector<LogicalRegion> &points,
+        std::map<LogicalRegion,std::vector<DomainPoint> > &dependences)
+    //--------------------------------------------------------------------------
+    {
+      const Domain launch_domain = domain->get_tight_domain();
+      if (!is_exclusive)
+      {
+        AutoLock p_lock(projection_reservation);
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+        {
+          for (std::vector<LogicalRegion>::const_iterator it =
+                points.begin(); it != points.end(); it++)
+          {
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.partition, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
+          }
+        }
+        else
+        {
+          for (std::vector<LogicalRegion>::const_iterator it =
+                points.begin(); it != points.end(); it++)
+          {
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.region, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
+          }
+        }
+      }
+      else
+      {
+        if (req.handle_type == LEGION_PARTITION_PROJECTION)
+        {
+          for (std::vector<LogicalRegion>::const_iterator it =
+                points.begin(); it != points.end(); it++)
+          {
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.partition, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
+          }
+        }
+        else
+        {
+          for (std::vector<LogicalRegion>::const_iterator it =
+                points.begin(); it != points.end(); it++)
+          {
+            if (dependences.find(*it) != dependences.end())
+              continue;
+            std::vector<DomainPoint> &region_deps = dependences[*it];
+            functor->invert(*it, req.region, launch_domain, region_deps);
+            check_inversion(op_kind, uid, region_index,
+                region_deps, launch_domain, true/*allow empty*/);
           }
         }
       }
@@ -19090,120 +19485,121 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::check_inversion(const Task *task, unsigned index,
-                                         const std::vector<DomainPoint> &points)
+    void ProjectionFunction::check_inversion(const ProjectionPoint *point,
+        unsigned index, const std::vector<DomainPoint> &points,
+        const Domain &launch_domain, bool allow_empty)
     //--------------------------------------------------------------------------
     {
-      if (points.empty())
+      const Operation *op = point->as_operation();
+      if (!allow_empty && points.empty())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
             "Projection functor %d produced an empty inversion result "
-            "while inverting region requirement %d of task %s (UID %lld). "
-            "Empty inversions are never legal because the point task that "
+            "while inverting region requirement %d of %s (UID %lld). "
+            "Empty inversions are never legal because the point that "
             "produced the region must always be included.",
-            projection_id, index, task->get_task_name(), task->get_unique_id())
+            projection_id, index, op->get_logging_name(),
+            op->get_unique_op_id())
 #ifdef DEBUG_LEGION
-      std::set<DomainPoint> unique_points(points.begin(), points.end());
-      if (unique_points.size() != points.size())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+      std::set<DomainPoint> unique_points;
+      for (std::vector<DomainPoint>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (!launch_domain.contains(*it))
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "that contains points not in the launch domain for region "
+            "requirement %d of %s (UID %lld). Only points in the launch "
+            "domain can appear in the result.", projection_id, index,
+            op->get_logging_name(), op->get_unique_op_id())
+        if (!unique_points.insert(*it).second)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
             "Projection functor %d produced an invalid inversion result "
             "containing duplicate points for region requirement %d of "
-            "task %s (UID %lld). Each point is only permitted to "
+            "%s (UID %lld). Each point is only permitted to "
             "appear once in an inversion.", projection_id, index,
-            task->get_task_name(), task->get_unique_id())
-      if (unique_points.find(task->index_point) == unique_points.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-            "Projection functor %d produced an invalid inversion result "
-            "that does not contain the original point for region requirement "
-            "%d of task %s (UID %lld).", projection_id, index,
-            task->get_task_name(), task->get_unique_id())
+            op->get_logging_name(), op->get_unique_op_id())
+      }
 #endif
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::check_inversion(const Mappable *mappable, 
+    void ProjectionFunction::check_inversion(unsigned op_kind,
+        UniqueID uid, unsigned index, const std::vector<DomainPoint> &points,
+        const Domain &launch_domain, bool allow_empty)
+    //--------------------------------------------------------------------------
+    {
+      const Operation::OpKind kind = static_cast<Operation::OpKind>(op_kind);
+      if (!allow_empty && points.empty())
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an empty inversion result "
+            "while inverting region requirement %d of %s (UID %lld)."
+            "Empty inversions are never legal because the point copy "
+            "that produced the region must always be included.",
+            projection_id, index, Operation::get_string_rep(kind), uid)
+#ifdef DEBUG_LEGION
+      std::set<DomainPoint> unique_points;
+      for (std::vector<DomainPoint>::const_iterator it =
+            points.begin(); it != points.end(); it++)
+      {
+        if (!launch_domain.contains(*it))
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "that contains points not in the launch domain for region "
+            "requirement %d of %s (UID %lld). Only points in the launch "
+            "domain can appear in the result.", projection_id, index,
+            Operation::get_string_rep(kind), uid)
+        if (!unique_points.insert(*it).second)
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+            "Projection functor %d produced an invalid inversion result "
+            "containing duplicate points for region requirement %d of "
+            "%s (UID %lld). Each point is only permitted to "
+            "appear once in an inversion.", projection_id, index,
+            Operation::get_string_rep(kind), uid)
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_containment(const ProjectionPoint *point,
                          unsigned index, const std::vector<DomainPoint> &points)
     //--------------------------------------------------------------------------
     {
-      switch (mappable->get_mappable_type())
+#ifdef DEBUG_LEGION
+      const DomainPoint &index_point = point->get_domain_point();
+      for (std::vector<DomainPoint>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
       {
-        case LEGION_COPY_MAPPABLE:
-          {
-            const Copy *copy = mappable->as_copy();
-            if (points.empty())
-              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-                  "Projection functor %d produced an empty inversion result "
-                  "while inverting region requirement %d of copy (UID %lld)."
-                  "Empty inversions are never legal because the point copy "
-                  "that produced the region must always be included.",
-                  projection_id, index, copy->get_unique_id())
-#ifdef DEBUG_LEGION
-            std::set<DomainPoint> unique_points(points.begin(), points.end());
-            if (unique_points.size() != points.size())
-              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-                  "Projection functor %d produced an invalid inversion result "
-                  "containing duplicate points for region requirement %d of "
-                  "copy (UID %lld). Each point is only permitted to "
-                  "appear once in an inversion.", projection_id, index,
-                  copy->get_unique_id())
-            if (unique_points.find(copy->index_point) == unique_points.end())
-              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-                  "Projection functor %d produced an invalid inversion result "
-                  "that does not contain the original point for region "
-                  "requirement %d of copy (UID %lld).", projection_id, index,
-                  copy->get_unique_id())
-#endif
-            break;
-          }
-        case LEGION_FILL_MAPPABLE:
-          {
-            const Fill *fill = mappable->as_fill();
-            if (points.empty())
-              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-                  "Projection functor %d produced an empty inversion result "
-                  "while inverting region requirement %d of fill (UID %lld)."
-                  "Empty inversions are never legal because the point fill "
-                  "that produced the region must always be included.",
-                  projection_id, index, fill->get_unique_id())
-#ifdef DEBUG_LEGION
-            std::set<DomainPoint> unique_points(points.begin(), points.end());
-            if (unique_points.size() != points.size())
-              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-                  "Projection functor %d produced an invalid inversion result "
-                  "containing duplicate points for region requirement %d of "
-                  "fill (UID %lld). Each point is only permitted to "
-                  "appear once in an inversion.", projection_id, index,
-                  fill->get_unique_id())
-            if (unique_points.find(fill->index_point) == unique_points.end())
-              REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-                  "Projection functor %d produced an invalid inversion result "
-                  "that does not contain the original point for region "
-                  "requirement %d of fill (UID %lld).", projection_id, index,
-                  fill->get_unique_id())
-#endif
-            break;
-          }
-        default:
-          assert(false);
+        if ((*it) == index_point)
+          return;
       }
+      const Operation *op = point->as_operation();
+      REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
+          "Projection functor %d produced an invalid inversion result "
+          "that does not contain the original point for region requirement "
+          "%d of %s (UID %lld).", projection_id, index,
+          op->get_logging_name(), op->get_unique_op_id())
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::check_containment(const Task *task, unsigned index,
-                                         const std::vector<DomainPoint> &points)
+    void ProjectionFunction::check_containment(unsigned op_kind, UniqueID uid,
+        unsigned index, const DomainPoint &index_point,
+        const std::vector<DomainPoint> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       for (std::vector<DomainPoint>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
-        if ((*it) == task->index_point)
+        if ((*it) == index_point)
           return;
       }
+      const Operation::OpKind kind = static_cast<Operation::OpKind>(op_kind);
       REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
           "Projection functor %d produced an invalid inversion result "
           "that does not contain the original point for region requirement "
-          "%d of task %s (UID %lld).", projection_id, index,
-          task->get_task_name(), task->get_unique_id())
+          "%d of %s (UID %lld).", projection_id, index,
+          Operation::get_string_rep(kind), uid)
 #endif
     }
 
@@ -19268,54 +19664,6 @@ namespace Legion {
         }
       }
     }
-
-    //--------------------------------------------------------------------------
-    void ProjectionFunction::check_containment(const Mappable *mappable, 
-                         unsigned index, const std::vector<DomainPoint> &points)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      
-      switch (mappable->get_mappable_type())
-      {
-        case LEGION_COPY_MAPPABLE:
-          {
-            const Copy *copy = mappable->as_copy();
-            for (std::vector<DomainPoint>::const_iterator it = 
-                  points.begin(); it != points.end(); it++)
-            {
-              if ((*it) == copy->index_point)
-                return;
-            }
-            REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-              "Projection functor %d produced an invalid inversion result "
-              "that does not contain the original point for region requirement "
-              "%d of copy (UID %lld).", projection_id, index,
-              copy->get_unique_id())
-            break;
-          }
-        case LEGION_FILL_MAPPABLE:
-          {
-            const Fill *fill = mappable->as_fill();
-            for (std::vector<DomainPoint>::const_iterator it = 
-                  points.begin(); it != points.end(); it++)
-            {
-              if ((*it) == fill->index_point)
-                return;
-            }
-            REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT,
-              "Projection functor %d produced an invalid inversion result "
-              "that does not contain the original point for region requirement "
-              "%d of fill (UID %lld).", projection_id, index,
-              fill->get_unique_id())
-            break;
-          }
-        default:
-          assert(false);
-      
-      }
-#endif
-    } 
 
     //--------------------------------------------------------------------------
     ProjectionNode* ProjectionFunction::construct_projection_tree(
@@ -19758,6 +20106,7 @@ namespace Legion {
 #endif
         safe_tracing(config.safe_tracing),
         disable_independence_tests(config.disable_independence_tests),
+        enable_pointwise_analysis(config.enable_pointwise_analysis),
         legion_spy_enabled(config.legion_spy_enabled),
         supply_default_mapper(default_mapper),
         enable_test_mapper(config.enable_test_mapper),
@@ -19978,6 +20327,7 @@ namespace Legion {
         unsafe_mapper(rhs.unsafe_mapper),
         safe_tracing(rhs.safe_tracing),
         disable_independence_tests(rhs.disable_independence_tests),
+        enable_pointwise_analysis(rhs.enable_pointwise_analysis),
         legion_spy_enabled(rhs.legion_spy_enabled),
         supply_default_mapper(rhs.supply_default_mapper),
         enable_test_mapper(rhs.enable_test_mapper),
@@ -22235,17 +22585,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context issue must epoch!");
       return ctx->execute_must_epoch(launcher); 
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::issue_timing_measurement(Context ctx,
-                                             const TimingLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context in timing measurement!");
-      return ctx->issue_timing_measurement(launcher); 
     }
 
     //--------------------------------------------------------------------------
@@ -25364,15 +25703,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_slice_record_intra_space_dependence(Processor target,
-                                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SLICE_RECORD_INTRA_DEP, rez,
-                                                         true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_slice_remote_rendezvous(Processor target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -26016,6 +26346,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_future_map_find_pointwise(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_FUTURE_MAP_POINTWISE, rez,
+                                                          true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_compute_equivalence_sets(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -26049,15 +26388,6 @@ namespace Legion {
     {
       find_messenger(target)->send_message(
         SEND_REPL_EQUIVALENCE_SET_NOTIFICATION, rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_intra_space_dependence(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(SEND_REPL_INTRA_SPACE_DEP,
-                                                    rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -26156,6 +26486,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(SEND_REPL_FIND_COLLECTIVE_VIEW,
+                                                          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_pointwise_dependence(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(SEND_REPL_POINTWISE_DEPENDENCE,
                                                           rez, true/*flush*/);
     }
 
@@ -26356,6 +26695,15 @@ namespace Legion {
     {
       find_messenger(target)->send_message(
           SEND_REMOTE_CONTEXT_REFINE_EQUIVALENCE_SETS, rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_pointwise_dependence(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(
+          SEND_REMOTE_CONTEXT_POINTWISE_DEPENDENCE, rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -27996,13 +28344,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_slice_record_intra_dependence(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      IndexTask::process_slice_record_intra_dependence(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_slice_remote_collective_rendezvous(
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -28509,6 +28850,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_future_map_find_pointwise(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FutureMapImpl::handle_future_map_find_pointwise(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_control_replicate_compute_equivalence_sets(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -28538,14 +28886,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_equivalence_set_notification(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_intra_space_dependence(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_intra_space_dependence(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -28632,6 +28972,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_find_collective_view(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_pointwise_dependence(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_pointwise_dependence(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -28880,6 +29228,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_refine_equivalence_sets(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_pointwise_dependence(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_pointwise_dependence(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -30721,6 +31077,8 @@ namespace Legion {
                                                DistributedID ctx_did,
                                                const ContextCoordinate &coord,
                                                Provenance *provenance,
+                                               bool has_global_reference,
+                                               RtEvent &registered,
                                                Operation *op, GenerationID gen,
                                                UniqueID op_uid, int op_depth, 
                                                CollectiveMapping *mapping)
@@ -30746,35 +31104,30 @@ namespace Legion {
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
           op, gen, coord, op_uid, op_depth, provenance, mapping);
       // Retake the lock and see if we lost the race
-      RtEvent ready;
+      AutoLock d_lock(distributed_collectable_lock);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator 
+        finder = dist_collectables.find(did);
+      if (finder != dist_collectables.end())
       {
-        AutoLock d_lock(distributed_collectable_lock);
-        std::map<DistributedID,DistributedCollectable*>::const_iterator 
-          finder = dist_collectables.find(did);
-        if (finder != dist_collectables.end())
-        {
-          // We lost the race
-          delete result;
+        // We lost the race
+        delete result;
 #ifdef DEBUG_LEGION
-          result = dynamic_cast<FutureImpl*>(finder->second);
-          assert(result != NULL);
+        result = dynamic_cast<FutureImpl*>(finder->second);
+        assert(result != NULL);
 #else
-          result = static_cast<FutureImpl*>(finder->second);
+        result = static_cast<FutureImpl*>(finder->second);
 #endif
-          return result;
-        }
-        ready = result->record_future_registered();
-        dist_collectables[did] = result;
+        return result;
       }
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      registered = result->record_future_registered(has_global_reference);
+      dist_collectables[did] = result;
       return result;
     }
 
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
-                          TaskContext *ctx, uint64_t coord, IndexSpace domain,
-                          Provenance *provenance)
+              TaskContext *ctx, uint64_t coord, IndexSpace domain,
+              Provenance *provenance, const std::optional<uint64_t> &ctx_index)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -30798,30 +31151,24 @@ namespace Legion {
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
-           coord, provenance, false/*register now*/);
-      // Retake the lock and see if we lost the race
-      RtEvent ready;
+           coord, ctx_index, provenance, false/*register now*/);
+      AutoLock d_lock(distributed_collectable_lock);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator 
+        finder = dist_collectables.find(did);
+      if (finder != dist_collectables.end())
       {
-        AutoLock d_lock(distributed_collectable_lock);
-        std::map<DistributedID,DistributedCollectable*>::const_iterator 
-          finder = dist_collectables.find(did);
-        if (finder != dist_collectables.end())
-        {
-          // We lost the race
-          delete result;
+        // We lost the race
+        delete result;
 #ifdef DEBUG_LEGION
-          result = dynamic_cast<FutureMapImpl*>(finder->second);
-          assert(result != NULL);
+        result = dynamic_cast<FutureMapImpl*>(finder->second);
+        assert(result != NULL);
 #else
-          result = static_cast<FutureMapImpl*>(finder->second);
+        result = static_cast<FutureMapImpl*>(finder->second);
 #endif
-          return result;
-        }
-        ready = result->record_future_map_registered();
-        dist_collectables[did] = result;
+        return result;
       }
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      result->record_future_map_registered();
+      dist_collectables[did] = result;
       return result;
     }
 
@@ -33921,6 +34268,8 @@ namespace Legion {
         .add_option_int("-lg:parallel_replay", 
                         config.max_replay_parallelism, !filter)
         .add_option_bool("-lg:no_dyn",config.disable_independence_tests,!filter)
+        .add_option_bool("-lg:enable_pointwise_analysis",
+            config.enable_pointwise_analysis, !filter)
         .add_option_bool("-lg:spy",config.legion_spy_enabled, !filter)
         .add_option_bool("-lg:test",config.enable_test_mapper, !filter)
         .add_option_int("-lg:delay", config.delay_start, !filter)

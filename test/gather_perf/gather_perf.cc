@@ -599,6 +599,8 @@ void do_gather_copy(Runtime *runtime, Context ctx,
 				 false /*!range*/);
       icl.possible_src_indirect_out_of_range = false;
       icl.collective_src_indirect_points = true;
+      // Set the tag to 1 to signal the mapper to do preimages and shadow instances
+      icl.tag = 1;
 
       runtime->issue_copy_operation(ctx, icl);
       break;
@@ -1346,6 +1348,11 @@ public:
       inst = choose_instance(ctx, dst_index, num_points,
 			     copy.src_indirect_requirements[0]);
       output.src_indirect_instances[0] = inst;
+    }
+    if (copy.tag == 1)
+    {
+      output.compute_preimages = true;
+      output.shadow_indirections = true;
     }
   }
 

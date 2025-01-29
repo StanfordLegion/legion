@@ -112,7 +112,8 @@ const static IteratorTestCase kIteratorTestCases[] = {
         .num_steps = 2,
     },
 
-    // Case 1: step through 2D layout with 4 elements
+// Case 1: step through 2D layout with 4 elements
+#if REALM_MAX_DIM > 1
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
@@ -197,7 +198,9 @@ const static IteratorTestCase kIteratorTestCases[] = {
         .exp_bytes = {kByteSize * 2, kByteSize * 2},
         .num_steps = 2,
     },
+#endif
 
+#if REALM_MAX_DIM > 2
     // Case 5: step through 3D layout at once
     IteratorTestCase{
         .it = new TransferIteratorIndexSpace<3, int>(
@@ -215,6 +218,7 @@ const static IteratorTestCase kIteratorTestCases[] = {
         .exp_bytes = {kByteSize * 8},
         .num_steps = 1,
     },
+#endif
 
     // Case 6: step with empty rect
     IteratorTestCase{.it = new TransferIteratorIndexSpace<1, int>(
