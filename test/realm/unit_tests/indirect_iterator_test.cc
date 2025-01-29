@@ -78,7 +78,6 @@ TYPED_TEST_P(IndirectIteratorTest, GetAddresses)
 {
   constexpr int N = TestFixture::N;
   constexpr size_t elem_size = 8;
-  constexpr size_t max_bytes = elem_size * 2;
   using T = typename TestFixture::T;
   const InstanceLayoutPieceBase *nonaffine;
   AddressList addrlist;
