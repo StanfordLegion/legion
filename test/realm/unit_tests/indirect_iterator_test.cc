@@ -135,7 +135,7 @@ TYPED_TEST_P(IndirectIteratorTest, GetAddresses)
   EXPECT_EQ(cursor.remaining(0), elem_size);
 
   size_t offset = 0;
-  for(int i = 0; i < buffer.size(); i++) {
+  for(size_t i = 0; i < buffer.size(); i++) {
     EXPECT_EQ(cursor.get_offset(), offset);
     cursor.advance(0, elem_size);
     offset += elem_size * step;
