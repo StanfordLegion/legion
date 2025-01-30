@@ -15,11 +15,8 @@
 
 #include "realm/comp_queue_impl.h"
 
-#include "realm/proc_impl.h"
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
-#include "realm/threads.h"
-#include "realm/profiling.h"
 
 namespace Realm {
 
@@ -86,10 +83,11 @@ namespace Realm {
       log_compqueue.fatal() << "completion queue ID space exhausted!";
       abort();
     }
-    if(max_size > 0)
+    if(max_size > 0) {
       cq->set_capacity(max_size, false /*!resizable*/);
-    else
+    } else {
       cq->set_capacity(1024 /*no obvious way to pick this*/, true /*resizable*/);
+    }
 
     log_compqueue.info() << "created completion queue: cq=" << cq->me
                          << " size=" << max_size;
@@ -107,10 +105,12 @@ namespace Realm {
     if(owner == Network::my_node_id) {
       CompQueueImpl *cq = get_runtime()->get_compqueue_impl(*this);
 
-      if(wait_on.has_triggered())
+      if(wait_on.has_triggered()) {
         cq->destroy();
-      else
+        get_runtime()->local_compqueue_free_list->free_entry(cq);
+      } else {
         cq->deferred_destroy.defer(cq, wait_on);
+      }
     } else {
       ActiveMessage<CompQueueDestroyMessage> amsg(owner);
       amsg->comp_queue = *this;
@@ -124,10 +124,12 @@ namespace Realm {
   {
     CompQueueImpl *cq = get_runtime()->get_compqueue_impl(msg.comp_queue);
 
-    if(msg.wait_on.has_triggered())
+    if(msg.wait_on.has_triggered()) {
       cq->destroy();
-    else
+      get_runtime()->local_compqueue_free_list->free_entry(cq);
+    } else {
       cq->deferred_destroy.defer(cq, msg.wait_on);
+    }
   }
 
   // adds an event to the completion queue (once it triggers)
@@ -353,24 +355,7 @@ namespace Realm {
   // class CompQueueImpl
   //
 
-  CompQueueImpl::CompQueueImpl(void)
-    : next_free(0)
-    , resizable(false)
-    , max_events(0)
-    , wr_ptr(0)
-    , rd_ptr(0)
-    , pending_events(0)
-    , commit_ptr(0)
-    , consume_ptr(0)
-    , cur_events(0)
-    , completed_events(0)
-    , has_progress_events(false)
-    , local_progress_event(0)
-    , first_free_waiter(0)
-    , batches(0)
-  {}
-
-  CompQueueImpl::~CompQueueImpl(void)
+  CompQueueImpl::~CompQueueImpl()
   {
     AutoLock<> al(mutex);
     assert(pending_events.load() == 0);
@@ -379,8 +364,6 @@ namespace Realm {
       delete batches;
       batches = next_batch;
     }
-    if(completed_events)
-      free(completed_events);
   }
 
   void CompQueueImpl::init(CompletionQueue _me, int _owner)
@@ -392,10 +375,11 @@ namespace Realm {
   void CompQueueImpl::set_capacity(size_t _max_size, bool _resizable)
   {
     AutoLock<> al(mutex);
-    if(resizable)
+    if(resizable) {
       assert(cur_events == 0);
-    else
+    } else {
       assert(wr_ptr.load() == consume_ptr.load());
+    }
     wr_ptr.store(0);
     rd_ptr.store(0);
     pending_events.store(0);
@@ -405,13 +389,17 @@ namespace Realm {
     resizable = _resizable;
     // round up to a power of 2 for easy modulo arithmetic
     max_events = 1;
-    while(max_events < _max_size)
-      max_events <<= 1;
 
-    void *ptr = malloc(sizeof(Event) * max_events);
-    assert(ptr != 0);
-    completed_events = reinterpret_cast<Event *>(ptr);
+    while(max_events < _max_size) {
+      max_events <<= 1;
+    }
+
+    completed_events = std::make_unique<Event[]>(max_events);
   }
+
+  size_t CompQueueImpl::get_capacity() const { return max_events; }
+
+  size_t CompQueueImpl::get_pending_events() const { return pending_events.load(); }
 
   void CompQueueImpl::destroy(void)
   {
@@ -419,27 +407,13 @@ namespace Realm {
     // ok to have completed events leftover, but no pending events
     assert(pending_events.load() == 0);
     max_events = 0;
-    if(completed_events) {
-      free(completed_events);
-      completed_events = 0;
-    }
-
-    get_runtime()->local_compqueue_free_list->free_entry(this);
   }
 
-  void CompQueueImpl::add_event(Event event, bool faultaware)
+  void CompQueueImpl::add_event(Event event, EventImpl *ev_impl, bool faultaware)
   {
-    bool poisoned = false;
-
-    // special case: NO_EVENT has no impl...
-    if(!event.exists()) {
-      add_completed_event(event, 0 /*no waiter*/, TimeLimit::responsive());
-      return;
-    }
-
-    EventImpl *ev_impl = get_runtime()->get_event_impl(event);
     EventImpl::gen_t needed_gen = ID(event).event_generation();
 
+    bool poisoned = false;
     if(ev_impl->has_triggered(needed_gen, poisoned)) {
       if(poisoned && !faultaware) {
         log_compqueue.fatal() << "cannot enqueue poisoned event: cq=" << me
@@ -488,12 +462,24 @@ namespace Realm {
     }
   }
 
+  void CompQueueImpl::add_event(Event event, bool faultaware)
+  {
+    // special case: NO_EVENT has no impl...
+    if(!event.exists()) {
+      add_completed_event(event, 0 /*no waiter*/, TimeLimit::responsive());
+      return;
+    }
+
+    add_event(event, get_runtime()->get_event_impl(event), faultaware);
+  }
+
   Event CompQueueImpl::get_local_progress_event(void)
   {
     // non-resizable queues can observe a non-empty queue and return NO_EVENT
     //  without taking the lock
-    if(!resizable && (rd_ptr.load() < commit_ptr.load()))
+    if(!resizable && (rd_ptr.load() < commit_ptr.load())) {
       return Event::NO_EVENT;
+    }
 
     {
       AutoLock<> al(mutex);
@@ -512,8 +498,9 @@ namespace Realm {
         //  log to handle the progress event we're about to make
         has_progress_events.store(true);
         // commit load has to be fenced to stay after the store above
-        if(rd_ptr.load() < commit_ptr.load_fenced())
+        if(rd_ptr.load() < commit_ptr.load_fenced()) {
           return Event::NO_EVENT;
+        }
       }
 
       // we appear to be empty - get or create the progress event
@@ -542,12 +529,12 @@ namespace Realm {
       immediate_trigger = true;
     } else {
       AutoLock<> al(mutex);
-
       // now that we hold the lock, check emptiness consistent with progress
       //  event information
       if(resizable) {
-        if(cur_events > 0)
+        if(cur_events > 0) {
           immediate_trigger = true;
+        }
       } else {
         // before we recheck in the non-resizable case, set the
         //  'has_progress_events' flag - this ensures that any pusher we don't
@@ -555,12 +542,14 @@ namespace Realm {
         //  log to handle the remote progress event we're about to add
         has_progress_events.store(true);
         // commit load has to be fenced to stay after the store above
-        if(rd_ptr.load() < commit_ptr.load_fenced())
+        if(rd_ptr.load() < commit_ptr.load_fenced()) {
           immediate_trigger = true;
+        }
       }
 
-      if(!immediate_trigger)
+      if(!immediate_trigger) {
         remote_progress_events.push_back(event);
+      }
     }
 
     // lock is released, so we can trigger now if needed
@@ -584,12 +573,12 @@ namespace Realm {
           if((rd_ofs + count) > max_events) {
             size_t before_wrap = max_events - rd_ofs;
             // yes, two memcpy's needed
-            memcpy(events, completed_events + rd_ofs, before_wrap * sizeof(Event));
-            memcpy(events + before_wrap, completed_events,
+            memcpy(events, completed_events.get() + rd_ofs, before_wrap * sizeof(Event));
+            memcpy(events + before_wrap, completed_events.get(),
                    (count - before_wrap) * sizeof(Event));
           } else {
             // no, single memcpy does the job
-            memcpy(events, completed_events + rd_ofs, count * sizeof(Event));
+            memcpy(events, completed_events.get() + rd_ofs, count * sizeof(Event));
           }
         }
 
@@ -626,12 +615,12 @@ namespace Realm {
         if((rd_ofs + count) > max_events) {
           size_t before_wrap = max_events - rd_ofs;
           // yes, two memcpy's needed
-          memcpy(events, completed_events + rd_ofs, before_wrap * sizeof(Event));
-          memcpy(events + before_wrap, completed_events,
+          memcpy(events, completed_events.get() + rd_ofs, before_wrap * sizeof(Event));
+          memcpy(events + before_wrap, completed_events.get(),
                  (count - before_wrap) * sizeof(Event));
         } else {
           // no, single memcpy does the job
-          memcpy(events, completed_events + rd_ofs, count * sizeof(Event));
+          memcpy(events, completed_events.get() + rd_ofs, count * sizeof(Event));
         }
       }
 
@@ -663,19 +652,18 @@ namespace Realm {
         // should detect it precisely
         assert(cur_events == max_events);
         size_t new_size = max_events * 2;
-        Event *new_events = reinterpret_cast<Event *>(malloc(new_size * sizeof(Event)));
-        assert(new_events != 0);
+        std::unique_ptr<Event[]> new_events = std::make_unique<Event[]>(new_size);
         size_t rd_ofs = rd_ptr.load() & (max_events - 1);
         if(rd_ofs > 0) {
           // most cases wrap around
-          memcpy(new_events, completed_events + rd_ofs,
+          memcpy(new_events.get(), completed_events.get() + rd_ofs,
                  (cur_events - rd_ofs) * sizeof(Event));
-          memcpy(new_events + (cur_events - rd_ofs), completed_events,
+          memcpy(new_events.get() + (cur_events - rd_ofs), completed_events.get(),
                  rd_ofs * sizeof(Event));
-        } else
-          memcpy(new_events, completed_events, cur_events * sizeof(Event));
-        free(completed_events);
-        completed_events = new_events;
+        } else {
+          memcpy(new_events.get(), completed_events.get(), cur_events * sizeof(Event));
+        }
+        completed_events = std::move(new_events);
         rd_ptr.store(0);
         wr_ptr.store(cur_events);
         max_events = new_size;
@@ -777,6 +765,7 @@ namespace Realm {
   {
     assert(!poisoned);
     cq->destroy();
+    get_runtime()->local_compqueue_free_list->free_entry(cq);
   }
 
   void CompQueueImpl::DeferredDestroy::print(std::ostream &os) const

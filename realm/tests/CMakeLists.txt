@@ -77,6 +77,7 @@ list(
   APPEND
   REALM_UNIT_TESTS
   memcpy_channel_test.cc
+  comp_queue_test.cc
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc

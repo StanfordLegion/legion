@@ -23,6 +23,7 @@ endif()
 
 list(APPEND REALM_TESTS
   memcpy_channel_test.cc
+  comp_queue_test.cc
   ucx_mpool_test.cc
   barrier_test.cc
   event_test.cc

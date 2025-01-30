@@ -1507,11 +1507,18 @@ namespace Legion {
       // Logger calls for mapping dependences
       static inline void log_mapping_dependence(UniqueID context, 
                 UniqueID prev_id, unsigned prev_idx, UniqueID next_id, 
-                unsigned next_idx, unsigned dep_type)
+                unsigned next_idx, unsigned dep_type, bool pointwise = false)
       {
-        log_spy.print("Mapping Dependence %llu %llu %u %llu %u %d", 
-		      context, prev_id, prev_idx,
-		      next_id, next_idx, dep_type);
+        log_spy.print("Mapping Dependence %llu %llu %u %llu %u %d %d", 
+		      context, prev_id, prev_idx, next_id, next_idx, dep_type,
+                      pointwise ? 1 : 0);
+      }
+
+      static inline void log_future_dependence(UniqueID context, 
+                UniqueID prev_id, UniqueID next_id, bool pointwise = false)
+      {
+        log_spy.print("Future Dependence %llu %llu %llu %d",
+            context, prev_id, next_id, pointwise ? 1 : 0);
       }
 
       // Logger calls for realm events

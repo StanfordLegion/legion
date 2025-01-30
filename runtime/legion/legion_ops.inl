@@ -128,6 +128,9 @@ namespace Legion {
           ready = true;
         }
 #endif
+        // Hold the lock while doing this to prevent races on checking
+        // the predication state
+        AutoLock o_lock(this->op_lock);
         // We do the mapping if we resolve true or if the predicate isn't ready
         // If it's already resolved false then we can take the easy way out
         if (ready && !value)
