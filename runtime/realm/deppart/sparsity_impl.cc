@@ -258,11 +258,7 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count, Event wait_on)
   {
-    // Only do this if we're single node for now since it is not safe with
-    // Realm's quiescence code in multi-node at the moment
-    if(Network::max_node_id == 0) {
-      references.fetch_add_acqrel(count);
-    }
+    references.fetch_add_acqrel(count);
     if(wait_on != Event::NO_EVENT) {
       GenEventImpl::trigger(wait_on, false);
     }
