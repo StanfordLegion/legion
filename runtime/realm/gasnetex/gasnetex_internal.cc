@@ -3593,7 +3593,6 @@ namespace Realm {
     }
     if(compmgr.num_completions_pending() > 0) {
       log_gex_quiesce.debug() << "compmgr busy";
-      assert(0);
       local_counts[0]++;
     }
     for(gex_ep_index_t src_ep_index = 0; src_ep_index < xmitsrcs.size(); src_ep_index++) {

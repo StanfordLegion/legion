@@ -120,7 +120,7 @@ public:
 };
 
 template <int N, typename T>
-std::vector<Rect<N, T>> create_rects(int num_rects, int gap, int start = 0)
+static std::vector<Rect<N, T>> create_rects(int num_rects, int gap, int start = 0)
 {
   std::vector<Rect<N, T>> rect_list;
   int index = start;

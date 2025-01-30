@@ -1617,19 +1617,35 @@ namespace Legion {
         return;
       // Then compute the logical user
       ProjectionSummary *shard_proj = NULL;
-      if (proj_info.is_sharding() && proj_info.is_projecting())
+      if (proj_info.is_projecting())
       {
-        // If we're doing a projection in a control replicated context then
-        // we need to compute the shard projection up front since it might
-        // involve a collective if we don't hit in the cache and we want
-        // that to appear nice and deterministic
-        RegionTreeNode *destination = 
-          (req.handle_type == LEGION_PARTITION_PROJECTION) ?
-          static_cast<RegionTreeNode*>(get_node(req.partition)) :
-          static_cast<RegionTreeNode*>(get_node(req.region));
-        shard_proj = destination->compute_projection_summary(op, idx, req,
-                                              logical_analysis, proj_info);
+        if (runtime->enable_pointwise_analysis)
+        {
+          RegionTreeNode *destination = 
+            (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+            static_cast<RegionTreeNode*>(get_node(req.partition)) :
+            static_cast<RegionTreeNode*>(get_node(req.region));
+          shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                logical_analysis, proj_info);
+        }
+        else
+        {
+          if(proj_info.is_sharding())
+          {
+            // If we're doing a projection in a control replicated context then
+            // we need to compute the shard projection up front since it might
+            // involve a collective if we don't hit in the cache and we want
+            // that to appear nice and deterministic
+            RegionTreeNode *destination = 
+              (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+              static_cast<RegionTreeNode*>(get_node(req.partition)) :
+              static_cast<RegionTreeNode*>(get_node(req.region));
+            shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                  logical_analysis, proj_info);
+          }
+        }
       }
+
       LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
           shard_proj, (op->get_must_epoch_op() == NULL) ? UINT_MAX :
           op->get_must_epoch_op()->find_operation_index(
@@ -2232,8 +2248,8 @@ namespace Legion {
         // If we already have the targets there's no need to 
         // iterate over the source equivalence sets as we can just
         // build a standard CopyAcrossUnstructured object
-        CopyAcrossUnstructured *across = 
-         copy_expr->create_across_unstructured(reservations,false/*preimages*/);
+        CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+            reservations, false/*preimages*/, false/*shadow indirections*/);
         across->add_reference();
 #ifdef LEGION_SPY
         across->src_tree_id = src_req.region.get_tree_id();
@@ -2378,7 +2394,8 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_src_out_of_range,
-                                           const bool compute_preimages)
+                                           const bool compute_preimages,
+                                           const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2408,8 +2425,8 @@ namespace Legion {
       // Easy out if we're not moving anything
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
@@ -2429,8 +2446,6 @@ namespace Legion {
       if (dst_ready.exists())
         copy_preconditions.push_back(dst_ready);
       ApEvent src_indirect_ready = idx_ready;
-      if (src_indirect_ready.exists())
-        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
       {
         if (src_indirect_ready.exists())
@@ -2518,7 +2533,8 @@ namespace Legion {
                                           std::set<RtEvent> &map_applied_events,
                                            const bool possible_dst_out_of_range,
                                              const bool possible_dst_aliasing,
-                                             const bool compute_preimages)
+                                             const bool compute_preimages,
+                                             const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2549,8 +2565,8 @@ namespace Legion {
       // Easy out if we're not going to move anything
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the sources
       across->initialize_source_fields(this, src_req, src_targets, trace_info);
@@ -2572,8 +2588,6 @@ namespace Legion {
       if (src_ready.exists())
         copy_preconditions.push_back(src_ready);
       ApEvent dst_indirect_ready = idx_ready;
-      if (dst_indirect_ready.exists())
-        copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
       {
         if (dst_indirect_ready.exists())
@@ -2665,7 +2679,8 @@ namespace Legion {
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing,
-                              const bool compute_preimages)
+                              const bool compute_preimages,
+                              const bool shadow_indirections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2703,8 +2718,8 @@ namespace Legion {
       // Quick out if there is nothing we're going to copy
       if (copy_expr->is_empty())
         return local_pre;
-      CopyAcrossUnstructured *across = 
-        copy_expr->create_across_unstructured(reservations, compute_preimages);
+      CopyAcrossUnstructured *across = copy_expr->create_across_unstructured(
+          reservations, compute_preimages, shadow_indirections);
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &src_idx_target = src_idx_targets[0];
@@ -2726,8 +2741,6 @@ namespace Legion {
       else
         copy_preconditions.swap(local_preconditions);
       ApEvent src_indirect_ready = src_idx_ready;
-      if (src_indirect_ready.exists())
-        copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
       {
         if (src_indirect_ready.exists())
@@ -2737,8 +2750,6 @@ namespace Legion {
           src_indirect_ready = init_precondition;
       }
       ApEvent dst_indirect_ready = dst_idx_ready;
-      if (dst_indirect_ready.exists())
-        copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
       {
         if (dst_indirect_ready.exists())
@@ -6195,47 +6206,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::find_remote_expression(
-                                         const PendingRemoteExpression &pending)
-    //--------------------------------------------------------------------------
-    {
-      if (pending.is_index_space)
-      {
-        IndexSpaceNode *node = get_node(pending.handle);
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        if (!pending.done_ref_counting)
-          node->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(node);
-        return node;
-      }
-      else
-      {
-        // Technically shouldn't happen anymore but if it does its still here
-        IndexSpaceExpression *result = NULL;
-        {
-          AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-            finder = remote_expressions.find(pending.remote_expr_id);
-#ifdef DEBUG_LEGION
-          assert(finder != remote_expressions.end());
-#endif
-          result = finder->second;
-        }
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        if (!pending.done_ref_counting)
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::unregister_remote_expression(
                                                 IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
@@ -6478,10 +6448,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->instances.size(); idx++)
           if (it->instances[idx] == instance)
             return it->instance_events[idx];
+      AutoLock p_lock(preimage_lock,1,false/*exclusive*/);
+      std::map<PhysicalInstance,LgEvent>::const_iterator finder =
+        profiling_shadow_instances.find(instance);
+      if (finder != profiling_shadow_instances.end())
+        return finder->second;
       // Should always have found it before this
       assert(false);
       return src_indirect_instance_event;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Index Space Expression 
@@ -6706,6 +6681,7 @@ namespace Legion {
           op->add_base_expression_reference(LIVE_EXPR_REF);
           op->unpack_global_ref();
         }
+        // Else LIVE_EXPR_REF added by pack_expression call
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
@@ -6738,85 +6714,10 @@ namespace Legion {
 #endif
         result->add_base_expression_reference(LIVE_EXPR_REF);
         if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          // Unpack the global reference that we had
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
-          Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source,
-          PendingRemoteExpression &pending, RtEvent &wait_for)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!pending.done_ref_counting);
-#endif
-      // Handle the special case where this is a local index space expression 
-      bool is_local;
-      derez.deserialize(is_local);
-      if (is_local)
-      {
-        IndexSpaceExpression *result;
-        derez.deserialize(result);
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = 
-          dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        op->add_base_expression_reference(LIVE_EXPR_REF);
-        if (source != forest->runtime->address_space)
-          op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
-        pending.done_ref_counting = true;
-        return result;
-      }
-      derez.deserialize(pending.is_index_space);
-      // If this is an index space it is easy
-      if (pending.is_index_space)
-      {
-        derez.deserialize(pending.handle);
-        IndexSpaceNode *node = forest->get_node(pending.handle, &wait_for);
-        if (node == NULL)
-        {
-          pending.source = source;
-          return node;
-        }
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        node->unpack_global_ref();
-        pending.done_ref_counting = true;
-        ImplicitReferenceTracker::record_live_expression(node);
-        return node;
-      }
-      else
-      {
-        derez.deserialize(pending.remote_expr_id);
-        bool created = false;
-        IndexSpaceExpression *result =
-          forest->find_or_create_remote_expression(
-              pending.remote_expr_id, derez, created);
-#ifdef DEBUG_LEGION
-        IndexSpaceOperation *op = dynamic_cast<IndexSpaceOperation*>(result);
-        assert(op != NULL);
-#else
-        IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
-#endif
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        if (created && (source != op->owner_space))
-          // Notify the owner of the new instance and pass the global
-          // ref with it so we don't delete prematurely
-          op->send_remote_registration(true/*passing global ref*/);
-        else
-          op->unpack_global_ref();
-        pending.done_ref_counting = true;
+          // Notify the owner of the new instance
+          op->send_remote_registration(true/*has global ref*/);
+        // Unpack the global reference that we had
+        op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
@@ -16577,78 +16478,101 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
-                  // If we can validate a region record which of our
-                  // predecessors regions we are validating, otherwise
-                  // just register a normal dependence
-                  user.op->register_region_dependence(user.idx, prev.op,
-                                                      prev.gen, prev.idx,
-                                                      dtype, overlap);
-#ifdef LEGION_SPY
-                  LegionSpy::log_mapping_dependence(
-                      user.op->get_context()->get_unique_id(),
-                      prev.uid, prev.idx, user.uid, user.idx, dtype);
-#endif
-                  if (prev.shard_proj != NULL)
+                  // Check to see if we can record a point-wise dependence
+                  // between these two operations. We can only do this if
+                  // it they are both projections and we've arrived so 
+                  // they are both projecting from the same node in the
+                  // region tree.
+                  bool dominates = false;
+                  if (arrived && state.record_pointwise_dependence(
+                        logical_analysis, prev, user, dominates))
                   {
-                    // Two operations from the same must epoch shouldn't
-                    // be recording close dependences on each other so
-                    // we can skip that part
-                    if ((prev.ctx_index == user.ctx_index) &&
-                        (user.op->get_must_epoch_op() != NULL))
-                      break;
-                    // If this is a sharding projection operation then check 
-                    // to see if we need to record a fence dependence here to
-                    // ensure that we get dependences between interfering 
-                    // points in different shards correct
-                    // There are three sceanrios here:
-                    // 1. We haven't arrived in which case we don't have any 
-                    //    good way to symbolically prove it is safe to elide
-                    //    the fence so just record the close
-                    // 2. We've arrived but we're not projection in which case
-                    //    we'll interfere with any projections anyway so we need
-                    //    a full fence for dependences anyway
-                    // 3. We've arrived and are projecting in which case we can
-                    //    try to elide things symbolically, if that doesn't work
-                    //    we may still need to do an expensive analysis to prove
-                    //    it is safe to elide the close which we'll only do it
-                    //    we are tracing
-                    if (arrived && proj_info.is_projecting())
-                    {
-                      // If we arrived and are projecting then we can test
-                      // these two projection trees for intereference with
-                      // each other and see if we can prove that they are
-                      // disjoint in which case we don't need a close
-#ifdef DEBUG_LEGION
-                      assert(proj_info.is_sharding());
-                      assert(user.shard_proj != NULL);
+                    user.op->register_pointwise_dependence(user.idx, prev);
+                    // See if we the new user dominates or not
+                    if (!dominates)
+                      dominator_mask -= overlap;
+#ifdef LEGION_SPY
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype, true);
 #endif
-                      bool dominates = true;
-                      if (!state.has_interfering_shards(logical_analysis,
-                            prev.shard_proj, user.shard_proj, dominates))
-                      {
-                        // If the two projections are non-interfering, then 
-                        // we can only consider the second projection as 
-                        // dominating the first if it uses all the same data.
-                        // Otherwise you can cases like those that occur in 
-                        // https://github.com/StanfordLegion/legion/issues/1765
-                        // where some index tasks push earlier index tasks out
-                        // of the set of current/previous epoch users and then 
-                        // we end up missing a merge close op fence.
-                        if (!dominates)
-                          dominator_mask -= it->second;
+                  }
+                  else
+                  {
+                    // If we can validate a region record which of our
+                    // predecessors regions we are validating, otherwise
+                    // just register a normal dependence
+                    user.op->register_region_dependence(user.idx, prev.op,
+                                                        prev.gen, prev.idx,
+                                                        dtype, overlap);
+#ifdef LEGION_SPY
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype);
+#endif
+                    if (prev.shard_proj != NULL)
+                    {
+                     // Two operations from the same must epoch shouldn't
+                      // be recording close dependences on each other so
+                      // we can skip that part
+                      if ((prev.ctx_index == user.ctx_index) &&
+                          (user.op->get_must_epoch_op() != NULL))
                         break;
+                      // If this is a sharding projection operation then check 
+                      // to see if we need to record a fence dependence here to
+                      // ensure that we get dependences between interfering 
+                      // points in different shards correct
+                      // There are three sceanrios here:
+                      // 1. We haven't arrived in which case we don't have any 
+                      //    good way to symbolically prove it is safe to elide
+                      //    the fence so just record the close
+                      // 2. We've arrived but we're not projection in which case
+                      //    we'll interfere with any projections anyway so we need
+                      //    a full fence for dependences anyway
+                      // 3. We've arrived and are projecting in which case we can
+                      //    try to elide things symbolically, if that doesn't work
+                      //    we may still need to do an expensive analysis to prove
+                      //    it is safe to elide the close which we'll only do it
+                      //    we are tracing
+                      if (arrived && proj_info.is_projecting())
+                      {
+                        // If we arrived and are projecting then we can test
+                        // these two projection trees for intereference with
+                        // each other and see if we can prove that they are
+                        // disjoint in which case we don't need a close
+#ifdef DEBUG_LEGION
+                        assert(runtime->enable_pointwise_analysis ||
+                            proj_info.is_sharding());
+                        assert(user.shard_proj != NULL);
+#endif
+                        dominates = true;
+                        if (!state.has_interfering_shards(logical_analysis,
+                              prev.shard_proj, user.shard_proj, dominates))
+                        {
+                          // If the two projections are non-interfering, then 
+                          // we can only consider the second projection as 
+                          // dominating the first if it uses all the same data.
+                          // Otherwise you can cases like those that occur in 
+                          // https://github.com/StanfordLegion/legion/issues/1765
+                          // where some index tasks push earlier index tasks out
+                          // of the set of current/previous epoch users and then 
+                          // we end up missing a merge close op fence.
+                          if (!dominates)
+                            dominator_mask -= it->second;
+                          break;
+                        }
                       }
+                      // We weren't able to prove that the projections were
+                      // non-interfering with each other so we need a close
+                      // Not able to do the symbolic elision so we need a fence
+                      // across the shards to be safe
+                      logical_analysis.record_close_dependence(root,
+                                    user.idx, this, &prev, overlap);
+                      it.filter(overlap);
+                      tighten = true;
+                      if (!it->second)
+                        to_delete.push_back(it->first);
                     }
-                    // We weren't able to prove that the projections were
-                    // non-interfering with each other so we need a close
-                    // Not able to do the symbolic elision so we need a fence
-                    // across the shards to be safe
-                    logical_analysis.record_close_dependence(root,
-                                  user.idx, this, &prev, overlap);
-                    it.filter(overlap);
-                    tighten = true;
-                    if (!it->second)
-                      to_delete.push_back(it->first);
                   }
                   break;
                 }

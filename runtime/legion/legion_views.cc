@@ -1527,7 +1527,7 @@ namespace Legion {
             op->get_unique_op_id(), index, applied_events, trace_info);
         if (dst_precondition.exists())
         {
-          if (dst_precondition.exists())
+          if (precondition.exists())
             precondition =
               Runtime::merge_events(&trace_info,precondition,dst_precondition);
           else
