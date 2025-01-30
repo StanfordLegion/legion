@@ -207,7 +207,7 @@ const static PopEventsTestCase kPopEventsTestCases[] = {
     PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/3, /*num_triggered_events=*/3,
                       /*num_pop_events=*/4},
 
-    PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/5, /*num_triggered_events=*/5,
+    PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/5, /*num_triggered_events=*/4,
                       /*num_pop_events=*/5},
 
     PopEventsTestCase{/*max_queue_size=*/4, /*num_events=*/5, /*num_triggered_events=*/2,
