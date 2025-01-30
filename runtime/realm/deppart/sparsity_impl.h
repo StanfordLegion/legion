@@ -26,6 +26,7 @@
 #include "realm/nodeset.h"
 #include "realm/atomics.h"
 #include <limits>
+#include <functional>
 #include <memory>
 
 namespace Realm {
