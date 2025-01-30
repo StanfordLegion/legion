@@ -119,6 +119,20 @@ public:
   size_t sent_bytes = 0;
 };
 
+template <int N, typename T>
+std::vector<Rect<N, T>> create_rects(int num_rects, int gap, int start = 0)
+{
+  std::vector<Rect<N, T>> rect_list;
+  int index = start;
+  for(int i = 0; i < num_rects; i++) {
+    Point<N, T> lo_point = Point<N, T>(index);
+    Point<N, T> hi_point = Point<N, T>(index + 1);
+    index += gap;
+    rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
+  }
+  return rect_list;
+}
+
 template <typename PointType>
 struct PointTraits;
 
@@ -136,18 +150,6 @@ public:
 
   void SetUp() override { sparsity_comm = new MockSparsityMapCommunicator<N, T>(); }
 
-  std::vector<Rect<N, T>> create_rects(int num_rects, int gap, int start = 0)
-  {
-    std::vector<Rect<N, T>> rect_list;
-    int index = start;
-    for(int i = 0; i < num_rects; i++) {
-      Point<N, T> lo_point = Point<N, T>(index);
-      Point<N, T> hi_point = Point<N, T>(index + 1);
-      index += gap;
-      rect_list.emplace_back(Rect<N, T>(lo_point, hi_point));
-    }
-    return rect_list;
-  }
   // constexpr static int num_rects = 3;
   MockSparsityMapCommunicator<N, T> *sparsity_comm;
 };
@@ -177,7 +179,7 @@ TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
   constexpr size_t num_rects = 3;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
 
@@ -197,7 +199,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
   constexpr int N = TestFixture::N;
   constexpr int num_rects = 3, gap = 3;
   NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
@@ -248,7 +250,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
   constexpr int N = TestFixture::N;
   constexpr int num_rects = 3, gap = 3;
   NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   auto impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
@@ -275,7 +277,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
   constexpr int num_rects = 2, gap = 3;
   NodeSet subscribers;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   auto impl = std::make_unique<SparsityMapImpl<N, T>>(
       handle, subscribers,
       reinterpret_cast<SparsityMapCommunicator<N, T> *>(this->sparsity_comm));
@@ -332,7 +334,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeCoveringForNRect)
   using T = typename TestFixture::T;
   constexpr int N = TestFixture::N;
   constexpr size_t num_rects = 4, max_rects = 3, gap = 3, max_overhead = 1000;
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
   auto impl =
@@ -361,7 +363,7 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
 
   constexpr size_t num_rects = 3;
   constexpr int gap = 3;
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
 
@@ -395,8 +397,8 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   constexpr size_t num_rects = 3;
   constexpr int gap = 3;
 
-  std::vector<Rect<N, T>> rect_list = this->create_rects(num_rects, gap);
-  std::vector<Rect<N, T>> other_rect_list = this->create_rects(num_rects, gap, 100);
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
+  std::vector<Rect<N, T>> other_rect_list = create_rects<N, T>(num_rects, gap, 100);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet node;
 
