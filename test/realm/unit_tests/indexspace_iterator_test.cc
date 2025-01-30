@@ -1,60 +1,8 @@
 #include "realm/transfer/transfer.h"
-#include "realm/inst_layout.h"
 #include <memory>
 #include <gtest/gtest.h>
 
 using namespace Realm;
-
-template <int N, typename T>
-static InstanceLayout<N, T> *create_layout(const Rect<N, T> &bounds,
-                                           const std::vector<int> &dim_order,
-                                           size_t bytes_per_element = 8)
-{
-  InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
-  InstanceLayoutGeneric::FieldLayout field_layout;
-  field_layout.list_idx = 0;
-  field_layout.rel_offset = 0;
-  field_layout.size_in_bytes = bytes_per_element;
-
-  AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
-  affine_piece->bounds = bounds;
-  affine_piece->offset = 0;
-  affine_piece->strides[dim_order[0]] = bytes_per_element;
-  size_t mult = affine_piece->strides[dim_order[0]];
-  for(int i = 1; i < N; i++) {
-    int d = dim_order[i];
-    affine_piece->strides[d] = (bounds.hi[d - 1] - bounds.lo[d - 1] + 1) * mult;
-    mult *= (bounds.hi[d - 1] - bounds.lo[d - 1] + 1);
-  }
-
-  inst_layout->space = bounds;
-  inst_layout->fields[0] = field_layout;
-  inst_layout->piece_lists.resize(1);
-  inst_layout->piece_lists[0].pieces.push_back(affine_piece);
-
-  return inst_layout;
-}
-
-// TODO(apryakhin@): Move to utils
-static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_idx = 0,
-                                       int inst_idx = 0)
-{
-  return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
-}
-
-template <int N, typename T>
-static RegionInstanceImpl *
-create_inst(const Rect<N, T> &bounds, const std::vector<int> &dim_order,
-            size_t bytes_per_element = 8, RegionInstance inst = make_inst())
-{
-  InstanceLayout<N, T> *inst_layout = create_layout(bounds, dim_order, bytes_per_element);
-  RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
-  impl->metadata.layout = inst_layout;
-  impl->metadata.inst_offset = 0;
-  NodeSet ns;
-  impl->metadata.mark_valid(ns);
-  return impl;
-}
 
 template <typename PointType>
 struct PointTraits;
@@ -95,11 +43,10 @@ TYPED_TEST_P(IndexSpaceIteratorParamTest, StepSparse)
   constexpr int N = TestFixture::N;
   constexpr int gap = 3;
   constexpr size_t num_rects = 3;
+  NodeSet subscribers;
   Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(16));
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-
   std::vector<Rect<N, T>> rects = create_rects<N, T>(num_rects, gap);
-  NodeSet subscribers;
   auto impl = std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(rects, /*disjoint=*/true);
@@ -119,13 +66,14 @@ TYPED_TEST_P(IndexSpaceIteratorParamTest, StepDense)
   constexpr int N = TestFixture::N;
   using T = typename TestFixture::T;
   Rect<N, T> domain = Rect<N, T>(TypeParam(4), TypeParam(16));
+  Rect<N, T> restrictions = Rect<N, T>(TypeParam(4), TypeParam(14));
   std::vector<Rect<N, T>> rects{domain};
 
   size_t index = 0;
-  for(IndexSpaceIterator<N, T> it(domain); it.valid; it.step()) {
+  for(IndexSpaceIterator<N, T> it(domain, restrictions); it.valid; it.step()) {
     ASSERT_TRUE(index < rects.size());
-    ASSERT_EQ(it.rect.lo, rects[index].lo);
-    ASSERT_EQ(it.rect.hi, rects[index].hi);
+    ASSERT_EQ(it.rect.lo, restrictions.lo);
+    ASSERT_EQ(it.rect.hi, restrictions.hi);
     index++;
   }
 }
