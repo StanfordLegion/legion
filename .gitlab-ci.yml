@@ -1387,7 +1387,7 @@ icc212_cxx17_debug_cmake_legion:
 msvc169_realm:
   <<: [*msvc_wine, *image_msvc169, *msvc_tests]
   variables:
-    <<: [*short]
+    <<: [*short, *no_ccache]
 
 # sanitizer tests (Realm only):
 gcc12_tsan_realm:
