@@ -1,6 +1,5 @@
 #include "realm/transfer/transfer.h"
 #include "realm/inst_layout.h"
-#include <numeric>
 #include <tuple>
 #include <gtest/gtest.h>
 
@@ -52,138 +51,156 @@ static RegionInstanceImpl *create_inst(Rect<N, T> bounds, size_t bytes_per_eleme
   return impl;
 }
 
-template <typename PointType>
-struct PointTraits;
-
 template <int N, typename T>
-struct PointTraits<Realm::Point<N, T>> {
-  static constexpr int DIM = N;
-  using value_type = T;
+SparsityMapPublicImpl<N, T> *mock_get_impl(const SparsityMap<N, T> &map)
+{
+  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+  static NodeSet subscribers;
+  static auto impl = new SparsityMapImpl<N, T>(handle, subscribers);
+  return impl;
+}
+
+template <int DIM>
+struct TypeWrapper {
+  static constexpr int value = DIM;
 };
 
-template <typename PointType>
-class IndexSpaceIteratorTest : public ::testing::Test {
-protected:
-  static constexpr int N = PointTraits<PointType>::DIM;
-  using T = typename PointTraits<PointType>::value_type;
-
-  void SetUp() override { std::iota(dim_order, dim_order + N, 0); }
-
-  constexpr static size_t elem_size = 8;
-  std::vector<FieldID> field_ids{0};
-  std::vector<size_t> field_sizes{elem_size};
-  std::vector<size_t> field_offsets{0};
-  int dim_order[N];
+template <typename TypeWrapper>
+class GetAddressesTest : public ::testing::Test {
+public:
+  static constexpr int DIM = TypeWrapper::value;
 };
 
-TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
+template <int DIM>
+struct GetAddressesTestCase {
+  Rect<DIM> domain;
+  Rect<DIM> restrictions;
+  std::vector<Rect<DIM>> rects;
+  std::vector<Rect<DIM>> expected;
+  std::vector<int> dim_order;
+  std::vector<FieldID> field_ids;
+  std::vector<size_t> field_offsets;
+  std::vector<size_t> field_sizes;
+  size_t elem_size;
+};
 
-TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDenseInvertedDims)
+template <int DIM>
+std::vector<GetAddressesTestCase<DIM>> GetTestCases()
 {
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
-  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
-  AddressList addrlist;
-  AddressListCursor cursor;
-  const InstanceLayoutPieceBase *nonaffine;
+  if constexpr(DIM == 1) {
+    return {
+        // Sparse 1D rects
+        {
+            /*domain=*/{Rect<1>(0, 14)},
+            /*restrictions=*/{Rect<1>(0, 14)},
+            /*rects=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
+            /*expected=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
+            /*dim_order=*/{0},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+            /*elem_size=*/sizeof(int),
+        },
+    };
+  } else if constexpr(DIM == 2) {
+    // Full 1D no rects
+    return {
+        {
+            /*domain=*/Rect<2>({0, 0}, {10, 10}),
+            /*restrictions=*/Rect<2>({0, 0}, {10, 10}),
+            /*rects*/ {Rect<2>({0, 0}, {10, 10})},
+            /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+            /*dim_order=*/{0, 1},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+            /*elem_size=*/sizeof(int),
+        },
+    };
+  } else if constexpr(DIM == 3) {
+    return {
+        // Full 3D domain
+        {
+            /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+            /*restrictions=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+            /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+            /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+            /*dim_order=*/{0, 1, 2},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+            /*elem_size=*/sizeof(int),
+        },
 
-  int inverted_dim_order[N];
-  for(int i = N - 1; i >= 0; i--) {
-    inverted_dim_order[N - 1 - i] = i;
+    };
   }
+  return {};
+}
 
-  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
-      domain, create_inst<N, T>(domain, this->elem_size), inverted_dim_order,
-      this->field_ids, this->field_offsets, this->field_sizes);
+TYPED_TEST_SUITE_P(GetAddressesTest);
 
-  bool ok = it->get_addresses(addrlist, nonaffine);
+TYPED_TEST_P(GetAddressesTest, Base)
+{
+  using T = int;
+  constexpr int N = TypeParam::value;
+  auto test_cases = GetTestCases<N>();
+  for(const auto &test_case : test_cases) {
+    NodeSet subscribers;
 
-  cursor.set_addrlist(&addrlist);
-  ASSERT_TRUE(ok);
-  ASSERT_TRUE(it->done());
-  ASSERT_EQ(cursor.remaining(0),
-            N > 1 ? this->elem_size : this->elem_size * domain.volume());
-  for(int i = 1; i < N; i++) {
-    int d = inverted_dim_order[i];
-    size_t count = (domain.hi[d] - domain.lo[d] + 1);
-    ASSERT_EQ(cursor.remaining(i), count);
+    SparsityMap<N, T>::ImplLookup::get_impl_ptr = mock_get_impl;
+    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+    auto impl = reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
+    impl->set_contributor_count(1);
+    impl->contribute_dense_rect_list(test_case.rects, true);
+    IndexSpace<N, T> domain = test_case.domain;
+    if(!test_case.rects.empty())
+      domain.sparsity = handle;
+
+    auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
+        domain, create_inst<N, T>(test_case.domain, test_case.elem_size),
+        test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
+        test_case.field_sizes);
+    const InstanceLayoutPieceBase *nonaffine;
+    AddressList addrlist;
+    AddressListCursor cursor;
+
+    bool ok = it->get_addresses(addrlist, nonaffine);
+
+    ASSERT_TRUE(it->done());
+
+    cursor.set_addrlist(&addrlist);
+    size_t bytes_pending = 0;
+    for(const auto &rect : test_case.expected) {
+      bytes_pending += rect.volume();
+    }
+
+    EXPECT_EQ(addrlist.bytes_pending(), bytes_pending * test_case.elem_size);
+    ASSERT_EQ(cursor.get_dim(), 1);
+
+    for(const auto &rect : test_case.expected) {
+      size_t rem = cursor.remaining(0);
+      ASSERT_EQ(cursor.remaining(0), rect.volume() * test_case.elem_size);
+      cursor.advance(0, cursor.remaining(0));
+    }
+
+    ASSERT_EQ(addrlist.bytes_pending(), 0);
   }
 }
 
-TYPED_TEST_P(IndexSpaceIteratorTest, GetAddressesDense)
-{
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
-  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(4));
+REGISTER_TYPED_TEST_SUITE_P(GetAddressesTest, Base);
 
-  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
-      domain, create_inst<N, T>(domain, this->elem_size), this->dim_order,
-      this->field_ids, this->field_offsets, this->field_sizes);
-  const InstanceLayoutPieceBase *nonaffine;
-  AddressList addrlist;
+using TestTypes = ::testing::Types<TypeWrapper<1>
+#if REALM_MAX_DIM > 1
+                                   ,
+                                   TypeWrapper<2>
+#endif
+#if REALM_MAX_DIM > 2
+                                   ,
+                                   TypeWrapper<3>
+#endif
+                                   >;
 
-  bool ok = it->get_addresses(addrlist, nonaffine);
-
-  AddressListCursor cursor;
-  cursor.set_addrlist(&addrlist);
-
-  ASSERT_TRUE(ok);
-  ASSERT_TRUE(it->done());
-  ASSERT_EQ(nonaffine, nullptr);
-  ASSERT_EQ(addrlist.bytes_pending(), domain.volume() * this->elem_size);
-  ASSERT_EQ(cursor.remaining(0), domain.volume() * this->elem_size);
-  ASSERT_EQ(cursor.get_offset(), 0);
-  ASSERT_EQ(cursor.get_dim(), 1);
-}
-
-TYPED_TEST_P(IndexSpaceIteratorTest, StepDense)
-{
-  constexpr int N = TestFixture::N;
-  const size_t max_bytes = this->elem_size * 2;
-  using T = typename TestFixture::T;
-  Rect<N, T> domain = Rect<N, T>(TypeParam(0), TypeParam(3));
-
-  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
-      domain, create_inst<N, T>(domain, this->elem_size), this->dim_order,
-      this->field_ids, this->field_offsets, this->field_sizes);
-
-  size_t offset = 0;
-  for(int i = 0; i < domain.volume() / 2; i++) {
-    TransferIterator::AddressInfo info;
-    size_t ret_bytes = it->step(max_bytes, info, 0, 0);
-    ASSERT_EQ(ret_bytes, max_bytes);
-    ASSERT_EQ(info.base_offset, offset);
-    ASSERT_EQ(info.bytes_per_chunk, max_bytes);
-    ASSERT_EQ(info.num_lines, 1);
-    ASSERT_EQ(info.num_planes, 1);
-    offset += max_bytes;
-  }
-
-  EXPECT_TRUE(it->done());
-}
-
-REGISTER_TYPED_TEST_SUITE_P(IndexSpaceIteratorTest, GetAddressesDense,
-                            GetAddressesDenseInvertedDims, StepDense);
-
-template <typename T, int... Ns>
-auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
-{
-  return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
-}
-
-template <typename T>
-auto GeneratePointTypesForAllDims()
-{
-  return GeneratePointTypes<T>(std::make_integer_sequence<int, REALM_MAX_DIM>{});
-}
-
-#define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX)                                        \
-  using N##SUFFIX = decltype(GeneratePointTypesForAllDims<BASE_TYPE>());                 \
-  INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, IndexSpaceIteratorTest, N##SUFFIX)
-
-INSTANTIATE_TEST_TYPES(int, Int);
-// TODO(apryakhin@): Consider enabling if needed
-// INSTANTIATE_TEST_TYPES(long long, LongLong);
+INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, GetAddressesTest, TestTypes);
 
 constexpr static size_t kByteSize = sizeof(int);
 
