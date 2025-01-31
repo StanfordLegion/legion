@@ -281,9 +281,6 @@ before_script:
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       export THREADS=$(nproc --all)
-      if [[ "$USE_CCACHE" -eq 1 ]]; then
-        apt install -y ccache
-      fi
     elif [[ "$(uname)" = "Darwin" ]]; then
       export THREADS=$(sysctl -n hw.ncpu)
     else
@@ -536,6 +533,8 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:250130
 .image_2204: &image_2204
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:250130
+.image_2404: &image_2404
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-24.04:250130
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
@@ -665,7 +664,6 @@ before_script:
 
 .realm_clang_format: &realm_clang_format
   script:
-    - apt update -qq -yy && apt install -qq -yy clang-format-14
     - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
     - |
       if grep -q '[^[:space:]]' /tmp/not-formatted.diff; then
