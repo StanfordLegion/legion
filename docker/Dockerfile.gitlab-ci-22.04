@@ -35,10 +35,12 @@ RUN pip3 install --upgrade 'pip>=22,<23' && \
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.84.0 -y
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.23.5/cmake-3.23.5-linux-x86_64.tar.gz && \
-    echo "bbd7ad93d2a14ed3608021a9466ae63db76a24efd1fae7a5f7798c1de7ab9344  cmake-3.23.5-linux-x86_64.tar.gz" | shasum --check && \
-    tar xfzC cmake-3.23.5-linux-x86_64.tar.gz /usr/local --strip-components=1 && \
-    rm cmake-3.23.5-linux-x86_64.tar.gz
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.84.0 -y
+
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.22.6/cmake-3.22.6-linux-x86_64.tar.gz && \
+    echo "09e1b34026c406c5bf4d1b053eadb3a8519cb360e37547ebf4b70ab766d94fbc  cmake-3.22.6-linux-x86_64.tar.gz" | shasum --check && \
+    tar xfzC cmake-3.22.6-linux-x86_64.tar.gz /usr/local --strip-components=1 && \
+    rm cmake-3.22.6-linux-x86_64.tar.gz
 
 RUN git clone https://github.com/terralang/terra.git && \
     cd terra/build && \
