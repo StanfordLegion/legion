@@ -726,7 +726,11 @@ if(Legion_USE_OpenMP)
 endif()
 
 if(REALM_USE_NVTX)
-  target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
+  if (NOT TARGET CUDA::nvToolsExt)
+    add_library(CUDA::nvToolsExt ALIAS CUDA::nvtx3)
+  endif()
+  target_link_libraries(RealmRuntime PRIVATE CUDA::nvToolsExt)
+  target_link_libraries(RealmStatic PRIVATE CUDA::nvToolsExt)
 endif()
 
 if(Legion_BACKTRACE_USE_CPPTRACE)
