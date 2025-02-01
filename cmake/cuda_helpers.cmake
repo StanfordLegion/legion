@@ -37,6 +37,14 @@ macro(enable_cuda_language_and_find_cuda_toolkit)
     unset(CMAKE_CUDA_STANDARD CACHE)
   endif()
 
+  # CMake < 3.26 doesn't recognize >=20 as a CUDA standard,
+  # so unset CMAKE_CUDA_STANDARD before enabling the CUDA language.
+  if(CMAKE_VERSION VERSION_LESS_EQUAL "3.26" AND (CMAKE_CUDA_STANDARD GREATER_EQUAL 20))
+    set(CMAKE_CUDA20_STANDARD_COMPILE_OPTION "")
+    set(CMAKE_CUDA20_EXTENSION_COMPILE_OPTION "")
+    list(APPEND CMAKE_CUDA_FLAGS "-std=c++20")
+  endif()
+
   # Enable the CUDA language
   enable_language(CUDA)
 
