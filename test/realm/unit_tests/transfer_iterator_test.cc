@@ -6,9 +6,9 @@
 using namespace Realm;
 
 template <int N, typename T>
-static InstanceLayout<N, T> *
-create_layout(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
-              const std::vector<size_t> &field_sizes, size_t bytes_per_element = 8)
+static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
+                                           const std::vector<FieldID> &field_ids,
+                                           const std::vector<size_t> &field_sizes)
 {
   InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
 
@@ -48,11 +48,9 @@ static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_i
 template <int N, typename T>
 static RegionInstanceImpl *
 create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
-            const std::vector<size_t> &field_sizes, size_t bytes_per_element = 8,
-            RegionInstance inst = make_inst())
+            const std::vector<size_t> &field_sizes, RegionInstance inst = make_inst())
 {
-  InstanceLayout<N, T> *inst_layout =
-      create_layout(bounds, field_ids, field_sizes, bytes_per_element);
+  InstanceLayout<N, T> *inst_layout = create_layout(bounds, field_ids, field_sizes);
   RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
   impl->metadata.layout = inst_layout;
   impl->metadata.inst_offset = 0;
@@ -79,7 +77,6 @@ struct GetAddressesTestCase {
   std::vector<FieldID> field_ids;
   std::vector<size_t> field_offsets;
   std::vector<size_t> field_sizes;
-  size_t elem_size;
 };
 
 template <int DIM>
@@ -87,6 +84,17 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
 {
   if constexpr(DIM == 1) {
     return {
+        // Empty 1D domain
+        {
+            /*domain=*/{Rect<1>(1, 0)},
+            /*rects=*/{},
+            /*expected=*/{},
+            /*dim_order=*/{0},
+            /*field_ids=*/{0, 1},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+        },
+
         // Dense 1D rects multifield
         {
             /*domain=*/{Rect<1>(0, 14)},
@@ -96,7 +104,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0, 1},
             /*field_offsets=*/{0, 0},
             /*field_sizes=*/{sizeof(int), sizeof(long long)},
-            /*elem_size=*/sizeof(int),
         },
 
         // Dense 1D rects
@@ -108,7 +115,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-            /*elem_size=*/sizeof(int),
         },
 
         // Sparse 1D rects
@@ -120,7 +126,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-            /*elem_size=*/sizeof(int),
         },
     };
   } else if constexpr(DIM == 2) {
@@ -135,7 +140,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-            /*elem_size=*/sizeof(int),
         },
 
         // Full 2D sparse
@@ -147,7 +151,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-            /*elem_size=*/sizeof(int),
         },
 
         // Full 2D dense reverse dims
@@ -159,7 +162,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-            /*elem_size=*/sizeof(int),
         },
     };
   } else if constexpr(DIM == 3) {
@@ -173,7 +175,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-            /*elem_size=*/sizeof(int),
         },
 
     };
@@ -239,7 +240,7 @@ TYPED_TEST_P(GetAddressesTest, Base)
 
     ASSERT_EQ(addrlist.bytes_pending(), bytes_pending);
 
-    if(cursor.get_dim() == 1) {
+    if(bytes_pending > 0 && cursor.get_dim() == 1) {
       // TODO(apryakhin:@): Find better way to analyze the adddress list
       // ASSERT_EQ(cursor.get_dim(), 1);
       for(const size_t field_size : test_case.field_sizes) {
@@ -306,6 +307,27 @@ TEST_P(TransferIteratorStepTest, Base)
 }
 
 const static IteratorStepTestCase kIteratorStepTestCases[] = {
+    // Case 0: step through 1D layout with 2 elements
+    IteratorStepTestCase{
+        .it = new TransferIteratorIndexSpace<1, int>(
+            Rect<1, int>(0, 1), create_inst<1, int>(Rect<1, int>(0, 1), {0}, {kByteSize}),
+            0, {0}, {0},
+            /*field_sizes=*/{kByteSize}),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0, /*bytes_per_el=*/kByteSize,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0},
+                  TransferIterator::AddressInfo{/*offset=*/kByteSize,
+                                                /*bytes_per_el=*/kByteSize,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize, kByteSize},
+        .exp_bytes = {kByteSize, kByteSize},
+        .num_steps = 2,
+    },
 // Case 1: step through 2D layout with 4 elements
 #if REALM_MAX_DIM > 1
     IteratorStepTestCase{
@@ -355,6 +377,45 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
         .max_bytes = {kByteSize * 4, kByteSize * 4},
         .exp_bytes = {kByteSize * 2, kByteSize * 2},
         .num_steps = 2,
+    },
+
+    // Case 4: step through 2D layout at once
+    IteratorStepTestCase{
+        .it = new TransferIteratorIndexSpace<2, int>(
+            Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), {0},
+                                {kByteSize}),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
+                                                /*bytes_per_el=*/kByteSize * 4,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize * 4},
+        .exp_bytes = {kByteSize * 4},
+        .num_steps = 1,
+    },
+
+#endif
+
+#if REALM_MAX_DIM > 2
+    // Case 5: step through 3D layout at once
+    IteratorStepTestCase{
+        .it = new TransferIteratorIndexSpace<3, int>(
+            Rect<3, int>(Point<3, int>(0), Point<3, int>(1)),
+            create_inst<3, int>(Rect<3, int>(Point<3, int>(0), Point<3, int>(1)), {0},
+                                {kByteSize}),
+            0, {0}, {0}, /*field_sizes=*/{kByteSize}),
+        .infos = {TransferIterator::AddressInfo{/*offset=*/0,
+                                                /*bytes_per_el=*/kByteSize * 8,
+                                                /*num_lines=*/1,
+                                                /*line_stride=*/0,
+                                                /*num_planes=*/1,
+                                                /*plane_stride=*/0}},
+        .max_bytes = {kByteSize * 8},
+        .exp_bytes = {kByteSize * 8},
+        .num_steps = 1,
     },
 #endif
 
