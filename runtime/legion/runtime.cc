@@ -13874,13 +13874,9 @@ namespace Legion {
       static_assert((sizeof(size_t) == 4) || (sizeof(size_t) == 8));
       // Round up to the nearest power of 2
       size--;
-      size |= size >> 1;
-      size |= size >> 2;
-      size |= size >> 4;
-      size |= size >> 8;
-      size |= size >> 16;
-      if (sizeof(size_t) == 8)
-        size |= size >> 32;
+      for (unsigned i = 1; i <= (4 * sizeof(size)); i <<= 1) {
+        size |= size >> i;
+      }
       size++;
       return std::min<size_t>(size, max_alignment);
     }
