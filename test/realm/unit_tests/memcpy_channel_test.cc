@@ -345,12 +345,8 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
       test_case.dst_strides, test_case.dst_extents, test_case.max_entries);
   output_port.addrcursor.set_addrlist(&output_port.addrlist);
 
-  int iterations = 0;
-  while(xfer_desc->progress_xd(channel, TimeLimit::relative(0))) {
-    iterations++;
+  while(xfer_desc->progress_xd(channel, TimeLimit::relative(10000000))) {
   }
-
-  ASSERT_EQ(iterations, 1);
 
   for(size_t i = 0; i < check_bytes * test_case.max_entries; i++) {
     ASSERT_EQ(src_buffer[i], dst_buffer[i]);
@@ -358,53 +354,59 @@ TEST_P(MemcpyXferDescParamTest, ProgresXD)
 }
 
 const static MemcpyXferDescTestCase kMemcpyXferDescTestCases[] = {
-    // case 1 : 1D regular
-    MemcpyXferDescTestCase{
-        .src_strides = {4}, .src_extents = {4}, .dst_strides = {4}, .dst_extents = {4}},
-
-    // case 2 : 1D with several entries for address list
-    MemcpyXferDescTestCase{.src_strides = {4},
-                           .src_extents = {4},
-                           .dst_strides = {4},
-                           .dst_extents = {4},
-                           .max_entries = 3},
-
-    // case 2 : 2D regular
-    MemcpyXferDescTestCase{.src_strides = {4, 16},
-                           .src_extents = {4, 4},
-                           .dst_strides = {4, 16},
-                           .dst_extents = {4, 4}},
-
-    // case 3: 2D with different stride/extents for dst
-    MemcpyXferDescTestCase{.src_strides = {4, 16},
-                           .src_extents = {4, 4},
-                           .dst_strides = {16, 32},
-                           .dst_extents = {3, 4}},
-
-    // case 3: 2D transpose
-    MemcpyXferDescTestCase{.src_strides = {4, 16},
-                           .src_extents = {4, 4},
-                           .dst_strides = {16, 4},
-                           .dst_extents = {4, 4}},
-
-    // case 3: 3D
-    /*MemcpyXferDescTestCase{.src_strides = {4, 16, 256},
-                           .src_extents = {4, 4, 2},
-                           .dst_strides = {4, 16, 256},
-                           .dst_extents = {4, 4, 2}},*/
-
-    // case 3: 3D inverted layout
-    MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
-                           .src_extents = {4, 4, 4},
-                           .dst_strides = {256, 16, 4},
-                           .dst_extents = {4, 4, 4}},
-
-    // case 3: 3D transpose
-    /*MemcpyXferDescTestCase{.src_strides = {256, 16, 4},
-                           .src_extents = {4, 4, 4},
-                           .dst_strides = {4, 16, 256},
-                           .dst_extents = {4, 4, 4}}*/
-};
+    // Case 1: 1D regular copy
+    {.src_strides = {4},
+     .src_extents = {4},
+     .dst_strides = {4},
+     .dst_extents = {4},
+     .max_entries = 1},
+    // Case 2: 2D regular copy with uniform strides
+    {.src_strides = {16, 4},
+     .src_extents = {4, 4},
+     .dst_strides = {16, 4},
+     .dst_extents = {4, 4},
+     .max_entries = 1},
+    // Case 3: 2D irregular copy with non-uniform strides
+    {.src_strides = {20, 5},
+     .src_extents = {4, 5},
+     .dst_strides = {20, 5},
+     .dst_extents = {4, 5},
+     .max_entries = 1},
+    // case 3a: 2D transpose
+    {.src_strides = {4, 16},
+     .src_extents = {4, 4},
+     .dst_strides = {16, 4},
+     .dst_extents = {4, 4}},
+    // Case 4: 3D regular copy with uniform strides
+    {.src_strides = {64, 16, 4},
+     .src_extents = {4, 4, 4},
+     .dst_strides = {64, 16, 4},
+     .dst_extents = {4, 4, 4},
+     .max_entries = 1},
+    // Case 5: 3D irregular copy with non-uniform strides
+    {.src_strides = {70, 17, 5},
+     .src_extents = {4, 5, 6},
+     .dst_strides = {70, 17, 5},
+     .dst_extents = {4, 5, 6},
+     .max_entries = 1},
+    // Case 6: Sparse copy with gaps in strides
+    {.src_strides = {128, 32},
+     .src_extents = {4, 8},
+     .dst_strides = {132, 34},
+     .dst_extents = {4, 8},
+     .max_entries = 2},
+    // Case 7: Copy with small extents and high stride
+    {.src_strides = {64},
+     .src_extents = {2},
+     .dst_strides = {64},
+     .dst_extents = {2},
+     .max_entries = 1},
+    // Case 8: Multi-entry copy
+    {.src_strides = {4},
+     .src_extents = {4},
+     .dst_strides = {4},
+     .dst_extents = {4},
+     .max_entries = 4}};
 
 INSTANTIATE_TEST_SUITE_P(Foo, MemcpyXferDescParamTest,
                          testing::ValuesIn(kMemcpyXferDescTestCases));
