@@ -5,143 +5,126 @@
 
 using namespace Realm;
 
-TEST(MemcpyChannelTest, CreateMemcpyChannel)
-{
-  NodeID owner = 0;
-  Node node;
-  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
-  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
-
-  std::unique_ptr<Channel> channel(
-      new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
-  NodeID channel_owner = channel->node;
-  XferDesKind channel_kind = channel->kind;
-  auto paths = channel->get_paths();
-
-  ASSERT_EQ(channel_kind, XferDesKind::XFER_MEM_CPY);
-  ASSERT_EQ(channel_owner, owner);
-  ASSERT_TRUE(paths.empty());
-  channel->shutdown();
-}
-
 static inline Memory make_mem(int idx, int node_id)
 {
   return ID::make_memory(idx, node_id).convert<Memory>();
 }
 
-TEST(MemcpyChannelTest, SupportsPathRemoteSharedMemories)
-{
+struct SupportsPathTestCase {
+  int src_mem_id;
+  int src_node_id;
+  int dst_mem_id;
+  int dst_node_id;
+  bool is_remote_shared;
+  bool is_local;
+  uint64_t expected_cost;
+  ReductionOpID redop_id = 0;
+  bool src_serdez_id = 0;
+  bool dst_serdez_id = 0;
+  std::vector<size_t> src_frags;
+  std::vector<size_t> dst_frags;
+};
+
+class SupportsPathTest : public ::testing::TestWithParam<SupportsPathTestCase> {
+protected:
+  MemoryImpl *create_memory(int id, int node_id, size_t bytes)
+  {
+    return new LocalCPUMemory(make_mem(id, node_id), bytes, 0, Memory::SYSTEM_MEM,
+                              nullptr);
+  }
+
   Node node;
   std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
-  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
+};
+
+TEST_P(SupportsPathTest, CheckSupportsPath)
+{
+  auto test_case = GetParam();
   constexpr size_t bytes = 16;
-  std::vector<std::byte> buffer(bytes);
-  auto src_mem =
-      new LocalCPUMemory(make_mem(0, 0), bytes, 0, Memory::SYSTEM_MEM, buffer.data());
+
+  auto src_mem = create_memory(test_case.src_mem_id, test_case.src_node_id, bytes);
+  auto dst_mem = create_memory(test_case.dst_mem_id, test_case.dst_node_id, bytes);
+
   node.memories.push_back(src_mem);
 
-  std::vector<std::byte> buffer1(bytes);
-  auto dst_mem_1 =
-      new LocalCPUMemory(make_mem(0, 1), bytes, 0, Memory::SYSTEM_MEM, buffer1.data());
+  if(test_case.is_remote_shared) {
+    remote_shared_memory_mappings.insert({dst_mem->me.id, SharedMemoryInfo()});
+  }
 
-  std::vector<std::byte> buffer2(bytes);
-  auto dst_mem_2 =
-      new LocalCPUMemory(make_mem(0, 2), bytes, 0, Memory::SYSTEM_MEM, buffer2.data());
+  if(test_case.is_local) {
+    node.memories.push_back(dst_mem);
+  }
 
-  std::vector<std::byte> buffer3(bytes);
-  auto dst_mem_3 =
-      new LocalCPUMemory(make_mem(0, 3), bytes, 0, Memory::SYSTEM_MEM, buffer3.data());
-
-  remote_shared_memory_mappings.insert({dst_mem_1->me.id, SharedMemoryInfo()});
-  remote_shared_memory_mappings.insert({dst_mem_2->me.id, SharedMemoryInfo()});
-
-  uint64_t cost_1 = 0, cost_2 = 0, cost_3 = 0;
-
+  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
   std::unique_ptr<Channel> channel(
       new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
 
-  cost_1 =
-      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_1->me),
-                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
-                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+  uint64_t cost = channel->supports_path(
+      ChannelCopyInfo(src_mem->me, dst_mem->me), test_case.src_serdez_id,
+      test_case.dst_serdez_id, test_case.redop_id, bytes,
+      (test_case.src_frags.empty() ? nullptr : &test_case.src_frags),
+      (test_case.dst_frags.empty() ? nullptr : &test_case.dst_frags));
 
-  cost_2 =
-      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_2->me),
-                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
-                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+  ASSERT_EQ(cost, test_case.expected_cost);
 
-  cost_3 =
-      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_3->me),
-                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
-                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
-
-  ASSERT_EQ(cost_1, 100);
-  ASSERT_EQ(cost_2, 100);
-  ASSERT_EQ(cost_3, 0);
-  ASSERT_FALSE(channel->get_paths().empty());
-
-  delete dst_mem_1;
-  delete dst_mem_2;
-  delete dst_mem_3;
+  if(!test_case.is_local) {
+    delete dst_mem;
+  }
 
   channel->shutdown();
 }
 
-TEST(MemcpyChannelTest, SupportsPathLocalMemories)
-{
-  Node node;
-  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
-  BackgroundWorkManager *bgwork = new BackgroundWorkManager();
-  constexpr size_t bytes = 16;
-  std::vector<std::byte> buffer(bytes);
-  auto src_mem =
-      new LocalCPUMemory(make_mem(0, 0), bytes, 0, Memory::SYSTEM_MEM, buffer.data());
+INSTANTIATE_TEST_SUITE_P(
+    SupportsPathTests, SupportsPathTest,
+    ::testing::Values(
+        // Case 1: Local memory copy (expected cost: 100)
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 100},
 
-  std::vector<std::byte> buffer1(bytes);
-  auto dst_mem_1 =
-      new LocalCPUMemory(make_mem(1, 1), bytes, 0, Memory::SYSTEM_MEM, buffer1.data());
+        // Case 2: Remote shared memory copy (expected cost: 100)
+        SupportsPathTestCase{0, 0, 1, 1, true, false, 100},
 
-  std::vector<std::byte> buffer2(bytes);
-  auto dst_mem_2 =
-      new LocalCPUMemory(make_mem(2, 2), bytes, 0, Memory::SYSTEM_MEM, buffer2.data());
+        // Case 3: Unreachable memory (expected cost: 0)
+        SupportsPathTestCase{0, 0, 2, 2, false, false, 0},
 
-  std::vector<std::byte> buffer3(bytes);
-  auto dst_mem_3 =
-      new LocalCPUMemory(make_mem(3, 3), bytes, 0, Memory::SYSTEM_MEM, buffer3.data());
+        // Case 4: Another local memory (expected cost: 100)
+        SupportsPathTestCase{0, 0, 3, 0, false, true, 100},
 
-  node.memories.push_back(src_mem);
-  node.memories.push_back(dst_mem_1);
-  node.memories.push_back(dst_mem_2);
-  uint64_t cost_1 = 0, cost_2 = 0, cost_3 = 0;
+        // Case 5: Another remote shared memory (expected cost: 100)
+        SupportsPathTestCase{0, 0, 4, 1, true, false, 100},
 
-  std::unique_ptr<Channel> channel(
-      new MemcpyChannel(bgwork, &node, remote_shared_memory_mappings));
+        // Case 6: Completely disconnected memory (expected cost: 0)
+        SupportsPathTestCase{0, 0, 5, 2, false, false, 0},
 
-  cost_1 =
-      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_1->me),
-                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
-                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+        // Case 7: Local memory with reduction
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 0,
+                             /*redop_id=*/1},
 
-  cost_2 =
-      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_2->me),
-                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
-                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+        // Case 8: Local memory with both src serdez
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 100,
+                             /*redop_id=*/0, /*src_serdez_id=*/1,
+                             /*dst_serdez_id=*/0},
 
-  cost_3 =
-      channel->supports_path(ChannelCopyInfo(src_mem->me, dst_mem_3->me),
-                             /*src_serdez_id=*/0, /*dst_serdez_id=*/0,
-                             /*redop_id=*/0, bytes, /*src_frangs=*/0, /*dst_frags=*/0);
+        // Case 9: Local memory with dst serdez
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 100,
+                             /*redop_id=*/0, /*src_serdez_id=*/0,
+                             /*dst_serdez_id=*/1},
 
-  ASSERT_EQ(cost_1, 100);
-  ASSERT_EQ(cost_2, 100);
-  ASSERT_EQ(cost_3, 0);
-  ASSERT_FALSE(channel->get_paths().empty());
+        // Case 10: Local memory with both src/dst serdez
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 0,
+                             /*redop_id=*/0, /*src_serdez_id=*/1,
+                             /*dst_serdez_id=*/1},
 
-  // we only need to delete memories are not part of the 'node' since pointers will be
-  // deleted for us
-  delete dst_mem_3;
-  channel->shutdown();
-}
+        // Case 11: Local memory with src frags
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 1000,
+                             /*redop_id=*/0, /*src_serdez_id=*/0,
+                             /*dst_serdez_id=*/0, /*src_frags=*/{10}},
+
+        // Case 12: Local memory with src and dst frags
+        SupportsPathTestCase{0, 0, 1, 0, false, true, 2000,
+                             /*redop_id=*/0, /*src_serdez_id=*/0,
+                             /*dst_serdez_id=*/0, /*src_frags=*/{10}, /*dst_frags=*/{20}}
+
+        ));
 
 struct MemcpyXferDescTestCase {
   std::vector<size_t> src_strides;
