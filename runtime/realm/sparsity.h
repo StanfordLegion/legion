@@ -136,11 +136,12 @@ namespace Realm {
 				      bool always_create, bool disjoint);
     ///@}
 
+
     struct ImplLookup {
-        static SparsityMapPublicImpl<N, T>* (*get_impl_ptr)(const SparsityMap<N, T>&);
+      static std::function<SparsityMapPublicImpl<N, T>*(const SparsityMap<N, T>&)> get_impl_ptr;
 
         static SparsityMapPublicImpl<N, T>* get_impl(const SparsityMap<N, T>& map) {
-            return get_impl_ptr(map);
+          return get_impl_ptr(map);
         }
     };
 

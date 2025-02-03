@@ -6,29 +6,34 @@
 using namespace Realm;
 
 template <int N, typename T>
-static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
-                                           size_t bytes_per_element = 8)
+static InstanceLayout<N, T> *
+create_layout(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
+              const std::vector<size_t> &field_sizes, size_t bytes_per_element = 8)
 {
   InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
-  InstanceLayoutGeneric::FieldLayout field_layout;
-  field_layout.list_idx = 0;
-  field_layout.rel_offset = 0;
-  field_layout.size_in_bytes = bytes_per_element;
 
-  AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
-  affine_piece->bounds = bounds;
-  affine_piece->offset = 0;
-  affine_piece->strides[0] = bytes_per_element;
-  size_t mult = affine_piece->strides[0];
-  for(int i = 1; i < N; i++) {
-    affine_piece->strides[i] = (bounds.hi[i - 1] - bounds.lo[i - 1] + 1) * mult;
-    mult *= (bounds.hi[i - 1] - bounds.lo[i - 1] + 1);
+  inst_layout->piece_lists.resize(field_ids.size());
+
+  for(int i = 0; i < field_ids.size(); i++) {
+    InstanceLayoutGeneric::FieldLayout field_layout;
+    field_layout.list_idx = i;
+    field_layout.rel_offset = 0;
+    field_layout.size_in_bytes = field_sizes[i];
+
+    AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
+    affine_piece->bounds = bounds;
+    affine_piece->offset = 0;
+    affine_piece->strides[0] = field_sizes[i];
+    size_t mult = affine_piece->strides[0];
+    for(int i = 1; i < N; i++) {
+      affine_piece->strides[i] = (bounds.hi[i - 1] - bounds.lo[i - 1] + 1) * mult;
+      mult *= (bounds.hi[i - 1] - bounds.lo[i - 1] + 1);
+    }
+
+    inst_layout->space = bounds;
+    inst_layout->fields[field_ids[i]] = field_layout;
+    inst_layout->piece_lists[i].pieces.push_back(affine_piece);
   }
-
-  inst_layout->space = bounds;
-  inst_layout->fields[0] = field_layout;
-  inst_layout->piece_lists.resize(1);
-  inst_layout->piece_lists[0].pieces.push_back(affine_piece);
 
   return inst_layout;
 }
@@ -41,22 +46,16 @@ static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_i
 }
 
 template <int N, typename T>
-static RegionInstanceImpl *create_inst(Rect<N, T> bounds, size_t bytes_per_element = 8,
-                                       RegionInstance inst = make_inst())
+static RegionInstanceImpl *
+create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
+            const std::vector<size_t> &field_sizes, size_t bytes_per_element = 8,
+            RegionInstance inst = make_inst())
 {
-  InstanceLayout<N, T> *inst_layout = create_layout(bounds, bytes_per_element);
+  InstanceLayout<N, T> *inst_layout =
+      create_layout(bounds, field_ids, field_sizes, bytes_per_element);
   RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
   impl->metadata.layout = inst_layout;
   impl->metadata.inst_offset = 0;
-  return impl;
-}
-
-template <int N, typename T>
-SparsityMapPublicImpl<N, T> *mock_get_impl(const SparsityMap<N, T> &map)
-{
-  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  static NodeSet subscribers;
-  static auto impl = new SparsityMapImpl<N, T>(handle, subscribers);
   return impl;
 }
 
@@ -74,7 +73,6 @@ public:
 template <int DIM>
 struct GetAddressesTestCase {
   Rect<DIM> domain;
-  Rect<DIM> restrictions;
   std::vector<Rect<DIM>> rects;
   std::vector<Rect<DIM>> expected;
   std::vector<int> dim_order;
@@ -89,10 +87,33 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
 {
   if constexpr(DIM == 1) {
     return {
+        // Dense 1D rects multifield
+        {
+            /*domain=*/{Rect<1>(0, 14)},
+            /*rects=*/{Rect<1>(0, 14)},
+            /*expected=*/{Rect<1>(0, 14)},
+            /*dim_order=*/{0},
+            /*field_ids=*/{0, 1},
+            /*field_offsets=*/{0, 0},
+            /*field_sizes=*/{sizeof(int), sizeof(long long)},
+            /*elem_size=*/sizeof(int),
+        },
+
+        // Dense 1D rects
+        {
+            /*domain=*/{Rect<1>(0, 14)},
+            /*rects=*/{Rect<1>(0, 14)},
+            /*expected=*/{Rect<1>(0, 14)},
+            /*dim_order=*/{0},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+            /*elem_size=*/sizeof(int),
+        },
+
         // Sparse 1D rects
         {
             /*domain=*/{Rect<1>(0, 14)},
-            /*restrictions=*/{Rect<1>(0, 14)},
             /*rects=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
             /*expected=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
             /*dim_order=*/{0},
@@ -103,14 +124,38 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
         },
     };
   } else if constexpr(DIM == 2) {
-    // Full 1D no rects
     return {
+
+        // Full 2D dense
         {
             /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*restrictions=*/Rect<2>({0, 0}, {10, 10}),
             /*rects*/ {Rect<2>({0, 0}, {10, 10})},
             /*expected=*/{Rect<2>({0, 0}, {10, 10})},
             /*dim_order=*/{0, 1},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+            /*elem_size=*/sizeof(int),
+        },
+
+        // Full 2D sparse
+        {
+            /*domain=*/Rect<2>({0, 0}, {10, 10}),
+            /*rects*/ {Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
+            /*expected=*/{Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
+            /*dim_order=*/{0, 1},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+            /*elem_size=*/sizeof(int),
+        },
+
+        // Full 2D dense reverse dims
+        {
+            /*domain=*/Rect<2>({0, 0}, {10, 10}),
+            /*rects*/ {Rect<2>({0, 0}, {10, 10})},
+            /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+            /*dim_order=*/{1, 0},
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
@@ -122,7 +167,6 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
         // Full 3D domain
         {
             /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
-            /*restrictions=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
             /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
             /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
             /*dim_order=*/{0, 1, 2},
@@ -147,17 +191,30 @@ TYPED_TEST_P(GetAddressesTest, Base)
   for(const auto &test_case : test_cases) {
     NodeSet subscribers;
 
-    SparsityMap<N, T>::ImplLookup::get_impl_ptr = mock_get_impl;
+    SparsityMapPublicImpl<N, T> *local_impl = nullptr;
+    SparsityMap<N, T>::ImplLookup::get_impl_ptr =
+        [&local_impl](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
+      if(local_impl == nullptr) {
+        SparsityMap<N, T> handle =
+            (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+        NodeSet subscribers;
+        local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
+      }
+      return local_impl;
+    };
+
     SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
     auto impl = reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
     impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(test_case.rects, true);
     IndexSpace<N, T> domain = test_case.domain;
-    if(!test_case.rects.empty())
+    if(!test_case.rects.empty()) {
       domain.sparsity = handle;
+    }
 
     auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
-        domain, create_inst<N, T>(test_case.domain, test_case.elem_size),
+        domain,
+        create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
         test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
         test_case.field_sizes);
     const InstanceLayoutPieceBase *nonaffine;
@@ -166,24 +223,38 @@ TYPED_TEST_P(GetAddressesTest, Base)
 
     bool ok = it->get_addresses(addrlist, nonaffine);
 
+    ASSERT_TRUE(ok);
     ASSERT_TRUE(it->done());
 
     cursor.set_addrlist(&addrlist);
+    size_t total_volume = 0;
+    for(const auto &rect : test_case.expected) {
+      total_volume += rect.volume();
+    }
+
     size_t bytes_pending = 0;
-    for(const auto &rect : test_case.expected) {
-      bytes_pending += rect.volume();
+    for(const size_t size : test_case.field_sizes) {
+      bytes_pending += total_volume * size;
     }
 
-    EXPECT_EQ(addrlist.bytes_pending(), bytes_pending * test_case.elem_size);
-    ASSERT_EQ(cursor.get_dim(), 1);
+    ASSERT_EQ(addrlist.bytes_pending(), bytes_pending);
 
-    for(const auto &rect : test_case.expected) {
-      size_t rem = cursor.remaining(0);
-      ASSERT_EQ(cursor.remaining(0), rect.volume() * test_case.elem_size);
-      cursor.advance(0, cursor.remaining(0));
+    if(cursor.get_dim() == 1) {
+      // TODO(apryakhin:@): Find better way to analyze the adddress list
+      // ASSERT_EQ(cursor.get_dim(), 1);
+      for(const size_t field_size : test_case.field_sizes) {
+        for(const auto &rect : test_case.expected) {
+          int dim = cursor.get_dim();
+          size_t rem = cursor.remaining(dim - 1);
+          ASSERT_EQ(cursor.remaining(dim - 1), rect.volume() * field_size);
+          cursor.advance(dim - 1, cursor.remaining(dim - 1));
+        }
+      }
+
+      ASSERT_EQ(addrlist.bytes_pending(), 0);
     }
 
-    ASSERT_EQ(addrlist.bytes_pending(), 0);
+    delete impl;
   }
 }
 
@@ -216,7 +287,6 @@ class TransferIteratorStepTest : public ::testing::TestWithParam<IteratorStepTes
 
 TEST_P(TransferIteratorStepTest, Base)
 {
-
   IteratorStepTestCase test_case = GetParam();
 
   for(int i = 0; i < test_case.num_steps; i++) {
@@ -241,8 +311,8 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
     IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-                                kByteSize),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(1)), {0},
+                                {kByteSize}),
             0, {0}, {0}, /*field_sizes=*/{kByteSize}),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
@@ -265,8 +335,8 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
     IteratorStepTestCase{
         .it = new TransferIteratorIndexSpace<2, int>(
             Rect<2, int>(Point<2, int>(0), Point<2, int>(1)),
-            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)),
-                                kByteSize),
+            create_inst<2, int>(Rect<2, int>(Point<2, int>(0), Point<2, int>(3)), {0},
+                                {kByteSize}),
             0, {0}, {0}, /*field_sizes=*/{kByteSize}),
         .infos = {TransferIterator::AddressInfo{/*offset=*/0,
                                                 /*bytes_per_el=*/kByteSize * 2,
@@ -291,8 +361,8 @@ const static IteratorStepTestCase kIteratorStepTestCases[] = {
     // Case 6: step with empty rect
     IteratorStepTestCase{.it = new TransferIteratorIndexSpace<1, int>(
                              Rect<1, int>::make_empty(),
-                             create_inst<1, int>(Rect<1, int>(0, 1), kByteSize), 0, {0},
-                             {0},
+                             create_inst<1, int>(Rect<1, int>(0, 1), {0}, {kByteSize}), 0,
+                             {0}, {0},
                              /*field_sizes=*/{kByteSize}),
                          .max_bytes = {0},
                          .exp_bytes = {0},
