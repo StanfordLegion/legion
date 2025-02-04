@@ -281,9 +281,12 @@ TYPED_TEST_P(IndirectGetAddresses, Base)
         /*extra_elems=*/0);
     it->set_indirect_input_port(xd.get(), /*indirect_port_idx=*/0, addr_it.get());
 
+
+    bool done_pre = it->done();
     bool ok = it->get_addresses(addrlist, nonaffine);
 
     ASSERT_TRUE(ok);
+    ASSERT_FALSE(done_pre);
     ASSERT_TRUE(it->done());
     ASSERT_EQ(nonaffine, nullptr);
     ASSERT_EQ(addrlist.bytes_pending(), buffer.size() * elem_size);
