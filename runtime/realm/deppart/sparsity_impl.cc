@@ -121,9 +121,20 @@ namespace Realm {
   template <int N, typename T>
   SparsityMapPublicImpl<N,T> *SparsityMap<N,T>::impl(void) const
   {
-    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(*this);
-    return wrapper->get_or_create<N,T>(*this);
+    return ImplLookup::get_impl(*this);
   }
+
+  template <int N, typename T>
+  SparsityMapPublicImpl<N, T> *
+  SparsityMap<N, T>::default_get_impl(const SparsityMap<N, T> &map)
+  {
+    SparsityMapImplWrapper *wrapper = get_runtime()->get_sparsity_impl(map);
+    return wrapper->get_or_create<N, T>(map);
+  }
+
+  template <int N, typename T>
+  std::function<SparsityMapPublicImpl<N, T>*(const SparsityMap<N, T>&)>
+    SparsityMap<N, T>::ImplLookup::get_impl_ptr = &SparsityMap<N, T>::default_get_impl;
 
   template <int N, typename T>
   void SparsityMap<N, T>::destroy(Event wait_on, unsigned count)
