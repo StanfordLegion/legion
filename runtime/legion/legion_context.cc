@@ -10946,15 +10946,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_created_requirement_contexts(
-        const bool is_top, std::set<RtEvent> &applied_events,
+        const bool is_top, std::set<RtEvent> &applied,
         const ShardMapping *shard_mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
-      std::map<LogicalRegion,EqKDTree*> return_regions;
+      std::map<RegionNode*,EqKDTree*> return_regions;
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
             created_requirements.begin(); it != 
             created_requirements.end(); it++)
       {
+        RegionNode *node = runtime->forest->get_node(it->second.region);
 #ifdef DEBUG_LEGION
         assert(returnable_privileges.find(it->first) !=
                 returnable_privileges.end());
@@ -10967,21 +10968,27 @@ namespace Legion {
         if (returnable_privileges[it->first] && !is_top)
         {
 #ifdef DEBUG_LEGION
-          assert(return_regions.find(it->second.region) == 
-                  return_regions.end());
+          assert(return_regions.find(node) == return_regions.end());
 #endif
           finder->second.tree->add_reference();
-          return_regions[it->second.region] = finder->second.tree;
+          return_regions[node] = finder->second.tree;
           equivalence_set_trees.erase(finder);
         }
         else
         {
           // Not returning so just remove it which will delete the tree
 #ifdef DEBUG_LEGION
-          assert(return_regions.find(it->second.region) == 
-                  return_regions.end());
+          assert(return_regions.find(node) == return_regions.end());
 #endif
+          const FieldMask close_mask =
+            node->column_source->get_field_mask(it->second.privilege_fields);
+          std::vector<RtEvent> applied_events;
+          node->row_source->invalidate_equivalence_set_kd_tree(
+            finder->second.tree, finder->second.lock,
+            close_mask, applied_events, false/*move to previous*/);
           equivalence_set_trees.erase(finder);
+          if (!applied_events.empty())
+            applied.insert(applied_events.begin(), applied_events.end());
         }
       }
       if (!return_regions.empty())
@@ -10990,16 +10997,15 @@ namespace Legion {
         created_nodes.reserve(return_regions.size());
         std::vector<EqKDTree*> created_trees;
         created_trees.reserve(return_regions.size());
-        for (std::map<LogicalRegion,EqKDTree*>::const_iterator it =
+        for (std::map<RegionNode*,EqKDTree*>::const_iterator it =
               return_regions.begin(); it != return_regions.end(); it++)
         {
-          created_nodes.push_back(runtime->forest->get_node(it->first));
+          created_nodes.push_back(it->first);
           created_trees.push_back(it->second);
         }
         InnerContext *parent_ctx = find_parent_context();   
         parent_ctx->receive_created_region_contexts(
-            created_nodes, created_trees, applied_events, 
-            shard_mapping, source_shard);
+            created_nodes, created_trees, applied, shard_mapping, source_shard);
         for (std::vector<EqKDTree*>::const_iterator it =
               created_trees.begin(); it != created_trees.end(); it++)
           if (((*it) != NULL) && (*it)->remove_reference())

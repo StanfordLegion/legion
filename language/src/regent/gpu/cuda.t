@@ -139,15 +139,16 @@ end)
 -- #################
 
 local supported_archs = {
-  ["fermi"]   = 20,
-  ["kepler"]  = 32,
-  ["k20"]     = 35,
-  ["maxwell"] = 52,
-  ["pascal"]  = 60,
-  ["volta"]   = 70,
-  ["turing"]  = 75,
-  ["ampere"]  = 80,
-  ["hopper"]  = 90,
+  ["fermi"]     = 20,
+  ["kepler"]    = 32,
+  ["k20"]       = 35,
+  ["maxwell"]   = 52,
+  ["pascal"]    = 60,
+  ["volta"]     = 70,
+  ["turing"]    = 75,
+  ["ampere"]    = 80,
+  ["hopper"]    = 90,
+  ["blackwell"] = 100,
 }
 
 local function parse_cuda_arch(arch)

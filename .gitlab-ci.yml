@@ -357,7 +357,6 @@ before_script:
     fi
   - |
     if [ "$USE_CCACHE" -eq 1 ]; then
-      export CCACHE_COMPILER=${CXX}
       ccache --zero-stats
       ccache --show-stats
     fi
