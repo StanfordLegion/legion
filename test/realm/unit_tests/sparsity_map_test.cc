@@ -50,7 +50,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
 TEST(SparistyMapImplWrapperTest, AddReferences)
 {
   constexpr int unsigned count = 2;
-  auto wrapper =
+  std::unique_ptr<SparsityMapImplWrapper> wrapper =
       std::make_unique<SparsityMapImplWrapper>(/*comm=*/nullptr, /*report_leaks=*/false);
 
   wrapper->add_references(count);
@@ -164,7 +164,7 @@ TYPED_TEST_P(SparsityMapImplTest, AddRemoteWaiter)
   constexpr int N = TestFixture::N;
   NodeSet subscribers;
   SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-  auto impl =
+  std::unique_ptr<SparsityMapImpl<N, T>> impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
 
   bool ok = impl->add_waiter(/*uop=*/nullptr, true);
@@ -376,8 +376,9 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
   impl->contribute_nothing();
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
-  auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
-  auto other_impl =
+  MockSparsityMapCommunicator<N, T> *other_sparsity_comm =
+      new MockSparsityMapCommunicator<N, T>();
+  std::unique_ptr<SparsityMapImpl<N, T>> other_impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, other_sparsity_comm);
   other_impl->contribute_dense_rect_list(rect_list,
                                          /*disjoint=*/true);
@@ -412,10 +413,12 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   impl->contribute_nothing();
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
 
-  auto *other_sparsity_comm = new MockSparsityMapCommunicator<N, T>();
-  auto other_impl = std::make_unique<SparsityMapImpl<N, T>>(
-      handle, node,
-      reinterpret_cast<SparsityMapCommunicator<N, T> *>(other_sparsity_comm));
+  MockSparsityMapCommunicator<N, T> *other_sparsity_comm =
+      new MockSparsityMapCommunicator<N, T>();
+  std::unique_ptr<SparsityMapImpl<N, T>> other_impl =
+      std::make_unique<SparsityMapImpl<N, T>>(
+          handle, node,
+          reinterpret_cast<SparsityMapCommunicator<N, T> *>(other_sparsity_comm));
   other_impl->contribute_raw_rects(other_rect_list.data(), other_rect_list.size(), 0,
                                    /*disjoint=*/true, 0);
   other_impl->set_contributor_count(1);
