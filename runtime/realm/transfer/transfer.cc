@@ -1069,9 +1069,6 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndirect<N, T>::TransferIteratorIndirect(void)
-    : can_merge(true)
-    , point_pos(0)
-    , num_points(0)
   {}
 
   template <int N, typename T>
@@ -1080,17 +1077,10 @@ namespace Realm {
       const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
       const std::vector<size_t> &_fld_sizes)
     : TransferIteratorBase<N, T>(_inst_impl, 0)
-    , addrs_in(0)
     , addrs_mem(_addrs_mem)
-    , addrs_mem_base(0)
-    , point_pos(0)
-    , num_points(0)
-    //, is(_is)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
-    , indirect_xd(0)
-    , indirect_port_idx(-1)
   {}
 
   template <int N, typename T>
