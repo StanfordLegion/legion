@@ -1,8 +1,6 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/transfer.h"
 #include "realm/inst_layout.h"
-#include <numeric>
-#include <tuple>
 #include <gtest/gtest.h>
 
 using namespace Realm;

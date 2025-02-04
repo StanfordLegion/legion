@@ -23,6 +23,25 @@ endif()
 
 list(APPEND REALM_TESTS
   indirect_iterator_test.cc
+  ucx_mpool_test.cc
+  barrier_test.cc
+  event_test.cc
+  path_cache_test.cc
+  transfer_utils_test.cc
+  address_list_test.cc
+  cmdline_parser_test.cc
+  sequence_assembler_test.cc
+  dynamic_table_test.cc
+  range_allocator_test.cc
+  pri_queue_test.cc
+  intrusive_list_test.cc
+  point_test.cc
+  repl_heap_test.cc
+  nodeset_test.cc
+  transfer_iterator_test.cc
+  lowlevel_dma_test.cc
+  circ_queue_test.cc
+  gather_scatter_test.cc
  )
 
 list(APPEND UCX_SOURCES
