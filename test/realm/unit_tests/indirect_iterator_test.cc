@@ -266,28 +266,31 @@ TYPED_TEST_P(IndirectGetAddresses, Base)
     xd->input_ports.resize(1);
     xd->input_ports[0].mem = input_mem.get();
 
-    auto it = std::make_unique<TransferIteratorIndirect<N, T>>(
-        Memory::NO_MEMORY,
-        create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
-        test_case.field_ids, test_case.field_offsets, test_case.field_sizes);
+    std::unique_ptr<TransferIteratorIndirect<N, T>> it =
+        std::make_unique<TransferIteratorIndirect<N, T>>(
+            Memory::NO_MEMORY,
+            create_inst<N, T>(test_case.domain, test_case.field_ids,
+                              test_case.field_sizes),
+            test_case.field_ids, test_case.field_offsets, test_case.field_sizes);
 
     Rect<1, T> addr_domain = Rect<1, T>(Point<1, T>(0), Point<1, T>(buffer.size() - 1));
     std::vector<FieldID> indirect_fields{0};
     std::vector<size_t> indirect_field_sizes{sizeof(Point<N, T>)};
-    auto addr_it = std::make_unique<TransferIteratorIndexSpace<1, T>>(
-        addr_domain,
-        create_inst<1, T>(addr_domain, indirect_fields, indirect_field_sizes), dim_order,
-        indirect_fields, test_case.field_offsets, indirect_field_sizes,
-        /*extra_elems=*/0);
+    std::unique_ptr<TransferIteratorIndexSpace<1, T>> addr_it =
+        std::make_unique<TransferIteratorIndexSpace<1, T>>(
+            addr_domain,
+            create_inst<1, T>(addr_domain, indirect_fields, indirect_field_sizes),
+            dim_order, indirect_fields, test_case.field_offsets, indirect_field_sizes,
+            /*extra_elems=*/0);
     it->set_indirect_input_port(xd.get(), /*indirect_port_idx=*/0, addr_it.get());
 
-
-    bool done_pre = it->done();
+    bool done_early = it->done();
     bool ok = it->get_addresses(addrlist, nonaffine);
+    bool done_later = it->done();
 
+    ASSERT_FALSE(done_early);
     ASSERT_TRUE(ok);
-    ASSERT_FALSE(done_pre);
-    ASSERT_TRUE(it->done());
+    ASSERT_TRUE(done_later);
     ASSERT_EQ(nonaffine, nullptr);
     ASSERT_EQ(addrlist.bytes_pending(), buffer.size() * elem_size);
 
