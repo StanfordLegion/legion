@@ -29,6 +29,7 @@
 
 #include <iostream>
 #include <vector>
+#include <functional>
 
 /**
  * \file sparsity.h
