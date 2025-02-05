@@ -138,14 +138,15 @@ namespace Realm {
     ///@}
 
     struct ImplLookup {
-      static std::function<SparsityMapPublicImpl<N, T>*(const SparsityMap<N, T>&)> get_impl_ptr;
-
-        static SparsityMapPublicImpl<N, T>* get_impl(const SparsityMap<N, T>& map) {
-          return get_impl_ptr(map);
-        }
+      static SparsityMapPublicImpl<N, T> *get_impl(const SparsityMap<N, T> &map)
+      {
+        return get_impl_ptr(map);
+      }
+      static SparsityMapPublicImpl<N, T> *default_get_impl(const SparsityMap<N, T> &map);
+      static inline std::function<SparsityMapPublicImpl<N, T> *(
+          const SparsityMap<N, T> &)>
+          get_impl_ptr = default_get_impl;
     };
-
-    static SparsityMapPublicImpl<N, T>* default_get_impl(const SparsityMap<N, T>& map);
   };
 
   template <int N, typename T>
