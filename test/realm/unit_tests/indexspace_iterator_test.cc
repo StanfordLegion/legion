@@ -138,25 +138,33 @@ TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
 TYPED_TEST_P(IndexSpaceIteratorTest, HandlesVariousCases)
 {
   using T = int;
-  constexpr int DIM = TypeParam::value;
-  auto test_cases = GetTestCases<DIM>();
+  constexpr int N = TypeParam::value;
+  auto test_cases = GetTestCases<N>();
   for(const auto &test_case : test_cases) {
     NodeSet subscribers;
-    std::unique_ptr<SparsityMapImpl<DIM, T>> impl;
+    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+    SparsityMapPublicImpl<N, T> *local_impl = nullptr;
+    SparsityMap<N, T>::ImplLookup::get_impl_ptr =
+        [&](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
+      if(local_impl == nullptr) {
+        local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
+      }
+      return local_impl;
+    };
+
+    IndexSpace<N, T> domain = test_case.domain;
+
     if(!test_case.rects.empty()) {
-      SparsityMap<DIM, T> handle =
-          (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<DIM, T>>();
-      impl = std::make_unique<SparsityMapImpl<DIM, T>>(handle, subscribers);
+      SparsityMapImpl<N, T> *impl =
+          reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
       impl->set_contributor_count(1);
       impl->contribute_dense_rect_list(test_case.rects, true);
+      domain.sparsity = handle;
     }
 
-    SparsityMapPublicImpl<DIM, T> *public_impl = impl.get();
-
     size_t index = 0;
-    for(IndexSpaceIterator<DIM, T> it(test_case.domain, test_case.restrictions,
-                                      public_impl);
-        it.valid; it.step()) {
+    for(IndexSpaceIterator<N, T> it(domain, test_case.restrictions); it.valid;
+        it.step()) {
       EXPECT_TRUE(index < test_case.expected.size());
       ASSERT_EQ(it.rect.lo, test_case.expected[index].lo);
       ASSERT_EQ(it.rect.hi, test_case.expected[index].hi);
@@ -164,6 +172,8 @@ TYPED_TEST_P(IndexSpaceIteratorTest, HandlesVariousCases)
     }
 
     ASSERT_EQ(index, test_case.expected.size());
+
+    delete local_impl;
   }
 }
 
