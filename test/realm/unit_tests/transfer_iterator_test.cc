@@ -246,7 +246,6 @@ TYPED_TEST_P(GetAddressesTest, Base)
       for(const size_t field_size : test_case.field_sizes) {
         for(const auto &rect : test_case.expected) {
           int dim = cursor.get_dim();
-          size_t rem = cursor.remaining(dim - 1);
           ASSERT_EQ(cursor.remaining(dim - 1), rect.volume() * field_size);
           cursor.advance(dim - 1, cursor.remaining(dim - 1));
         }
