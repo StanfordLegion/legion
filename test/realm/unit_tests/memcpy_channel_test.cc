@@ -357,20 +357,16 @@ TYPED_TEST_P(GetAddressesTest, Base)
 
   for(const auto &test_case : test_cases) {
     NodeSet subscribers;
-
+    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
     SparsityMapPublicImpl<N, T> *local_impl = nullptr;
     SparsityMap<N, T>::ImplLookup::get_impl_ptr =
-        [&local_impl](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
+        [&](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
       if(local_impl == nullptr) {
-        SparsityMap<N, T> handle =
-            (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-        NodeSet subscribers;
         local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
       }
       return local_impl;
     };
 
-    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
     SparsityMapImpl<N, T> *impl =
         reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
     impl->set_contributor_count(1);
