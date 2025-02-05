@@ -305,15 +305,14 @@ TYPED_TEST_P(IndirectGetAddresses, Base)
 
 REGISTER_TYPED_TEST_SUITE_P(IndirectGetAddresses, Base);
 
-using TestTypes = ::testing::Types<TypeWrapper<1>
-#if REALM_MAX_DIM > 1
-                                   ,
-                                   TypeWrapper<2>
-#endif
-#if REALM_MAX_DIM > 2
-                                   ,
-                                   TypeWrapper<3>
-#endif
-                                   >;
+template <typename Seq>
+struct WrapTypes;
+
+template <std::size_t... Ns>
+struct WrapTypes<std::index_sequence<Ns...>> {
+  using type = ::testing::Types<std::integral_constant<int, Ns + 1>...>;
+};
+
+using TestTypes = typename WrapTypes<std::make_index_sequence<REALM_MAX_DIM>>::type;
 
 INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, IndirectGetAddresses, TestTypes);
