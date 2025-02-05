@@ -651,10 +651,14 @@ ifeq ($(strip $(GPU_ARCH)),hopper)
 override GPU_ARCH = 90
 NVCC_FLAGS	+= -DHOPPER_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),blackwell)
+override GPU_ARCH = 100
+NVCC_FLAGS	+= -DBLACKWELL_ARCH
+endif
 
 ifeq ($(strip $(GPU_ARCH)),auto)
   # detect based on what nvcc supports
-  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75 80 90
+  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75 80 90 100
   override GPU_ARCH = $(shell for X in $(ALL_ARCHES) ; do \
     $(NVCC) -gencode arch=compute_$$X,code=sm_$$X -cuda -x c++ /dev/null -o /dev/null 2> /dev/null && echo $$X; \
   done)
