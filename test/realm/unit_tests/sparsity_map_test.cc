@@ -83,7 +83,7 @@ TEST(SparistyMapImplWrapperTest, RemoveReferences)
   }
 }
 
-template <int N, typename T>
+template <int N, typename T = int>
 class MockSparsityMapCommunicator : public SparsityMapCommunicator<N, T> {
 public:
   virtual ~MockSparsityMapCommunicator() = default;
@@ -135,6 +135,51 @@ static std::vector<Rect<N, T>> create_rects(int num_rects, int gap, int start = 
   return rect_list;
 }
 
+TEST(SparsityMapImplTest, AddRemoteWaiter)
+{
+  NodeSet subscribers;
+  SparsityMap<1> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<1>>();
+  MockSparsityMapCommunicator<1> *sparsity_comm = new MockSparsityMapCommunicator<1>();
+
+  std::unique_ptr<SparsityMapImpl<1, int>> impl =
+      std::make_unique<SparsityMapImpl<1, int>>(handle, subscribers, sparsity_comm);
+
+  bool ok = impl->add_waiter(/*uop=*/nullptr, true);
+
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(sparsity_comm->sent_requests, 1);
+}
+
+TEST(SparsityMapImplTest, SetContributorCountRemote)
+{
+  NodeSet subscribers;
+  std::vector<Rect<1>> rect_list{Rect<1>(Point<1>(0), Point<1>(1))};
+  MockSparsityMapCommunicator<1> *sparsity_comm = new MockSparsityMapCommunicator<1>();
+  SparsityMap<1> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<1>>();
+  std::unique_ptr<SparsityMapImpl<1, int>> impl =
+      std::make_unique<SparsityMapImpl<1, int>>(
+          handle, subscribers,
+          reinterpret_cast<SparsityMapCommunicator<1, int> *>(sparsity_comm));
+
+  impl->set_contributor_count(2);
+
+  ASSERT_EQ(sparsity_comm->sent_contributions, 1);
+}
+
+TEST(SparsityMapImplTest, ContributeNothingRemote)
+{
+  NodeSet subscribers;
+  std::vector<Rect<1>> rect_list{Rect<1>(Point<1>(0), Point<1>(1))};
+  MockSparsityMapCommunicator<1> *sparsity_comm = new MockSparsityMapCommunicator<1>();
+  SparsityMap<1> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<1>>();
+  std::unique_ptr<SparsityMapImpl<1, int>> impl =
+      std::make_unique<SparsityMapImpl<1, int>>(handle, subscribers, sparsity_comm);
+
+  impl->contribute_nothing();
+
+  ASSERT_EQ(sparsity_comm->sent_contributions, 1);
+}
+
 template <typename PointType>
 struct PointTraits;
 
@@ -157,21 +202,6 @@ public:
 };
 
 TYPED_TEST_SUITE_P(SparsityMapImplTest);
-
-TYPED_TEST_P(SparsityMapImplTest, AddRemoteWaiter)
-{
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
-  NodeSet subscribers;
-  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-  std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
-
-  bool ok = impl->add_waiter(/*uop=*/nullptr, true);
-
-  ASSERT_TRUE(ok);
-  ASSERT_EQ(this->sparsity_comm->sent_requests, 1);
-}
 
 TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
 {
@@ -212,38 +242,6 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
   ASSERT_EQ(this->sparsity_comm->sent_contributions, num_rects);
   ASSERT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
   ASSERT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
-}
-
-TYPED_TEST_P(SparsityMapImplTest, SetContributorCountRemote)
-{
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
-
-  NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list{Rect<N, T>(TypeParam(0), TypeParam(1))};
-  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-  std::unique_ptr<SparsityMapImpl<N, T>> impl = std::make_unique<SparsityMapImpl<N, T>>(
-      handle, subscribers,
-      reinterpret_cast<SparsityMapCommunicator<N, T> *>(this->sparsity_comm));
-
-  impl->set_contributor_count(2);
-
-  ASSERT_EQ(this->sparsity_comm->sent_contributions, 1);
-}
-
-TYPED_TEST_P(SparsityMapImplTest, ContributeNothingRemote)
-{
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
-  NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list{Rect<N, T>(TypeParam(0), TypeParam(1))};
-  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-  std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
-
-  impl->contribute_nothing();
-
-  ASSERT_EQ(this->sparsity_comm->sent_contributions, 1);
 }
 
 TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
@@ -431,10 +429,9 @@ TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
   ASSERT_FALSE(ok);
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SparsityMapImplTest, AddRemoteWaiter, RemoteDataReply,
+REGISTER_TYPED_TEST_SUITE_P(SparsityMapImplTest, RemoteDataReply,
                             ContributeDenseRectListRemote, ContributeDenseNotDisjoint,
-                            ContributeDenseDisjointRects, SetContributorCountRemote,
-                            ContributeNothingRemote, ComputeCoveringForOneRect,
+                            ContributeDenseDisjointRects, ComputeCoveringForOneRect,
                             ComputeCoveringForNRect, ComputeOverlapPassApprox,
                             ComputeOverlapFail);
 
