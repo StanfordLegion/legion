@@ -9055,6 +9055,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    uint64_t ShardTask::order_collectively_mapped_unbounded_pools(
+          uint64_t lamport_clock, bool need_result)
+    //--------------------------------------------------------------------------
+    {
+      if (is_leaf())
+      {
+        // If we're a leaf that means we're normally replicated and shards
+        // can have point tasks, but they are collectively mapping so we do
+        // need to do the lamport all-reduce to make sure we don't deadlock.
+        // TODO: implelement this
+        std::abort();
+      }
+      else
+      {
+        // If we're a non-leaf variant that means we're control replicated
+        // and therefore non of the tasks will have pool memories
+        return lamport_clock;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ShardTask::concurrent_allreduce(ProcessorManager *manager,
                            uint64_t lamport_clock, VariantID vid, bool poisoned)
     //--------------------------------------------------------------------------
