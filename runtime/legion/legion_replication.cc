@@ -14038,9 +14038,14 @@ namespace Legion {
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
-      typename REDOP::RHS next;
-      derez.deserialize(next);
-      REDOP::template fold<true/*exclusive*/>(value, next);
+      if (this->participating)
+      {
+        typename REDOP::RHS next;
+        derez.deserialize(next);
+        REDOP::template fold<true/*exclusive*/>(value, next);
+      }
+      else // Just overwrite in this case since we're not participating
+        derez.deserialize(value);
     }
     
     //--------------------------------------------------------------------------
