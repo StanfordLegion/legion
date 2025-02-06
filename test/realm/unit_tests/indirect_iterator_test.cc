@@ -14,7 +14,7 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
 
   inst_layout->piece_lists.resize(field_ids.size());
 
-  for(int i = 0; i < field_ids.size(); i++) {
+  for(size_t i = 0; i < field_ids.size(); i++) {
     InstanceLayoutGeneric::FieldLayout field_layout;
     field_layout.list_idx = i;
     field_layout.rel_offset = 0;
