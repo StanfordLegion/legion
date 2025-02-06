@@ -55,7 +55,6 @@ list(APPEND REALM_SRC
   realm/barrier_impl.h        realm/barrier_impl.cc
   realm/barrier_impl.inl
   realm/faults.h            realm/faults.cc
-  realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
@@ -222,6 +221,10 @@ if(REALM_USE_UCX)
     realm/ucx/ucp_internal.cc
     realm/ucx/ucp_context.h
     realm/ucx/ucp_context.cc
+    realm/ucx/oob_group_comm.h
+    realm/ucx/oob_group_comm.cc
+    realm/ucx/ucc_comm.h
+    realm/ucx/ucc_comm.cc
     realm/ucx/mpool.h
     realm/ucx/mpool.cc
     realm/ucx/spinlock.h
@@ -463,7 +466,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 endif()
 
 if(REALM_USE_MPI)
-  target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
+   target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
 endif()
 
 if(REALM_USE_UCX)
@@ -471,6 +474,12 @@ if(REALM_USE_UCX)
   if(NOT REALM_UCX_DYNAMIC_LOAD)
     target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
   endif()
+
+  find_package(ucc REQUIRED CONFIG)
+  message(STATUS "Found UCC: ${UCC_INCLUDE_DIRS} ${UCC_LIBRARIES})")
+  target_include_directories(RealmRuntime PRIVATE ${UCC_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ucc::ucc)
+
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)
@@ -480,6 +489,20 @@ if(REALM_USE_UCX)
   target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
   set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
   install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
+    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  # build the P2P bootstrap plugin
+  add_library(realm_ucp_bootstrap_p2p MODULE
+    realm/ucx/bootstrap/bootstrap_p2p.cc
+	realm/ucx/bootstrap/client.cc
+	realm/ucx/bootstrap/logger.cc
+	realm/ucx/bootstrap/server.cc
+	realm/ucx/bootstrap/p2p_comm.cc
+	realm/ucx/bootstrap/worker.cc)
+  target_include_directories(realm_ucp_bootstrap_p2p PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/runtime)
+  set_target_properties(realm_ucp_bootstrap_p2p PROPERTIES PREFIX "")
+  install(TARGETS realm_ucp_bootstrap_p2p LIBRARY
       DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
@@ -540,6 +563,9 @@ if(Legion_USE_CUDA)
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
   target_compile_definitions(RealmStatic INTERFACE USE_CUDA)
 
+  target_include_directories(RealmRuntime PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  target_include_directories(RealmStatic PRIVATE ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+
   set_target_cuda_standard(RealmRuntime STANDARD ${Legion_CUDA_STANDARD})
   set_target_cuda_architectures(RealmRuntime ARCHITECTURES ${Legion_CUDA_ARCH})
   set_target_cuda_standard(RealmStatic STANDARD ${Legion_CUDA_STANDARD})
@@ -555,9 +581,9 @@ if(Legion_USE_CUDA)
   endif()
   target_include_directories(realm_cuhook PRIVATE
                             ${CMAKE_CURRENT_SOURCE_DIR}
-                            ${PROJECT_BINARY_DIR}/runtime)
+                            ${PROJECT_BINARY_DIR}/runtime
+                            ${CUDAToolkit_CUPTI_INCLUDE_DIR})
   target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
-  add_dependencies(RealmRuntime realm_cuhook)
   install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
@@ -650,6 +676,9 @@ if(Legion_USE_Kokkos)
   get_property(kokkos_include_dirs
                TARGET Kokkos::kokkoscore
                PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  if(Legion_USE_CUDA)
+    list(APPEND kokkos_include_dirs ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+  endif()
   list(TRANSFORM kokkos_include_dirs PREPEND "-I")
   list(APPEND kokkos_compile_options ${kokkos_include_dirs}
                                      "-I${CMAKE_CURRENT_SOURCE_DIR}"
@@ -723,14 +752,16 @@ if(Legion_USE_OpenMP)
 endif()
 
 if(REALM_USE_NVTX)
-  target_link_libraries(RealmRuntime PRIVATE CUDA::nvtx3)
+  if (NOT TARGET CUDA::nvToolsExt)
+    add_library(CUDA::nvToolsExt ALIAS CUDA::nvtx3)
+  endif()
+  target_link_libraries(RealmRuntime PRIVATE CUDA::nvToolsExt)
+  target_link_libraries(RealmStatic PRIVATE CUDA::nvToolsExt)
 endif()
 
-if(Legion_BACKTRACE_USE_LIBDW)
-  target_include_directories(RealmRuntime PRIVATE ${LIBDW_INCLUDE_DIR})
-  target_link_libraries(RealmRuntime PRIVATE ${LIBDW_LIBRARY})
-  target_include_directories(RealmStatic PRIVATE ${LIBDW_INCLUDE_DIR})
-  target_link_libraries(RealmStatic PRIVATE ${LIBDW_LIBRARY})
+if(Legion_BACKTRACE_USE_CPPTRACE)
+  target_link_libraries(RealmRuntime PRIVATE cpptrace::cpptrace)
+  target_link_libraries(RealmStatic PRIVATE cpptrace::cpptrace)
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
@@ -739,7 +770,7 @@ set_target_properties(RealmStatic PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}
 target_include_directories(RealmRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
@@ -752,7 +783,7 @@ target_include_directories(RealmRuntime
 target_include_directories(RealmStatic
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.
@@ -788,7 +819,6 @@ list(APPEND LEGION_SRC
   legion.h
   legion/bitmask.h
   legion/garbage_collection.h             legion/garbage_collection.cc
-  legion/index_space_value.h              legion/index_space_value.cc
   legion/legion_allocation.h
   legion/legion_analysis.h                legion/legion_analysis.cc
   legion/legion_c.h                       legion/legion_c.cc
@@ -810,6 +840,8 @@ list(APPEND LEGION_SRC
   legion/legion_spy.h                     legion/legion_spy.cc
   legion/legion_tasks.h                   legion/legion_tasks.cc
   legion/legion_trace.h                   legion/legion_trace.cc
+  legion/legion_auto_trace.h              legion/legion_auto_trace.cc
+  legion/trie.h
   legion/legion_types.h
   legion/legion_utilities.h
   legion/legion_views.h                   legion/legion_views.cc
@@ -995,8 +1027,8 @@ target_include_directories(LegionRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mappers>
-    $<INSTALL_INTERFACE:include>
-    $<INSTALL_INTERFACE:include/mappers>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mappers>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 
   # Include paths for generated header files.

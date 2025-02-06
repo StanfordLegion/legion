@@ -86,7 +86,19 @@ namespace Legion {
       struct OperationInfo {
       public:
         LegionVector<DependenceRecord> dependences;
+        // Note that in this data structure the "context_index"
+        // field of PointwiseDependence data structure is actually the
+        // relative offset in the trace of the prior operation
+        std::map<unsigned,
+          std::vector<PointwiseDependence> > pointwise_dependences;
         LegionVector<CloseInfo> closes;
+        // Only need this during trace capture
+        // It records dependences for internal operations (that are not merge
+        // close ops, mainly refinement ops) based on the region
+        // requirement the internal operations were made for so we can forward
+        // them on when later things depende on them. This data structure is
+        // cleared after we're done with the trace recording
+        std::map<unsigned,LegionVector<DependenceRecord> > internal_dependences;
       };
       struct VerificationInfo {
       public:
@@ -158,6 +170,9 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype,
                                     const FieldMask &dependent_mask);
+      void record_pointwise_dependence(Operation *target, GenerationID target_gen,
+          Operation *source, GenerationID source_gen, unsigned idx,
+          const PointwiseDependence &dependence);
     public:
       // Called by task execution thread
       inline bool is_fixed(void) const { return fixed; }
@@ -183,9 +198,20 @@ namespace Legion {
     public:
       bool has_physical_trace(void) const { return (physical_trace != NULL); }
       PhysicalTrace* get_physical_trace(void) { return physical_trace; }
+      void invalidate_equivalence_sets(void) const;
+    public:
+      // A little bit of help for recording the set of colors for
+      // control replicated concurrent index space task launches
+      bool find_concurrent_colors(ReplIndexTask *task,
+          std::map<Color,CollectiveID> &concurrent_exchange_colors);
+      void record_concurrent_colors(ReplIndexTask *task,
+          const std::map<Color,CollectiveID> &concurrent_exchange_colors);
     protected:
       void replay_operation_dependences(Operation *op,
           const LegionVector<DependenceRecord> &dependences);
+      void replay_pointwise_dependences(Operation *op,
+          const std::map<unsigned,
+            std::vector<PointwiseDependence> > &dependences);
       void translate_dependence_records(Operation *op, const unsigned index,
           const std::vector<StaticDependence> &dependences);
 #ifdef LEGION_SPY
@@ -209,17 +235,33 @@ namespace Legion {
       bool fixed;
       bool intermediate_fence;
     protected:
+      struct OpInfo {
+      public:
+        OpInfo(Operation *o)
+          : op(o), gen(op->get_generation()),
+            context_index(op->get_context_index()),
+            unique_id(op->get_unique_op_id()) { }
+      public:
+        Operation* op;
+        GenerationID gen;
+        uint64_t context_index;
+        UniqueID unique_id;
+      };
       // Logical dependence analysis stage of the pipeline
       bool recording;
       size_t replay_index;
       std::deque<OperationInfo> replay_info;
       std::set<std::pair<Operation*,GenerationID> > frontiers;
-      std::vector<std::pair<Operation*,GenerationID> > operations;
+      std::vector<OpInfo> operations;
       // Only need this backwards lookup for trace capture
-      std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      std::map<std::pair<Operation*,GenerationID>,
+        std::pair<unsigned,unsigned>> op_map;
       FenceOp *trace_fence;
       GenerationID trace_fence_gen;
       StaticTranslator *static_translator;
+    protected:
+      // Help for control replicated concurrent index task launches
+      std::map<TraceLocalID,std::vector<Color> > concurrent_colors;
 #ifdef LEGION_SPY
     protected:
       std::map<std::pair<Operation*,GenerationID>,UniqueID> current_uids;
@@ -281,6 +323,8 @@ namespace Legion {
       NOT_REPLAYABLE_CONSENSUS,
       NOT_REPLAYABLE_VIRTUAL,
       NOT_REPLAYABLE_REMOTE_SHARD,
+      NOT_REPLAYABLE_NON_LEAF,
+      NOT_REPLAYABLE_VARIABLE_RETURN,
     };
 
     enum IdempotencyStatus {
@@ -334,6 +378,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void); 
+      virtual bool record_trace_hash(TraceRecognizer &identifier, uint64_t idx);
     protected:
       virtual FenceOp* get_complete_operation(void) { return this; }
     protected:
@@ -416,6 +461,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual bool record_trace_hash(TraceRecognizer &identifier, uint64_t idx);
     public:
       virtual ApEvent get_begin_completion(void) 
         { return get_completion_event(); }
@@ -458,6 +504,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual bool record_trace_hash(TraceRecognizer &identifier, uint64_t idx);
     public:
       virtual FenceOp* get_begin_operation(void) { return this; }
       virtual ApEvent get_begin_completion(void) 
@@ -506,7 +553,6 @@ namespace Legion {
       inline bool is_recording(void) const { return recording; }
       inline bool is_replaying(void) const { return !recording; }
       inline bool is_recurrent(void) const { return recurrent; }
-      size_t get_expected_operation_count(void) const;
     public:
       void record_parent_req_fields(unsigned index, const FieldMask &mask);
       void find_condition_sets(std::map<EquivalenceSet*,unsigned> &sets) const;
@@ -523,6 +569,7 @@ namespace Legion {
           std::set<RtEvent> &map_applied_events,
           std::set<ApEvent> &execution_preconditions,
           bool has_blocking_call, bool has_intermediate_fence);
+      void invalidate_equivalence_sets(void) const;
     protected:
       bool find_replay_template(BeginOp *op,
             std::set<RtEvent> &map_applied_conditions,
@@ -755,6 +802,7 @@ namespace Legion {
         bool                    postmap_task;
         std::vector<Processor>  target_procs;
         std::vector<Memory>     future_locations;
+        std::map<Memory,PoolBounds> pool_bounds;
         std::deque<InstanceSet> physical_instances;
       };
       typedef LegionMap<TraceLocalID,CachedMapping> CachedMappings;
@@ -903,6 +951,7 @@ namespace Legion {
       bool check_preconditions(void);
       void apply_postconditions(FenceOp *op,
                                 std::set<RtEvent> &applied_events);
+      void invalidate_equivalence_sets(void) const;
     public:
       bool can_start_replay(void);
       void register_operation(MemoizableOp *op);
@@ -940,6 +989,7 @@ namespace Legion {
       virtual void record_mapper_output(const TraceLocalID &tlid,
                              const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances,
+                             bool is_leaf, bool has_return_size,
                              std::set<RtEvent> &applied_events);
       void get_mapper_output(SingleTask *task,
                              VariantID &chosen_variant,
@@ -947,21 +997,23 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::vector<Memory> &future_locations,
+                             std::map<Memory,PoolBounds> &pool_bounds,
                              std::deque<InstanceSet> &physical_instances) const;
       void get_task_reservations(SingleTask *task,
                              std::map<Reservation,bool> &reservations) const;
       void get_allreduce_mapping(AllReduceOp *op,
           std::vector<Memory> &target_memories, size_t &future_size);
-      RtBarrier get_concurrent_barrier(IndexTask *task);
-      const std::vector<ShardID>& get_concurrent_shards(ReplIndexTask* task);
+      void initialize_concurrent_groups(IndexTask *task);
     public:
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
-                          const TraceLocalID &tlid, bool register_memo);
+                          const TraceLocalID &tlid, bool register_memo,
+                          std::set<RtEvent> &applied_events);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 
                                                const TraceLocalID &tlid);
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                        const TraceLocalID &tlid);
+                                        const TraceLocalID &tlid,
+                                        std::set<RtEvent> &applied);
     public:
       virtual void record_merge_events(ApEvent &lhs, ApEvent rhs,
                                        const TraceLocalID &tlid);
@@ -1072,8 +1124,8 @@ namespace Legion {
                                 std::set<RtEvent> &applied_events); 
       virtual void record_future_allreduce(const TraceLocalID &tlid,
           const std::vector<Memory> &target_memories, size_t future_size);
-      virtual void record_concurrent_barrier(IndexTask *task, RtBarrier bar,
-          const std::vector<ShardID> &shards, size_t participants);
+      void record_concurrent_group(IndexTask *task, Color color, size_t local,
+          size_t global, RtBarrier bar, const std::vector<ShardID> &shards);
       void record_execution_fence(const TraceLocalID &tlid);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
@@ -1154,6 +1206,8 @@ namespace Legion {
       std::map<TraceLocalID,std::map<Reservation,bool> > cached_reservations;
       std::map<TraceLocalID,CachedAllreduce> cached_allreduces;
       bool has_virtual_mapping;
+      bool has_non_leaf_task;
+      bool has_variable_return_size;
       std::atomic<bool> has_no_consensus;
       mutable TraceViewSet::FailedPrecondition failure;
     protected:
@@ -1170,12 +1224,17 @@ namespace Legion {
       std::map<ApEvent,unsigned> event_map;
       std::map<ApEvent,BarrierAdvance*> managed_barriers;
       std::map<ApEvent,std::vector<BarrierArrival*> > managed_arrivals;
-      struct ConcurrentBarrier {
+      struct ConcurrentGroup {
+        ConcurrentGroup(Color c, size_t l, size_t g, RtBarrier b, 
+            const std::vector<ShardID> &s)
+          : shards(s), barrier(b), local(l), global(g), color(c) { }
         std::vector<ShardID> shards;
         RtBarrier barrier;
-        size_t participants;
+        size_t local;
+        size_t global;
+        Color color;
       };
-      std::map<TraceLocalID,ConcurrentBarrier> concurrent_barriers;
+      std::map<TraceLocalID,std::vector<ConcurrentGroup> > concurrent_groups;
     protected:
       std::vector<Instruction*>               instructions;
       std::vector<std::vector<Instruction*> > slices;
@@ -1265,28 +1324,18 @@ namespace Legion {
       public:
         DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
                              UpdateKind kind, RtUserEvent done, 
-                             Deserializer &derez, const UniqueInst &inst,
-                             RtUserEvent deferral = 
-                              RtUserEvent::NO_RT_USER_EVENT);
-        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
-                             UpdateKind kind, RtUserEvent done, 
                              const UniqueInst &inst, Deserializer &derez,
                              IndexSpaceExpression *expr,
                              RtUserEvent deferral = 
                               RtUserEvent::NO_RT_USER_EVENT);
-        DeferTraceUpdateArgs(ShardedPhysicalTemplate *target, 
-                             UpdateKind kind, RtUserEvent done, 
-                             const UniqueInst &inst, Deserializer &derez,
-                             const PendingRemoteExpression &pending);
         DeferTraceUpdateArgs(const DeferTraceUpdateArgs &args,
-                             RtUserEvent deferral,IndexSpaceExpression *expr);
+                             RtUserEvent deferral, IndexSpaceExpression *expr);
       public:
         ShardedPhysicalTemplate *const target;
         const UpdateKind kind;
         const RtUserEvent done;
         const UniqueInst inst;
         IndexSpaceExpression *const expr;
-        const PendingRemoteExpression pending;
         const size_t buffer_size;
         void *const buffer;
         const RtUserEvent deferral_event;
@@ -1322,7 +1371,8 @@ namespace Legion {
       virtual void finish_replay(FenceOp *op,std::set<ApEvent> &postconditions);
       virtual ApEvent get_completion_for_deletion(void) const;
       virtual void record_trigger_event(ApUserEvent lhs, ApEvent rhs,
-                                        const TraceLocalID &tlid);
+                                        const TraceLocalID &tlid,
+                                        std::set<RtEvent> &applied);
       using PhysicalTemplate::record_merge_events;
       virtual void record_merge_events(ApEvent &lhs, 
                                        const std::set<ApEvent>& rhs,
@@ -1478,7 +1528,8 @@ namespace Legion {
       // Pending refreshes from remote nodes
       std::map<ApBarrier,ApBarrier> pending_refresh_frontiers;
       std::map<ApEvent,ApBarrier> pending_refresh_barriers;
-      std::map<TraceLocalID,RtBarrier> pending_concurrent_barriers;
+      std::map<TraceLocalID,
+        std::vector<std::pair<Color,RtBarrier> > > pending_concurrent_barriers;
     };
 
     enum InstructionKind

@@ -322,7 +322,7 @@ TEST_F(GenEventTest, LocalTriggerWithWaiter)
   EXPECT_TRUE(waiter_one.triggered);
 }
 
-TEST_F(GenEventTest, LocalTriggerWithMultipleWaitersPoisoned)
+TEST_F(GenEventTest, LocalTriggerWithZeroTimeLimitPoisoned)
 {
   const NodeID owner = 0;
   const GenEventImpl::gen_t trigger_gen = 1;
@@ -334,12 +334,12 @@ TEST_F(GenEventTest, LocalTriggerWithMultipleWaitersPoisoned)
   event.init(ID::make_event(0, 0, 0), owner);
   bool ok1 = event.add_waiter(trigger_gen, &waiter_one);
   bool ok2 = event.add_waiter(trigger_gen, &waiter_two);
-  event.trigger(trigger_gen, 0, /*poisoned=*/true, TimeLimit::responsive());
+  event.trigger(trigger_gen, 0, /*poisoned=*/true, TimeLimit::relative(0));
 
   EXPECT_TRUE(ok1);
   EXPECT_TRUE(ok2);
   EXPECT_TRUE(waiter_one.triggered);
-  EXPECT_TRUE(waiter_two.triggered);
+  EXPECT_FALSE(waiter_two.triggered);
   EXPECT_TRUE(event.is_generation_poisoned(trigger_gen));
   EXPECT_TRUE(event.has_triggered(trigger_gen, poisoned));
 }

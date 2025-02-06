@@ -19,22 +19,59 @@
 #define REALM_BARRIER_IMPL_H
 
 #include "realm/event.h"
+#include "realm/event_impl.h"
 #include "realm/id.h"
 #include "realm/nodeset.h"
-#include "realm/faults.h"
-
-#include "realm/network.h"
-
-#include "realm/lists.h"
-#include "realm/threads.h"
-#include "realm/logging.h"
 #include "realm/redop.h"
-#include "realm/bgwork.h"
 
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace Realm {
+
+  struct BarrierTriggerMessageArgsInternal {
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
+    int broadcast_index;
+    bool is_complete_list;
+    int sequence_number;
+  };
+
+  struct RemoteNotification;
+
+  struct BarrierTriggerMessageArgs {
+    BarrierTriggerMessageArgsInternal internal;
+    std::vector<RemoteNotification> remote_notifications;
+  };
+
+  class BarrierCommunicator {
+  public:
+    virtual ~BarrierCommunicator() = default;
+
+    virtual void adjust(NodeID target, Barrier barrier, int delta, Event wait_on,
+                        NodeID sender, bool forwarded, const void *data, size_t datalen);
+
+    virtual void trigger(NodeID target, ID::IDType barrier_id,
+                         BarrierTriggerMessageArgs &trigger_args, const void *data,
+                         size_t datalen);
+
+    virtual void subscribe(NodeID target, ID::IDType barrier_id,
+                           EventImpl::gen_t subscribe_gen, NodeID subscriber,
+                           bool forwarded);
+
+    virtual size_t recommend_max_payload(NodeID node, size_t size,
+                                         bool with_congestion = true);
+  };
+
+  struct RemoteNotification {
+    NodeID node;
+    EventImpl::gen_t trigger_gen, previous_gen;
+  };
 
   class BarrierImpl : public EventImpl {
   public:
@@ -44,6 +81,7 @@ namespace Realm {
     static atomic<Barrier::timestamp_t> barrier_adjustment_timestamp;
 
     BarrierImpl(void);
+    BarrierImpl(BarrierCommunicator *_barrier_comm, int _broadcast_radix = 4);
     ~BarrierImpl(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -86,13 +124,38 @@ namespace Realm {
                         const void *reduce_value, size_t reduce_value_size,
                         TimeLimit work_until);
 
+    void handle_remote_subscription(NodeID subscriber, EventImpl::gen_t subscribe_gen,
+                                    bool forwarded, const void *data, size_t datalen);
+
+    void handle_remote_trigger(NodeID sender, ID::IDType barrier_id,
+                               EventImpl::gen_t trigger_gen,
+                               EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
+                               ReductionOpID redop_id, NodeID migration_target,
+                               int broadcast_index,
+                               const std::vector<RemoteNotification> remote_notifications,
+                               int sequence_number, bool is_complete_list,
+                               unsigned base_count, const void *data, size_t datalen,
+                               TimeLimit work_until);
+
     bool get_result(gen_t result_gen, void *value, size_t value_size);
 
-  public:                     // protected:
-    atomic<gen_t> generation; // can be read without holding mutex
-    atomic<gen_t> gen_subscribed;
-    gen_t first_generation;
-    BarrierImpl *next_free;
+  protected:
+    void broadcast_trigger(const std::vector<RemoteNotification> &ordered_notifications,
+                           const std::vector<NodeID> &broadcast_targets,
+                           EventImpl::gen_t oldest_previous,
+                           EventImpl::gen_t broadcast_previous,
+                           EventImpl::gen_t first_generation, NodeID migration_target,
+                           unsigned base_arrival_count, ReductionOpID redop_id,
+                           const void *data, size_t datalen,
+                           bool include_notifications = true);
+
+  public:
+    atomic<gen_t> generation = atomic<gen_t>(0);
+    atomic<gen_t> gen_subscribed = atomic<gen_t>(0);
+    gen_t first_generation = 0;
+    BarrierImpl *next_free = nullptr;
+
+    std::unique_ptr<BarrierCommunicator> barrier_comm;
 
     Mutex mutex; // controls which local thread has access to internal data (not
                  // runtime-visible event)
@@ -118,7 +181,7 @@ namespace Realm {
     std::map<gen_t, Generation *> generations;
 
     // external waiters on this node are notifies via a condition variable
-    bool has_external_waiters;
+    bool has_external_waiters = false;
     // use kernel mutex for timedwait functionality
     KernelMutex external_waiter_mutex;
     KernelMutex::CondVar external_waiter_condvar;
@@ -129,73 +192,16 @@ namespace Realm {
     std::map<unsigned, gen_t> remote_subscribe_gens, remote_trigger_gens;
     std::map<gen_t, gen_t> held_triggers;
 
-    unsigned base_arrival_count;
-    ReductionOpID redop_id;
-    const ReductionOpUntyped *redop;
-    char *initial_value; // for reduction barriers
-
-    unsigned value_capacity; // how many values the two allocations below can hold
-    char *final_values;      // results of completed reductions
+    unsigned base_arrival_count = 0;
+    ReductionOpID redop_id = 0;
+    const ReductionOpUntyped *redop = nullptr;
+    std::unique_ptr<char[]> initial_value{};
+    unsigned value_capacity = 0;
+    std::vector<char> final_values;
+    bool needs_ordering;
+    std::vector<std::pair<int, std::vector<RemoteNotification>>> ordered_buffer;
+    int broadcast_radix;
   };
-
-  // active messages
-
-  struct BarrierAdjustMessage {
-    NodeID sender;
-    int forwarded;
-    int delta;
-    Barrier barrier;
-    Event wait_on;
-
-    static void handle_message(NodeID sender, const BarrierAdjustMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-    static void send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
-                             NodeID sender, bool forwarded, const void *data,
-                             size_t datalen);
-  };
-
-  struct BarrierSubscribeMessage {
-    NodeID subscriber;
-    ID::IDType barrier_id;
-    EventImpl::gen_t subscribe_gen;
-    bool forwarded;
-
-    static void handle_message(NodeID sender, const BarrierSubscribeMessage &msg,
-                               const void *data, size_t datalen);
-
-    static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t subscribe_gen, NodeID subscriber,
-                             bool forwarded);
-  };
-
-  struct BarrierTriggerMessage {
-    ID::IDType barrier_id;
-    EventImpl::gen_t trigger_gen;
-    EventImpl::gen_t previous_gen;
-    EventImpl::gen_t first_generation;
-    ReductionOpID redop_id;
-    NodeID migration_target;
-    unsigned base_arrival_count;
-
-    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
-                               const void *data, size_t datalen, TimeLimit work_until);
-
-    static void send_request(NodeID target, ID::IDType barrier_id,
-                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
-                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
-                             NodeID migration_target, unsigned base_arrival_count,
-                             const void *data, size_t datalen);
-  };
-
-  struct BarrierMigrationMessage {
-    Barrier barrier;
-    NodeID current_owner;
-
-    static void handle_message(NodeID sender, const BarrierMigrationMessage &msg,
-                               const void *data, size_t datalen);
-    static void send_request(NodeID target, Barrier barrier, NodeID owner);
-  };
-
 }; // namespace Realm
 
 #include "realm/barrier_impl.inl"

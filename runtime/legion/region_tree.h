@@ -24,7 +24,9 @@
 #include "legion/legion_profiling.h"
 #include "legion/garbage_collection.h"
 
+#include <numeric>
 #include <algorithm>
+#include <numeric>
 
 namespace Legion {
   namespace Internal {
@@ -39,6 +41,8 @@ namespace Legion {
       inline bool operator<(const FieldDataDescriptor &rhs) const
         { return (color < rhs.color); }
     public:
+      // Index space user events for these domains are already
+      // added by the operation that populates these structs
       Domain domain;
       DomainPoint color;
       PhysicalInstance inst;
@@ -63,7 +67,8 @@ namespace Legion {
       IndirectRecord(void) { }
       IndirectRecord(RegionTreeForest *forest, 
                      const RegionRequirement &req,
-                     const InstanceSet &insts);
+                     const InstanceSet &insts,
+                     size_t total_points);
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -77,24 +82,6 @@ namespace Legion {
 #endif
       Domain domain;
       ApEvent domain_ready;
-    };
-
-    /**
-     * \struct PendingRemoteExpression
-     * A small helper class for passing arguments associated
-     * with deferred calls to unpack remote expressions
-     */
-    struct PendingRemoteExpression {
-    public:
-      PendingRemoteExpression(void)
-        : handle(IndexSpace::NO_SPACE), remote_expr_id(0),
-          source(0), is_index_space(false), done_ref_counting(false) { }
-    public:
-      IndexSpace handle;
-      IndexSpaceExprID remote_expr_id;
-      AddressSpaceID source;
-      bool is_index_space;
-      bool done_ref_counting;
     };
 
     /**
@@ -159,7 +146,8 @@ namespace Legion {
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
       IndexSpaceNode* create_index_space(IndexSpace handle, 
-                              const Domain *domain,
+                              const Domain &domain,
+                              bool take_ownership,
                               DistributedID did, 
                               Provenance *provenance,
                               CollectiveMapping *mapping = NULL,
@@ -563,7 +551,8 @@ namespace Legion {
                             const PhysicalTraceInfo &trace_info,
                             std::set<RtEvent> &map_applied_events,
                             const bool possible_src_out_of_range,
-                            const bool compute_preimages);
+                            const bool compute_preimages,
+                            const bool shadow_indirections);
       ApEvent scatter_across(const RegionRequirement &src_req,
                              const RegionRequirement &idx_req,
                              const RegionRequirement &dst_req,
@@ -587,7 +576,8 @@ namespace Legion {
                              std::set<RtEvent> &map_applied_events,
                              const bool possible_dst_out_of_range,
                              const bool possible_dst_aliasing,
-                             const bool compute_preimages);
+                             const bool compute_preimages,
+                             const bool shadow_indirections);
       ApEvent indirect_across(const RegionRequirement &src_req,
                               const RegionRequirement &src_idx_req,
                               const RegionRequirement &dst_req,
@@ -616,7 +606,8 @@ namespace Legion {
                               const bool possible_src_out_of_range,
                               const bool possible_dst_out_of_range,
                               const bool possible_dst_aliasing,
-                              const bool compute_preimages);
+                              const bool compute_preimages,
+                              const bool shadow_indirections);
       void fill_fields(FillOp *op,
                        const RegionRequirement &req,
                        const unsigned index, FillView *fill_view,
@@ -689,8 +680,8 @@ namespace Legion {
 #endif
     public:
       // We know the domain of the index space
-      IndexSpaceNode* create_node(IndexSpace is, const void *bounds, 
-                                  bool is_domain, IndexPartNode *par, 
+      IndexSpaceNode* create_node(IndexSpace is, const Domain &domain, 
+                                  bool take_ownership, IndexPartNode *par, 
                                   LegionColor color, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
@@ -892,7 +883,7 @@ namespace Legion {
       friend class IndexSpaceExpression;
       IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
     public:
-      void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
+      void remove_canonical_expression(IndexSpaceExpression *expr);
     private:
       static inline bool compare_expressions(IndexSpaceExpression *one,
                                              IndexSpaceExpression *two);
@@ -912,19 +903,9 @@ namespace Legion {
                        IndexSpaceExpression *lhs, IndexSpaceExpression *rhs);
     public:
       // Remote expression methods
-      IndexSpaceExpression* find_or_request_remote_expression(
-              IndexSpaceExprID remote_expr_id, 
-              IndexSpaceExpression *origin, RtEvent *wait_for = NULL);
-      IndexSpaceExpression* find_remote_expression(
-              const PendingRemoteExpression &pending_expression);
+      IndexSpaceExpression* find_or_create_remote_expression(
+          IndexSpaceExprID remote_expr_id, Deserializer &derez, bool &created);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
-      void handle_remote_expression_request(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_expression_response(Deserializer &derez,
-                                             AddressSpaceID source);
-    protected:
-      IndexSpaceExpression* unpack_expression_value(Deserializer &derez,
-                                                    AddressSpaceID source);
     public:
       Runtime *const runtime;
     protected:
@@ -958,13 +939,12 @@ namespace Legion {
       std::map<IndexSpaceExprID/*lhs*/,ExpressionTrieNode*> difference_ops;
       // Remote expressions
       std::map<IndexSpaceExprID,IndexSpaceExpression*> remote_expressions;
-      std::map<IndexSpaceExprID,RtEvent> pending_remote_expressions;
     private:
       // In order for the symbolic analysis to work, we need to know that
       // we don't have multiple symbols for congruent expressions. This data
       // structure is used to find congruent expressions where they exist
-      std::map<std::pair<size_t,TypeTag>,
-               std::vector<IndexSpaceExpression*> > canonical_expressions;
+      typedef SmallPointerVector<IndexSpaceExpression,true> CanonicalSet;
+      std::unordered_map<uint64_t/*hash*/,CanonicalSet> canonical_expressions;
     public:
       static const unsigned MAX_EXPRESSION_FANOUT = 32;
     };
@@ -1010,12 +990,10 @@ namespace Legion {
       public:
         DeferCopyAcrossArgs(CopyAcrossExecutor *e, Operation *o, 
             PredEvent guard, ApEvent copy_pre, ApEvent src_pre,
-            ApEvent dst_pre, const PhysicalTraceInfo &info,
-            bool replay, bool recurrent, unsigned stage);
+            ApEvent dst_pre, bool replay, bool recurrent, unsigned stage);
       public:
         CopyAcrossExecutor *const executor;
         Operation *const op;
-        PhysicalTraceInfo *const trace_info;
         const PredEvent guard;
         const ApEvent copy_precondition;
         const ApEvent src_indirect_precondition;
@@ -1044,6 +1022,7 @@ namespace Legion {
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
       virtual void record_trace_immutable_indirection(bool source) = 0;
+      virtual void release_shadow_instances(void) = 0;
     public:
       static void handle_deferred_copy_across(const void *args);
     public:
@@ -1070,7 +1049,7 @@ namespace Legion {
           src_indirect_field(0), dst_indirect_field(0),
           src_indirect_instance(PhysicalInstance::NO_INST),
           dst_indirect_instance(PhysicalInstance::NO_INST) { }
-      virtual ~CopyAcrossUnstructured(void) { }
+      virtual ~CopyAcrossUnstructured(void);
     public:
       // From InstanceNameClosure
       virtual LgEvent find_instance_name(PhysicalInstance inst) const;
@@ -1084,6 +1063,7 @@ namespace Legion {
                               const bool recurrent_replay = false,
                               const unsigned stage = 0) = 0;
       virtual void record_trace_immutable_indirection(bool source) = 0;
+      virtual void release_shadow_instances(void) = 0;
     public:
       void initialize_source_fields(RegionTreeForest *forest,
                                     const RegionRequirement &req,
@@ -1109,7 +1089,9 @@ namespace Legion {
                                     const bool both_are_range,
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
-                                    const bool exclusive_redop);
+                                    const bool exclusive_redop); 
+    protected:
+      mutable LocalLock preimage_lock;
     public:
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
@@ -1128,6 +1110,19 @@ namespace Legion {
       LgEvent src_indirect_instance_event, dst_indirect_instance_event;
       TypeTag src_indirect_type, dst_indirect_type;
       std::vector<unsigned> nonempty_indexes;
+      // Shadow indirection instances
+      // Only one copy of this since we only do it in gather/scatter cases
+      // so we can use the same data structure for either kind of indirection
+      struct ShadowInstance {
+        PhysicalInstance instance;
+        ApEvent ready;
+        LgEvent unique_event;
+      };
+      std::map<Memory,ShadowInstance> shadow_instances;
+      // Only valid when profiling for looking up instance names
+      std::map<PhysicalInstance,LgEvent> profiling_shadow_instances;
+      // Zips with current_src/dst_preimages
+      std::vector<ApEvent> indirection_preconditions;
     public:
       RtEvent prev_done;
       ApEvent last_copy;
@@ -1170,15 +1165,20 @@ namespace Legion {
       };
       struct RebuildIndirectionsHelper {
       public:
-        RebuildIndirectionsHelper(CopyAcrossUnstructuredT<DIM,T> *u, bool s)
-          : unstructured(u), source(s), empty(true) { }
+        RebuildIndirectionsHelper(CopyAcrossUnstructuredT<DIM,T> *u,
+                                  Operation *o, ApEvent e, bool s)
+          : unstructured(u), op(o), indirection_event(e),
+            source(s), empty(true) { }
       public:
         template<typename N2, typename T2>
         static inline void demux(RebuildIndirectionsHelper *helper)
           { helper->empty = helper->unstructured->template 
-            rebuild_indirections<N2::N,T2>(helper->source); }
+            rebuild_indirections<N2::N,T2>(helper->op,
+                helper->indirection_event, helper->source); }
       public:
         CopyAcrossUnstructuredT<DIM,T> *const unstructured;
+        Operation *const op;
+        const ApEvent indirection_event;
         const bool source;
         bool empty;
       };
@@ -1188,7 +1188,8 @@ namespace Legion {
                               const DomainT<DIM,T> &domain,
                               ApEvent domain_ready,
                               const std::map<Reservation,bool> &rsrvs,
-                              const bool compute_preimages);
+                              const bool compute_preimages,
+                              const bool shadow_indirections);
       virtual ~CopyAcrossUnstructuredT(void);
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1200,20 +1201,30 @@ namespace Legion {
                               const bool recurrent_replay = false,
                               const unsigned stage = 0); 
       virtual void record_trace_immutable_indirection(bool source);
+      virtual void release_shadow_instances(void);
     public:
-      ApEvent issue_individual_copies(const ApEvent precondition,
-                      const Realm::ProfilingRequestSet &requests);
+      ApEvent issue_individual_copies(Operation *op, const ApEvent precondition,
+                                    const Realm::ProfilingRequestSet &requests);
       template<int D2, typename T2>
       ApEvent perform_compute_preimages(std::vector<DomainT<DIM,T> > &preimages,
                 Operation *op, ApEvent precondition, const bool source); 
       template<int D2, typename T2>
-      bool rebuild_indirections(const bool source);
+      bool rebuild_indirections(Operation *op,
+          ApEvent indirection_event, const bool source); 
+    protected:
+      Realm::InstanceLayoutGeneric* select_shadow_layout(bool source) const;
+      PhysicalInstance allocate_shadow_indirection(Memory memory, 
+          UniqueID creator_uid, bool source, LgEvent &unique_event);
+      ApEvent update_shadow_indirection(PhysicalInstance shadow,
+          LgEvent unique_event, ApEvent indirection_event,
+          const DomainT<DIM,T> &update_domain,
+          Operation *op, size_t field_size, bool source) const;
     public:
       IndexSpaceExpression *const expr;
       const DomainT<DIM,T> copy_domain;
       const ApEvent copy_domain_ready;
+      const bool shadow_indirections;
     protected:
-      mutable LocalLock preimage_lock;
       std::deque<std::vector<DomainT<DIM,T> > > src_preimages, dst_preimages;
       std::vector<DomainT<DIM,T> > current_src_preimages, current_dst_preimages;
       std::vector<const CopyIndirection*> indirections;
@@ -1225,12 +1236,11 @@ namespace Legion {
       // we would need to do the full quadratic intersection between each of
       // the source and destination preimages.
       std::vector<std::vector<unsigned> > individual_field_indexes;
-      ApEvent src_indirect_spaces_precondition,dst_indirect_spaces_precondition;
+      // For help in creating shadow indirections
+      Realm::InstanceLayoutGeneric *shadow_layout;
 #ifdef LEGION_SPY
       std::deque<ApEvent> src_preimage_preconditions;
       std::deque<ApEvent> dst_preimage_preconditions;
-      ApEvent current_src_preimage_precondition;
-      ApEvent current_dst_preimage_precondition;
 #endif
       bool need_src_indirect_precondition, need_dst_indirect_precondition;
       bool src_indirect_immutable_for_tracing;
@@ -1292,20 +1302,28 @@ namespace Legion {
       inline bool deterministic_pointer_less(const IndexSpaceExpression *rhs) 
         const { return (expr_id < rhs->expr_id); }
     public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
-                                           bool need_tight_result) = 0;
-      virtual bool is_sparse() = 0;
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
+      virtual bool is_sparse(void) = 0;
+      virtual Domain get_tight_domain(void) = 0;
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event) = 0;
+      virtual void record_index_space_user(ApEvent user) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool is_set(void) const { return true; }
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const = 0; 
+    public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs) = 0;
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs) = 0;
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs) = 0;
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs) = 0;
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs) = 0;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) = 0;
@@ -1367,14 +1385,16 @@ namespace Legion {
                            int priority = 0, bool replay = false) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
-                           const bool compute_preimages) = 0;
+                           const bool compute_preimages,
+                           const bool shadow_indirections) = 0;
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
                            bool compact, void **piece_list = NULL,
                            size_t *piece_list_size = NULL,
-                           size_t *num_pieces = NULL) = 0;
+                           size_t *num_pieces = NULL,
+                           size_t base_alignment = 32) = 0;
       // Return the expression with a resource ref on the expression
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size) = 0;
@@ -1383,7 +1403,7 @@ namespace Legion {
          const Domain *padding_delta) = 0;
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::vector<IndexSpaceExpression*> &expressions) = 0;
+          SmallPointerVector<IndexSpaceExpression,true> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
@@ -1434,6 +1454,27 @@ namespace Legion {
       // Convert this index space expression to the canonical one that
       // represents all expressions that are all congruent
       IndexSpaceExpression* get_canonical_expression(RegionTreeForest *forest);
+      virtual uint64_t get_canonical_hash(void) = 0;
+    protected:
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_union_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_union_internal(
+          const std::set<IndexSpaceExpression*> &exprs,
+          RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_intersection_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_intersection_internal(
+          const std::set<IndexSpaceExpression*> &exprs,
+          RegionTreeForest *context);
+      template<int DIM, typename T>
+      IndexSpaceExpression* inline_subtraction_internal(
+          IndexSpaceExpression *rhs, RegionTreeForest *context);
+      template<int DIM, typename T>
+      uint64_t get_canonical_hash_internal(const DomainT<DIM,T> &domain) const;
     protected:
       template<int DIM, typename T>
       inline ApEvent issue_fill_internal(RegionTreeForest *forest,Operation *op,
@@ -1449,6 +1490,9 @@ namespace Legion {
                                ApEvent precondition, PredEvent pred_guard,
                                LgEvent unique_event, CollectiveKind collective,
                                bool record_effect, int priority, bool replay);
+    public:
+      // Make this one public so it can be accessed by CopyUnstructuredT
+      // Be careful using this directly
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,Operation*op,
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1464,6 +1508,7 @@ namespace Legion {
                                LgEvent src_unique, LgEvent dst_unique,
                                CollectiveKind collective, bool record_effect,
                                int priority, bool replay);
+    protected:
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1472,7 +1517,8 @@ namespace Legion {
                                const std::vector<size_t> &field_sizes,
                                bool compact, void **piece_list = NULL,
                                size_t *piece_list_size = NULL,
-                               size_t *num_pieces = NULL) const;
+                               size_t *num_pieces = NULL,
+                               size_t base_alignment = 32) const;
       template<int DIM, typename T>
       inline IndexSpaceExpression* create_layout_expression_internal(
                                RegionTreeForest *context,
@@ -1489,15 +1535,12 @@ namespace Legion {
     public:
       template<int DIM, typename T>
       inline IndexSpaceExpression* find_congruent_expression_internal(
-                        std::vector<IndexSpaceExpression*> &expressions);
+          SmallPointerVector<IndexSpaceExpression,true> &expressions);
       template<int DIM, typename T>
       inline KDTree* get_sparsity_map_kd_tree_internal(void);
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source); 
-      static IndexSpaceExpression* unpack_expression(Deserializer &derez,
-                         RegionTreeForest *forest, AddressSpaceID source,
-                         PendingRemoteExpression &pending, RtEvent &wait_for);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;
@@ -1590,18 +1633,15 @@ namespace Legion {
     public:
       virtual void notify_local(void);
     public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
-                                           bool need_tight_result) = 0;
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
+      virtual Domain get_tight_domain(void) = 0;
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event) = 0;
+      virtual void record_index_space_user(ApEvent user) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const = 0;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
@@ -1635,6 +1675,7 @@ namespace Legion {
       const OperationKind op_kind;
     protected:
       mutable LocalLock inter_lock;
+      std::deque<ApEvent> index_space_users;
       std::atomic<int> invalidated;
     };
 
@@ -1647,19 +1688,16 @@ namespace Legion {
           TypeTag tag, Deserializer &derez);
       virtual ~IndexSpaceOperationT(void);
     public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
-                                           bool need_tight_result);
-      virtual bool is_sparse();
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true);
+      virtual bool is_sparse(void);
+      virtual Domain get_tight_domain(void);
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event);
+      virtual void record_index_space_user(ApEvent user);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_value(Serializer &rez,
-                                         AddressSpaceID target) = 0;
+      virtual void skip_unpack_expression(Deserializer &derez) const;
       virtual bool invalidate_operation(void) = 0;
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
@@ -1669,6 +1707,18 @@ namespace Legion {
                                 const std::set<Domain> &rectangles);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
+    public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs);
+      virtual uint64_t get_canonical_hash(void);
     public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
@@ -1698,14 +1748,16 @@ namespace Legion {
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
-                           const bool compute_preimages);
+                           const bool compute_preimages,
+                           const bool shadow_indirections);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
                            bool compact, void **piece_list = NULL, 
                            size_t *piece_list_size = NULL,
-                           size_t *num_pieces = NULL);
+                           size_t *num_pieces = NULL,
+                           size_t base_alignment = 32);
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
@@ -1713,7 +1765,7 @@ namespace Legion {
          const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::vector<IndexSpaceExpression*> &expressions);
+          SmallPointerVector<IndexSpaceExpression,true> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void initialize_equivalence_set_kd_tree(EqKDTree *tree,
@@ -1741,8 +1793,12 @@ namespace Legion {
           std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
           ShardID local_shard = 0);
     public:
-      ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
-                                    bool need_tight_result);
+      DomainT<DIM,T> get_tight_index_space(void);
+      // Return event is when the result index space is safe to use
+      // The done event must be triggered after the index space is
+      // done being used if it is not a no-event
+      [[nodiscard]] ApEvent get_loose_index_space(
+          DomainT<DIM,T> &result, ApUserEvent &done_event);
     protected:
       Realm::IndexSpace<DIM,T> realm_index_space, tight_index_space;
       ApEvent realm_index_space_ready; 
@@ -1758,12 +1814,12 @@ namespace Legion {
     public:
       IndexSpaceUnion(const std::vector<IndexSpaceExpression*> &to_union,
                       RegionTreeForest *context);
+      IndexSpaceUnion(const Rect<DIM,T> &bounds, RegionTreeForest *context);
       IndexSpaceUnion(const IndexSpaceUnion<DIM,T> &rhs);
       virtual ~IndexSpaceUnion(void);
     public:
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1798,12 +1854,13 @@ namespace Legion {
     public:
       IndexSpaceIntersection(const std::vector<IndexSpaceExpression*> &to_inter,
                              RegionTreeForest *context);
+      IndexSpaceIntersection(const Rect<DIM,T> &bounds, 
+                             RegionTreeForest *context);
       IndexSpaceIntersection(const IndexSpaceIntersection &rhs);
       virtual ~IndexSpaceIntersection(void);
     public:
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1838,12 +1895,12 @@ namespace Legion {
     public:
       IndexSpaceDifference(IndexSpaceExpression *lhs,IndexSpaceExpression *rhs,
                            RegionTreeForest *context);
+      IndexSpaceDifference(const Rect<DIM,T> &bounds, RegionTreeForest *ctx);
       IndexSpaceDifference(const IndexSpaceDifference &rhs);
       virtual ~IndexSpaceDifference(void);
     public:
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     protected:
@@ -1893,7 +1950,6 @@ namespace Legion {
     public:
       InternalExpression& operator=(const InternalExpression &rhs);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     };
@@ -1944,34 +2000,33 @@ namespace Legion {
     public:
       RemoteExpression& operator=(const RemoteExpression &op);
     public:
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
       virtual bool invalidate_operation(void);
       virtual void remove_operation(void);
     };
 
     class RemoteExpressionCreator {
     public:
-      RemoteExpressionCreator(RegionTreeForest *f, TypeTag t, Deserializer &d)
-        : forest(f), type_tag(t), derez(d), operation(NULL) { }
+      RemoteExpressionCreator(RegionTreeForest *f, IndexSpaceExprID e,
+                              TypeTag t, Deserializer &d)
+        : forest(f), expr_id(e), type_tag(t), derez(d), operation(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(RemoteExpressionCreator *creator)
       {
-        IndexSpaceExprID expr_id;
-        creator->derez.deserialize(expr_id);
-        DistributedID did;
-        creator->derez.deserialize(did);
         IndexSpaceOperation *origin;
         creator->derez.deserialize(origin);
+        DistributedID did;
+        creator->derez.deserialize(did);
 #ifdef DEBUG_LEGION
         assert(creator->operation == NULL);
 #endif
         creator->operation =
-            new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
-                            origin, creator->type_tag, creator->derez);
+            new RemoteExpression<N::N,T>(creator->forest, creator->expr_id,
+                did, origin, creator->type_tag, creator->derez);
       }
     public:
       RegionTreeForest *const forest;
+      const IndexSpaceExprID expr_id;
       const TypeTag type_tag;
       Deserializer &derez;
       IndexSpaceOperation *operation;
@@ -2193,23 +2248,21 @@ namespace Legion {
       static void handle_release_color(RegionTreeForest *forest, 
                                        Deserializer &derez);
     public:
-      // From IndexSpaceExpression
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
-                                           bool need_tight_result) = 0;
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight = true) = 0;
-      
-      virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
-      virtual bool set_bounds(const void *bounds, bool is_domain, 
-                              bool inititializing, ApEvent is_ready) = 0;
+      virtual Domain get_tight_domain(void) = 0;
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event) = 0;
+      virtual RtEvent add_sparsity_map_references(const Domain &domain,
+          unsigned references) = 0;
+      virtual void record_index_space_user(ApEvent user) = 0;
+      virtual bool set_domain(const Domain &domain, ApEvent is_ready,
+          bool take_ownership, bool broadcast = false, 
+          bool initializing = false) = 0;
       virtual bool set_output_union(
             const std::map<DomainPoint,DomainPoint> &sizes) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
+      virtual void skip_unpack_expression(Deserializer &derez) const;
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
@@ -2271,8 +2324,8 @@ namespace Legion {
       bool intersects_with(IndexPartNode *rhs, bool compute = true);
       bool dominates(IndexSpaceNode *rhs);
     public:
-      virtual void pack_index_space(Serializer &rez, 
-                                    bool include_size) const = 0;
+      virtual void pack_index_space(Serializer &rez,
+                                    bool pack_reference) const = 0; 
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source) = 0;
     public:
@@ -2407,6 +2460,7 @@ namespace Legion {
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
+      std::deque<ApEvent> index_space_users;
     protected:
       static constexpr uintptr_t REMOVED_CHILD = 0xdead;
       Color                     next_uncollected_color;
@@ -2438,25 +2492,28 @@ namespace Legion {
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs) = delete;
     public:
-      ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
-				    bool need_tight_result);
+      DomainT<DIM,T> get_tight_index_space(void);
+      // Return event is when the result index space is safe to use
+      // The done event must be triggered after the index space is
+      // done being used if it is not a no-event
+      [[nodiscard]] ApEvent get_loose_index_space(
+          DomainT<DIM,T> &result, ApUserEvent &done_event);
       bool set_realm_index_space(const Realm::IndexSpace<DIM,T> &value,
                                  ApEvent valid, bool initialization = false,
                                  bool broadcast = false, 
                                  AddressSpaceID source = UINT_MAX);
       RtEvent get_realm_index_space_ready(bool need_tight_result);
     public:
-      // From IndexSpaceExpression
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
-                                           bool need_tight_result);
-      virtual bool is_sparse();
-      // If you ask for a tight index space you don't need to pay 
-      // attention to the event returned as a precondition as it 
-      // is guaranteed to be a no-event
-      virtual ApEvent get_domain(Domain &domain, bool need_tight);
-      virtual bool set_domain(const Domain &domain, bool broadcast = false);
-      virtual bool set_bounds(const void *bounds, bool is_domain, 
-                              bool inititializing, ApEvent is_ready);
+      virtual bool is_sparse(void);
+      virtual Domain get_tight_domain(void);
+      [[nodiscard]] virtual ApEvent get_loose_domain(Domain &domain,
+          ApUserEvent &done_event);
+      virtual RtEvent add_sparsity_map_references(const Domain &domain,
+          unsigned references);
+      virtual void record_index_space_user(ApEvent user);
+      virtual bool set_domain(const Domain &domain, ApEvent is_ready,
+          bool take_ownership, bool broadcast = false,
+          bool initializing = false);
       virtual bool set_output_union(
                 const std::map<DomainPoint,DomainPoint> &sizes);
       virtual void tighten_index_space(void);
@@ -2501,7 +2558,8 @@ namespace Legion {
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
       virtual size_t compute_color_offset(LegionColor color);
     public:
-      virtual void pack_index_space(Serializer &rez, bool include_size) const;
+      virtual void pack_index_space(Serializer &rez,
+                                    bool pack_refrence) const;
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
     public:
@@ -2634,6 +2692,18 @@ namespace Legion {
                                    const std::vector<std::string> &field_files,
                                    const OrderingConstraint &dimension_order);
     public:
+      virtual IndexSpaceExpression* inline_union(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_union(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_intersection(
+          IndexSpaceExpression *rhs);
+      virtual IndexSpaceExpression* inline_intersection(
+          const std::set<IndexSpaceExpression*> &exprs);
+      virtual IndexSpaceExpression* inline_subtraction(
+          IndexSpaceExpression *rhs);
+      virtual uint64_t get_canonical_hash(void);
+    public:
       virtual ApEvent issue_fill(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -2662,14 +2732,16 @@ namespace Legion {
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
-                           const bool compute_preimages);
+                           const bool compute_preimages,
+                           const bool shadow_indirections);
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
                            bool compact, void **piece_list = NULL, 
                            size_t *piece_list_size = NULL,
-                           size_t *num_pieces = NULL);
+                           size_t *num_pieces = NULL,
+                           size_t base_alignment = 32);
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
@@ -2677,7 +2749,7 @@ namespace Legion {
          const Domain *padding_delta);
     public:
       virtual IndexSpaceExpression* find_congruent_expression(
-                  std::vector<IndexSpaceExpression*> &expressions);
+          SmallPointerVector<IndexSpaceExpression,true> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
     public:
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -3355,7 +3427,7 @@ namespace Legion {
       void invalidate_previous_sets(const FieldMask &mask,
               FieldMaskSet<EqKDNode<DIM,T> > &to_invalidate_previous);
       void record_child_all_previous(EqKDNode<DIM,T> *child, 
-                                     FieldMask &mask);
+                                     FieldMask mask);
     protected:
       mutable LocalLock node_lock;
       // Left and right sub-trees for different fields

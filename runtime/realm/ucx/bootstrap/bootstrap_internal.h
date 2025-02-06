@@ -23,12 +23,14 @@
 #include "realm/ucx/bootstrap/bootstrap.h"
 
 #define BOOTSTRAP_MPI_PLUGIN "realm_ucp_bootstrap_mpi.so"
-
+#define BOOTSTRAP_P2P_PLUGIN "realm_ucp_bootstrap_p2p.so"
 namespace Realm {
 namespace UCP {
 
-  enum BootstrapMode {
+  enum BootstrapMode
+  {
     BOOTSTRAP_MPI,
+    BOOTSTRAP_P2P,
     BOOTSTRAP_PLUGIN
   };
 

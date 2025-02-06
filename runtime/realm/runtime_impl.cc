@@ -51,11 +51,23 @@
 #include <thread>
 #include <sstream>
 #include <fstream>
+#include <csignal>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
 #include <signal.h>
 #include <sys/types.h>
+#endif
+
+// include leak sanitizer interface if necessary for __lsan_ignore_object
+#ifdef __SANITIZE_ADDRESS__
+#if __SANITIZE_ADDRESS__
+#include <sanitizer/lsan_interface.h>
+#endif
+#elif defined(__has_feature)
+#if __has_feature(leak_sanitizer)
+#include <sanitizer/lsan_interface.h>
+#endif
 #endif
 
 // for cpu resource discovery
@@ -86,6 +98,7 @@ static char *strndup(const char *src, size_t maxlen)
   size_t actlen = strnlen(src, maxlen);
   char *dst = (char *)malloc(actlen + 1);
   strncpy(dst, src, actlen);
+  dst[actlen] = '\0';
   return dst;
 }
 #endif
@@ -117,6 +130,37 @@ TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessorMemoryAffinity);
 TYPE_IS_SERIALIZABLE(Realm::Machine::ProcessInfo);
 
 namespace Realm {
+
+  struct ReductionNotification {
+    NodeID origin;
+    ReductionOpID redop_id = 0;
+    size_t response_handle = 0;
+    struct ReductionResponseData {
+      NodeID send_to = 0;
+      size_t num_senders = 0;
+      size_t sender_handle = 0;
+      Event event;
+    };
+    static Mutex response_data_mutex;
+    static size_t response_data_counter;
+    static std::unordered_map<size_t, ReductionResponseData> response_data;
+    static void handle_message(NodeID sender, const ReductionNotification &args,
+                               const void *data, size_t datalen);
+    static bool broadcast(NodeID sender, const ReductionNotification &notification,
+                          const void *data, size_t datalen,
+                          Event event = Event::NO_EVENT);
+  };
+
+  struct ReductionNotificationResponse {
+    size_t response_handle;
+    static void handle_message(NodeID sender, const ReductionNotificationResponse &args,
+                               const void *data, size_t datalen);
+  };
+
+  std::unordered_map<size_t, ReductionNotification::ReductionResponseData>
+      ReductionNotification::response_data;
+  Mutex ReductionNotification::response_data_mutex;
+  size_t ReductionNotification::response_data_counter = 0;
 
   Logger log_runtime("realm");
   Logger log_collective("collective");
@@ -570,17 +614,55 @@ namespace Realm {
 #endif
     }
 
-    bool Runtime::register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop)
+    bool Runtime::register_reduction(Event &event, ReductionOpID redop_id,
+                                     const ReductionOpUntyped *redop)
     {
-      assert(impl != 0);
+      assert(impl != nullptr);
+      return reinterpret_cast<RuntimeImpl *>(impl)->register_reduction(event, redop_id,
+                                                                       redop);
+    }
 
-      ReductionOpUntyped *cloned = ReductionOpUntyped::clone_reduction_op(redop);
-      bool conflict = ((RuntimeImpl *)impl)->reduce_op_table.put(redop_id, cloned);
-      if(conflict) {
-	log_runtime.error() << "duplicate registration of reduction op " << redop_id;
-	free(cloned);
-	return false;
+    Event RuntimeImpl::notify_register_reduction(ReductionOpID redop_id)
+    {
+      Event event = Event::NO_EVENT;
+      // If we're all alone, no need to notify anybody
+      if(Network::all_peers.size() == 0) {
+        return event;
       }
+
+      std::vector<uintptr_t> remote_handles;
+      const Node &node = get_runtime()->nodes[Network::my_node_id];
+
+      // Run through all the dma channels, if they support this redop, then add them to
+      // the list
+      for(const Channel *ch : node.dma_channels) {
+        if(ch->supports_redop(redop_id)) {
+          remote_handles.push_back(reinterpret_cast<uintptr_t>(ch));
+        }
+      }
+
+      event = UserEvent::create_user_event();
+      ReductionNotification::broadcast(
+          Network::my_node_id, ReductionNotification{Network::my_node_id, redop_id, 0},
+          remote_handles.data(), remote_handles.size() * sizeof(remote_handles[0]),
+          event);
+
+      return event;
+    }
+
+    bool RuntimeImpl::register_reduction(Event &event, ReductionOpID redop_id,
+                                         const ReductionOpUntyped *redop)
+    {
+      ReductionOpUntyped *cloned = ReductionOpUntyped::clone_reduction_op(redop);
+      event = Event::NO_EVENT;
+      bool conflict = reduce_op_table.put(redop_id, cloned);
+      if(conflict) {
+        log_runtime.error() << "duplicate registration of reduction op " << redop_id;
+        free(cloned);
+        return false;
+      }
+
+      event = notify_register_reduction(redop_id);
 
       return true;
     }
@@ -749,7 +831,8 @@ namespace Realm {
     config_map.insert({"pin_util_procs", &pin_util_procs});
     config_map.insert({"use_ext_sysmem", &use_ext_sysmem});
     config_map.insert({"regmem", &reg_mem_size});
-    config_map.insert({"enable_sparsity_refcount", &enable_sparsity_refcount});
+    config_map.insert({"report_sparsity_leaks", &report_sparsity_leaks});
+    config_map.insert({"barrier_broadcast_radix", &barrier_broadcast_radix});
 
     resource_map.insert({"cpu", &res_num_cpus});
     resource_map.insert({"sysmem", &res_sysmem_size});
@@ -896,7 +979,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         .add_option_bool("-ll:pin_util", pin_util_procs)
         .add_option_int("-ll:cpu_bgwork", cpu_bgwork_timeslice)
         .add_option_int("-ll:util_bgwork", util_bgwork_timeslice)
-        .add_option_int("-ll:ext_sysmem", use_ext_sysmem);
+        .add_option_int("-ll:ext_sysmem", use_ext_sysmem)
+        .add_option_bool("-ll:report_sparsity_leaks", report_sparsity_leaks)
+        .add_option_int("-ll:barrier_radix", barrier_broadcast_radix);
 
     // config for RuntimeImpl
     // low-level runtime parameters
@@ -1335,25 +1420,35 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 	  if(!starts.empty()) {
 	    int new_argc = local_argc + starts.size();
 	    const char **new_argv = (const char **)(malloc((new_argc + 1) * sizeof(char *)));
-	    // new args go after argv[0] and anything that looks like a
-	    //  positional argument (i.e. doesn't start with -)
-	    int before_new = 0;
-	    while(before_new < local_argc) {
-	      if((before_new > 0) && (local_argv[before_new][0] == '-'))
-		break;
-	      new_argv[before_new] = local_argv[before_new];
-	      before_new++;
-	    }
-	    for(size_t i = 0; i < starts.size(); i++)
-	      new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
-	    for(int i = before_new; i < local_argc; i++)
-	      new_argv[i + starts.size()] = local_argv[i];
-	    new_argv[new_argc] = 0;
+            // new args go after argv[0] and anything that looks like a
+            //  positional argument (i.e. doesn't start with -)
+            int before_new = 0;
+            while(before_new < local_argc) {
+              if((before_new > 0) && (local_argv[before_new][0] == '-'))
+                break;
+              new_argv[before_new] = local_argv[before_new];
+              before_new++;
+            }
+            for(size_t i = 0; i < starts.size(); i++)
+              new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
+            for(int i = before_new; i < local_argc; i++)
+              new_argv[i + starts.size()] = local_argv[i];
+            new_argv[new_argc] = 0;
 
-	    local_argc = new_argc;
-	    local_argv = new_argv;
-	  }
-	}
+            local_argc = new_argc;
+            local_argv = new_argv;
+            // We intentionally leak this allocation so tell leak sanitizer
+#ifdef __SANITIZE_ADDRESS__
+#if __SANITIZE_ADDRESS__
+            __lsan_ignore_object(new_argv);
+#endif
+#elif defined(__has_feature)
+#if __has_feature(leak_sanitizer)
+            __lsan_ignore_object(new_argv);
+#endif
+#endif
+          }
+        }
       }
 
       module_registrar.create_network_modules(network_modules, &local_argc, &local_argv);
@@ -1442,6 +1537,12 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       RemoteChannelInfo *rci = ch->construct_remote_info();
       bool ok = ((serializer << NODE_ANNOUNCE_DMA_CHANNEL) &&
                  (serializer << *rci));
+      // TODO: iterate the redop table, check for support and add it here.
+      if(ch->supports_redop(0)) {
+        ok = ((serializer << size_t(1)) && (serializer << ReductionOpID(0)));
+      } else {
+        ok = (serializer << size_t(0));
+      }
       delete rci;
       return ok;
     }
@@ -2062,7 +2163,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       Tracer<LockTraceItem>::init_trace(lock_trace_block_size,
                                         lock_trace_exp_arrv_rate);
 #endif
-	
+
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
@@ -2332,6 +2433,10 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         assert(Config::path_cache_lru_size > 0);
         init_path_cache();
       }
+
+      // Ensure everyone gets to this point before continuing to ensure everyone has all
+      // the channels, memory kinds, and all metadata available
+      Network::barrier();
     }
 
     bool RuntimeImpl::configure_from_command_line(std::vector<std::string> &cmdline)
@@ -2864,16 +2969,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         }
         Network::single_network = 0;
 
-        // clean up all the module configs
-        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
-            it != module_configs.end(); it++) {
-          delete(it->second);
-          it->second = nullptr;
-        }
-
-        // dlclose all dynamic module handles
-        module_registrar.unload_module_sofiles();
-
         delete[] nodes;
         delete local_event_free_list;
         delete local_barrier_free_list;
@@ -2894,6 +2989,18 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
         Network::shared_peers.clear();
 
         NodeSetBitmask::free_allocations();
+
+        // clean up all the module configs only after cleaning pu the local state in
+        // case some of them might still need to refer to it during deletion
+        // e.g. the sparsity map impl class
+        for(std::map<std::string, ModuleConfig *>::iterator it = module_configs.begin();
+            it != module_configs.end(); it++) {
+          delete(it->second);
+          it->second = nullptr;
+        }
+
+        // dlclose all dynamic module handles
+        module_registrar.unload_module_sofiles();
       }
 
       if (!Threading::cleanup())
@@ -3244,7 +3351,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
                   << " raised inside realm signal handler, previous caught signal " << ThreadLocal::error_signal_value
                   << std::endl;
         unregister_error_signal_handler();
-        abort();
+        // We could just call exit or abort, but reraising the signal sets the return
+        // status from the process correctly.
+        std::raise(signal);
       }
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       assert((signal == SIGINT) || (signal == SIGFPE) ||
@@ -3326,25 +3435,29 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
       Backtrace bt;
       bt.capture_backtrace(1 /* skip this handler */);
-      bt.lookup_symbols();
       fflush(stdout);
       fflush(stderr);
       std::cout << std::flush;
       std::cerr << "Signal " << signal
 #ifdef REALM_ON_WINDOWS
-                << " received by process " << GetCurrentProcessId()
-                << " (thread " << GetCurrentThreadId()
+                << " received by process " << GetCurrentProcessId() << " (thread "
+                << GetCurrentThreadId()
 #else
-                << " received by process " << getpid()
-                << " (thread " << std::hex << uintptr_t(pthread_self())
+                << " received by process " << getpid() << " (thread " << std::hex
+                << uintptr_t(pthread_self())
 #endif
-                << std::dec << ") at: " << bt << std::flush;
+                << std::dec << ") at:" << std::endl;
+      std::cerr << bt;
+      std::cerr << std::flush;
       // returning would almost certainly cause this signal to be raised again,
       //  so sleep for a second in case other threads also want to chronicle
       //  their own deaths, and then exit
       sleep(1);
       // don't bother trying to clean things up
-      _exit(1);
+      unregister_error_signal_handler();
+      // We could just call exit or abort, but reraising the signal sets the return status
+      // from the process correctly.
+      std::raise(signal);
     }
 
   
@@ -3417,4 +3530,135 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   ActiveMessageHandlerReg<RuntimeShutdownRequest> runtime_shutdown_request_handler;
   ActiveMessageHandlerReg<RuntimeShutdownMessage> runtime_shutdown_message_handler;
 
+  //////////////////////////////
+  //
+  // ReductionNotification
+  //
+  /*static*/ bool
+  ReductionNotification::broadcast(NodeID sender,
+                                   const ReductionNotification &notification,
+                                   const void *data, size_t datalen, Event event)
+  {
+    const size_t num_peers = Network::all_peers.size() + 1;
+    const size_t child_offset = 2 * Network::my_node_id;
+    const NodeID parent_index = NodeID((Network::my_node_id - 1) / 2);
+    const size_t num_outgoing =
+        (((child_offset + 1) < num_peers) && (sender != NodeID(child_offset + 1))) +
+        (((child_offset + 2) < num_peers) && (sender != NodeID(child_offset + 2))) +
+        ((Network::my_node_id > 0) && (parent_index != sender));
+    size_t resp_handle = 0;
+
+    // Grab a handle for this reduction request, set the number of requests we expect back
+    // (1 or 2), and stash the sender in there to forward the response when it comes
+    if(num_outgoing > 0) {
+      AutoLock<> al(ReductionNotification::response_data_mutex);
+      resp_handle = response_data_counter++;
+      response_data.insert(std::make_pair(
+          resp_handle, ReductionResponseData{sender, num_outgoing,
+                                             notification.response_handle, event}));
+    }
+
+    // Send the notification to my left child if they weren't the ones that sent me the
+    // notification
+    if(((child_offset + 1) < num_peers) && (sender != NodeID(child_offset + 1))) {
+      ActiveMessage<ReductionNotification> amsg(NodeID(child_offset + 1), datalen);
+      *amsg = notification;                // Copy over the header
+      amsg->response_handle = resp_handle; // Update the response handle
+      amsg.add_payload(data, datalen);
+      amsg.commit();
+    }
+
+    // Send the notification to my right child if they weren't the ones that sent me the
+    // notification
+    if(((child_offset + 2) < num_peers) && (sender != NodeID(child_offset + 2))) {
+      ActiveMessage<ReductionNotification> amsg(NodeID(child_offset + 2), datalen);
+      *amsg = notification;                // Copy over the header
+      amsg->response_handle = resp_handle; // Update the response handle
+      amsg.add_payload(data, datalen);
+      amsg.commit();
+    }
+
+    // Send the notification to my parent if they weren't the ones that sent me the
+    // notification
+    if((Network::my_node_id > 0) && (parent_index != sender)) {
+      ActiveMessage<ReductionNotification> amsg(NodeID(parent_index), datalen);
+      *amsg = notification;                // Copy over the header
+      amsg->response_handle = resp_handle; // Update the response handle
+      amsg.add_payload(data, datalen);
+      amsg.commit();
+    }
+
+    return num_outgoing > 0;
+  }
+  /*static*/ void ReductionNotification::handle_message(NodeID sender,
+                                                        const ReductionNotification &args,
+                                                        const void *data, size_t datalen)
+  {
+    // Register the redop locally
+    const uintptr_t *handles = reinterpret_cast<const uintptr_t *>(data);
+    size_t num_handles = datalen / sizeof(*handles);
+    Node &node = get_runtime()->nodes[args.origin];
+    for(size_t i = 0; (sender != Network::my_node_id) && (i < num_handles); i++) {
+      // Find the dma channel for this handle
+      bool found = false;
+      for(Channel *ch : node.dma_channels) {
+        // We know that all channels for remote nodes are remote channels, so cast them as
+        // such so we can retrieve their remote pointers
+        RemoteChannel *rch = static_cast<RemoteChannel *>(ch);
+        if(rch->get_remote_ptr() == handles[i]) {
+          // Register the redop
+          rch->register_redop(args.redop_id);
+          found = true;
+          break;
+        }
+      }
+
+      if(!found) {
+        log_runtime.fatal(
+            "Could not find remote channel for notification: redop=%d, handle=%llx",
+            args.redop_id, (unsigned long long)handles[i]);
+        assert(0 && "Failed to find remote channel for redop notification");
+      }
+    }
+
+    // Do we have to wait for others in our tree?
+    if(!broadcast(sender, args, data, datalen)) {
+      // Nope, tell the sender we're done with this registration!
+      ActiveMessage<ReductionNotificationResponse> amsg(
+          sender, sizeof(ReductionNotificationResponse));
+      amsg->response_handle = args.response_handle;
+      amsg.commit();
+    }
+  }
+
+  ActiveMessageHandlerReg<ReductionNotification> runtime_reduction_notification_handler;
+
+  /*static*/ void ReductionNotificationResponse::handle_message(
+      NodeID sender, const ReductionNotificationResponse &args, const void *, size_t)
+  {
+    AutoLock<> al(ReductionNotification::response_data_mutex);
+    ReductionNotification::ReductionResponseData &data =
+        ReductionNotification::response_data[args.response_handle];
+    // Is this is the last response?  If so, send an amsg to the waiter
+    if(--data.num_senders > 0) {
+      return;
+    }
+    // Last response for this, let's tell our waiter that the stashed response handle is
+    // done
+    if(data.send_to != Network::my_node_id) {
+      ActiveMessage<ReductionNotificationResponse> amsg(
+          data.send_to, sizeof(ReductionNotificationResponse));
+      amsg->response_handle = data.sender_handle;
+      amsg.commit();
+    }
+    // If this response was associated to an event, assume it's a UserEvent and trigger
+    // it.
+    if(data.event != Event::NO_EVENT) {
+      GenEventImpl::trigger(data.event, false);
+    }
+    ReductionNotification::response_data.erase(args.response_handle);
+  }
+
+  ActiveMessageHandlerReg<ReductionNotificationResponse>
+      runtime_reduction_notification_response_handler;
 }; // namespace Realm

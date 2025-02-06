@@ -87,24 +87,9 @@ namespace Legion {
       static inline void log_top_index_space(IDType unique_id,
           AddressSpaceID owner, const std::string_view &provenance)
       {
-        // GCC9 has a really dumb bug here: it's smart enough to
-        // see that provenance.data() might be null in some cases
-        // but is too stupid to see that when that is true then
-        // provenance.length() is 0 and so there's not UB. The
-        // false-positive warning is fixed in GCC10.
-#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER) 
-#if __GNUC__ <= 9
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-overflow"
-#endif
-#endif
         log_spy.print("Index Space " IDFMT " %u %.*s", unique_id,
-            owner, int(provenance.length()), provenance.data());
-#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
-#if __GNUC__ <= 9
-#pragma GCC diagnostic pop
-#endif
-#endif
+            owner, int(provenance.length()), 
+            (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_index_space_name(IDType unique_id,
@@ -122,7 +107,8 @@ namespace Legion {
         // Convert ints from -1,0,1 to 0,1,2
         log_spy.print("Index Partition " IDFMT " " IDFMT " %d %d %lld %u %.*s",
 		      parent_id, unique_id, disjoint+1, complete+1, point,
-                      owner, int(provenance.length()), provenance.data()); 
+                      owner, int(provenance.length()),
+                      (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -219,7 +205,8 @@ namespace Legion {
                                          const std::string_view &provenance)
       {
         log_spy.print("Field Space %u %u %.*s", unique_id, 
-            owner, int(provenance.length()), provenance.data());
+            owner, int(provenance.length()),
+            (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_field_space_name(unsigned unique_id,
@@ -236,7 +223,7 @@ namespace Legion {
         log_spy.print("Field Creation %u %u %ld %.*s", 
 		      unique_id, field_id, long(size),
                       int(provenance.length()),
-                      provenance.data());
+                      (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_field_name(unsigned unique_id,
@@ -253,7 +240,8 @@ namespace Legion {
       {
         log_spy.print("Region " IDFMT " %u %u %u %.*s", 
 		      index_space, field_space, tree_id, owner,
-                      int(provenance.length()), provenance.data());
+                      int(provenance.length()), 
+                      (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_logical_region_name(IDType index_space, 
@@ -1031,7 +1019,8 @@ namespace Legion {
                                     const std::string_view &provenance)
       {
         log_spy.print("Operation Provenance %llu %.*s", unique_id,
-            int(provenance.length()), provenance.data());
+            int(provenance.length()), 
+            (provenance.length() == 0) ? "" : provenance.data());
       }
 
       static inline void log_child_operation_index(UniqueID parent_id, 
@@ -1404,6 +1393,12 @@ namespace Legion {
                       inst_event.id, fid, offset);
       }
 
+      static inline void log_instance_deletion(LgEvent inst_event, LgEvent deletion)
+      {
+        log_spy.print("Instance Deletion " IDFMT " " IDFMT,
+            inst_event.id, deletion.id);
+      }
+
       // Logger calls for mapping decisions
       static inline void log_variant_decision(UniqueID unique_id, unsigned vid)
       {
@@ -1512,11 +1507,18 @@ namespace Legion {
       // Logger calls for mapping dependences
       static inline void log_mapping_dependence(UniqueID context, 
                 UniqueID prev_id, unsigned prev_idx, UniqueID next_id, 
-                unsigned next_idx, unsigned dep_type)
+                unsigned next_idx, unsigned dep_type, bool pointwise = false)
       {
-        log_spy.print("Mapping Dependence %llu %llu %u %llu %u %d", 
-		      context, prev_id, prev_idx,
-		      next_id, next_idx, dep_type);
+        log_spy.print("Mapping Dependence %llu %llu %u %llu %u %d %d", 
+		      context, prev_id, prev_idx, next_id, next_idx, dep_type,
+                      pointwise ? 1 : 0);
+      }
+
+      static inline void log_future_dependence(UniqueID context, 
+                UniqueID prev_id, UniqueID next_id, bool pointwise = false)
+      {
+        log_spy.print("Future Dependence %llu %llu %llu %d",
+            context, prev_id, next_id, pointwise ? 1 : 0);
       }
 
       // Logger calls for realm events

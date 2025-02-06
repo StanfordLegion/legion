@@ -381,6 +381,7 @@ pub trait Container {
         &self,
         ready: Timestamp,
         start: Timestamp,
+        device: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)>;
 
     // For internal use only
@@ -753,11 +754,18 @@ impl Proc {
         self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
-    fn update_prof_task_times(&mut self, prof_uid: ProfUID, create: Timestamp, ready: Timestamp) {
+    fn update_prof_task_times(
+        &mut self,
+        prof_uid: ProfUID,
+        new_creator_uid: Option<ProfUID>,
+        create: Timestamp,
+        ready: Timestamp,
+    ) {
         let entry = self.entries.get_mut(&prof_uid).unwrap();
         assert!(entry.kind == ProcEntryKind::ProfTask);
         assert!(entry.time_range.create.is_none());
         assert!(entry.time_range.ready.is_none());
+        entry.creator = new_creator_uid;
         entry.time_range.create = Some(create);
         entry.time_range.ready = Some(ready);
     }
@@ -1110,6 +1118,7 @@ impl Container for Proc {
         &self,
         ready: Timestamp,
         start: Timestamp,
+        device: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
         // If this is an I/O processor then there is no concept of a "previous"
         // as there might be multiple ranges executing at the same time
@@ -1118,7 +1127,7 @@ impl Container for Proc {
         }
         let mut result = None;
         // Iterate all the levels of the stack
-        for level in &self.time_points_stacked {
+        for level in self.time_points_stacked(device) {
             if level.is_empty() {
                 // I don't know whey this happens but we'll ignore it
                 continue;
@@ -1165,6 +1174,8 @@ impl Container for Proc {
             // Make sure the running range starts before the start
             if running_start < start {
                 let running_stop = entry.time_range.stop.unwrap();
+                // If you hit this assertion that means that there are two tasks running
+                // at the same time on the processor which shouldn't be possible
                 assert!(running_stop <= start);
                 // We're only interested in ranges that end after the ready time
                 if ready < running_stop {
@@ -1363,6 +1374,7 @@ impl Container for Mem {
         &self,
         _: Timestamp,
         _: Timestamp,
+        _: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
         // No support for this
         None
@@ -1738,6 +1750,7 @@ impl Container for Chan {
         &self,
         _: Timestamp,
         _: Timestamp,
+        _: Option<DeviceKind>,
     ) -> Option<(ProfUID, Timestamp, Timestamp)> {
         // No support for this
         None
@@ -3148,8 +3161,10 @@ pub enum EventEntryKind {
     TriggerEvent,
     PoisonEvent,
     ArriveBarrier,
+    ExternalHandshake,
     ReservationAcquire,
     InstanceReady,
+    InstanceDeletion,
     CompletionQueueEvent,
 }
 
@@ -3557,6 +3572,7 @@ impl State {
         time_range: TimeRange,
         creator: EventID,
         fevent: EventID,
+        completion: bool,
     ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
@@ -3576,7 +3592,8 @@ impl State {
             ProcEntryKind::ProfTask,
             time_range,
             Some(creator_uid),
-            None,
+            // Critical path dependence on the thing that created it finishing
+            if completion { Some(creator) } else { None },
             &mut self.op_prof_uid,
             &mut self.prof_uid_proc,
         )
@@ -3595,7 +3612,7 @@ impl State {
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
-        let base = Base::new(alloc);
+        let base = Base::from_fevent(alloc, fevent);
         self.record_event_node(
             fevent,
             EventEntryKind::CopyEvent,
@@ -3629,7 +3646,7 @@ impl State {
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
-        let base = Base::new(alloc);
+        let base = Base::from_fevent(alloc, fevent);
         self.record_event_node(
             fevent,
             EventEntryKind::FillEvent,
@@ -3655,7 +3672,7 @@ impl State {
     ) {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        let base = Base::new(alloc); // FIXME: construct here to avoid mutability conflict
+        let base = Base::from_fevent(alloc, fevent); // FIXME: construct here to avoid mutability conflict
         let creator_uid = creator.map(|e| alloc.create_reference(e));
         self.record_event_node(
             fevent,
@@ -3770,6 +3787,20 @@ impl State {
                 }
             }
         }
+        // for each prof task find it's creator and fill in the appropriate
+        // creation and ready times
+        // Note this also swaps the creator from pointing at the thing the profiling
+        // task was profiling (copy, fill, inst, task) over to the task that actually
+        // made the thing that we're profiling so that the right thing is being pointed
+        // to for when we got to do the critical path analysis
+        for (prof_uid, (creator, creator_uid, completion)) in profs {
+            let (new_creator_uid, create, ready) =
+                self.find_prof_task_times(&copies, creator, creator_uid, completion);
+            let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
+            let proc = self.procs.get_mut(&proc_id).unwrap();
+            proc.update_prof_task_times(prof_uid, new_creator_uid, create, ready);
+        }
+        self.has_prof_data = true;
         // put copies into channels
         for (fevent, copy) in copies {
             if !copy.copy_inst_infos.is_empty() {
@@ -3790,22 +3821,15 @@ impl State {
                 }
             }
         }
-        // for each prof task find it's creator and fill in the appropriate
-        // creation and ready times
-        for (prof_uid, (creator_uid, completion)) in profs {
-            let (create, ready) = self.find_prof_task_times(creator_uid, completion);
-            let proc_id = self.prof_uid_proc.get(&prof_uid).unwrap();
-            let proc = self.procs.get_mut(&proc_id).unwrap();
-            proc.update_prof_task_times(prof_uid, create, ready);
-        }
-        self.has_prof_data = true;
     }
 
     fn find_prof_task_times(
         &self,
+        copies: &BTreeMap<EventID, Copy>,
+        creator: EventID,
         creator_uid: ProfUID,
         completion: bool,
-    ) -> (Timestamp, Timestamp) {
+    ) -> (Option<ProfUID>, Timestamp, Timestamp) {
         // See what kind of creator we have for this prof task
         if let Some(proc_id) = self.prof_uid_proc.get(&creator_uid) {
             assert!(completion);
@@ -3815,7 +3839,7 @@ impl State {
             let create = entry.time_range().create.unwrap();
             // Profiling responses are ready when the task is done executing
             let ready = entry.time_range().stop.unwrap();
-            (create, ready)
+            (entry.creator(), create, ready)
         } else if let Some(chan_id) = self.prof_uid_chan.get(&creator_uid) {
             assert!(completion);
             let chan = self.chans.get(&chan_id).unwrap();
@@ -3824,7 +3848,7 @@ impl State {
             let create = entry.time_range().create.unwrap();
             // Profiling response sare ready when the op is done executing
             let ready = entry.time_range().stop.unwrap();
-            (create, ready)
+            (entry.creator(), create, ready)
         } else if let Some(mem_id) = self.insts.get(&creator_uid) {
             let mem = self.mems.get(&mem_id).unwrap();
             let inst = mem.entry(creator_uid);
@@ -3833,12 +3857,20 @@ impl State {
             if completion {
                 // Profiling responses are ready at the same time as the instance is deleted
                 let ready = inst.time_range().stop.unwrap();
-                (create, ready)
+                (inst.creator(), create, ready)
             } else {
                 // Profiling response are ready at the same time as the instance is ready
                 let ready = inst.time_range().ready.unwrap();
-                (create, ready)
+                (inst.creator(), create, ready)
             }
+        } else if let Some(copy) = copies.get(&creator) {
+            // This is a copy that will be split into channels but we can still
+            // get the creator and timing information for it
+            // Profiling responses are created at the same time the op is created
+            let create = copy.time_range.create.unwrap();
+            // Profiling response sare ready when the op is done executing
+            let ready = copy.time_range.stop.unwrap();
+            (copy.creator, create, ready)
         } else {
             unreachable!();
         }
@@ -4168,8 +4200,12 @@ impl State {
         }
     }
 
+    pub fn has_critical_path_data(&self) -> bool {
+        self.event_graph.edge_count() > 0
+    }
+
     pub fn compute_critical_paths(&mut self) {
-        if self.event_graph.edge_count() == 0 {
+        if !self.has_critical_path_data() {
             println!("Info: Realm event graph data was not present in these logs so critical paths will not be available in this profile.");
             // clear the event lookup
             self.event_lookup.clear();
@@ -4272,7 +4308,7 @@ fn process_record(
     insts: &mut BTreeMap<ProfUID, Inst>,
     copies: &mut BTreeMap<EventID, Copy>,
     fills: &mut BTreeMap<EventID, Fill>,
-    profs: &mut BTreeMap<ProfUID, (ProfUID, bool)>,
+    profs: &mut BTreeMap<ProfUID, (EventID, ProfUID, bool)>,
     call_threshold: Timestamp,
 ) {
     match record {
@@ -4853,6 +4889,13 @@ fn process_record(
                 .set_mem(*mem_id)
                 .set_size(*size)
                 .set_creator(creator_uid);
+            state.record_event_node(
+                *fevent,
+                EventEntryKind::InstanceDeletion,
+                inst_uid,
+                *destroy,
+                false,
+            );
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {
@@ -4944,8 +4987,18 @@ fn process_record(
             completion,
         } => {
             let time_range = TimeRange::new_call(*start, *stop);
-            let entry = state.create_prof_task(*proc_id, *op_id, time_range, *creator, *fevent);
-            profs.insert(entry.base.prof_uid, (entry.creator.unwrap(), *completion));
+            let entry = state.create_prof_task(
+                *proc_id,
+                *op_id,
+                time_range,
+                *creator,
+                *fevent,
+                *completion,
+            );
+            profs.insert(
+                entry.base.prof_uid,
+                (*creator, entry.creator.unwrap(), *completion),
+            );
             if !completion {
                 // Special case for instance allocation, record the "start" time for the instance
                 // which we'll use for determining if the instance was allocated immediately or not
@@ -5056,40 +5109,78 @@ fn process_record(
             performed,
         } => {
             assert!(result.is_barrier());
-            let creator_uid = state.create_fevent_reference(*fevent);
-            // Barrier arrivals are strange in that we might ultimately have multiple
-            // arrivals on the barrier and we need to deduplicate those and find the
-            // last arrival which we can't do with record_event_node
-            if let Some(index) = state.event_lookup.get(&result) {
-                let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
-                match node_weight.kind {
-                    EventEntryKind::UnknownEvent => {
-                        node_weight.kind = EventEntryKind::ArriveBarrier;
-                        node_weight.creator = Some(creator_uid);
-                        node_weight.trigger_time = Some(*performed);
+            // If the fevent is the same as the result then that is the signal
+            // that this is an external handshake
+            if fevent == result {
+                // This is a handshake
+                // See when we got the last one
+                if let Some(index) = state.event_lookup.get(&result) {
+                    let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
+                    match node_weight.kind {
+                        EventEntryKind::UnknownEvent => {
+                            node_weight.kind = EventEntryKind::ExternalHandshake;
+                            node_weight.trigger_time = Some(*performed);
+                        }
+                        EventEntryKind::ExternalHandshake => {
+                            // Check to see if this arrive came after the previous latest arrive
+                            if node_weight.trigger_time.unwrap() < *performed {
+                                node_weight.trigger_time = Some(*performed);
+                            }
+                        }
+                        _ => unreachable!(),
                     }
-                    EventEntryKind::ArriveBarrier => {
-                        // Check to see if this arrive came after the previous latest arrive
-                        if node_weight.trigger_time.unwrap() < *performed {
+                } else {
+                    let index = state.event_graph.add_node(EventEntry::new(
+                        EventEntryKind::ExternalHandshake,
+                        None,
+                        Some(*performed),
+                    ));
+                    state.event_lookup.insert(*result, index);
+                    // This is an important detail: Realm barriers have to trigger
+                    // in order so add a dependence between this generation and the
+                    // previous generation of the barrier to capture this property
+                    if let Some(previous) = result.get_previous_phase() {
+                        let previous_index = state.find_event_node(previous);
+                        state.event_graph.add_edge(previous_index, index, ());
+                    }
+                }
+            } else {
+                // This is a normal barrier arrival
+                let creator_uid = state.create_fevent_reference(*fevent);
+                // Barrier arrivals are strange in that we might ultimately have multiple
+                // arrivals on the barrier and we need to deduplicate those and find the
+                // last arrival which we can't do with record_event_node
+                if let Some(index) = state.event_lookup.get(&result) {
+                    let node_weight = state.event_graph.node_weight_mut(*index).unwrap();
+                    match node_weight.kind {
+                        EventEntryKind::UnknownEvent => {
+                            node_weight.kind = EventEntryKind::ArriveBarrier;
                             node_weight.creator = Some(creator_uid);
                             node_weight.trigger_time = Some(*performed);
                         }
+                        EventEntryKind::ArriveBarrier => {
+                            // Check to see if this arrive came after the previous latest arrive
+                            if node_weight.trigger_time.unwrap() < *performed {
+                                node_weight.creator = Some(creator_uid);
+                                node_weight.trigger_time = Some(*performed);
+                            }
+                        }
+                        _ => unreachable!(),
                     }
-                    _ => unreachable!(),
-                }
-            } else {
-                let index = state.event_graph.add_node(EventEntry::new(
-                    EventEntryKind::ArriveBarrier,
-                    Some(creator_uid),
-                    Some(*performed),
-                ));
-                state.event_lookup.insert(*result, index);
-                // This is an important detail: Realm barriers have to trigger
-                // in order so add a dependence between this generation and the
-                // previous generation of the barrier to capture this property
-                if let Some(previous) = result.get_previous_phase() {
-                    let previous_index = state.find_event_node(previous);
-                    state.event_graph.add_edge(previous_index, index, ());
+                } else {
+                    let index = state.event_graph.add_node(EventEntry::new(
+                        EventEntryKind::ArriveBarrier,
+                        Some(creator_uid),
+                        Some(*performed),
+                    ));
+                    state.event_lookup.insert(*result, index);
+                    // This is an important detail: Realm barriers have to trigger
+                    // in order so add a dependence between this generation and the
+                    // previous generation of the barrier to capture this property
+                    if let Some(previous) = result.get_previous_phase() {
+                        let previous_index = state.find_event_node(previous);
+                        state.event_graph.add_edge(previous_index, index, ());
+                    }
                 }
             }
             if let Some(precondition) = *precondition {

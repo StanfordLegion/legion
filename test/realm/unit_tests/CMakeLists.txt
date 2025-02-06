@@ -23,6 +23,9 @@ endif()
 
 list(APPEND REALM_TESTS
   addrsplit_channel_test.cc
+  comp_queue_test.cc
+  ucx_mpool_test.cc
+  barrier_test.cc
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
@@ -33,6 +36,7 @@ list(APPEND REALM_TESTS
   range_allocator_test.cc
   pri_queue_test.cc
   intrusive_list_test.cc
+  point_test.cc
   repl_heap_test.cc
   nodeset_test.cc
   transfer_iterator_test.cc
@@ -40,6 +44,17 @@ list(APPEND REALM_TESTS
   circ_queue_test.cc
   gather_scatter_test.cc
  )
+
+list(APPEND UCX_SOURCES
+   ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.h
+   ${Legion_SOURCE_DIR}/runtime/realm/ucx/mpool.cc
+)
+
+if(NOT WIN32)
+list(APPEND REALM_TESTS
+  backtrace_test.cc
+)
+endif()
 
 include(FetchContent)
 FetchContent_Declare(
@@ -51,6 +66,8 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(realm_tests ${REALM_TESTS})
+
+target_sources(realm_tests PRIVATE ${UCX_SOURCES})
 
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests

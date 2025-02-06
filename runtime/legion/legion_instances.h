@@ -245,8 +245,6 @@ namespace Legion {
         INTERNAL_INSTANCE_KIND,
         // External allocations imported by attach operations
         EXTERNAL_ATTACHED_INSTANCE_KIND,
-        // Allocations drawn from the eager pool
-        EAGER_INSTANCE_KIND,
         // Instance not yet bound
         UNBOUND_INSTANCE_KIND,
       };
@@ -262,9 +260,8 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_MANAGER_TASK_ID;
       public:
-        DeferPhysicalManagerArgs(DistributedID d,
-            Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
-            const PendingRemoteExpression &pending, FieldSpace h, 
+        DeferPhysicalManagerArgs(DistributedID d, Memory m, PhysicalInstance i,
+            size_t f, IndexSpaceExpression *lx, FieldSpace h, 
             RegionTreeID tid, LayoutConstraintID l, ApEvent use, LgEvent unique,
             InstanceKind kind, ReductionOpID redop, const void *piece_list,
             size_t piece_list_size, GarbageCollectionState state);
@@ -273,7 +270,6 @@ namespace Legion {
         const Memory mem;
         const PhysicalInstance inst;
         const size_t footprint;
-        const PendingRemoteExpression pending;
         IndexSpaceExpression *local_expr;
         const FieldSpace handle;
         const RegionTreeID tree_id;
@@ -355,6 +351,8 @@ namespace Legion {
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &fields);
     public:
+      inline bool is_unbound(void) const 
+        { return (kind.load() == UNBOUND_INSTANCE_KIND); }
       inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
       inline bool acquire_instance(ReferenceSource source);
@@ -390,25 +388,23 @@ namespace Legion {
       bool can_collect(bool &already_collected) const;
       bool acquire_collect(std::set<ApEvent> &gc_events, 
           uint64_t &sent_valid, uint64_t &received_valid);
-      bool collect(RtEvent &collected, AutoLock *i_lock = NULL);
+      bool collect(RtEvent &collected, PhysicalInstance *hole = NULL,
+                   AutoLock *i_lock = NULL);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
-                                  AddressSpaceID source, GCPriority priority);
-      void perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
+                                              GCPriority priority);
+      RtEvent broadcast_garbage_collection_priority_update(GCPriority priority);
+      RtEvent perform_deletion(AddressSpaceID source, 
+          PhysicalInstance *hole = NULL, AutoLock *i_lock = NULL);
       void force_deletion(void);
-      RtEvent update_garbage_collection_priority(AddressSpaceID source,
-                                                 GCPriority priority);
       RtEvent attach_external_instance(void);
       void detach_external_instance(void);
       bool has_visible_from(const std::set<Memory> &memories) const;
       uintptr_t get_instance_pointer(void) const; 
       size_t get_instance_size(void) const;
-      void update_instance_footprint(size_t footprint)
-        { instance_footprint = footprint; }
     public:
       bool update_physical_instance(PhysicalInstance new_instance,
-                                    size_t new_footprint,
-                                    uintptr_t new_pointer = 0);
+          RtEvent ready, size_t new_footprint);
       void broadcast_manager_update(void);
       static void handle_send_manager_update(Runtime *runtime,
                                              AddressSpaceID source,
@@ -520,8 +516,6 @@ namespace Legion {
       // Event that signifies if the instance name is available
       RtUserEvent instance_ready;
       std::atomic<InstanceKind> kind;
-      // Keep the pointer for owned external instances
-      uintptr_t external_pointer;
       // Completion event of the task that sets a realm instance
       // to this manager. Valid only when the kind is UNBOUND
       // initially, otherwise NO_AP_EVENT.
@@ -628,7 +622,7 @@ namespace Legion {
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
           field_space_node(NULL), instance_domain(NULL), tree_id(0),
           redop_id(0), reduction_op(NULL), realm_layout(NULL), piece_list(NULL),
-          piece_list_size(0), valid(false) { }
+          piece_list_size(0), valid(false), allocated(false) { }
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       IndexSpaceExpression *expr, FieldSpaceNode *node,
                       RegionTreeID tree_id, const LayoutConstraintSet &cons, 
@@ -640,11 +634,12 @@ namespace Legion {
       PhysicalManager* create_physical_instance(RegionTreeForest *forest,
             LayoutConstraintKind *unsat_kind,
                         unsigned *unsat_index, size_t *footprint = NULL,
-                        RtEvent collection_done = RtEvent::NO_RT_EVENT);
+                        RtEvent collection_done = RtEvent::NO_RT_EVENT,
+                        PhysicalInstance hole = PhysicalInstance::NO_INST);
     public:
       virtual bool handle_profiling_response(
           const Realm::ProfilingResponse &response, const void *orig, 
-          size_t orig_length, LgEvent &fevent);
+          size_t orig_length, LgEvent &fevent, bool &failed_alloc);
     protected:
       void compute_space_and_domain(RegionTreeForest *forest);
     protected:
@@ -675,6 +670,7 @@ namespace Legion {
     public:
       LgEvent current_unique_event;
       bool valid;
+      bool allocated;
     };
 
     //--------------------------------------------------------------------------

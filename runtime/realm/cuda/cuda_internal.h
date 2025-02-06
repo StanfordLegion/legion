@@ -19,12 +19,14 @@
 #include "realm/cuda/cuda_module.h"
 
 #include <memory>
+#include <unordered_map>
 #if !defined(CUDA_ENABLE_DEPRECATED)
 // Ignore deprecation warnings from cuda headers
 #define CUDA_ENABLE_DEPRECATED 1
 #endif
 #include <cuda.h>
 #include <nvml.h>
+#include <cupti.h>
 #if defined(REALM_USE_CUDART_HIJACK)
 #include <cuda_runtime_api.h>   // For cudaDeviceProp
 #endif
@@ -105,6 +107,20 @@
 #define IS_DEFAULT_STREAM(stream)                                                        \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) ||                                  \
    ((stream) == CU_STREAM_PER_THREAD))
+
+#define REPORT_CUPTI_ERROR(level, cmd, ret)                                              \
+  do {                                                                                   \
+    log_gpu.newmsg(level) << __FILE__ << '(' << __LINE__ << "):" << cmd << " = " << ret; \
+  } while(0)
+
+#define CHECK_CUPTI(cmd)                                                                 \
+  do {                                                                                   \
+    CUptiResult ret = (cmd);                                                             \
+    if(ret != CUPTI_SUCCESS) {                                                           \
+      REPORT_CUPTI_ERROR(Logger::LEVEL_ERROR, #cmd, ret);                                \
+      abort();                                                                           \
+    }                                                                                    \
+  } while(0)
 
 namespace Realm {
 
@@ -188,7 +204,10 @@ namespace Realm {
 
     class GPUWorkFence : public Realm::Operation::AsyncWorkItem {
     public:
-      GPUWorkFence(Realm::Operation *op);
+      GPUWorkFence(GPU *gpu, Realm::Operation *op);
+      ~GPUWorkFence();
+
+      virtual void mark_finished(bool successful);
 
       virtual void request_cancellation(void);
 
@@ -204,6 +223,7 @@ namespace Realm {
 
     protected:
       static void cuda_callback(CUstream stream, CUresult res, void *data);
+      GPU *gpu = nullptr;
     };
 
     class GPUWorkStart : public Realm::Operation::AsyncWorkItem {
@@ -410,6 +430,10 @@ namespace Realm {
       bool is_accessible_host_mem(const MemoryImpl *mem) const;
       bool is_accessible_gpu_mem(const MemoryImpl *mem) const;
 
+      bool register_reduction(ReductionOpID redop_id, CUfunction apply_excl,
+                              CUfunction apply_nonexcl, CUfunction fold_excl,
+                              CUfunction fold_nonexcl);
+
     protected:
       CUmodule load_cuda_module(const void *data);
 
@@ -474,6 +498,7 @@ namespace Realm {
       std::vector<GPUStream *> task_streams;
       atomic<unsigned> next_task_stream = atomic<unsigned>(0);
       atomic<unsigned> next_d2d_stream = atomic<unsigned>(0);
+      size_t cupti_activity_refcount = 0;
 
       GPUEventPool event_pool;
 
@@ -492,6 +517,15 @@ namespace Realm {
       std::map<NodeID, GPUStream *> cudaipc_streams;
       Mutex alloc_mutex;
       const CudaIpcMapping *find_ipc_mapping(Memory mem) const;
+
+      struct GPUReductionOpEntry {
+        CUfunction apply_nonexcl = nullptr;
+        CUfunction apply_excl = nullptr;
+        CUfunction fold_nonexcl = nullptr;
+        CUfunction fold_excl = nullptr;
+      };
+
+      std::unordered_map<ReductionOpID, GPUReductionOpEntry> gpu_reduction_table;
     };
 
     // helper to push/pop a GPU's context by scope
@@ -962,40 +996,24 @@ namespace Realm {
 
     class GPUreduceChannel : public SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes> {
     public:
-      GPUreduceChannel(GPU* _gpu, BackgroundWorkManager *bgwork);
+      GPUreduceChannel(GPU *_gpu, BackgroundWorkManager *bgwork);
 
       // multiple concurrent cuda reduces ok
       static const bool is_ordered = false;
 
       // helper method here so that GPUreduceRemoteChannel can use it too
-      static bool is_gpu_redop(ReductionOpID redop_id);
+      bool supports_redop(ReductionOpID redop_id) const override;
 
-      // override this because we have to be picky about which reduction ops
-      //  we support
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
+      RemoteChannelInfo *construct_remote_info() const override;
 
-      virtual RemoteChannelInfo *construct_remote_info() const;
+      XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node, XferDesID guid,
+                               const std::vector<XferDesPortInfo> &inputs_info,
+                               const std::vector<XferDesPortInfo> &outputs_info,
+                               int priority, XferDesRedopInfo redop_info,
+                               const void *fill_data, size_t fill_size,
+                               size_t fill_total) override;
 
-      virtual XferDes *create_xfer_des(uintptr_t dma_op,
-				       NodeID launch_node,
-				       XferDesID guid,
-				       const std::vector<XferDesPortInfo>& inputs_info,
-				       const std::vector<XferDesPortInfo>& outputs_info,
-				       int priority,
-				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size,
-                                       size_t fill_total);
-
-      long submit(Request** requests, long nr);
+      long submit(Request **requests, long nr) override;
 
     protected:
       friend class GPUreduceXferDes;
@@ -1026,17 +1044,6 @@ namespace Realm {
       friend class GPUreduceRemoteChannelInfo;
 
       GPUreduceRemoteChannel(uintptr_t _remote_ptr);
-
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
     };
 
     // active message for establishing cuda ipc mappings
@@ -1463,6 +1470,25 @@ namespace Realm {
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
     NVML_APIS(DECL_FNPTR_EXTERN)
 #undef DECL_FNPTR_EXTERN
+
+#define CUPTI_APIS(__op__)                                                               \
+  __op__(cuptiActivityRegisterCallbacks);                                                \
+  __op__(cuptiActivityEnable);                                                           \
+  __op__(cuptiActivityDisable);                                                          \
+  __op__(cuptiActivityEnableContext);                                                    \
+  __op__(cuptiActivityDisableContext);                                                   \
+  __op__(cuptiActivityFlushAll);                                                         \
+  __op__(cuptiActivityGetNextRecord);                                                    \
+  __op__(cuptiActivityRegisterTimestampCallback);                                        \
+  __op__(cuptiActivityPushExternalCorrelationId);                                        \
+  __op__(cuptiActivityPopExternalCorrelationId);
+
+#define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
+    CUPTI_APIS(DECL_FNPTR_EXTERN)
+#undef DECL_FNPTR_EXTERN
+
+#define CUPTI_HAS_FNPTR(name) (name##_fnptr != nullptr)
+#define CUPTI_FNPTR(name) (assert(name##_fnptr != nullptr), name##_fnptr)
 
   }; // namespace Cuda
 

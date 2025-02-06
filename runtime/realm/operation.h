@@ -73,7 +73,7 @@ namespace Realm {
       AsyncWorkItem(Operation *_op);
       virtual ~AsyncWorkItem(void);
 
-      void mark_finished(bool successful);
+      virtual void mark_finished(bool successful);
 
       virtual void request_cancellation(void) = 0;
 
@@ -99,6 +99,8 @@ namespace Realm {
     // used to measure when device-side work starts for a gpu task
     bool wants_gpu_work_start() const;
     void mark_gpu_work_start();
+    void add_gpu_work_start(uint64_t timestamp);
+    void add_gpu_work_end(uint64_t timestamp);
 
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread

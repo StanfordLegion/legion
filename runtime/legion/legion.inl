@@ -340,11 +340,11 @@ namespace Legion {
       static inline void end_task(Context ctx, T *result)
       {
         StructHandler<T,std::is_class<T>::value>::end_task(ctx, result);
-      }
+      } 
 
       template<typename T>
       static inline Future from_value(const T *value)
-      {
+      { 
         return StructHandler<T,std::is_class<T>::value>::from_value(value);
       }
 
@@ -486,6 +486,13 @@ namespace Legion {
       };
 
     }; // Serialization namespace
+
+    // Specialization for Domain
+    template<>
+    inline void LegionSerialization::end_task<Domain>(Context ctx, Domain *result)
+    {
+      Runtime::legion_task_postamble(ctx, *result, true/*take ownership*/);
+    }
 
     // Special namespace for providing multi-dimensional 
     // array syntax on accessors 
@@ -16080,122 +16087,18 @@ namespace Legion {
       return result;
     }
 
-    // DeferredBuffer without bounds checks
-    template<typename FT, int N, typename T> 
-#ifdef LEGION_BOUNDS_CHECKS
-    class DeferredBuffer<FT,N,T,false> {
-#else
-    class DeferredBuffer<FT,N,T,true> {
-#endif
-    public:
-      inline DeferredBuffer(void);
-      // Memory kinds
-      inline DeferredBuffer(Memory::Kind kind, 
-                            const Domain &bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>(),
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory::Kind kind,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>(),
-                            bool fortran_order_dims = false);
-      // Explicit memory
-      inline DeferredBuffer(Memory memory, 
-                            const Domain &bounds,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>(),
-                            bool fortran_order_dims = false);
-      inline DeferredBuffer(const Rect<N,T> &bounds, 
-                            Memory memory,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>(),
-                            bool fortran_order_dims = false);
-    public: // Explicit ordering
-      inline DeferredBuffer(Memory::Kind kind,
-                            const Domain &bounds,
-                            std::array<DimensionKind,N> ordering,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>());
-      inline DeferredBuffer(const Rect<N,T> &bounds,
-                            Memory::Kind kind,
-                            std::array<DimensionKind,N> ordering,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>());
-      inline DeferredBuffer(Memory memory,
-                            const Domain &bounds,
-                            std::array<DimensionKind,N> ordering,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>());
-      inline DeferredBuffer(const Rect<N,T> &bounds,
-                            Memory memory,
-                            std::array<DimensionKind,N> ordering,
-                            const FT *initial_value = NULL,
-                            size_t alignment = std::alignment_of<FT>());
-    protected:
-      Memory get_memory_from_kind(Memory::Kind kind);
-      void initialize_layout(size_t alignment, bool fortran_order_dims);
-      void initialize(Memory memory,
-                      DomainT<N,T> bounds,
-                      const FT *initial_value);
-    public:
-      __CUDA_HD__
-      inline FT read(const Point<N,T> &p) const;
-      __CUDA_HD__
-      inline void write(const Point<N,T> &p, FT value) const;
-      __CUDA_HD__
-      inline FT* ptr(const Point<N,T> &p) const;
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T> &r) const; // must be dense
-      __CUDA_HD__
-      inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
-      __CUDA_HD__
-      inline FT& operator[](const Point<N,T> &p) const;
-    public:
-      void destroy();
-      Realm::RegionInstance get_instance() const;
-    protected:
-      friend class OutputRegion;
-      Realm::RegionInstance instance;
-      Realm::AffineAccessor<FT,N,T> accessor;
-      std::array<DimensionKind,N> ordering;
-      size_t alignment;
-#ifndef LEGION_BOUNDS_CHECKS
-      DomainT<N,T> bounds;
-#endif
-    };
-
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(void)
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(void)
       : instance(Realm::RegionInstance::NO_INST)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             Memory::Kind kind, const Domain &space,
                              const FT *initial_value/* = NULL*/,
                              size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims/* = false*/)
@@ -16212,18 +16115,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             const Rect<N,T> &rect, Memory::Kind kind,
                              const FT *initial_value /*= NULL*/,
                              size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims /*= false*/)
@@ -16235,18 +16129,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory memory, const Domain &space,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             Memory memory, const Domain &space,
                              const FT *initial_value/* = NULL*/,
                              size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims/* = false*/)
@@ -16262,18 +16147,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             const Rect<N,T> &rect, Memory memory,
                              const FT *initial_value /*= NULL*/,
                              size_t alignment/* = alignof(FT)*/,
                              bool fortran_order_dims /*= false*/)
@@ -16284,18 +16160,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             Memory::Kind kind, const Domain &space,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
                              size_t _alignment/* = alignof(FT)*/)
@@ -16312,18 +16179,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             const Rect<N,T> &rect, Memory::Kind kind,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value /*= NULL*/,
                              size_t _alignment/* = alignof(FT)*/)
@@ -16335,18 +16193,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(Memory memory, const Domain &space,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             Memory memory, const Domain &space,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value/* = NULL*/,
                              size_t _alignment/* = alignof(FT)*/)
@@ -16362,18 +16211,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-           false
-#else
-            CB
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
+    template<typename FT, int N, typename T, bool CB>
+    inline DeferredBuffer<FT,N,T,CB>::DeferredBuffer(
+                             const Rect<N,T> &rect, Memory memory,
                              std::array<DimensionKind,N> _ordering,
                              const FT *initial_value /*= NULL*/,
                              size_t _alignment/* = alignof(FT)*/)
@@ -16384,18 +16224,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    Memory DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-                          false
-#else
-                          CB
-#endif
-                          >::get_memory_from_kind(Memory::Kind kind)
+    template<typename FT, int N, typename T, bool CB>
+    Memory DeferredBuffer<FT,N,T,CB>::get_memory_from_kind(Memory::Kind kind)
     //--------------------------------------------------------------------------
     {
       // Construct an instance of the right size in the corresponding memory
@@ -16421,19 +16251,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-                        false
-#else
-                        CB
-#endif
-                        >::initialize_layout(size_t _alignment,
-                                             bool fortran_order_dims)
+    template<typename FT, int N, typename T, bool CB>
+    void DeferredBuffer<FT,N,T,CB>::initialize_layout(size_t _alignment,
+                                                      bool fortran_order_dims)
     //--------------------------------------------------------------------------
     {
       if (fortran_order_dims)
@@ -16454,22 +16274,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-                        false
-#else
-                        CB
-#endif
-                        >::initialize(Memory memory,
-                                      DomainT<N,T> bounds,
+    template<typename FT, int N, typename T, bool CB>
+    void DeferredBuffer<FT,N,T,CB>::initialize(Memory memory,
+                                      DomainT<N,T> space,
                                       const FT *initial_value)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(space.dense());
+#endif
       Runtime *runtime = Runtime::get_runtime();
       const std::vector<size_t> field_sizes(1,sizeof(FT));
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
@@ -16479,9 +16292,10 @@ namespace Legion {
           static_cast<int>(ordering[i]) - static_cast<int>(LEGION_DIM_X);
       Realm::InstanceLayoutGeneric *layout = 
         Realm::InstanceLayoutGeneric::choose_instance_layout(
-          bounds, constraints, dim_order);
+          space, constraints, dim_order);
       layout->alignment_reqd = alignment;
       instance = runtime->create_task_local_instance(memory, layout);
+      bounds = space.bounds;
       if (initial_value != NULL)
       {
         Realm::ProfilingRequestSet no_requests;
@@ -16497,86 +16311,50 @@ namespace Legion {
       const bool is_compatible =
         Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
                                                      0/*fid*/,
-                                                     bounds.bounds);
+                                                     bounds);
 #endif
       assert(is_compatible);
 #endif
       // We can make the accessor
       accessor = Realm::AffineAccessor<FT,N,T>(instance,
                                                0/*field id*/,
-                                               bounds.bounds);
+                                               bounds);
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              > __CUDA_HD__
-    inline FT DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false 
-#else
-              CB
-#endif
-              >::read(const Point<N,T> &p) const
+    template<typename FT, int N, typename T, bool CB> __CUDA_HD__
+    inline FT DeferredBuffer<FT,N,T,CB>::read(const Point<N,T> &p) const
     //--------------------------------------------------------------------------
     {
+      assert(!CB || bounds.contains(p));
       return accessor.read(p);
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false 
-#else
-              CB
-#endif
-              >::write(const Point<N,T> &p,
+    template<typename FT, int N, typename T, bool CB> __CUDA_HD__
+    inline void DeferredBuffer<FT,N,T,CB>::write(const Point<N,T> &p,
                                                     FT value) const
     //--------------------------------------------------------------------------
     {
+      assert(!CB || bounds.contains(p));
       accessor.write(p, value);
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline FT* DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false 
-#else
-              CB
-#endif
-              >::ptr(const Point<N,T> &p) const
+    template<typename FT, int N, typename T, bool CB > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,CB>::ptr(const Point<N,T> &p) const
     //--------------------------------------------------------------------------
     {
+      assert(!CB || bounds.contains(p));
       return accessor.ptr(p);
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline FT* DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false 
-#else
-              CB
-#endif   
-              >::ptr(const Rect<N,T> &r) const
+    template<typename FT, int N, typename T, bool CB> __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,CB>::ptr(const Rect<N,T> &r) const
     //--------------------------------------------------------------------------
     {
+      assert(!CB || bounds.contains(r));
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       assert(Internal::is_dense_layout(r, accessor.strides, sizeof(FT)));
 #else
@@ -16595,617 +16373,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-            > __CUDA_HD__
-    inline FT* DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false 
-#else
-              CB
-#endif          
-            >::ptr(const Rect<N,T> &r, size_t strides[N]) const
+    template<typename FT, int N, typename T,bool CB> __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,CB>::ptr(
+                                    const Rect<N,T> &r, size_t strides[N]) const
     //--------------------------------------------------------------------------
     {
+      assert(!CB || bounds.contains(r));
       for (int i = 0; i < N; i++)
         strides[i] = accessor.strides[i] / sizeof(FT);
       return accessor.ptr(r.lo);
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline FT& DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false 
-#else
-              CB
-#endif
-              >::operator[](const Point<N,T> &p) const
+    template<typename FT, int N, typename T, bool CB> __CUDA_HD__
+    inline FT& DeferredBuffer<FT,N,T,CB>::operator[](const Point<N,T> &p) const
     //--------------------------------------------------------------------------
     {
+      assert(!CB || bounds.contains(p));
       return accessor[p];
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false
-#else
-              CB
-#endif
-              >::destroy()
+    template<typename FT, int N, typename T,bool CB>
+    inline void DeferredBuffer<FT,N,T,CB>::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance);
+      runtime->destroy_task_local_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifndef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    Realm::RegionInstance DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              false
-#else
-              CB
-#endif
-              >::get_instance() const
+    template<typename FT, int N, typename T, bool CB> __CUDA_HD__
+    inline Realm::RegionInstance DeferredBuffer<FT,N,T,CB>::get_instance(
+                                                                     void) const
     //--------------------------------------------------------------------------
     {
       return instance;
     }
 
     //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB 
-#else
-            true
-#endif
-           >::DeferredBuffer(void)
-      : instance(Realm::RegionInstance::NO_INST)
+    template<typename FT, int N, typename T, bool CB> __CUDA_HD__
+    inline Rect<N,T> DeferredBuffer<FT,N,T,CB>::get_bounds(void) const
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB 
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      if (!space.dense())
-      {
-        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
-        assert(false);
-      }
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
-                             const FT *initial_value /*= NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB 
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory memory, const Domain &space,
-                             const FT *initial_value/* = NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      if (!space.dense())
-      {
-        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
-        assert(false);
-      }
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
-                             const FT *initial_value /*= NULL*/,
-                             size_t alignment/* = 16*/,
-                             const bool fortran_order_dims/* = false*/)
-    //--------------------------------------------------------------------------
-    {
-      initialize_layout(alignment, fortran_order_dims);
-      initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      if (!space.dense())
-      {
-        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
-        assert(false);
-      }
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value /*= NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      const Realm::Memory memory = get_memory_from_kind(kind);
-      initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(Memory memory, const Domain &space,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value/* = NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      if (!space.dense())
-      {
-        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
-        assert(false);
-      }
-      initialize(memory, space, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    inline DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-            CB
-#else
-            true
-#endif
-           >::DeferredBuffer(const Rect<N,T> &rect, Memory memory,
-                             std::array<DimensionKind,N> _ordering,
-                             const FT *initial_value /*= NULL*/,
-                             size_t _alignment/* = 16*/)
-      : ordering(_ordering), alignment(_alignment)
-    //--------------------------------------------------------------------------
-    {
-      initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    Memory DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-                          CB
-#else
-                          true
-#endif
-                          >::get_memory_from_kind(Memory::Kind kind)
-    //--------------------------------------------------------------------------
-    {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      const Processor executing_processor =
-        Runtime::get_runtime()->get_executing_processor(Runtime::get_context());
-      finder.best_affinity_to(executing_processor);
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(executing_processor);
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d\n",
-                kind);
-        assert(false);
-      }
-      return finder.first();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-                        CB
-#else
-                        true
-#endif
-                        >::initialize_layout(size_t _alignment,
-                                             bool fortran_order_dims)
-    //--------------------------------------------------------------------------
-    {
-      if (fortran_order_dims)
-      {
-        for (int i = 0; i < N; i++)
-          ordering[i] =
-            static_cast<DimensionKind>(static_cast<int>(LEGION_DIM_X) + i);
-      }
-      else
-      {
-        for (int i = 0; i < N; i++)
-          ordering[i] =
-            static_cast<DimensionKind>(
-                static_cast<int>(LEGION_DIM_X) + N - (i + 1));
-      }
-
-      alignment = _alignment;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-                        CB
-#else
-                        true
-#endif
-                        >::initialize(Memory memory,
-                                      DomainT<N,T> domain,
-                                      const FT *initial_value)
-    //--------------------------------------------------------------------------
-    {
-      bounds = domain;
-      Runtime *runtime = Runtime::get_runtime();
-      const std::vector<size_t> field_sizes(1,sizeof(FT));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[N];
-      for (int i = 0; i < N; ++i)
-        dim_order[i] =
-          static_cast<int>(ordering[i]) - static_cast<int>(LEGION_DIM_X);
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
-      if (initial_value != NULL)
-      {
-        Realm::ProfilingRequestSet no_requests; 
-        std::vector<Realm::CopySrcDstField> dsts(1);
-        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
-        const Internal::LgEvent wait_on(
-            bounds.fill(dsts, no_requests, initial_value, sizeof(FT)));
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-      const bool is_compatible =
-        Realm::AffineAccessor<FT,N,T>::is_compatible(instance,
-                                                     0/*fid*/,
-                                                     bounds.bounds);
-#endif
-      assert(is_compatible);
-#endif
-      // We can make the accessor
-      accessor = Realm::AffineAccessor<FT,N,T>(instance,
-                                               0/*field id*/,
-                                               bounds.bounds);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              > __CUDA_HD__
-    inline FT DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB
-#else
-              true 
-#endif
-              >::read(const Point<N,T> &p) const
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-      assert(bounds.bounds.contains(p));
-#else
-      assert(bounds.contains(p));
-#endif
-      return accessor.read(p);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB 
-#else
-              true
-#endif
-              >::write(const Point<N,T> &p, FT value) const
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-      assert(bounds.bounds.contains(p));
-#else
-      assert(bounds.contains(p));
-#endif
-      accessor.write(p, value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline FT* DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB 
-#else
-              true
-#endif
-              >::ptr(const Point<N,T> &p) const
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-      assert(bounds.bounds.contains(p));
-#else
-      assert(bounds.contains(p));
-#endif
-      return accessor.ptr(p);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline FT* DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB 
-#else
-              true
-#endif   
-              >::ptr(const Rect<N,T> &r) const
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-      assert(bounds.bounds.contains(r));
-      assert(Internal::is_dense_layout(r, accessor.strides, sizeof(FT)));
-#else
-      assert(bounds.contains_all(r));
-      if (!Internal::is_dense_layout(r, accessor.strides, sizeof(FT)))
-      {
-        fprintf(stderr, 
-            "ERROR: Illegal request for pointer of non-dense rectangle\n");
-#ifdef DEBUG_LEGION
-        assert(false);
-#else
-        exit(ERROR_NON_DENSE_RECTANGLE);
-#endif
-      }
-#endif
-      return accessor.ptr(r.lo);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-            > __CUDA_HD__
-    inline FT* DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB 
-#else
-              true
-#endif          
-            >::ptr(const Rect<N,T> &r, size_t strides[N]) const
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-      assert(bounds.bounds.contains(r));
-#else
-      assert(bounds.contains_all(r));
-#endif
-      for (int i = 0; i < N; i++)
-        strides[i] = accessor.strides[i] / sizeof(FT);
-      return accessor.ptr(r.lo);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB 
-#endif
-              > __CUDA_HD__
-    inline FT& DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB 
-#else
-              true
-#endif
-              >::operator[](const Point<N,T> &p) const
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-      assert(bounds.bounds.contains(p));
-#else
-      assert(bounds.contains(p));
-#endif
-      return accessor[p];
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    void DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB
-#else
-              true
-#endif
-              >::destroy()
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance);
-      instance = Realm::RegionInstance::NO_INST;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T
-#ifdef LEGION_BOUNDS_CHECKS
-              , bool CB
-#endif
-              >
-    Realm::RegionInstance DeferredBuffer<FT,N,T,
-#ifdef LEGION_BOUNDS_CHECKS
-              CB
-#else
-              true
-#endif
-              >::get_instance() const
-    //--------------------------------------------------------------------------
-    {
-      return instance;
+      return bounds;
     }
 
     //--------------------------------------------------------------------------
@@ -17275,6 +16487,11 @@ namespace Legion {
             const DomainT<DIM,T> bounds =                                   \
                       runtime->get_index_space_domain<DIM,T>(               \
                           IndexSpaceT<DIM,T>(space));                       \
+            if (!bounds.dense())                                            \
+            {                                                               \
+              fprintf(stderr, "DeferredBuffer only allows a dense domain\n");\
+              assert(false);                                                \
+            }                                                               \
             int dim_order[DIM];                                             \
             if (fortran_order_dims)                                         \
             {                                                               \
@@ -17338,6 +16555,11 @@ namespace Legion {
     {
       assert(dims > 0);
       assert(dims <= LEGION_MAX_DIM);
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
       Runtime *runtime = Runtime::get_runtime();
@@ -17455,6 +16677,11 @@ namespace Legion {
             const DomainT<DIM,T> bounds =                                   \
                       runtime->get_index_space_domain<DIM,T>(               \
                           IndexSpaceT<DIM,T>(space));                       \
+            if (!bounds.dense())                                            \
+            {                                                               \
+              fprintf(stderr, "DeferredBuffer only allows a dense domain\n");\
+              assert(false);                                                \
+            }                                                               \
             int dim_order[DIM];                                             \
             if (fortran_order_dims)                                         \
             {                                                               \
@@ -17518,6 +16745,11 @@ namespace Legion {
     {
       assert(dims > 0);
       assert(dims <= LEGION_MAX_DIM);
+      if (!space.dense())
+      {
+        fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
+        assert(false);
+      }
       const std::vector<size_t> field_sizes(1, field_size);
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       Runtime *runtime = Runtime::get_runtime();
@@ -17606,19 +16838,17 @@ namespace Legion {
 #endif
       // We can make the accessor
       result.accessor = Realm::AffineAccessor<FT,DIM,T>(instance,0/*field id*/);
-#ifdef LEGION_BOUNDS_CHECKS
-      result.bounds = instance.template get_indexspace<DIM,T>();
-#endif
+      result.bounds = instance.template get_indexspace<DIM,T>().bounds;
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline void UntypedDeferredBuffer<T>::destroy(void)
+    inline void UntypedDeferredBuffer<T>::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance);
+      runtime->destroy_task_local_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
       field_size = 0;
       dims = 0;
@@ -17652,15 +16882,7 @@ namespace Legion {
       DeferredBuffer<T,DIM,COORD_T,CHECK_BOUNDS> buffer(
         bounds, target_memory(), ord, initial_value, alignment);
       if (return_buffer)
-      {
-#ifdef DEBUG_LEGION
-        return_data(extents, field_id, buffer);
-#else
-        // In release mode, we don't check the constraints, as we already know
-        // that the instance satisfies them.
-        return_data(extents, field_id, buffer.instance, NULL, false);
-#endif
-      }
+        return_data(extents, field_id, buffer.instance, false);
       return buffer;
     }
 
@@ -19594,6 +18816,8 @@ namespace Legion {
     /*static*/ inline Future Future::from_value(Runtime *rt, const T &value)
     //--------------------------------------------------------------------------
     {
+      static_assert(!std::is_base_of<Domain,T>::value,
+            "Use Future::from_domain for returning domains in futures");
       return LegionSerialization::from_value(&value);
     } 
 
@@ -19602,6 +18826,8 @@ namespace Legion {
     /*static*/ inline Future Future::from_value(const T &value)
     //--------------------------------------------------------------------------
     {
+      static_assert(!std::is_base_of<Domain,T>::value,
+            "Use Future::from_domain for returning domains in futures");
       return LegionSerialization::from_value(&value);
     }
 
@@ -20103,12 +19329,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                           const DomainT<DIM,T> &bounds, const char *provenance)
+      const DomainT<DIM,T> &bounds, const char *provenance, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       const Domain domain(bounds);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance,
+        take_ownership));
     }
 
     //--------------------------------------------------------------------------
@@ -20134,7 +19361,8 @@ namespace Legion {
       const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       const Domain domain(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance,
+        true/*take ownership*/));
     }
 
     //--------------------------------------------------------------------------
@@ -20150,7 +19378,8 @@ namespace Legion {
       const DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
       const Domain domain(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space(ctx, domain,
-        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance));
+        Internal::NT_TemplateHelper::template encode_tag<DIM,T>(), provenance,
+        true/*take ownership*/));
     }
 
     //--------------------------------------------------------------------------
@@ -20473,7 +19702,7 @@ namespace Legion {
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     bool perform_intersections,
                                     PartitionKind part_kind, Color color,
-                                    const char *provenance)
+                                    const char *provenance, bool take_ownership)
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,Domain> converted_domains;
@@ -20482,7 +19711,8 @@ namespace Legion {
         converted_domains[DomainPoint(it->first)] = Domain(it->second);
       return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), converted_domains, IndexSpace(color_space),
-              perform_intersections, part_kind, color, provenance));
+              perform_intersections, part_kind, color, provenance,
+              take_ownership));
     }
 
     //--------------------------------------------------------------------------
@@ -20521,7 +19751,8 @@ namespace Legion {
                 rectangles.begin(); it != rectangles.end(); it++)
         {
           const DomainT<DIM,T> domain(it->second);
-          futures[DomainPoint(it->first)] = Future::from_value(Domain(domain));
+          futures[DomainPoint(it->first)] = 
+            Future::from_domain(Domain(domain), true/*take ownership*/);
         }
         FutureMap fm = construct_future_map(ctx, IndexSpace(color_space),
                               futures, true/*collective*/, 0/*shard id*/, 
@@ -20542,7 +19773,8 @@ namespace Legion {
           domains[DomainPoint(it->first)] = DomainT<DIM,T>(it->second); 
         return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), domains, IndexSpace(color_space),
-              perform_intersections, part_kind, color, provenance));
+              perform_intersections, part_kind, color, provenance,
+              true/*take ownership*/));
       }
     }
 
