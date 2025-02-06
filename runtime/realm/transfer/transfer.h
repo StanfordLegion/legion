@@ -240,7 +240,7 @@ namespace Realm {
     virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
                                size_t &fsize);
 
-    TransferIterator *addrs_in{0};
+    TransferIterator *addrs_in{nullptr};
     Memory addrs_mem{Memory::NO_MEMORY};
     intptr_t addrs_mem_base{0};
     bool can_merge{true};
