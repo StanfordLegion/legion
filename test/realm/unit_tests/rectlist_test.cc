@@ -121,14 +121,14 @@ public:
 };
 
 template <int DIM>
-struct IndirectGetAddressesCase {
+struct AddPointTestCase {
   size_t max_rects;
   std::vector<Point<DIM>> points;
   std::vector<Rect<DIM>> rects;
 };
 
 template <int DIM>
-std::vector<IndirectGetAddressesCase<DIM>> GetAddPointTestCases()
+std::vector<AddPointTestCase<DIM>> GetAddPointTestCases()
 {
   if constexpr(DIM == 1) {
     return {
