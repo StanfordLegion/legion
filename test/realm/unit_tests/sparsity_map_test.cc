@@ -295,83 +295,9 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
   }
 }
 
-TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapPassApprox)
-{
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
-
-  constexpr size_t num_rects = 3;
-  constexpr int gap = 3;
-  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
-  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  NodeSet subscribers;
-
-  std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
-  impl->contribute_raw_rects(rect_list.data(), rect_list.size(), 0, /*disjoint=*/true, 0);
-  impl->set_contributor_count(1);
-  impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
-
-  MockSparsityMapCommunicator<N, T> *other_sparsity_comm =
-      new MockSparsityMapCommunicator<N, T>();
-  std::unique_ptr<SparsityMapImpl<N, T>> other_impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, other_sparsity_comm);
-  other_impl->contribute_dense_rect_list(rect_list,
-                                         /*disjoint=*/true);
-  other_impl->set_contributor_count(1);
-  other_impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *other_public_impl = other_impl.get();
-
-  Rect<N, T> bounds(TypeParam(0), TypeParam(10));
-  bool ok = public_impl->overlaps(other_public_impl, bounds, /*approx=*/true);
-
-  ASSERT_TRUE(ok);
-}
-
-TYPED_TEST_P(SparsityMapImplTest, ComputeOverlapFail)
-{
-  constexpr int N = TestFixture::N;
-  using T = typename TestFixture::T;
-
-  constexpr size_t num_rects = 3;
-  constexpr int gap = 3;
-
-  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
-  std::vector<Rect<N, T>> other_rect_list = create_rects<N, T>(num_rects, gap, 100);
-  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  NodeSet node;
-
-  std::unique_ptr<SparsityMapImpl<N, T>> impl = std::make_unique<SparsityMapImpl<N, T>>(
-      handle, node,
-      reinterpret_cast<SparsityMapCommunicator<N, T> *>(this->sparsity_comm));
-  impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
-  impl->set_contributor_count(1);
-  impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
-
-  MockSparsityMapCommunicator<N, T> *other_sparsity_comm =
-      new MockSparsityMapCommunicator<N, T>();
-  std::unique_ptr<SparsityMapImpl<N, T>> other_impl =
-      std::make_unique<SparsityMapImpl<N, T>>(
-          handle, node,
-          reinterpret_cast<SparsityMapCommunicator<N, T> *>(other_sparsity_comm));
-  other_impl->contribute_raw_rects(other_rect_list.data(), other_rect_list.size(), 0,
-                                   /*disjoint=*/true, 0);
-  other_impl->set_contributor_count(1);
-  other_impl->contribute_nothing();
-  SparsityMapPublicImpl<N, T> *other_public_impl = other_impl.get();
-
-  Rect<N, T> bounds(TypeParam(0), TypeParam(1000));
-  bool ok = public_impl->overlaps(other_public_impl, bounds, /*approx=*/false);
-
-  ASSERT_FALSE(ok);
-}
-
 REGISTER_TYPED_TEST_SUITE_P(SparsityMapImplTest, RemoteDataReply,
                             ContributeDenseRectListRemote, ContributeDenseNotDisjoint,
-                            ContributeDenseDisjointRects, ComputeOverlapPassApprox,
-                            ComputeOverlapFail);
+                            ContributeDenseDisjointRects);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
@@ -638,3 +564,167 @@ struct WrapTypes<std::index_sequence<Ns...>> {
 using TestTypes = typename WrapTypes<std::make_index_sequence<REALM_MAX_DIM>>::type;
 
 INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, ComputeCoveringTest, TestTypes);
+
+template <typename TypeParam>
+class OverlapsTest : public ::testing::Test {
+public:
+  static constexpr int DIM = TypeParam::value;
+};
+
+template <int DIM>
+struct OverlapsTestCase {
+  Rect<DIM> bounds;
+  std::vector<Rect<DIM>> rects1;
+  std::vector<Rect<DIM>> rects2;
+  bool approx;
+  bool expected;
+};
+
+template <int DIM>
+std::vector<OverlapsTestCase<DIM>> GenerateOverlapsTestCases()
+{
+  if constexpr(DIM == 1) {
+    return {
+        {// Case: No overlap (disjoint regions)
+         /*bounds=*/Rect<DIM>{{0}, {5}},
+         /*rects1=*/{Rect<DIM>{{0}, {2}}},
+         /*rects2=*/{Rect<DIM>{{3}, {5}}},
+         /*approx=*/false,
+         /*expected=*/false},
+
+        {// Case: Exact overlap (rects are identical)
+         /*bounds=*/Rect<DIM>{{0}, {5}},
+         /*rects1=*/{Rect<DIM>{{1}, {4}}},
+         /*rects2=*/{Rect<DIM>{{1}, {4}}},
+         /*approx=*/false,
+         /*expected=*/true},
+
+        {// Case: Partial overlap (rects partially intersect)
+         /*bounds=*/Rect<DIM>{{0}, {5}},
+         /*rects1=*/{Rect<DIM>{{1}, {4}}},
+         /*rects2=*/{Rect<DIM>{{3}, {6}}},
+         /*approx=*/false,
+         /*expected=*/true},
+
+        {// Case: Overlapping at a single point
+         /*bounds=*/Rect<DIM>{{0}, {5}},
+         /*rects1=*/{Rect<DIM>{{1}, {3}}},
+         /*rects2=*/{Rect<DIM>{{3}, {4}}},
+         /*approx=*/false,
+         /*expected=*/true},
+
+        {// Case: Approximate mode (loose check, should return true)
+         /*bounds=*/Rect<DIM>{{0}, {5}},
+         /*rects1=*/{Rect<DIM>{{1}, {3}}},
+         /*rects2=*/{Rect<DIM>{{3}, {6}}},
+         /*approx=*/true,
+         /*expected=*/true},
+
+        {// Case: No overlap even in approximate mode
+         /*bounds=*/Rect<DIM>{{0}, {5}},
+         /*rects1=*/{Rect<DIM>{{1}, {2}}},
+         /*rects2=*/{Rect<DIM>{{4}, {6}}},
+         /*approx=*/true,
+         /*expected=*/false},
+
+        {// Case: Sparse regions with no overlap
+         /*bounds=*/Rect<DIM>{{0}, {10}},
+         /*rects1=*/{Rect<DIM>{{0}, {1}}, Rect<DIM>{{3}, {4}}},
+         /*rects2=*/{Rect<DIM>{{5}, {6}}, Rect<DIM>{{8}, {9}}},
+         /*approx=*/false,
+         /*expected=*/false},
+    };
+  } else if constexpr(DIM == 2) {
+    return {
+        {// Case: No overlap (completely separate regions)
+         /*bounds=*/Rect<DIM>{{0, 0}, {5, 5}},
+         /*rects1=*/{Rect<DIM>{{0, 0}, {2, 2}}},
+         /*rects2=*/{Rect<DIM>{{3, 3}, {5, 5}}},
+         /*approx=*/false,
+         /*expected=*/false},
+
+        {// Case: Full overlap
+         /*bounds=*/Rect<DIM>{{0, 0}, {5, 5}},
+         /*rects1=*/{Rect<DIM>{{1, 1}, {4, 4}}},
+         /*rects2=*/{Rect<DIM>{{1, 1}, {4, 4}}},
+         /*approx=*/false,
+         /*expected=*/true},
+
+        {// Case: Partial overlap
+         /*bounds=*/Rect<DIM>{{0, 0}, {5, 5}},
+         /*rects1=*/{Rect<DIM>{{1, 1}, {3, 3}}},
+         /*rects2=*/{Rect<DIM>{{2, 2}, {4, 4}}},
+         /*approx=*/false,
+         /*expected=*/true},
+
+        {// Case: Overlapping at a single point
+         /*bounds=*/Rect<DIM>{{0, 0}, {5, 5}},
+         /*rects1=*/{Rect<DIM>{{1, 1}, {3, 3}}},
+         /*rects2=*/{Rect<DIM>{{3, 3}, {4, 4}}},
+         /*approx=*/false,
+         /*expected=*/true},
+
+        {// Case: Approximate mode (loose check)
+         /*bounds=*/Rect<DIM>{{0, 0}, {5, 5}},
+         /*rects1=*/{Rect<DIM>{{1, 1}, {3, 3}}},
+         /*rects2=*/{Rect<DIM>{{3, 3}, {6, 6}}},
+         /*approx=*/true,
+         /*expected=*/true},
+
+        {// Case: No overlap with approximation
+         /*bounds=*/Rect<DIM>{{0, 0}, {5, 5}},
+         /*rects1=*/{Rect<DIM>{{1, 1}, {2, 2}}},
+         /*rects2=*/{Rect<DIM>{{4, 4}, {6, 6}}},
+         /*approx=*/true,
+         /*expected=*/false},
+
+        {// Case: Sparse non-overlapping regions
+         /*bounds=*/Rect<DIM>{{0, 0}, {10, 10}},
+         /*rects1=*/{Rect<DIM>{{0, 0}, {1, 1}}, Rect<DIM>{{3, 3}, {4, 4}}},
+         /*rects2=*/{Rect<DIM>{{5, 5}, {6, 6}}, Rect<DIM>{{8, 8}, {9, 9}}},
+         /*approx=*/false,
+         /*expected=*/false},
+    };
+  }
+  return {};
+}
+
+TYPED_TEST_SUITE_P(OverlapsTest);
+
+TYPED_TEST_P(OverlapsTest, Base)
+{
+  using T = int;
+  constexpr int N = TypeParam::value;
+
+  auto test_cases = GenerateOverlapsTestCases<N>();
+  for(const auto &test_case : test_cases) {
+    SparsityMap<N, T> handle1 = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+    SparsityMap<N, T> handle2 = (ID::make_sparsity(0, 0, 1)).convert<SparsityMap<N, T>>();
+
+    NodeSet subscribers;
+
+    std::unique_ptr<SparsityMapImpl<N, T>> impl1 =
+        std::make_unique<SparsityMapImpl<N, T>>(handle1, subscribers);
+    std::unique_ptr<SparsityMapImpl<N, T>> impl2 =
+        std::make_unique<SparsityMapImpl<N, T>>(handle2, subscribers);
+
+    SparsityMapPublicImpl<N, T> *public_impl1 = impl1.get();
+    SparsityMapPublicImpl<N, T> *public_impl2 = impl2.get();
+
+    impl1->contribute_dense_rect_list(test_case.rects1, /*disjoint=*/true);
+    impl2->contribute_dense_rect_list(test_case.rects2, /*disjoint=*/true);
+    impl1->set_contributor_count(1);
+    impl2->set_contributor_count(1);
+    impl1->contribute_nothing();
+    impl2->contribute_nothing();
+
+    bool overlaps =
+        public_impl1->overlaps(public_impl2, test_case.bounds, test_case.approx);
+
+    ASSERT_EQ(overlaps, test_case.expected);
+  }
+}
+
+REGISTER_TYPED_TEST_SUITE_P(OverlapsTest, Base);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, OverlapsTest, TestTypes);
