@@ -77,7 +77,7 @@ struct AddressSplitTest : public ::testing::Test {
       _test_cases_;
 };
 
-TYPED_TEST_CASE_P(AddressSplitTest);
+TYPED_TEST_SUITE_P(AddressSplitTest);
 
 template <int DIM, typename T>
 class MockIterator : public TransferIterator {
