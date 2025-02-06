@@ -542,8 +542,8 @@ before_script:
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:250130
 .image_icc: &image_icc
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:250130
-.image_msvc169: &image_msvc169
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc
+.image_msvc178: &image_msvc178
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc:250206
 
 ###
 ### Tests
@@ -648,7 +648,7 @@ before_script:
     - su wine -c "wine64 cmd /c 'x64.bat && cmake -G Ninja -S repo -B build -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON'"
     - "# wine doesn't seem to cope with concurrent file access, so use a serial build"
     - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -- -j1'"
-    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2019\\VC\\Redist\\MSVC\\14.28.29910\\debug_nonredist\\x64\\Microsoft.VC142.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.18362.0\\x64\\ucrt;%PATH% && cd build && ctest --output-on-failure'"
+    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2022\\VC\\Redist\\MSVC\\14.38.33130\\debug_nonredist\\x64\\Microsoft.VC143.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.20348.0\\x64\\ucrt;%PATH% && cd build && ctest --output-on-failure'"
     - echo OK
 
 # use a custom script for running Realm tests with sanitizers
@@ -1384,10 +1384,10 @@ icc212_cxx17_debug_cmake_legion:
     <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *cpptrace]
 
 # MSVC (Realm only):
-msvc169_realm:
-  <<: [*msvc_wine, *image_msvc169, *msvc_tests]
+msvc178_realm:
+  <<: [*msvc_wine, *image_msvc178, *msvc_tests]
   variables:
-    <<: [*short, *no_ccache]
+    <<: [*short]
 
 # sanitizer tests (Realm only):
 gcc12_tsan_realm:
