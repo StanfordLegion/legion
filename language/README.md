@@ -65,7 +65,7 @@ Regent also has a number of transitive dependencies via Legion:
 
   * Linux, macOS, or another Unix
   * A C++ 17 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
-  * *Optional*: CUDA 10.0 or newer (for NVIDIA GPUs)
+  * *Optional*: CUDA 11.7 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
   * *Optional*: HDF5 (for file I/O)
 
