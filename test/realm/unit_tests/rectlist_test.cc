@@ -30,8 +30,8 @@ TYPED_TEST_P(RectListTest, HybridAddDisjointRects)
 
   size_t shift = 0;
   for(size_t i = 0; i < max_rects; i++) {
-    rects.push_back(Rect<TestFixture::N, typename TestFixture::T>(
-        TypeParam(shift), TypeParam(shift + 1)));
+    rects.push_back(Rect<TestFixture::N, typename TestFixture::T>(TypeParam(shift),
+                                                                  TypeParam(shift + 1)));
     rectlist.add_rect(rects.back());
     shift += 3;
   }
@@ -87,30 +87,8 @@ TYPED_TEST_P(RectListTest, HybridAddDisjointPoints)
   }
 }
 
-TYPED_TEST_P(RectListTest, CoverageCounter)
-{
-  constexpr size_t max_elements = 3;
-  size_t elements = 0;
-  Realm::CoverageCounter<TestFixture::N, typename TestFixture::T> counter;
-
-  for(size_t i = 0; i < max_elements; i++) {
-    auto rect =
-        Rect<TestFixture::N, typename TestFixture::T>(TypeParam(i), TypeParam(i + 1));
-    counter.add_rect(rect);
-    elements += rect.volume();
-  }
-
-  for(size_t i = 0; i < max_elements; i++) {
-    TypeParam point(i);
-    counter.add_point(point);
-  }
-  elements += max_elements;
-
-  EXPECT_EQ(counter.get_count(), elements);
-}
-
 REGISTER_TYPED_TEST_SUITE_P(RectListTest, HybridAddDisjointRects, HybridAddPoints,
-                            HybridAddDisjointPoints, CoverageCounter);
+                            HybridAddDisjointPoints);
 
 template <typename T, int... Ns>
 auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
@@ -349,3 +327,73 @@ TYPED_TEST_P(DenseAddRectTest, Base)
 REGISTER_TYPED_TEST_SUITE_P(DenseAddRectTest, Base);
 
 INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, DenseAddRectTest, TestTypes);
+
+template <typename TypeWrapper>
+class CoverageCounterTest : public ::testing::Test {
+public:
+  static constexpr int DIM = TypeWrapper::value;
+};
+
+template <int DIM>
+struct CoverageCounterTestCase {
+  std::vector<Rect<DIM>> rects;
+  std::vector<Point<DIM>> points;
+  size_t expected;
+};
+
+template <int DIM>
+std::vector<CoverageCounterTestCase<DIM>> GetCoverageCounterTestCases()
+{
+  if constexpr(DIM == 1) {
+    return {
+        // Case empty
+        {/*rects=*/{}, /*points=*/{}, /*expected=*/0},
+
+        // Case empty rects
+        {/*rects=*/{Rect<DIM>({1}, {0}), Rect<DIM>({3}, {2})}, /*points=*/{},
+         /*expected=*/0},
+
+        // Case normal rects
+        {/*rects=*/{Rect<DIM>({0}, {1}), Rect<DIM>({3}, {4})}, /*points=*/{},
+         /*expected=*/4},
+
+        // Case normal rects and points
+        {/*rects=*/{Rect<DIM>({0}, {1}), Rect<DIM>({3}, {4})},
+         /*points=*/{Point<DIM>(0), Point<DIM>(1)}, /*expected=*/6},
+
+    };
+  } else if constexpr(DIM == 2) {
+    // Case normal 2D rects and points
+    return {
+        {/*rects=*/{Rect<DIM>({0, 0}, {1, 1}), Rect<DIM>({3, 3}, {4, 4})},
+         /*points=*/{Point<DIM>(0), Point<DIM>(1)}, /*expected=*/10},
+    };
+  }
+  return {};
+}
+
+TYPED_TEST_SUITE_P(CoverageCounterTest);
+
+TYPED_TEST_P(CoverageCounterTest, Base)
+{
+  using T = int;
+  constexpr int N = TypeParam::value;
+
+  auto test_cases = GetCoverageCounterTestCases<N>();
+  for(const auto &test_case : test_cases) {
+    Realm::CoverageCounter<N, T> counter;
+
+    for(const auto &r : test_case.rects) {
+      counter.add_rect(r);
+    }
+
+    for(const auto &p : test_case.points) {
+      counter.add_point(p);
+    }
+
+    EXPECT_EQ(counter.get_count(), test_case.expected);
+  }
+}
+
+REGISTER_TYPED_TEST_SUITE_P(CoverageCounterTest, Base);
+INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, CoverageCounterTest, TestTypes);
