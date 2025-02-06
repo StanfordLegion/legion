@@ -2915,13 +2915,22 @@ namespace Legion {
       // allocations if we have an unbounded pool
       if (variant_impl->is_leaf())
         create_leaf_memory_pools(variant_impl, output.leaf_pool_bounds); 
-      else if (!leaf_memory_pools.empty())
+      else 
       {
-        // Free up any leaf memory pools that we have since we don't need them
-        for (std::map<Memory,MemoryPool*>::const_iterator it =
-              leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
-          delete it->second;
-        leaf_memory_pools.clear();
+        // If we're a concurrent task or a collectively mapped task then we
+        // still need to participate in the max-allreduce for allocating
+        // unbounded pools
+        if (concurrent_task || must_epoch_task ||
+            !check_collective_regions.empty())
+          order_collectively_mapped_unbounded_pools(0, false/*need result*/);
+        if (!leaf_memory_pools.empty())
+        {
+          // Free up any leaf memory pools that we have since we don't need them
+          for (std::map<Memory,MemoryPool*>::const_iterator it =
+                leaf_memory_pools.begin(); it != leaf_memory_pools.end(); it++)
+            delete it->second;
+          leaf_memory_pools.clear();
+        }
       }
       // Save variant validation until we know which instances we'll be using 
 #ifdef DEBUG_LEGION
@@ -4629,7 +4638,8 @@ namespace Legion {
         // If we're a concurrent task or a collectively mapped task then we
         // still need to participate in the max-allreduce for allocating
         // unbounded pools
-        if (concurrent_task || !check_collective_regions.empty())
+        if (concurrent_task || must_epoch_task ||
+            !check_collective_regions.empty())
           order_collectively_mapped_unbounded_pools(0, false/*need result*/);
         return;
       }
@@ -4806,7 +4816,8 @@ namespace Legion {
       // any other that are also trying to map in parallel with us
       RtEvent wait_for_unbounded_allocations;
       std::vector<MemoryManager*> unbounded_pools;
-      if (concurrent_task || !check_collective_regions.empty())
+      if (concurrent_task || must_epoch_task ||
+          !check_collective_regions.empty())
       {
         uint64_t max_lamport_clock = 0;
         for (std::map<Memory,PoolBounds>::const_iterator it =
