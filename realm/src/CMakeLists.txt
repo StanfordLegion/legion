@@ -101,6 +101,8 @@ if(TARGET ucx::ucx)
     ucx/ucp_internal.cc
     ucx/ucp_context.cc
     ucx/mpool.cc
+    ucx/ucc_comm.cc
+    ucx/oob_group_comm.cc
     ucx/bootstrap/bootstrap.cc
     ucx/bootstrap/bootstrap_loader.cc
   )

@@ -198,6 +198,7 @@ cache: &global_cache
 .ucx: &ucx
   REALM_NETWORKS: "ucx"
   UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
+  UCC_SOURCE: "https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
   UCX_BRANCH: "v1.14.1"
   # mpi_interop example requires MPI to build correctly
@@ -317,6 +318,24 @@ before_script:
       export PATH=$PATH:$UCX_ROOT/bin
       export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$UCX_ROOT/lib
       export CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH:$UCX_ROOT
+      cd -
+    fi
+    if [[ "$UCC_SOURCE" != "" ]]; then
+      apt update -qq -yy && apt install -qq -yy autoconf automake libtool # needed for autogen.sh
+      mkdir ucc
+      cd ucc
+      wget -nv -O - $UCC_SOURCE | tar --strip-components=1 -zxf -
+      export UCC_ROOT=$PWD/install
+
+      # Remove offload-arch=native.
+      sed -i 's/--offload-arch=native//g' ./cuda_lt.sh
+
+      ./autogen.sh
+      ./configure --prefix=$UCC_ROOT --with-ucx=$UCX_ROOT --without-rocm
+      make -j8 install
+      export PATH=$PATH:$UCC_ROOT/bin
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$UCC_ROOT/lib
+      export CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH:$UCC_ROOT
       cd -
     fi
     if [[ "$REALM_NETWORKS" != "" ]]; then

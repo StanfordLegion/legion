@@ -219,6 +219,10 @@ if(REALM_USE_UCX)
     realm/ucx/ucp_internal.cc
     realm/ucx/ucp_context.h
     realm/ucx/ucp_context.cc
+    realm/ucx/oob_group_comm.h
+    realm/ucx/oob_group_comm.cc
+    realm/ucx/ucc_comm.h
+    realm/ucx/ucc_comm.cc
     realm/ucx/mpool.h
     realm/ucx/mpool.cc
     realm/ucx/spinlock.h
@@ -460,7 +464,7 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 endif()
 
 if(REALM_USE_MPI)
-  target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
+   target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
 endif()
 
 if(REALM_USE_UCX)
@@ -468,6 +472,12 @@ if(REALM_USE_UCX)
   if(NOT REALM_UCX_DYNAMIC_LOAD)
     target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
   endif()
+
+  find_package(ucc REQUIRED CONFIG)
+  message(STATUS "Found UCC: ${UCC_INCLUDE_DIRS} ${UCC_LIBRARIES})")
+  target_include_directories(RealmRuntime PRIVATE ${UCC_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ucc::ucc)
+
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)
@@ -477,6 +487,20 @@ if(REALM_USE_UCX)
   target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
   set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
   install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
+    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  # build the P2P bootstrap plugin
+  add_library(realm_ucp_bootstrap_p2p MODULE
+    realm/ucx/bootstrap/bootstrap_p2p.cc
+	realm/ucx/bootstrap/client.cc
+	realm/ucx/bootstrap/logger.cc
+	realm/ucx/bootstrap/server.cc
+	realm/ucx/bootstrap/p2p_comm.cc
+	realm/ucx/bootstrap/worker.cc)
+  target_include_directories(realm_ucp_bootstrap_p2p PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_BINARY_DIR}/runtime)
+  set_target_properties(realm_ucp_bootstrap_p2p PROPERTIES PREFIX "")
+  install(TARGETS realm_ucp_bootstrap_p2p LIBRARY
       DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
