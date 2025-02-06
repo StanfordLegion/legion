@@ -30,7 +30,7 @@ TYPED_TEST_P(RectListTest, HybridAddDisjointRects)
 
   size_t shift = 0;
   for(size_t i = 0; i < max_rects; i++) {
-    rects.emplace_back(Rect<TestFixture::N, typename TestFixture::T>(
+    rects.push_back(Rect<TestFixture::N, typename TestFixture::T>(
         TypeParam(shift), TypeParam(shift + 1)));
     rectlist.add_rect(rects.back());
     shift += 3;
@@ -54,7 +54,7 @@ TYPED_TEST_P(RectListTest, HybridAddPoints)
   for(size_t i = 0; i < max_rects; i++) {
     TypeParam point(0);
     point.x() = i;
-    points.emplace_back(point);
+    points.push_back(point);
     rectlist.add_point(points.back());
   }
 
@@ -75,7 +75,7 @@ TYPED_TEST_P(RectListTest, HybridAddDisjointPoints)
   for(size_t i = 0; i < max_rects; i++) {
     TypeParam point(shift);
     shift += 2;
-    points.emplace_back(point);
+    points.push_back(point);
     rectlist.add_point(points.back());
   }
 
