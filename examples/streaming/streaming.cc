@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
@@ -43,7 +42,7 @@ class StreamingMapper: public DefaultMapper {
     int current_point;
     int points_executed;
     int point_types;
-    bool disable_point_wise_analysis = false;
+    bool enable_point_wise_analysis = false;
     struct InFlightTask {
       // An event that we will trigger when the task completes.
       MapperEvent event;
@@ -63,55 +62,35 @@ class StreamingMapper: public DefaultMapper {
       char **argv = Legion::HighLevelRuntime::get_input_args().argv;
       // Parse some command line parameters.
       for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-lg:disable_point_wise_analysis") == 0) {
-          this->disable_point_wise_analysis = true;
+        if (strcmp(argv[i], "-lg:enable_pointwise_analysis") == 0) {
+          this->enable_point_wise_analysis = true;
           continue;
         }
       }
     }
   public:
-    void select_tasks_to_map(const MapperContext          ctx,
-        const SelectMappingInput&    input,
-        SelectMappingOutput&   output)
+    void select_tasks_to_map(const MapperContext ctx,
+        const SelectMappingInput& input,
+        SelectMappingOutput& output)
     {
-      if (this->disable_point_wise_analysis)
+      if (!this->enable_point_wise_analysis)
         DefaultMapper::select_tasks_to_map(ctx, input, output);
       else
       {
-        MapperEvent return_event;
+        MapperEvent return_event = this->runtime->create_mapper_event(ctx);
 
         for (std::list<const Task*>::const_iterator it =
             input.ready_tasks.begin();
             (it != input.ready_tasks.end()); it++)
         {
-          if ((*it)->task_id == POINTWISE_ANALYSABLE_FILL_ID ||
-              (*it)->task_id == POINTWISE_ANALYSABLE_INC_ID  ||
-              (*it)->task_id == POINTWISE_ANALYSABLE_SUM_ID)
-          {
-            if (this->queue.size() > 0)
-              return_event = this->queue.front().event;
-
-            Domain slice_domain = (*it)->get_slice_domain();
-            if (slice_domain.rect_data[0] == current_point)
-            {
-              output.map_tasks.insert(*it);
-              // Otherwise, we can schedule the task. Create a new event
-              // and queue it up on the processor.
-              this->queue.push_back({
-                .event = this->runtime->create_mapper_event(ctx),
-              });
-            }
-          }
-          else
-          {
-            output.map_tasks.insert(*it);
-          }
+          output.map_tasks.insert(*it);
         }
         // If we don't schedule any tasks for mapping, the runtime needs to know
         // when to ask us again to schedule more things. Return the MapperEvent we
         // selected earlier.
         if (output.map_tasks.size() == 0)
         {
+          printf("Did not get any task to select\n");
           assert(return_event.exists());
           output.deferral_event = return_event;
         }
@@ -123,66 +102,91 @@ class StreamingMapper: public DefaultMapper {
                   const MapTaskInput& input,
                   MapTaskOutput& output)
     {
-      DefaultMapper::map_task(ctx, task, input, output);
-      if (!this->disable_point_wise_analysis)
+      if (this->enable_point_wise_analysis)
       {
         if (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
             task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
             task.task_id == POINTWISE_ANALYSABLE_SUM_ID)
         {
-          output.task_prof_requests.add_measurement<ProfilingMeasurements::OperationStatus>();
+
+          Processor::Kind target_kind = task.target_proc.kind();
+          VariantInfo chosen;
+          if (input.shard_processor.exists())
+          {
+            const std::pair<TaskID,Processor::Kind> key(
+                task.task_id, input.shard_processor.kind());
+            std::map<std::pair<TaskID,Processor::Kind>,VariantInfo>::const_iterator
+              finder = preferred_variants.find(key);
+            if (finder == preferred_variants.end())
+            {
+              chosen.variant = input.shard_variant;
+              chosen.proc_kind = input.shard_processor.kind();
+              chosen.tight_bound = true;
+              chosen.is_inner =
+                runtime->is_inner_variant(ctx, task.task_id, input.shard_variant);
+              chosen.is_leaf =
+                runtime->is_leaf_variant(ctx, task.task_id, input.shard_variant);
+              chosen.is_replicable = true;
+              preferred_variants.emplace(std::make_pair(key, chosen));
+            }
+            else
+              chosen = finder->second;
+          }
+          else
+            chosen = default_find_preferred_variant(task, ctx,
+                            true/*needs tight bound*/, true/*cache*/, target_kind);
+          output.chosen_variant = chosen.variant;
+          output.task_priority = default_policy_select_task_priority(ctx, task);
+          output.postmap_task = false;
+          // Figure out our target processors
+          if (input.shard_processor.exists())
+            output.target_procs.resize(1, input.shard_processor);
+          else
+            default_policy_select_target_processors(ctx, task, output.target_procs);
+          Processor target_proc = output.target_procs[0];
+
+          for(size_t i = 0; i < task.regions.size(); i++) {
+            Mapping::PhysicalInstance inst;
+            MemoryConstraint mem_constraint =
+              find_memory_constraint(ctx, task,
+                  output.chosen_variant, i);
+            Memory target_memory =
+              default_policy_select_target_memory(ctx,
+                  target_proc, task.regions[i],
+                  mem_constraint);
+            LayoutConstraintSet constraints;
+            constraints.add_constraint(FieldConstraint(
+                  task.regions[i].privilege_fields,
+                  false /*!contiguous*/));
+            std::vector<LogicalRegion> regions(1,
+                task.regions[i].region);
+            bool created;
+            bool ok = runtime->find_or_create_physical_instance(ctx,
+                      target_memory,
+                      constraints,
+                      regions,
+                      inst,
+                      created,
+                      true/*acquire*/,
+                      0/*priority*/,
+                      true/*tight_region_bounds*/
+                      );
+            if (ok)
+              output.chosen_instances[i].push_back(inst);
+            else {
+              output.abort_mapping = true;
+              return;
+            }
+          }
         }
-      }
-    }
-
-    using DefaultMapper::report_profiling;
-    void report_profiling(const MapperContext ctx,
-                          const Task& task,
-                          const TaskProfilingInfo& input)
-    {
-      // Only specific tasks should have profiling information.
-      assert (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
-          task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
-          task.task_id == POINTWISE_ANALYSABLE_SUM_ID);
-
-      // We expect all of our tasks to complete successfully.
-      auto prof = input.profiling_responses.get_measurement<ProfilingMeasurements::OperationStatus>();
-      assert(prof->result == Realm::ProfilingMeasurements::OperationStatus::COMPLETED_SUCCESSFULLY);
-      // Clean up after ourselves.
-      delete prof;
-
-      MapperEvent event;
-      this->points_executed++;
-      if (this->points_executed == point_types)
-      {
-        event = this->queue.front().event;
-        this->queue.clear();
-        points_executed = 0;
-        current_point++;
-      }
-
-      // Trigger the event so that the runtime knows it's time to schedule
-      // some more tasks to map.
-      if (event.exists())
-        this->runtime->trigger_mapper_event(ctx, event);
-    }
-
-    virtual void slice_task(const MapperContext ctx,
-        const Task& task,
-        const SliceTaskInput& input,
-        SliceTaskOutput& output)
-    {
-      output.slices.resize(input.domain.get_volume());
-      unsigned idx = 0;
-      for (RectInDomainIterator<1> itr(input.domain); itr(); itr++)
-      {
-        for (PointInRectIterator<1> pir(*itr); pir(); pir++, idx++)
+        else
         {
-          Rect<1> slice(*pir, *pir);
-          output.slices[idx] = TaskSlice(slice,
-              task.target_proc,
-              false/*recurse*/, true/*stealable*/);
+          DefaultMapper::map_task(ctx, task, input, output);
         }
+      }
+      else
+      {
+        DefaultMapper::map_task(ctx, task, input, output);
       }
     }
 
@@ -261,8 +265,6 @@ void top_level_task(const Task *task,
   }
 
   runtime->destroy_index_space(ctx, launch_is);
-  // -ll:fsize 512 - in MB
-  // -ll:csize 512 - in MB
 }
 
 void point_wise_analysable_fill(const Task *task,
@@ -273,6 +275,8 @@ void point_wise_analysable_fill(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
+  const Point<1> point = task->index_point;
+  printf("Fill Task %d\n", int(point.x()));
   const FieldAccessor<LEGION_WRITE_ONLY,uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
@@ -294,6 +298,8 @@ void point_wise_analysable_inc(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
+  const Point<1> point = task->index_point;
+  printf("Inc Task %d\n", int(point.x()));
   const FieldAccessor<LEGION_READ_WRITE,uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
@@ -314,6 +320,8 @@ uint64_t point_wise_analysable_sum(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
+  const Point<1> point = task->index_point;
+  printf("Sum Task %d\n", int(point.x()));
   const FieldAccessor<LEGION_READ_ONLY, uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
