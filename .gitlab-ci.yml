@@ -281,9 +281,6 @@ before_script:
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       export THREADS=$(nproc --all)
-      if [[ "$USE_CCACHE" -eq 1 ]]; then
-        apt install -y ccache
-      fi
     elif [[ "$(uname)" = "Darwin" ]]; then
       export THREADS=$(sysctl -n hw.ncpu)
     else
@@ -291,14 +288,6 @@ before_script:
       export THREADS=1
     fi
   - |
-    # Some features require higher CMake versions - grab them here so
-    # the default can remain an older version
-    if [[ "$USE_CMAKE" -eq 1 && "$USE_PYTHON" -eq 1 ]]; then
-      wget -nv https://github.com/Kitware/CMake/releases/download/v3.20.6/cmake-3.20.6-Linux-x86_64.tar.gz
-      echo "458777097903b0f35a0452266b923f0a2f5b62fe331e636e2dcc4b636b768e36  cmake-3.20.6-Linux-x86_64.tar.gz" | shasum --check
-      tar -zxf cmake-3.20.6-Linux-x86_64.tar.gz
-      PATH=`pwd`/cmake-3.20.6-linux-x86_64/bin:$PATH
-    fi
     if [[ "$UCX_SOURCE" != "" ]]; then
       mkdir ucx
       cd ucx
@@ -541,18 +530,17 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:231213
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:250130
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:231213
-# FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
-.image_kokkos_openmp: &image_kokkos_openmp
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:250130
+.image_2404: &image_2404
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-24.04:250130
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:231213
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:250130
 .image_icc: &image_icc
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:231213
-.image_msvc169: &image_msvc169
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:250130
+.image_msvc178: &image_msvc178
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc:250206
 
 ###
 ### Tests
@@ -657,7 +645,7 @@ before_script:
     - su wine -c "wine64 cmd /c 'x64.bat && cmake -G Ninja -S repo -B build -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON'"
     - "# wine doesn't seem to cope with concurrent file access, so use a serial build"
     - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -- -j1'"
-    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2019\\VC\\Redist\\MSVC\\14.28.29910\\debug_nonredist\\x64\\Microsoft.VC142.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.18362.0\\x64\\ucrt;%PATH% && cd build && ctest --output-on-failure'"
+    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2022\\VC\\Redist\\MSVC\\14.38.33130\\debug_nonredist\\x64\\Microsoft.VC143.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.20348.0\\x64\\ucrt;%PATH% && cd build && ctest --output-on-failure'"
     - echo OK
 
 # use a custom script for running Realm tests with sanitizers
@@ -673,7 +661,6 @@ before_script:
 
 .realm_clang_format: &realm_clang_format
   script:
-    - apt update -qq -yy && apt install -qq -yy clang-format-14
     - git diff -U0 --no-color ${CI_MERGE_REQUEST_DIFF_BASE_SHA} -- '**realm/*.cc' '**realm/*.h' | clang-format-diff-14 -p1 2>&1 > /tmp/not-formatted.diff
     - |
       if grep -q '[^[:space:]]' /tmp/not-formatted.diff; then
@@ -1347,15 +1334,10 @@ clang12_cxx17_debug_kokkos_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion, *ctest, *cpptrace]
-# FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
-clang10_cxx17_debug_kokkos_openmp_legion:
-  <<: [*linux, *image_kokkos_openmp, *tests]
+clang14_cxx17_debug_kokkos_openmp_legion:
+  <<: [*linux, *image_2204, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
-# clang14_cxx17_debug_kokkos_openmp_legion:
-#   <<: [*linux, *image_2204, *tests]
-#   variables:
-#     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
+    <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
 nvidia_cuda117_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
@@ -1394,8 +1376,8 @@ icc212_cxx17_debug_cmake_legion:
     <<: [*icc212, *debug, *cxx17_precise, *cmake, *legion, *ctest, *realm_unit_ctest, *short, *cpptrace]
 
 # MSVC (Realm only):
-msvc169_realm:
-  <<: [*msvc_wine, *image_msvc169, *msvc_tests]
+msvc178_realm:
+  <<: [*msvc_wine, *image_msvc178, *msvc_tests]
   variables:
     <<: [*short]
 
