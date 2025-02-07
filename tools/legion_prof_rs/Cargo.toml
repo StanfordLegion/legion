@@ -12,7 +12,7 @@ categories = ["development-tools::profiling"]
 license = "Apache-2.0"
 
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.84"
 
 [features]
 default = ["archiver", "client", "server", "viewer"]
@@ -38,7 +38,7 @@ slice-group-by = "0.3" # because &[]::group_by is unstable
 log = "0.4"
 env_logger = "0.10"
 nonmax = { version = "0.5.5", features = ["serde"] }
-petgraph = "0.6.5"
+petgraph = "0.7"
 
 [profile.dev]
 opt-level = 2
