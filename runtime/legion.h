@@ -3752,6 +3752,9 @@ namespace Legion {
       void finalize(Context ctx) const;
       Realm::RegionInstance get_instance(void) const;
     protected:
+      Realm::RegionInstance instance;
+    protected:
+      // Helper methods for DeferredValues and DeferredBuffers
       static Memory get_memory_from_kind(Memory::Kind kind, bool value);
       static Realm::RegionInstance allocate_instance(Memory memory,
           Realm::InstanceLayoutGeneric *layout);
@@ -3762,7 +3765,6 @@ namespace Legion {
       friend class FieldAccessor;
       template<typename,bool,int,typename,typename,bool>
       friend class ReductionAccessor;
-      Realm::RegionInstance instance;
       template<typename>
       friend class UntypedDeferredBuffer;
       template<typename,int,typename,bool>
@@ -3806,7 +3808,6 @@ namespace Legion {
       typedef const T& const_reference; 
     protected:
       DeferredValue(void);
-      Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
     };
 
