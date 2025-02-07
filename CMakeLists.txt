@@ -1071,8 +1071,8 @@ install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Option to install additional Legion support tools
-option(Legion_INSTALL_SPY "Install Legion Spy" ON)
-if (Legion_INSTALL_SPY)
+option(Legion_INSTALL_TOOLS "Install Legion Tools" ON)
+if (Legion_INSTALL_TOOLS)
   install(
     FILES
       ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
