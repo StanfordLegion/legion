@@ -16,9 +16,13 @@
 
 // UCP network module internals
 
+#include "ucp_internal.h"
+#include "bootstrap/bootstrap_internal.h"
 #include "realm/runtime_impl.h"
 #include "realm/transfer/ib_memory.h"
 #include "realm/logging.h"
+#include "unistd.h"
+#include <cstdint>
 
 #ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
@@ -382,7 +386,7 @@ namespace UCP {
     size_t self_max_addrlen = 0, max_addrlen = 0, max_num_rx_workers = 0;
     char *buf;
     ucs_status_t status;
-    int rc;
+    ucc_status_t rc;
     bool ret = true;
 
     struct WorkerInfo {
@@ -413,19 +417,22 @@ namespace UCP {
     // to avoid allgatherv, we find and use the maximum values across all ranks
 
     // find the global max rx worker address length across all ranks
-    rc = boot_handle.allgather(&self_max_addrlen, all_max_addrlen.data(),
-        sizeof(self_max_addrlen), &boot_handle);
-    CHKERR_JUMP(rc != 0, "failed to allgather max worker address length",
-        log_ucp, err);
+    rc = ucc_comm->UCC_Allgather(
+        &self_max_addrlen, sizeof(self_max_addrlen), UCC_DT_UINT8, all_max_addrlen.data(),
+        sizeof(self_max_addrlen) * ucc_comm->get_world_size(), UCC_DT_UINT8);
+
+    CHKERR_JUMP(rc != UCC_OK, "failed to allgather max worker address length", log_ucp,
+                err);
 
     max_addrlen = *std::max_element(all_max_addrlen.begin(),
         all_max_addrlen.end());
 
     // get the number of rx workers created by each rank
-    rc = boot_handle.allgather(&self_num_rx_workers, all_num_rx_workers.data(),
-        sizeof(self_num_rx_workers), &boot_handle);
-    CHKERR_JUMP(rc != 0, "failed to allgather the number of workers",
-        log_ucp, err);
+    rc = ucc_comm->UCC_Allgather(&self_num_rx_workers, sizeof(self_num_rx_workers),
+                                 UCC_DT_UINT8, all_num_rx_workers.data(),
+                                 sizeof(self_num_rx_workers) * ucc_comm->get_world_size(),
+                                 UCC_DT_UINT8);
+    CHKERR_JUMP(rc != UCC_OK, "failed to allgather the number of workers", log_ucp, err);
 
     max_num_rx_workers = *std::max_element(all_num_rx_workers.begin(),
         all_num_rx_workers.end());
@@ -436,10 +443,12 @@ namespace UCP {
     }
     self_dev_indices.resize(max_num_rx_workers);
     all_dev_indices.resize(world_size * max_num_rx_workers);
-    rc = boot_handle.allgather(self_dev_indices.data(), all_dev_indices.data(),
-        max_num_rx_workers * sizeof(self_dev_indices[0]), &boot_handle);
-    CHKERR_JUMP(rc != 0, "failed to allgather worker device indices",
-        log_ucp, err);
+    rc = ucc_comm->UCC_Allgather(
+        self_dev_indices.data(), max_num_rx_workers * sizeof(self_dev_indices[0]),
+        UCC_DT_UINT8, all_dev_indices.data(),
+        max_num_rx_workers * sizeof(all_dev_indices[0]) * ucc_comm->get_world_size(),
+        UCC_DT_UINT8);
+    CHKERR_JUMP(rc != UCC_OK, "failed to allgather worker device indices", log_ucp, err);
 
     // gather the addresses of all rx workers across all ranks.
     // first copy all self rx worker addresses into a contiguous buffer
@@ -451,9 +460,12 @@ namespace UCP {
     }
     // do the allgather now
     all_rx_workers_addr.resize(world_size * max_num_rx_workers * max_addrlen);
-    rc = boot_handle.allgather(self_rx_workers_addr.data(), all_rx_workers_addr.data(),
-        max_num_rx_workers * max_addrlen, &boot_handle);
-    CHKERR_JUMP(rc != 0, "failed to allgather worker addresses", log_ucp, err);
+    rc = ucc_comm->UCC_Allgather(
+        self_rx_workers_addr.data(), max_num_rx_workers * max_addrlen, UCC_DT_UINT8,
+        all_rx_workers_addr.data(),
+        max_num_rx_workers * max_addrlen * ucc_comm->get_world_size(), UCC_DT_UINT8);
+
+    CHKERR_JUMP(rc != UCC_OK, "failed to allgather worker addresses", log_ucp, err);
 
     // create an ep from each local tx worker to each remote rx worker
     for (int peer = 0; peer < world_size; peer++) {
@@ -785,6 +797,7 @@ err:
 
   bool UCPInternal::bootstrap()
   {
+    ucc_status_t status{UCC_OK};
     assert(!initialized_boot && !initialized_ucp);
 
     BootstrapConfig boot_config;
@@ -795,22 +808,38 @@ err:
       boot_config.mode = Realm::UCP::BOOTSTRAP_MPI;
     } else if (strcmp(bootstrap_mode_str, "mpi") == 0) {
         boot_config.mode = Realm::UCP::BOOTSTRAP_MPI;
-    } else if (strcmp(bootstrap_mode_str, "plugin") == 0) {
-        boot_config.mode = Realm::UCP::BOOTSTRAP_PLUGIN;
+    } else if(strcmp(bootstrap_mode_str, "p2p") == 0) {
+      boot_config.mode = Realm::UCP::BOOTSTRAP_P2P;
+    } else if(strcmp(bootstrap_mode_str, "plugin") == 0) {
+      boot_config.mode = Realm::UCP::BOOTSTRAP_PLUGIN;
     } else {
       log_ucp.fatal() << "invalid UCP bootstrap mode %s" << bootstrap_mode_str;
       goto err;
     }
 
     boot_config.plugin_name = getenv("REALM_UCP_BOOTSTRAP_PLUGIN");
-
     CHKERR_JUMP(bootstrap_init(&boot_config, &boot_handle),
         "failed to bootstrap ucp", log_ucp, err);
 
-    Network::my_node_id  = boot_handle.pg_rank;
-    Network::max_node_id = boot_handle.pg_size - 1;
-    Network::all_peers.add_range(0, boot_handle.pg_size - 1);
-    Network::all_peers.remove(boot_handle.pg_rank);
+    ucc_comm.reset(
+        new ucc::UCCComm(boot_handle.pg_rank, boot_handle.pg_size, &boot_handle));
+
+    status = ucc_comm->init();
+    if(UCC_OK != status) {
+      log_ucp.error() << "Failed to initialize ucc collectives\n";
+      goto err;
+    }
+
+    // Compute shared ranks
+    if(!compute_shared_ranks()) {
+      log_ucp.error() << "Failed to compute shared ranks \n";
+      goto err;
+    }
+
+    Network::my_node_id = ucc_comm->get_rank();
+    Network::max_node_id = ucc_comm->get_world_size() - 1;
+    Network::all_peers.add_range(0, ucc_comm->get_world_size() - 1);
+    Network::all_peers.remove(ucc_comm->get_rank());
 
     initialized_boot = true;
     log_ucp.info() << "bootstrapped UCP network module";
@@ -819,6 +848,36 @@ err:
 
 err:
     return false;
+  }
+
+  bool UCPInternal::compute_shared_ranks()
+  {
+    std::vector<int> rank_host_ids(ucc_comm->get_world_size());
+    shared_ranks.resize(ucc_comm->get_world_size());
+
+    int host_id = gethostid();
+
+    // allgather ranks
+    ucc_status_t st{UCC_OK};
+
+    st = ucc_comm->UCC_Allgather(&host_id, 1, UCC_DT_INT32, rank_host_ids.data(),
+                                 ucc_comm->get_world_size(), UCC_DT_UINT32);
+
+    if(UCC_OK != st) {
+      log_ucp.error() << "Failed to get the hostids of the rank\n";
+      return false;
+    }
+
+    // Populate shared ranks and total count.
+    for(int r = 0; r < static_cast<int>(rank_host_ids.size()); r++) {
+      if(rank_host_ids[r] == host_id) {
+        this->shared_ranks.push_back(r);
+      }
+    }
+
+    this->num_shared_ranks = rank_host_ids.size();
+
+    return true;
   }
 
 #ifdef REALM_UCX_DYNAMIC_LOAD
@@ -1510,17 +1569,18 @@ err:
 
   void UCPInternal::get_shared_peers(Realm::NodeSet &shared_peers)
   {
-    for(int i = 0; i < boot_handle.num_shared_ranks; i++) {
-      if(boot_handle.shared_ranks[i] != boot_handle.pg_rank) {
-        shared_peers.add(boot_handle.shared_ranks[i]);
+    for(int i = 0; i < this->num_shared_ranks; i++) {
+      if(this->shared_ranks[i] != ucc_comm->get_rank()) {
+        shared_peers.add(shared_ranks[i]);
       }
     }
   }
+
   void UCPInternal::barrier()
   {
-    int rc;
-    rc = boot_handle.barrier(&boot_handle);
-    if (rc != 0) {
+    ucc_status_t rc;
+    rc = ucc_comm->UCC_Barrier();
+    if(rc != UCC_OK) {
       log_ucp.error() << "UCP barrier failed";
     }
   }
@@ -1528,14 +1588,14 @@ err:
   void UCPInternal::broadcast(NodeID root,
       const void *val_in, void *val_out, size_t bytes)
   {
-    int rc;
+    ucc_status_t rc;
 
     if (Network::my_node_id == root) {
       std::memcpy(val_out, val_in, bytes);
     }
 
-    rc = boot_handle.bcast(val_out, bytes, root, &boot_handle);
-    if (rc != 0) {
+    rc = ucc_comm->UCC_Bcast(val_out, bytes, UCC_DT_UINT8, root);
+    if(rc != UCC_OK) {
       log_ucp.error() << "UCP broadcast failed";
     }
   }
@@ -1543,10 +1603,11 @@ err:
   void UCPInternal::gather(NodeID root,
       const void *val_in, void *vals_out, size_t bytes)
   {
-    int rc;
+    ucc_status_t rc;
 
-    rc = boot_handle.gather(val_in, vals_out, bytes, root, &boot_handle);
-    if (rc != 0) {
+    rc = ucc_comm->UCC_Gather(const_cast<void *>(val_in), bytes, UCC_DT_UINT8, vals_out,
+                              bytes, UCC_DT_UINT8, root);
+    if(rc != UCC_OK) {
       log_ucp.error() << "UCP gather failed";
     }
   }
@@ -1554,11 +1615,13 @@ err:
   void UCPInternal::allgatherv(const char *val_in, size_t bytes,
                                std::vector<char> &vals_out, std::vector<size_t> &lengths)
   {
-    int rc = 0;
+    ucc_status_t rc = UCC_OK;
     lengths.resize(Network::max_node_id + 1);
     // Retrieve the sizes of the buffers
-    rc = boot_handle.allgather(&bytes, lengths.data(), sizeof(bytes), &boot_handle);
-    if(rc != 0) {
+    rc =
+        ucc_comm->UCC_Allgather(&bytes, sizeof(bytes), UCC_DT_UINT8, lengths.data(),
+                                sizeof(bytes) * ucc_comm->get_world_size(), UCC_DT_UINT8);
+    if(rc != UCC_OK) {
       log_ucp.error() << "UCP all gather failed";
     }
     // Set up the receive buffer and describe the final buffer layout
@@ -1576,9 +1639,11 @@ err:
     vals_out.resize(total);
 
     // Perform the allgatherv!
-    rc = boot_handle.allgatherv(val_in, vals_out.data(), sizes.data(), offsets.data(),
-                                &boot_handle);
-    if(rc != 0) {
+    rc = ucc_comm->UCC_Allgatherv(const_cast<char *>(val_in), sizes[ucc_comm->get_rank()],
+                                  UCC_DT_UINT8, vals_out.data(), sizes, offsets,
+                                  UCC_DT_UINT8);
+
+    if(rc != UCC_OK) {
       log_ucp.error() << "UCP allgatherv failed";
     }
   }
@@ -1615,10 +1680,9 @@ err:
                     << " total_rcomp_received "  << local_counts[4]
                     << " outstanding_reqs "      << local_counts[5];
 
-
-    int rc = boot_handle.allreduce_ull(local_counts, total_counts,
-        num_counters, REDUCTION_SUM, &boot_handle);
-    if (rc != 0) {
+    ucc_status_t rc = ucc_comm->UCC_Allreduce(local_counts, total_counts, num_counters,
+                                              UCC_DT_UINT64, UCC_OP_SUM);
+    if(rc != UCC_OK) {
       log_ucp.error() << "allreduce failed in check_for_quiescence";
       return false;
     }

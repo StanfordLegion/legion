@@ -651,10 +651,14 @@ ifeq ($(strip $(GPU_ARCH)),hopper)
 override GPU_ARCH = 90
 NVCC_FLAGS	+= -DHOPPER_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),blackwell)
+override GPU_ARCH = 100
+NVCC_FLAGS	+= -DBLACKWELL_ARCH
+endif
 
 ifeq ($(strip $(GPU_ARCH)),auto)
   # detect based on what nvcc supports
-  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75 80 90
+  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75 80 90 100
   override GPU_ARCH = $(shell for X in $(ALL_ARCHES) ; do \
     $(NVCC) -gencode arch=compute_$$X,code=sm_$$X -cuda -x c++ /dev/null -o /dev/null 2> /dev/null && echo $$X; \
   done)
@@ -763,9 +767,15 @@ ifeq ($(strip $(REALM_NETWORKS)),ucx)
   REALM_CC_FLAGS  += -DREALM_USE_UCX
   UCX_LIBS        := -lucp
   LEGION_LD_FLAGS += $(UCX_LIBS)
+  UCC_LIBS        := -lucc
+  LEGION_LD_FLAGS += $(UCC_LIBS)
   ifdef UCX_ROOT
     CC_FLAGS        += -I$(UCX_ROOT)/include
     LEGION_LD_FLAGS += -L$(UCX_ROOT)/lib
+  endif
+  ifdef UCC_ROOT
+    CC_FLAGS        += -I$(UCC_ROOT)/include
+    LEGION_LD_FLAGS += -L$(UCC_ROOT)/lib
   endif
 else
   $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, mpi, or ucx)
@@ -1039,6 +1049,8 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/ucx/ucp_module.cc \
 			   $(LG_RT_DIR)/realm/ucx/ucp_internal.cc \
 			   $(LG_RT_DIR)/realm/ucx/ucp_context.cc \
 			   $(LG_RT_DIR)/realm/ucx/mpool.cc \
+			   $(LG_RT_DIR)/realm/ucx/ucc_comm.cc \
+			   $(LG_RT_DIR)/realm/ucx/oob_group_comm.cc \
 			   $(LG_RT_DIR)/realm/ucx/bootstrap/bootstrap.cc \
 			   $(LG_RT_DIR)/realm/ucx/bootstrap/bootstrap_loader.cc
 endif

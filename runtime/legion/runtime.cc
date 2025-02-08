@@ -13777,11 +13777,12 @@ namespace Legion {
         else
           use_event = RtEvent(PhysicalInstance::create_instance(instance,
                     memory, layout->clone(), requests, alloc_precondition));
-        if (use_event.exists() && (implicit_profiler != NULL))
-          implicit_profiler->record_instance_ready(use_event, unique_event,
-                                                   alloc_precondition);
         if (allocator.succeeded())
         {
+          // Only record this if we succeeded in the allocation
+          if (use_event.exists() && (implicit_profiler != NULL))
+            implicit_profiler->record_instance_ready(use_event, unique_event,
+                                                     alloc_precondition);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
           size_t previous =
@@ -13803,6 +13804,10 @@ namespace Legion {
             requests, instance);
         if (instance.exists())
         {
+          // Only record this if we succeeded in the allocation
+          if (use_event.exists() && (implicit_profiler != NULL))
+            implicit_profiler->record_instance_ready(use_event, unique_event,
+                                                     alloc_precondition);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
           size_t previous =
@@ -13874,13 +13879,9 @@ namespace Legion {
       static_assert((sizeof(size_t) == 4) || (sizeof(size_t) == 8));
       // Round up to the nearest power of 2
       size--;
-      size |= size >> 1;
-      size |= size >> 2;
-      size |= size >> 4;
-      size |= size >> 8;
-      size |= size >> 16;
-      if (sizeof(size_t) == 8)
-        size |= size >> 32;
+      for (unsigned i = 1; i <= (4 * sizeof(size)); i <<= 1) {
+        size |= size >> i;
+      }
       size++;
       return std::min<size_t>(size, max_alignment);
     }
