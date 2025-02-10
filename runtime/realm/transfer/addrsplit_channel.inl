@@ -71,7 +71,8 @@ namespace Realm {
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
     , addrsplit_channel(_addrsplit_channel)
-  {}
+  {
+  }
 
   template <int N, typename T>
   void AddressSplitXferDesFactory<N, T>::release()
