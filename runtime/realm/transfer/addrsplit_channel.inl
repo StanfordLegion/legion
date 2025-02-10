@@ -65,20 +65,12 @@ namespace Realm {
   //
 
   template <int N, typename T>
-  /*static*/ ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>>
-      AddressSplitXferDesFactory<N, T>::areg;
-
-  template <int N, typename T>
   AddressSplitXferDesFactory<N, T>::AddressSplitXferDesFactory(
       size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces,
       AddressSplitChannel *_addrsplit_channel)
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
     , addrsplit_channel(_addrsplit_channel)
-  {}
-
-  template <int N, typename T>
-  AddressSplitXferDesFactory<N, T>::~AddressSplitXferDesFactory()
   {}
 
   template <int N, typename T>
@@ -152,10 +144,6 @@ namespace Realm {
   {
     ctrl_encoder.set_port_count(spaces.size());
   }
-
-  template <int N, typename T>
-  AddressSplitXferDes<N, T>::~AddressSplitXferDes()
-  {}
 
   template <int N, typename T>
   int AddressSplitXferDes<N, T>::find_point_in_spaces(Point<N, T> p, int guess_idx) const

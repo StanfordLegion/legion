@@ -25,11 +25,23 @@ namespace Realm {
   AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
     : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(
           bgwork, XFER_ADDR_SPLIT, "address split")
+  {}
+
+  XferDes *AddressSplitChannel::create_xfer_des(
+      uintptr_t dma_op, NodeID launch_node, XferDesID guid,
+      const std::vector<XferDesPortInfo> &inputs_info,
+      const std::vector<XferDesPortInfo> &outputs_info, int priority,
+      XferDesRedopInfo redop_info, const void *fill_data, size_t fill_size,
+      size_t fill_total)
   {
+    assert(0);
+    return nullptr;
   }
 
-  AddressSplitChannel::~AddressSplitChannel()
+  long AddressSplitChannel::submit(Request **requests, long nr)
   {
+    assert(0);
+    return 0;
   }
 
   ////////////////////////////////////////////////////////////////////////

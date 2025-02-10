@@ -47,10 +47,10 @@ namespace Realm {
     : public SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase> {
   public:
     AddressSplitChannel(BackgroundWorkManager *bgwork);
-    virtual ~AddressSplitChannel();
+    virtual ~AddressSplitChannel() = default;
 
     // do as many of these concurrently as we like
-    static const bool is_ordered = false;
+    static constexpr bool is_ordered = false;
 
     virtual void enqueue_ready_xd(XferDes *xd)
     {
@@ -64,17 +64,9 @@ namespace Realm {
                                      const std::vector<XferDesPortInfo> &outputs_info,
                                      int priority, XferDesRedopInfo redop_info,
                                      const void *fill_data, size_t fill_size,
-                                     size_t fill_total)
-    {
-      assert(0);
-      return 0;
-    }
+                                     size_t fill_total);
 
-    virtual long submit(Request **requests, long nr)
-    {
-      assert(0);
-      return 0;
-    }
+    virtual long submit(Request **requests, long nr);
 
   protected:
     static AddressSplitChannel *local_channel;
@@ -96,7 +88,7 @@ namespace Realm {
                                AddressSplitChannel *_addrsplit_channel);
 
   protected:
-    virtual ~AddressSplitXferDesFactory();
+    virtual ~AddressSplitXferDesFactory() = default;
 
   public:
     virtual void release();
@@ -109,7 +101,7 @@ namespace Realm {
                                  const void *fill_data, size_t fill_size,
                                  size_t fill_total);
 
-    static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>> areg;
+    static inline ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>> areg;
 
   protected:
     size_t bytes_per_element;
@@ -126,7 +118,7 @@ namespace Realm {
                         size_t _element_size,
                         const std::vector<IndexSpace<N, T>> &_spaces);
 
-    ~AddressSplitXferDes();
+    ~AddressSplitXferDes() = default;
 
     virtual Event request_metadata();
 
@@ -137,7 +129,7 @@ namespace Realm {
 
     std::vector<IndexSpace<N, T>> spaces;
     size_t element_size;
-    static const size_t MAX_POINTS = 64;
+    static constexpr size_t MAX_POINTS = 64;
     size_t point_index, point_count;
     Point<N, T> points[MAX_POINTS];
     int output_space_id;
