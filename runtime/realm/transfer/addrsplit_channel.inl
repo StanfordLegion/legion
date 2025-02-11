@@ -100,9 +100,9 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  void AddressSplitXferDesFactory<N, T>::release()
+  bool AddressSplitXferDesFactory<N, T>::needs_release()
   {
-    delete this;
+    return true;
   }
 
   template <int N, typename T>

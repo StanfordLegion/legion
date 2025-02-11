@@ -31,13 +31,13 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
       std::make_unique<BackgroundWorkManager>();
   MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
   std::vector<IndexSpace<1>> spaces(1);
-  AddressSplitXferDesFactory<1, int> *factory = new AddressSplitXferDesFactory<1, int>(
-      bytes_per_element, spaces, addrsplit_channel);
+  std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
+      std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
+                                                           addrsplit_channel);
   factory->create_xfer_des(/*dma_op=*/0, /*launch_node=*/0, /*target_node=*/0, /*guid=*/0,
                            inputs_info, outputs_info, 0, redop_info, nullptr, 0, 0);
 
   EXPECT_EQ(addrsplit_channel->num_xds, 1);
-  factory->release();
 }
 
 template <int N, typename T>
@@ -67,14 +67,15 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesRemote)
       std::make_unique<BackgroundWorkManager>();
   MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
   std::vector<IndexSpace<1>> spaces(1);
-  AddressSplitXferDesFactory<1, int> *factory = new AddressSplitXferDesFactory<1, int>(
-      bytes_per_element, spaces, addrsplit_channel, comm);
+
+  std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
+      std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
+                                                           addrsplit_channel, comm);
   factory->create_xfer_des(0, launch_node, target_node, guid, inputs_info, outputs_info,
                            0, redop_info, nullptr, 0, 0);
 
   EXPECT_EQ(addrsplit_channel->num_xds, 0);
   EXPECT_EQ(comm->num_remote_xds, 1);
-  factory->release();
 }
 
 template <int N, typename T>

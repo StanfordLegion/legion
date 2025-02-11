@@ -655,12 +655,9 @@ namespace Realm {
     };
 
     class XferDesFactory {
-    protected:
-      // do not destroy directly - use release()
-      virtual ~XferDesFactory() {}
-
     public:
-      virtual void release() = 0;
+      virtual ~XferDesFactory() {}
+      virtual bool needs_release() = 0;
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
@@ -695,7 +692,7 @@ namespace Realm {
     public:
       SimpleXferDesFactory(uintptr_t _channel);
 
-      virtual void release();
+      virtual bool needs_release();
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,

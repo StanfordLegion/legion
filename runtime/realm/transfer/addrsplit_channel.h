@@ -80,6 +80,7 @@ namespace Realm {
   template <int N, typename T>
   class AddressSplitCommunicator {
   public:
+    virtual ~AddressSplitCommunicator() = default;
     virtual void create(NodeID target_node, NodeID launch_node, XferDesID guid,
                         uintptr_t dma_op, const void *msgdata, size_t msglen);
   };
@@ -96,11 +97,10 @@ namespace Realm {
                                AddressSplitChannel *_addrsplit_channel,
                                AddressSplitCommunicator<N, T> *_comm);
 
-  protected:
     virtual ~AddressSplitXferDesFactory() = default;
 
   public:
-    virtual void release();
+    virtual bool needs_release();
 
     virtual void create_xfer_des(uintptr_t dma_op, NodeID launch_node, NodeID target_node,
                                  XferDesID guid,

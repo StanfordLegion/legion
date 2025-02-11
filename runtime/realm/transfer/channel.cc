@@ -4477,9 +4477,9 @@ namespace Realm {
     : channel(_channel)
   {}
 
-  void SimpleXferDesFactory::release()
+  bool SimpleXferDesFactory::needs_release()
   {
-    // do nothing since we are a singleton
+    return false;
   }
 
   void SimpleXferDesFactory::create_xfer_des(uintptr_t dma_op,

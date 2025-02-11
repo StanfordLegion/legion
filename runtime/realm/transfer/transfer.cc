@@ -4935,7 +4935,9 @@ namespace Realm {
       xd_factory->create_xfer_des(reinterpret_cast<uintptr_t>(this), Network::my_node_id,
                                   xd_target_node, xd_guid, inputs_info, outputs_info,
                                   priority, xdn.redop, fill_data, fill_size, fill_total);
-      xd_factory->release();
+      if(xd_factory->needs_release()) {
+        delete xd_factory;
+      }
     }
 
     // record requested profiling information
