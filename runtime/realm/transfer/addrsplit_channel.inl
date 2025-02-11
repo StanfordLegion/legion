@@ -23,7 +23,7 @@ namespace Realm {
   extern Logger log_xpath;
   extern Logger log_xpath_cache;
 
-  static AddressSplitChannel *local_addrsplit_channel = 0;
+  AddressSplitChannel *get_local_addrsplit_channel();
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -50,8 +50,9 @@ namespace Realm {
     assert(ok);
     assert(fbd.bytes_left() == 0);
 
-    // assert(!args.inst.exists());
+    auto local_addrsplit_channel = get_local_addrsplit_channel();
     assert(local_addrsplit_channel);
+
     XferDes *xd = new AddressSplitXferDes<N, T>(
         args.dma_op, local_addrsplit_channel, args.launch_node, args.guid, inputs_info,
         outputs_info, priority, element_size, spaces);
@@ -71,8 +72,7 @@ namespace Realm {
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
     , addrsplit_channel(_addrsplit_channel)
-  {
-  }
+  {}
 
   template <int N, typename T>
   void AddressSplitXferDesFactory<N, T>::release()

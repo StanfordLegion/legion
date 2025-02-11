@@ -43,6 +43,22 @@ namespace Realm {
     size_t ib_size_bytes = 65536;
   }; // namespace Config
 
+  static AddressSplitChannel *local_addrsplit_channel = 0;
+
+  AddressSplitChannel *get_local_addrsplit_channel()
+  {
+    if(local_addrsplit_channel == nullptr) {
+      const Node &n = get_runtime()->nodes[Network::my_node_id];
+      for(Channel *ch : n.dma_channels) {
+        if(ch->kind == XFER_ADDR_SPLIT) {
+          local_addrsplit_channel = reinterpret_cast<AddressSplitChannel *>(ch);
+          break;
+        }
+      }
+    }
+    return local_addrsplit_channel;
+  }
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class TransferIterator
@@ -3514,20 +3530,9 @@ namespace Realm {
   IndirectionInfo *CopyIndirection<N, T>::Unstructured<N2, T2>::create_info(
       const IndexSpace<N, T> &is) const
   {
-    // The next indirection is not allowed to be specified yet.
     assert(next_indirection == nullptr);
-
-    if(local_addrsplit_channel == nullptr) {
-      const auto &n = get_runtime()->nodes[Network::my_node_id];
-      for(auto ch : n.dma_channels) {
-        if(ch->kind == XFER_ADDR_SPLIT) {
-          local_addrsplit_channel = reinterpret_cast<AddressSplitChannel *>(ch);
-        }
-      }
-    }
-
-    assert(local_addrsplit_channel);
-    return new IndirectionInfoTyped<N, T, N2, T2>(is, *this, local_addrsplit_channel);
+    return new IndirectionInfoTyped<N, T, N2, T2>(is, *this,
+                                                  get_local_addrsplit_channel());
   }
 
   ////////////////////////////////////////////////////////////////////////

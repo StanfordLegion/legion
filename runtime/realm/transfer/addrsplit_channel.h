@@ -67,9 +67,6 @@ namespace Realm {
                                      size_t fill_total);
 
     virtual long submit(Request **requests, long nr);
-
-  protected:
-    static AddressSplitChannel *local_channel;
   };
 
   template <int N, typename T>
