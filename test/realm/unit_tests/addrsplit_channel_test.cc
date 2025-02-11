@@ -12,7 +12,7 @@ public:
     : AddressSplitChannel(bgwork)
   {}
 
-  virtual void enqueue_ready_xd(XferDes *xd) { num_xds++; }
+  void enqueue_ready_xd(XferDes *xd) override { num_xds++; }
 
   int num_xds = 0;
 };
@@ -87,13 +87,13 @@ public:
     , total_bytes(_total_bytes)
   {}
 
-  virtual Event request_metadata(void) { return Event::NO_EVENT; }
+  Event request_metadata(void) override { return Event::NO_EVENT; }
 
-  virtual void reset(void) {}
+  void reset(void) override {}
 
-  virtual bool done(void) { return iterations >= max_iterations; }
-  virtual size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
-                      bool tentative = false)
+  bool done(void) override { return iterations >= max_iterations; }
+  size_t step(size_t max_bytes, AddressInfo &info, unsigned flags,
+              bool tentative = false) override
   {
     info.base_offset = offset;
     size_t bytes = std::min(max_bytes, total_bytes);
@@ -102,27 +102,22 @@ public:
     return bytes;
   }
 
-  virtual size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
-                             bool tentative = false)
+  size_t step_custom(size_t max_bytes, AddressInfoCustom &info,
+                     bool tentative = false) override
   {
     assert(0);
     return 0;
   }
 
-  virtual void confirm_step(void) {}
-  virtual void cancel_step(void) {}
+  void confirm_step(void) override {}
+  void cancel_step(void) override {}
 
-  virtual size_t get_base_offset(void) const { return 0; }
+  size_t get_base_offset(void) const override { return 0; }
 
-  virtual bool get_addresses(AddressList &addrlist,
-                             const InstanceLayoutPieceBase *&nonaffine)
+  bool get_addresses(AddressList &addrlist,
+                     const InstanceLayoutPieceBase *&nonaffine) override
   {
     nonaffine = 0;
-    return false;
-  }
-
-  virtual bool get_next_rect(Rect<DIM, T> &r, FieldID &fid, size_t &offset, size_t &fsize)
-  {
     return false;
   }
 
@@ -138,8 +133,10 @@ TYPED_TEST_P(AddressSplitTest, ProgressXD)
   using T = std::tuple_element_t<1, TypeParam>;
 
   for(const auto &test_case : AddressSplitTest<TypeParam>::_test_cases_) {
-    auto bgwork = std::make_unique<BackgroundWorkManager>();
-    auto addrsplit_channel = std::make_unique<MockAddressSplitChannel>(bgwork.get());
+    std::unique_ptr<BackgroundWorkManager> bgwork =
+        std::make_unique<BackgroundWorkManager>();
+    std::unique_ptr<MockAddressSplitChannel> addrsplit_channel =
+        std::make_unique<MockAddressSplitChannel>(bgwork.get());
 
     std::vector<XferDesPortInfo> inputs_info;
     std::vector<XferDesPortInfo> outputs_info;
@@ -227,54 +224,95 @@ INSTANTIATE_TYPED_TEST_SUITE_P(My, AddressSplitTest, MyTypes);
 
 template <>
 std::vector<AddressSplitXferDescTestCase<1, int>>
-    AddressSplitTest<std::tuple<std::integral_constant<int, 1>, int>>::_test_cases_ =
+    AddressSplitTest<std::tuple<std::integral_constant<int, 1>, int>>::_test_cases_ = {
+        // Case 0: All points inside one space
         {
+            .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(0), Point<1>(3)}}},
+            .src_points = {Point<1, int>(0), Point<1, int>(1), Point<1, int>(2),
+                           Point<1, int>(3)},
+            .exp_points = {{Point<1, int>(0), Point<1, int>(1), Point<1, int>(2),
+                            Point<1, int>(3)}},
+        },
 
-            // Case 0
-            AddressSplitXferDescTestCase<1, int>{
-                .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(0), Point<1>(3)}}},
-                .src_points = {Point<1, int>(0), Point<1, int>(1), Point<1, int>(2),
-                               Point<1, int>(3)},
-                .exp_points = {{Point<1, int>(0), Point<1, int>(1), Point<1, int>(2),
-                                Point<1, int>(3)}},
-            },
+        // Case 1: Partial overlap with a single index space
+        {
+            .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(2), Point<1>(6)}}},
+            .src_points = {Point<1, int>(0), Point<1, int>(1), Point<1, int>(2),
+                           Point<1, int>(3)},
+            .exp_points = {{Point<1, int>(2), Point<1, int>(3)}},
+        },
 
-            // Case 1 - partial overlap with a single index space
-            AddressSplitXferDescTestCase<1, int>{
-                .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(2), Point<1>(6)}}},
-                .src_points = {Point<1, int>(0), Point<1, int>(1), Point<1, int>(2),
-                               Point<1, int>(3)},
-                .exp_points = {{Point<1, int>(2), Point<1, int>(3)}},
-            },
+        // Case 2: Multiple disjoint index spaces
+        {
+            .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(0), Point<1>(2)}},
+                       IndexSpace<1, int>{Rect<1>{Point<1>(3), Point<1>(6)}}},
+            .src_points = {Point<1, int>(1), Point<1, int>(2), Point<1, int>(3),
+                           Point<1, int>(4)},
+            .exp_points = {{Point<1, int>(1), Point<1, int>(2)},
+                           {Point<1, int>(3), Point<1, int>(4)}},
+        },
 
-            // Case 2
-            AddressSplitXferDescTestCase<1, int>{
-                .spaces =
-                    {
-                        IndexSpace<1, int>{Rect<1>{Point<1>(0), Point<1>(2)}},
-                        IndexSpace<1, int>{Rect<1>{Point<1>(3), Point<1>(6)}},
-                    },
-                .src_points = {Point<1, int>(1), Point<1, int>(2), Point<1, int>(3),
-                               Point<1, int>(4)},
-                .exp_points =
-                    {
-                        {Point<1, int>(1), Point<1, int>(2)},
-                        {Point<1, int>(3), Point<1, int>(4)},
-                    },
-            },
+        // Case 3: Empty input set (should produce no output)
+        /*{
+            .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(0), Point<1>(5)}}},
+            .src_points = {},   // No input points
+            .exp_points = {{}}, // No output expected
+        },*/
 
-};
+        // Case 4: All input points outside index spaces (should produce no output)
+        {
+            .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(10), Point<1>(20)}}},
+            .src_points = {Point<1, int>(0), Point<1, int>(1), Point<1, int>(2)},
+            .exp_points = {{}}, // No output expected
+        },
+
+        // Case 5: Partially overlapping spaces
+        {
+            .spaces = {IndexSpace<1, int>{Rect<1>{Point<1>(0), Point<1>(4)}},
+                       IndexSpace<1, int>{Rect<1>{Point<1>(3), Point<1>(6)}}},
+            .src_points = {Point<1, int>(2), Point<1, int>(3), Point<1, int>(4)},
+            .exp_points = {{Point<1, int>(2), Point<1, int>(3), Point<1, int>(4)},
+                           {Point<1, int>(0), Point<1, int>(0)}},
+        }};
 
 template <>
 std::vector<AddressSplitXferDescTestCase<2, long long>> AddressSplitTest<
     std::tuple<std::integral_constant<int, 2>, long long>>::_test_cases_ = {
-
-    // Case 3
-    AddressSplitXferDescTestCase<2, long long>{
+    // Case 6: 2D test with a single row
+    {
         .spaces = {IndexSpace<2, long long>{
             Rect<2, long long>{Point<2, long long>(0, 0), Point<2, long long>(3, 0)}}},
         .src_points = {Point<2, long long>(0, 0), Point<2, long long>(1, 0),
                        Point<2, long long>(2, 0), Point<2, long long>(3, 0)},
         .exp_points = {{Point<2, long long>(0, 0), Point<2, long long>(1, 0),
                         Point<2, long long>(2, 0), Point<2, long long>(3, 0)}},
+    },
+
+    // Case 7: 2D test with multiple rows
+    {
+        .spaces = {IndexSpace<2, long long>{
+            Rect<2, long long>{Point<2, long long>(0, 0), Point<2, long long>(2, 2)}}},
+        .src_points = {Point<2, long long>(0, 0), Point<2, long long>(1, 1),
+                       Point<2, long long>(2, 2), Point<2, long long>(3, 3)},
+        .exp_points = {{Point<2, long long>(0, 0), Point<2, long long>(1, 1),
+                        Point<2, long long>(2, 2)}},
+    },
+
+    // Case 8: 2D test with all points outside (should produce no output)
+    {
+        .spaces = {IndexSpace<2, long long>{Rect<2, long long>{
+            Point<2, long long>(10, 10), Point<2, long long>(15, 15)}}},
+        .src_points = {Point<2, long long>(1, 1), Point<2, long long>(2, 2)},
+        .exp_points = {{}}, // No output expected
+    },
+
+    // Case 9: 2D test with overlapping spaces
+    {
+        .spaces = {IndexSpace<2, long long>{Rect<2, long long>{
+                       Point<2, long long>(0, 0), Point<2, long long>(2, 2)}},
+                   IndexSpace<2, long long>{Rect<2, long long>{
+                       Point<2, long long>(1, 1), Point<2, long long>(3, 3)}}},
+        .src_points = {Point<2, long long>(1, 1), Point<2, long long>(2, 2)},
+        .exp_points = {{Point<2, long long>(1, 1), Point<2, long long>(2, 2)},
+                       {Point<2, long long>(0, 0), Point<2, long long>(0, 0)}},
     }};
