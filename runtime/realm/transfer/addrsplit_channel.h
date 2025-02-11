@@ -78,11 +78,23 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  class AddressSplitCommunicator {
+  public:
+    virtual void create(NodeID target_node, NodeID launch_node, XferDesID guid,
+                        uintptr_t dma_op, const void *msgdata, size_t msglen);
+  };
+
+  template <int N, typename T>
   class AddressSplitXferDesFactory : public XferDesFactory {
   public:
     AddressSplitXferDesFactory(size_t _bytes_per_element,
                                const std::vector<IndexSpace<N, T>> &_spaces,
                                AddressSplitChannel *_addrsplit_channel);
+
+    AddressSplitXferDesFactory(size_t _bytes_per_element,
+                               const std::vector<IndexSpace<N, T>> &_spaces,
+                               AddressSplitChannel *_addrsplit_channel,
+                               AddressSplitCommunicator<N, T> *_comm);
 
   protected:
     virtual ~AddressSplitXferDesFactory() = default;
@@ -101,9 +113,10 @@ namespace Realm {
     static inline ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>> areg;
 
   protected:
-    size_t bytes_per_element;
+    size_t bytes_per_element{0};
     std::vector<IndexSpace<N, T>> spaces;
-    AddressSplitChannel *addrsplit_channel;
+    AddressSplitChannel *addrsplit_channel{0};
+    std::unique_ptr<AddressSplitCommunicator<N, T>> comm{nullptr};
   };
 
   template <int N, typename T>

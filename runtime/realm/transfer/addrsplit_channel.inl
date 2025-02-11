@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "realm/serialize.h"
 #include "realm/transfer/addrsplit_channel.h"
 
 namespace Realm {
@@ -32,6 +33,19 @@ namespace Realm {
 
   template <int N, typename T>
   class AddressSplitXferDes;
+
+  template <int N, typename T>
+  void AddressSplitCommunicator<N, T>::create(NodeID target_node, NodeID launch_node,
+                                              XferDesID guid, uintptr_t dma_op,
+                                              const void *msgdata, size_t msglen)
+  {
+    ActiveMessage<AddressSplitXferDesCreateMessage<N, T>> amsg(target_node, msglen);
+    amsg->launch_node = launch_node;
+    amsg->guid = guid;
+    amsg->dma_op = dma_op;
+    amsg.add_payload(msgdata, msglen);
+    amsg.commit();
+  }
 
   template <int N, typename T>
   void AddressSplitXferDesCreateMessage<N, T>::handle_message(
@@ -72,6 +86,17 @@ namespace Realm {
     : bytes_per_element(_bytes_per_element)
     , spaces(_spaces)
     , addrsplit_channel(_addrsplit_channel)
+    , comm(std::make_unique<AddressSplitCommunicator<N, T>>())
+  {}
+
+  template <int N, typename T>
+  AddressSplitXferDesFactory<N, T>::AddressSplitXferDesFactory(
+      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces,
+      AddressSplitChannel *_addrsplit_channel, AddressSplitCommunicator<N, T> *_comm)
+    : bytes_per_element(_bytes_per_element)
+    , spaces(_spaces)
+    , addrsplit_channel(_addrsplit_channel)
+    , comm(_comm)
   {}
 
   template <int N, typename T>
@@ -109,6 +134,15 @@ namespace Realm {
         assert(ok);
       }
       size_t req_size = bcs.bytes_used();
+      Serialization::DynamicBufferSerializer buffer(req_size);
+      {
+        bool ok =
+            ((buffer << inputs_info) && (buffer << outputs_info) &&
+             (buffer << priority) && (buffer << bytes_per_element) && (buffer << spaces));
+        assert(ok);
+      }
+      comm->create(target_node, launch_node, guid, dma_op, buffer.get_buffer(), req_size);
+      return;
       ActiveMessage<AddressSplitXferDesCreateMessage<N, T>> amsg(target_node, req_size);
       // amsg->inst = inst;
       amsg->launch_node = launch_node;

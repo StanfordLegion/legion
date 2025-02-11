@@ -5064,6 +5064,7 @@ namespace Realm {
   template class WrappingTransferIteratorIndirect<N, T>;                                 \
   template class TransferIteratorIndirectRange<N, T>;                                    \
   template class AddressSplitXferDesFactory<N, T>;                                       \
+  template class AddressSplitCommunicator<N, T>;                                         \
   template class TransferDomainIndexSpace<N, T>;
   FOREACH_NT(DOIT)
 
