@@ -69,21 +69,8 @@
 #endif
 #endif
 
-// for cpu resource discovery
-#if defined(REALM_ON_LINUX) || defined(REALM_ON_FREEBSD)
-#include <sys/sysinfo.h>
-#endif
-
-#ifdef REALM_ON_MACOS
-#include <sys/sysctl.h>
-#endif
-
 #ifdef REALM_ON_WINDOWS
-#include <winsock2.h>
-#include <windows.h>
-#include <processthreadsapi.h>
-#include <synchapi.h>
-#include <sysinfoapi.h>
+#include <winsock2.h> // gethostname
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -818,8 +805,9 @@ namespace Realm {
     unsigned long long job_id = 0;
   };
 
-  CoreModuleConfig::CoreModuleConfig(void)
+  CoreModuleConfig::CoreModuleConfig(const HardwareTopology *topo)
     : ModuleConfig("core")
+    , host_topology(topo)
   {
     config_map.insert({"cpu", &num_cpu_procs});
     config_map.insert({"util", &num_util_procs});
@@ -837,122 +825,10 @@ namespace Realm {
     resource_map.insert({"sysmem", &res_sysmem_size});
   }
 
-#ifdef REALM_ON_WINDOWS
-static DWORD CountSetBits(ULONG_PTR bitMask)
-{
-    DWORD LSHIFT = sizeof(ULONG_PTR)*8 - 1;
-    DWORD bitSetCount = 0;
-    ULONG_PTR bitTest = (ULONG_PTR)1 << LSHIFT;    
-    DWORD i;
-    
-    for (i = 0; i <= LSHIFT; ++i)
-    {
-        bitSetCount += ((bitMask & bitTest)?1:0);
-        bitTest/=2;
-    }
-
-    return bitSetCount;
-}
-#endif
-
   bool CoreModuleConfig::discover_resource(void)
   {
-#ifdef REALM_ON_LINUX
-    // system memory
-    struct sysinfo memInfo;
-    sysinfo (&memInfo);
-    res_sysmem_size = memInfo.totalram;
-    // phyical cores
-    std::ifstream infile("/proc/cpuinfo");
-    if (infile.fail()) return false;
-    std::string line;
-    int logical_cpu_cores = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
-    int cpu_id = 0;
-    int physical_cpu_cores = 0;
-    std::map<int, int> physcal_cpus;
-    while (std::getline(infile, line)) {
-      if(line.find("physical id") != std::string::npos) {
-        std::istringstream iss(line);
-        std::string x, y, z;
-        if(!(iss >> x >> y >> z >> cpu_id)) {
-          return false;
-        };
-      }
-      if(line.find("cpu cores") != std::string::npos) {
-        std::istringstream iss(line);
-        std::string x, y, z;
-        if(!(iss >> x >> y >> z >> physical_cpu_cores)) {
-          return false;
-        }
-        std::map<int, int>::iterator it = physcal_cpus.find(cpu_id);
-        if(it == physcal_cpus.end()) {
-          physcal_cpus.insert({cpu_id, physical_cpu_cores});
-        } else {
-          assert(it->second == physical_cpu_cores);
-        }
-      }
-    }
-    for(std::map<int, int>::iterator it = physcal_cpus.begin(); it != physcal_cpus.end();
-        it++) {
-      res_num_cpus += it->second;
-    }
-    // Some ARM machines do not have "cpu cores" and "physical id",
-    // so we will use "processor", however, there is no way to tell
-    // if local cores == physical cores, therefore, we just assume
-    // they are equal.
-    if(res_num_cpus == 0) {
-      res_num_cpus = logical_cpu_cores;
-    }
-#endif
-#ifdef REALM_ON_WINDOWS
-    // system memory
-    MEMORYSTATUSEX memInfo;
-    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
-    GlobalMemoryStatusEx(&memInfo);
-    res_sysmem_size = static_cast<size_t>(memInfo.ullTotalPageFile);
-    // physical cores
-    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer = nullptr;
-    DWORD buffer_size = 0;
-
-    // Get the required buffer size
-    if(!GetLogicalProcessorInformationEx(RelationAll, nullptr, &buffer_size)) {
-      DWORD last_err = GetLastError();
-      if(last_err != ERROR_INSUFFICIENT_BUFFER) {
-        return false;
-      }
-      assert(buffer_size != 0);
-    }
-
-    buffer = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(new char[buffer_size]);
-    if (!GetLogicalProcessorInformationEx(RelationAll, buffer, &buffer_size)) {
-      delete[] buffer;
-      return false;
-    }
-    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX ptr = buffer;
-    while (reinterpret_cast<LPBYTE>(ptr) < reinterpret_cast<LPBYTE>(buffer) + buffer_size) {
-      if (ptr->Relationship == RelationProcessorCore) {
-        res_num_cpus++;
-      }
-      ptr = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(reinterpret_cast<LPBYTE>(ptr) + ptr->Size);
-    }
-    delete[] buffer;
-#endif
-#ifdef REALM_ON_FREEBSD
-    // system memory
-    size_t buflen = sizeof(size_t);
-    sysctlbyname("hw.physmem", &res_sysmem_size, &buflen, NULL, 0);
-    // phyical cores
-    buflen = sizeof(int);
-    sysctlbyname("hw.ncpu", &res_num_cpus, &buflen, NULL, 0);
-#endif
-#ifdef REALM_ON_MACOS
-    // system memory
-    size_t buflen = sizeof(size_t);
-    sysctlbyname("hw.memsize", &res_sysmem_size, &buflen, NULL, 0);
-    // phyical cores
-    buflen = sizeof(int);
-    sysctlbyname("hw.physicalcpu", &res_num_cpus, &buflen, NULL, 0);
-#endif
+    res_num_cpus = host_topology->num_physical_cores();
+    res_sysmem_size = host_topology->system_memory();
     // we should be able to safely assume they are larger than 0,
     // otherwise, something is wrong with resource detection
     assert(res_num_cpus > 0 && res_sysmem_size > 0);
@@ -1063,7 +939,7 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
   /*static*/ ModuleConfig *CoreModule::create_module_config(RuntimeImpl *runtime)
   {
-    CoreModuleConfig *config = new CoreModuleConfig();
+    CoreModuleConfig *config = new CoreModuleConfig(&(runtime->host_topology));
     config->discover_resource();
     return config;
   }
@@ -1196,29 +1072,32 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
   //
 
     RuntimeImpl *runtime_singleton = 0;
-  
+
     RuntimeImpl::RuntimeImpl(void)
-      : machine(0), 
-        num_untriggered_events(0),
-	nodes(0),
-	local_event_free_list(0), local_barrier_free_list(0),
-	local_reservation_free_list(0),
-	local_compqueue_free_list(0),
-	//local_sparsity_map_free_list(0),
-	run_method_called(false),
-	shutdown_condvar(shutdown_mutex),
-	shutdown_request_received(false),
-	shutdown_result_code(0),
-	shutdown_initiated(false),
-	shutdown_in_progress(false),
-	core_map(0), core_reservations(0),
-	message_manager(0),
-	sampling_profiler(true /*system default*/),
-	num_local_memories(0), num_local_ib_memories(0),
-	num_local_processors(0),
-	module_registrar(this),
-        modules_created(false),
-	module_configs_created(false)
+      : machine(0)
+      , num_untriggered_events(0)
+      , nodes(0)
+      , local_event_free_list(0)
+      , local_barrier_free_list(0)
+      , local_reservation_free_list(0)
+      , local_compqueue_free_list(0)
+      ,
+      // local_sparsity_map_free_list(0),
+      run_method_called(false)
+      , shutdown_condvar(shutdown_mutex)
+      , shutdown_request_received(false)
+      , shutdown_result_code(0)
+      , shutdown_initiated(false)
+      , shutdown_in_progress(false)
+      , core_reservations(0)
+      , message_manager(0)
+      , sampling_profiler(true /*system default*/)
+      , num_local_memories(0)
+      , num_local_ib_memories(0)
+      , num_local_processors(0)
+      , module_registrar(this)
+      , modules_created(false)
+      , module_configs_created(false)
     {
       machine = new MachineImpl;
     }
@@ -1227,7 +1106,6 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
     {
       delete machine;
       delete core_reservations;
-      delete core_map;
 
       delete_container_contents_free(reduce_op_table.map);
       delete_container_contents(custom_serdez_table.map);
@@ -1908,8 +1786,13 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
           checked_cast<CoreModuleConfig *>(get_module_config("core"));
       assert(config != nullptr);
 
-      core_map = CoreMap::discover_core_map(config->hyperthread_sharing);
-      core_reservations = new CoreReservationSet(core_map);
+      if(!config->hyperthread_sharing) {
+        host_topology.remove_hyperthreads();
+      }
+      core_reservations = new CoreReservationSet(&host_topology);
+
+      // std::vector<const HardwareTopology::Proc *> pm;
+      // pm = host_topology->distribute_procs_across_domains();
 
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
@@ -2245,9 +2128,9 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
       bool ok = core_reservations->satisfy_reservations(config->dummy_reservation_ok);
       if(ok) {
 	if(config->show_reservations) {
-	  std::cout << *core_map << std::endl;
-	  core_reservations->report_reservations(std::cout);
-	}
+          std::cout << host_topology << std::endl;
+          core_reservations->report_reservations(std::cout);
+        }
       } else {
 	printf("HELP!  Could not satisfy all core reservations!\n");
 	exit(1);
@@ -3022,6 +2905,11 @@ static DWORD CountSetBits(ULONG_PTR bitMask)
 
     bool RuntimeImpl::create_configs(int argc, char **argv)
     {
+      // initialize topology
+      assert(topology_init == false);
+      host_topology = HardwareTopology::create_topology();
+      topology_init = true;
+
       if (!module_configs_created) {
         std::vector<std::string> cmdline;
         cmdline.reserve(argc);

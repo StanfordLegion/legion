@@ -116,6 +116,9 @@ function(populate_cuda_archs_list ARCHS)
       if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "11.8.0")
         list(APPEND archs 90)
       endif()
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8.0")
+        list(APPEND archs 100)
+      endif()
       # Compile all supported major real architectures (SASS),
       # and the highest major virtual architecture (PTX+SASS).
       list(SORT archs)

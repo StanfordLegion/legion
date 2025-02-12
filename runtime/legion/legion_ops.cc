@@ -15370,7 +15370,12 @@ namespace Legion {
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation(true/*deactivate*/);
+      {
+        RtEvent commit_precondition;
+        if (!commit_preconditions.empty())
+          commit_precondition = Runtime::merge_events(commit_preconditions);
+        commit_operation(true/*deactivate*/, commit_precondition);
+      }
     }
 
     //--------------------------------------------------------------------------

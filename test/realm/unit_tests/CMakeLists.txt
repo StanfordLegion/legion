@@ -44,6 +44,7 @@ list(APPEND REALM_TESTS
   gather_scatter_test.cc
   sparsity_map_test.cc
   ucx_mpool_test.cc
+  topology_test.cc
  )
 
 list(APPEND UCX_SOURCES
