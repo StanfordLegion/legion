@@ -348,19 +348,14 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
   return inst_layout;
 }
 
-// TODO(apryakhin@): Move to utils
-static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_idx = 0,
-                                       int inst_idx = 0)
-{
-  return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
-}
-
 template <int N, typename T>
 static RegionInstanceImpl *create_inst(Rect<N, T> bounds,
                                        const std::vector<int> &dim_order,
                                        size_t bytes_per_element = 8)
 {
-  RegionInstance inst = make_inst();
+  RegionInstance inst =
+      ID::make_instance(/*owner=*/0, /*creator=*/0, /*idx=*/0, /*inst_idx=*/0)
+          .convert<RegionInstance>();
   InstanceLayout<N, T> *inst_layout = create_layout(bounds, dim_order, bytes_per_element);
   RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
   impl->metadata.layout = inst_layout;
