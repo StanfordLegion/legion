@@ -79,6 +79,7 @@ list(APPEND REALM_SRC
   realm/threads.h           realm/threads.cc
   realm/threads.inl
   realm/shm.h               realm/shm.cc
+  realm/hardware_topology.h          realm/hardware_topology.cc
 )
 
 if(Legion_USE_CUDA)
