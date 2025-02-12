@@ -44,6 +44,7 @@ set(REALM_SOURCES
     tasks.cc
     threads.cc
     shm.cc
+    hardware_topology.cc
     transfer/lowlevel_disk.cc
     transfer/address_list.cc
     transfer/channel.cc
