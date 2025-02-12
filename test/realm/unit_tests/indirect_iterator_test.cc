@@ -157,7 +157,7 @@ void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
 
 TEST_P(IndirectGetAddressesTest, Base)
 {
-  const auto *base_test_case = GetParam();
+  const BaseTestCaseData *base_test_case = GetParam();
 
   dispatch_for_dimension(
       base_test_case->get_dim(),
