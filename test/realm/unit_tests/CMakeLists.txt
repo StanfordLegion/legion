@@ -42,6 +42,7 @@ list(APPEND REALM_TESTS
   lowlevel_dma_test.cc
   circ_queue_test.cc
   gather_scatter_test.cc
+  topology_test.cc
  )
 
 list(APPEND UCX_SOURCES

@@ -116,6 +116,8 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #endif
 #endif
 
+#include <algorithm>
+
 #ifndef CHECK_LIBC
 #define CHECK_LIBC(cmd) do { \
   errno = 0; \
@@ -244,22 +246,13 @@ namespace Realm {
   //
   // class CoreReservationSet
 
-  CoreReservationSet::CoreReservationSet(bool hyperthread_sharing)
-    : owns_coremap(true), cm(0)
-  {
-    cm = CoreMap::discover_core_map(hyperthread_sharing);
-  }
-
-  CoreReservationSet::CoreReservationSet(const CoreMap *_cm)
-    : owns_coremap(false), cm(_cm)
+  CoreReservationSet::CoreReservationSet(const HardwareTopology *_cm)
+    : cm(_cm)
   {
   }
 
   CoreReservationSet::~CoreReservationSet(void)
   {
-    if(owns_coremap)
-      delete const_cast<CoreMap *>(cm);
-    
     // we don't own the CoreReservation *'s in the allocation map, but we do own the 
     //  allocations
     for(std::map<CoreReservation *, CoreReservation::Allocation *>::iterator it = allocations.begin();
@@ -269,10 +262,7 @@ namespace Realm {
     allocations.clear();
   }
 
-  const CoreMap *CoreReservationSet::get_core_map(void) const
-  {
-    return cm;
-  }
+  const HardwareTopology *CoreReservationSet::get_core_map(void) const { return cm; }
 
   void CoreReservationSet::add_reservation(CoreReservation& rsrv)
   {
@@ -316,19 +306,19 @@ namespace Realm {
   }		
 
   // versions of the above that understand shared cores
-  static bool can_add_usage(const std::map<const CoreMap::Proc *,
-			                   CoreReservationParameters::CoreUsage>& current,
-			    CoreReservationParameters::CoreUsage reqd,
-			    const CoreMap::Proc *p,
-			    const std::set<CoreMap::Proc *>& shared)
+  static bool can_add_usage(const std::map<HardwareTopology::ProcID,
+                                           CoreReservationParameters::CoreUsage> &current,
+                            CoreReservationParameters::CoreUsage reqd,
+                            const HardwareTopology::ProcID p,
+                            const std::set<HardwareTopology::ProcID> &shared)
   {
-    std::map<const CoreMap::Proc *, CoreReservationParameters::CoreUsage>::const_iterator it;
+    std::map<HardwareTopology::ProcID,
+             CoreReservationParameters::CoreUsage>::const_iterator it;
     it = current.find(p);
     if((it != current.end()) && !can_add_usage(it->second, reqd)) return false;
 
-    for(std::set<CoreMap::Proc *>::const_iterator it2 = shared.begin();
-	it2 != shared.end();
-	it2++) {
+    for(std::set<HardwareTopology::ProcID>::const_iterator it2 = shared.begin();
+        it2 != shared.end(); it2++) {
       it = current.find(*it2);
       if((it != current.end()) && !can_add_usage(it->second, reqd)) return false;
     }
@@ -336,22 +326,20 @@ namespace Realm {
     return true;
   }
 
-  static void add_usage(std::map<const CoreMap::Proc *,
-			         CoreReservationParameters::CoreUsage>& current,
-			CoreReservationParameters::CoreUsage reqd,
-			const CoreMap::Proc *p,
-			const std::set<CoreMap::Proc *>& shared)
+  static void add_usage(
+      std::map<HardwareTopology::ProcID, CoreReservationParameters::CoreUsage> &current,
+      CoreReservationParameters::CoreUsage reqd, const HardwareTopology::ProcID p,
+      const std::set<HardwareTopology::ProcID> &shared)
   {
-    std::map<const CoreMap::Proc *, CoreReservationParameters::CoreUsage>::iterator it;
+    std::map<HardwareTopology::ProcID, CoreReservationParameters::CoreUsage>::iterator it;
     it = current.find(p);
     if(it != current.end())
       add_usage(it->second, reqd);
     else
       current.insert(std::make_pair(p, reqd));
 
-    for(std::set<CoreMap::Proc *>::const_iterator it2 = shared.begin();
-	it2 != shared.end();
-	it2++) {
+    for(std::set<HardwareTopology::ProcID>::const_iterator it2 = shared.begin();
+        it2 != shared.end(); it2++) {
       it = current.find(*it2);
       if(it != current.end())
 	add_usage(it->second, reqd);
@@ -363,12 +351,14 @@ namespace Realm {
   // attempts to find an allocation satisfying all the reservation requests in 'allocs' -
   //  if any allocations are already present, those are preserved (possibly causing the
   //  allocation attempt to fail)
-  static bool attempt_allocation(const CoreMap& cm,
-				 std::map<CoreReservation *, CoreReservation::Allocation *>& allocs)
+  static bool
+  attempt_allocation(const HardwareTopology &cm,
+                     std::map<CoreReservation *, CoreReservation::Allocation *> &allocs)
   {
     // we'll need to keep track of the usage level of each core
-    std::map<const CoreMap::Proc *, CoreReservationParameters::CoreUsage> alu_usage, fpu_usage, ldst_usage;
-    std::map<const CoreMap::Proc *, int> user_count;
+    std::map<HardwareTopology::ProcID, CoreReservationParameters::CoreUsage> alu_usage,
+        fpu_usage, ldst_usage;
+    std::map<HardwareTopology::ProcID, int> user_count;
 
     // iterate through the requests and sort them by whether or not they have any exclusivity
     //  demands and whether they're limited to a particular numa domain
@@ -383,32 +373,41 @@ namespace Realm {
 	for(std::set<int>::const_iterator it = alloc->proc_ids.begin();
 	    it != alloc->proc_ids.end();
 	    it++) {
-	  // get the corresponding CoreMap::Proc
-	  CoreMap::ProcMap::const_iterator it2 = cm.all_procs.find(*it);
-	  if(it2 == cm.all_procs.end()) {
-	    log_thread.error() << "existing allocation ('" << rsrv->name << "') has an unknown proc id (" << *it << ")";
-	    return false; // no way to fix this
-	  }
-	  const CoreMap::Proc *p = it2->second;
+          // get the corresponding HardwareTopology::Proc
+          const HardwareTopology::ProcID p = *it;
+          if(cm.has_processor(p) == false) {
+            log_thread.error() << "existing allocation ('" << rsrv->name
+                               << "') has an unknown proc id (" << *it << ")";
+            return false; // no way to fix this
+          }
 
-	  // update/check user_count
-	  if(alloc->exclusive_ownership && (user_count.count(p) > 0)) {
-	    log_thread.error() << "existing allocation ('" << rsrv->name << "') has unsatisfiable exclusivity on proc id (" << p->id << ")";
-	    return false; // no way to fix this
-	  }
-	  user_count[p]++;
+          // update/check user_count
+          if(alloc->exclusive_ownership && (user_count.count(p) > 0)) {
+            log_thread.error() << "existing allocation ('" << rsrv->name
+                               << "') has unsatisfiable exclusivity on proc id (" << p
+                               << ")";
+            return false; // no way to fix this
+          }
+          user_count[p]++;
 
-	  // update/check usage
-	  if(!(can_add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu) &&
-	       can_add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu) &&
-	       can_add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst))) {
-	    log_thread.error() << "existing allocation ('" << rsrv->name << "') has unsatisfiable usage on proc id (" << p->id << ")";
-	    return false; // no way to fix this
-	  }
-	  add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu);
-	  add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu);
-	  add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst);
-	}
+          // update/check usage
+          const std::set<HardwareTopology::ProcID> &shares_alu =
+              cm.get_processors_share_alu(p);
+          const std::set<HardwareTopology::ProcID> &shares_fpu =
+              cm.get_processors_share_fpu(p);
+          const std::set<HardwareTopology::ProcID> &shares_ldst =
+              cm.get_processors_share_ldst(p);
+          if(!(can_add_usage(alu_usage, rsrv->params.alu_usage, p, shares_alu) &&
+               can_add_usage(fpu_usage, rsrv->params.fpu_usage, p, shares_fpu) &&
+               can_add_usage(ldst_usage, rsrv->params.ldst_usage, p, shares_ldst))) {
+            log_thread.error() << "existing allocation ('" << rsrv->name
+                               << "') has unsatisfiable usage on proc id (" << p << ")";
+            return false; // no way to fix this
+          }
+          add_usage(alu_usage, rsrv->params.alu_usage, p, shares_alu);
+          add_usage(fpu_usage, rsrv->params.fpu_usage, p, shares_fpu);
+          add_usage(ldst_usage, rsrv->params.ldst_usage, p, shares_ldst);
+        }
       } else {
 	std::pair<bool, int> key = std::make_pair(((rsrv->params.alu_usage == CoreReservationParameters::CORE_USAGE_EXCLUSIVE) ||
 						   (rsrv->params.fpu_usage == CoreReservationParameters::CORE_USAGE_EXCLUSIVE) ||
@@ -421,82 +420,76 @@ namespace Realm {
     // ok, now attempt to satisfy all the requests
     // by _reverse_ iterating over to_satisfy, we consider exclusive requests before shared
     //  and those that want a particular numa domain before those that don't care
-    std::map<CoreReservation *, std::set<const CoreMap::Proc *> > assigned_procs;
+    std::map<CoreReservation *, std::set<HardwareTopology::ProcID>> assigned_procs;
     for(std::map<std::pair<bool, int>, std::set<CoreReservation *> >::reverse_iterator it = to_satisfy.rbegin();
 	it != to_satisfy.rend();
 	it++) {
       bool has_exclusive = it->first.first;
       int req_domain = it->first.second;
 
-      std::vector<const CoreMap::Proc *> pm;
+      std::vector<HardwareTopology::ProcID> pm;
       if(req_domain >= 0) {
-	CoreMap::DomainMap::const_iterator it2 = cm.by_domain.find(req_domain);
-	if(it2 == cm.by_domain.end()) {
-	  log_thread.error() << "one or more reservations requiring unknown domain (" << req_domain << ")";
-	  return false;
-	}
-	for(CoreMap::ProcMap::const_iterator it3 = it2->second.begin(); it3 != it2->second.end(); it3++)
-	  pm.push_back(it3->second);
+        const std::set<HardwareTopology::ProcID> procs =
+            cm.get_processors_by_domain(req_domain);
+        if(procs.empty()) {
+          log_thread.error() << "one or more reservations requiring unknown domain ("
+                             << req_domain << ")";
+          return false;
+        }
+        std::copy(procs.begin(), procs.end(), std::back_inserter(pm));
       } else {
 	// shuffle the procs from the different domains to get a roughly-even distribution
-	std::list<std::pair<const CoreMap::ProcMap *, CoreMap::ProcMap::const_iterator> > rr;
-	for(CoreMap::DomainMap::const_iterator it2 = cm.by_domain.begin();
-	    it2 != cm.by_domain.end();
-	    it2++)
-	  if(!(it2->second.empty()))
-	    rr.push_back(std::make_pair(&(it2->second), it2->second.begin()));
-	while(!(rr.empty())) {
-	  std::pair<const CoreMap::ProcMap *, CoreMap::ProcMap::const_iterator> x = rr.front();
-	  rr.pop_front();
-	  pm.push_back(x.second->second);
-	  if(++x.second != x.first->end())
-	    rr.push_back(x);
-	}
+        pm = cm.distribute_processors_across_domains();
       }
 
       for(std::set<CoreReservation *>::iterator it2 = it->second.begin();
 	  it2 != it->second.end();
 	  it2++) {
 	CoreReservation *rsrv = *it2;
-	std::set<const CoreMap::Proc *>& procs = assigned_procs[rsrv];
+        std::set<HardwareTopology::ProcID> &procs = assigned_procs[rsrv];
 
-	// iterate over all the possibly available processors and see if any fit
-	for(std::vector<const CoreMap::Proc *>::iterator it3 = pm.begin();
-	    it3 != pm.end();
-	    it3++)
-	{
-	  const CoreMap::Proc *p = *it3;
+        // iterate over all the possibly available processors and see if any fit
+        for(std::vector<HardwareTopology::ProcID>::iterator it3 = pm.begin();
+            it3 != pm.end(); it3++) {
+          const HardwareTopology::ProcID p = *it3;
 
-	  // is there already conflicting usage?
-	  if(!(can_add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu) &&
-	       can_add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu) &&
-	       can_add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst)))
-	    continue;
+          // is there already conflicting usage?
+          const std::set<HardwareTopology::ProcID> &shares_alu =
+              cm.get_processors_share_alu(p);
+          const std::set<HardwareTopology::ProcID> &shares_fpu =
+              cm.get_processors_share_fpu(p);
+          const std::set<HardwareTopology::ProcID> &shares_ldst =
+              cm.get_processors_share_ldst(p);
+          if(!(can_add_usage(alu_usage, rsrv->params.alu_usage, p, shares_alu) &&
+               can_add_usage(fpu_usage, rsrv->params.fpu_usage, p, shares_fpu) &&
+               can_add_usage(ldst_usage, rsrv->params.ldst_usage, p, shares_ldst)))
+            continue;
 
-	  // yes, do so and add this to the assigned procs
-	  add_usage(alu_usage, rsrv->params.alu_usage, p, p->shares_alu);
-	  add_usage(fpu_usage, rsrv->params.fpu_usage, p, p->shares_fpu);
-	  add_usage(ldst_usage, rsrv->params.ldst_usage, p, p->shares_ldst);
-	  procs.insert(p);
+          // yes, do so and add this to the assigned procs
+          add_usage(alu_usage, rsrv->params.alu_usage, p, shares_alu);
+          add_usage(fpu_usage, rsrv->params.fpu_usage, p, shares_fpu);
+          add_usage(ldst_usage, rsrv->params.ldst_usage, p, shares_ldst);
+          procs.insert(p);
 
-	  // an exclusive reservation request stops as soon as we have enough, while
-	  //  a shared reservation will use any/all compatible processors
-	  if(has_exclusive && ((int)(procs.size()) >= rsrv->params.num_cores))
-	    break;
-	}
+          // an exclusive reservation request stops as soon as we have enough, while
+          //  a shared reservation will use any/all compatible processors
+          if(has_exclusive && ((int)(procs.size()) >= rsrv->params.num_cores))
+            break;
+        }
 
-	// if we didn't get enough, we've failed this allocation
-	if((int)(procs.size()) < rsrv->params.num_cores) {
-	  log_thread.warning() << "reservation ('" << rsrv->name << "') cannot be satisfied";
-	  return false;
-	}
+        // if we didn't get enough, we've failed this allocation
+        if((int)(procs.size()) < rsrv->params.num_cores) {
+          log_thread.warning() << "reservation ('" << rsrv->name
+                               << "') cannot be satisfied";
+          return false;
+        }
       }
     }
 
     // if we got all the way through, we're successful and can now fill in the new allocations
-    for(std::map<CoreReservation *, std::set<const CoreMap::Proc *> >::iterator it = assigned_procs.begin();
-	it != assigned_procs.end();
-	it++) {
+    for(std::map<CoreReservation *, std::set<HardwareTopology::ProcID>>::iterator it =
+            assigned_procs.begin();
+        it != assigned_procs.end(); it++) {
       CoreReservation *rsrv = it->first;
       CoreReservation::Allocation *alloc = new CoreReservation::Allocation;
 
@@ -506,22 +499,23 @@ namespace Realm {
       CPU_ZERO(&alloc->allowed_cpus);
 #endif
 
-      for(std::set<const CoreMap::Proc *>::iterator it2 = it->second.begin();
-	  it2 != it->second.end();
-	  it2++) {
-	const CoreMap::Proc *p = *it2;
+      for(std::set<HardwareTopology::ProcID>::iterator it2 = it->second.begin();
+          it2 != it->second.end(); it2++) {
+        const HardwareTopology::ProcID p = *it2;
 
-	alloc->proc_ids.insert(p->id);
-	if(user_count[p] > 1)
-	  alloc->exclusive_ownership = false;
+        alloc->proc_ids.insert(p);
+        if(user_count[p] > 1)
+          alloc->exclusive_ownership = false;
 #ifdef HAVE_CPUSET
-	if(!(p->kernel_proc_ids.empty())) {
-	  alloc->restrict_cpus = true;
-	  for(std::set<int>::const_iterator it3 = p->kernel_proc_ids.begin();
-	      it3 != p->kernel_proc_ids.end();
-	      it3++)
-	    CPU_SET(*it3, &alloc->allowed_cpus);
-	}
+        const std::set<HardwareTopology::ProcID> &kernel_proc_ids =
+            cm.get_kernel_processor_ids(p);
+        if(!(kernel_proc_ids.empty())) {
+          alloc->restrict_cpus = true;
+          for(std::set<HardwareTopology::ProcID>::const_iterator it3 =
+                  kernel_proc_ids.begin();
+              it3 != kernel_proc_ids.end(); it3++)
+            CPU_SET(*it3, &alloc->allowed_cpus);
+        }
 #endif
       }
 
@@ -1683,568 +1677,6 @@ namespace Realm {
     UserThread::user_switch((UserThread *)switch_to);
   }
 #endif
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class CoreMap
-
-  CoreMap::CoreMap(void)
-  {
-  }
-
-  CoreMap::~CoreMap(void)
-  {
-    clear();
-  }
-
-  void CoreMap::clear(void)
-  {
-    // delete all the processor entries
-    for(ProcMap::iterator it = all_procs.begin();
-	it != all_procs.end();
-	it++)
-      delete it->second;
-
-    // now clear out the two maps
-    all_procs.clear();
-    by_domain.clear();
-  }
-
-  /*static*/ CoreMap *CoreMap::create_synthetic(int num_domains,
-						int cores_per_domain,
-						int hyperthreads /*= 1*/,
-						int fp_cluster_size /*= 1*/)
-  {
-    CoreMap *cm = new CoreMap;
-
-    // processor ids will just be monotonically increasing
-    int next_id = 0;
-
-    for(int d = 0; d < num_domains; d++) {
-      for(int c = 0; c < cores_per_domain; c++) {
-	std::set<Proc *> fp_procs;
-
-	for(int f = 0; f < fp_cluster_size; f++) {
-	  std::set<Proc *> ht_procs;
-
-	  for(int h = 0; h < hyperthreads; h++) {
-	    int id = next_id++;
-
-	    Proc *p = new Proc;
-
-	    p->id = id;
-	    p->domain = d;
-	    // kernel proc id list is empty - this is synthetic
-
-	    cm->all_procs[id] = p;
-	    cm->by_domain[d][id] = p;
-
-	    ht_procs.insert(p);
-	    fp_procs.insert(p);
-	  }
-
-	  // ALU and LD/ST shared with all other hyperthreads
-	  for(std::set<Proc *>::iterator it1 = ht_procs.begin(); it1 != ht_procs.end(); it1++)
-	    for(std::set<Proc *>::iterator it2 = ht_procs.begin(); it2 != ht_procs.end(); it2++)
-	      if(it1 != it2) {
-		(*it1)->shares_alu.insert(*it2);
-		(*it1)->shares_ldst.insert(*it2);
-	      }
-	}
-
-	// FPU shared with all other procs in cluster
-	for(std::set<Proc *>::iterator it1 = fp_procs.begin(); it1 != fp_procs.end(); it1++)
-	  for(std::set<Proc *>::iterator it2 = fp_procs.begin(); it2 != fp_procs.end(); it2++)
-	    if(it1 != it2) {
-	      (*it1)->shares_fpu.insert(*it2);
-	    }
-      }
-    }
-
-    return cm;
-  }
-
-  // this function is templated on the map key, since we don't really care 
-  //  what was used to make the equivalence classes
-  template <typename K>
-  void update_core_sharing(const std::map<K, std::set<CoreMap::Proc *> >& core_sets,
-			   bool share_alu, bool share_fpu, bool share_ldst)
-  {
-    for(typename std::map<K, std::set<CoreMap::Proc *> >::const_iterator it = core_sets.begin();
-        it != core_sets.end();
-        it++) {
-      const std::set<CoreMap::Proc *>& cset = it->second;
-      if(cset.size() == 1) continue;  // singleton set - no sharing
-
-      // all pairs dependencies
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = cset.begin(); it1 != cset.end(); it1++) {
-        for(std::set<CoreMap::Proc *>::const_iterator it2 = cset.begin(); it2 != cset.end(); it2++) {
-          if(it1 != it2) {
-            CoreMap::Proc *p = *it1;
-            if(share_alu)
-	      p->shares_alu.insert(*it2);
-	    if(share_fpu)
-	      p->shares_fpu.insert(*it2);
-	    if(share_ldst)
-	      p->shares_ldst.insert(*it2);
-          }
-        }
-      }
-    }
-  }
-
-#ifdef REALM_ON_LINUX
-  static CoreMap *extract_core_map_from_linux_sys(bool hyperthread_sharing)
-  {
-    CoreMap *cm = nullptr;
-    // hyperthreading sets are cores with the same node ID and physical core ID
-    //  they share ALU, FPU, and LDST units
-    std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
-
-    // "thread_siblings" can be used to detect Bulldozer's core pairs that
-    //  share the same FPU (this will also catch hyperthreads, but that's ok)
-    std::map<std::string, std::set<CoreMap::Proc *> > sibling_sets;
-
-    cpu_set_t cset;
-    int ret = sched_getaffinity(0, sizeof(cset), &cset);
-    if(ret < 0) {
-      log_thread.warning() << "failed to get affinity info";
-      return nullptr;
-    }
-
-    DIR *cpu_dir = opendir("/sys/devices/system/cpu");
-    if(!cpu_dir) {
-      log_thread.warning() << "can't open /sys/devices/system/cpu";
-      return nullptr;
-    }
-
-    cm = new CoreMap;
-
-    // Read the CPU directory, which is always available, to discover the cpu topology
-    for(struct dirent *cpu_entry = readdir(cpu_dir); cpu_entry != nullptr;
-        cpu_entry = readdir(cpu_dir)) {
-      char path[384] = "";
-      char *pos = nullptr;
-      // Not a cpu directory
-      if(strncmp(cpu_entry->d_name, "cpu", 3) != 0)
-        continue;
-      int cpu_id = strtol(cpu_entry->d_name + 3, &pos, 10);
-      // Not of the format "cpu[0-9]+", some letters afterward
-      if(pos != nullptr && *pos != 0)
-        continue;
-      // Not an accessible cpu
-      if(!CPU_ISSET(cpu_id, &cset))
-        continue;
-
-      CoreMap::Proc *proc = new CoreMap::Proc;
-      // Assume numa node 0, until we find out different
-      proc->domain = 0;
-      proc->id = cpu_id;
-      proc->kernel_proc_ids.insert(cpu_id);
-      cm->all_procs[proc->id] = proc;
-      // Assume each core stands alone, until we find out different
-      int core_id = cpu_id;
-
-      snprintf(path, sizeof(path), "/sys/devices/system/cpu/%s", cpu_entry->d_name);
-      DIR *per_cpu_dir = opendir(path);
-      if(per_cpu_dir != nullptr) {
-        // Find the numa node id, which may not exist if the system doesn't support it
-        for(struct dirent *entry = readdir(per_cpu_dir); entry != nullptr;
-            entry = readdir(per_cpu_dir)) {
-          // Not a node directory
-          if(strncmp(entry->d_name, "node", 4) != 0)
-            continue;
-
-          int node_id = strtol(entry->d_name + 4, &pos, 10);
-          // Not of the format "cpu[0-9]+", some letters afterward
-          if(pos != nullptr && *pos != 0)
-            continue;
-
-          proc->domain = node_id;
-          break;
-        }
-        closedir(per_cpu_dir);
-      }
-      // Now that we have an updated domain, add this processor to the correct domain
-      cm->by_domain[proc->domain][cpu_id] = proc;
-
-#if !(defined(__arm__) || defined(__aarch64__))
-      // Read topology/core_id for physical core id to determine hyperthreading
-      // This isn't a good way to determine hyperthreading, as core_id is
-      // platform specific.  For example, for ARM, the core id represents the
-      // package id, and the cpus within the core run independently.  For now,
-      // ARM doesn't support hyper-threading, so skip this part
-      snprintf(path, sizeof(path), "/sys/devices/system/cpu/%s/topology/core_id",
-               cpu_entry->d_name);
-      FILE *core_id_file = fopen(path, "r");
-      if(core_id_file != nullptr) {
-        int count = fscanf(core_id_file, "%d", &core_id);
-        if(count != 1) {
-          log_thread.warning() << "Unable to parse physical core id from " << path;
-        }
-        fclose(core_id_file);
-      }
-#endif
-      ht_sets[std::make_pair(proc->domain, core_id)].insert(proc);
-
-      // Read the thread siblings file to discover hyper-threading cores
-      // Assume those that share the same total mask are siblings (no need to actually
-      // parse the masks)
-      snprintf(path, sizeof(path), "/sys/devices/system/cpu/%s/topology/thread_siblings",
-               cpu_entry->d_name);
-      FILE *thread_sibling_file = fopen(path, "r");
-      if(thread_sibling_file != nullptr) {
-        char sibling_mask[1024];
-        if(fgets(sibling_mask, sizeof(sibling_mask), thread_sibling_file) == nullptr) {
-          log_thread.warning() << "Unable to read sibling mask from " << path;
-        } else {
-          sibling_sets[sibling_mask].insert(proc);
-        }
-        fclose(thread_sibling_file);
-      }
-    }
-
-    closedir(cpu_dir);
-
-    if(hyperthread_sharing) {
-      update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
-      update_core_sharing(sibling_sets, false /*!alu*/, true /*fpu*/, false /*!ldst*/);
-    }
-
-    // all done!
-    return cm;
-  }
-#endif
-
-#ifdef REALM_USE_HWLOC
-#ifdef REALM_ON_LINUX
-  // find bulldozer cpus that share fpu
-  static bool get_bd_sibling_id(int cpu_id, int core_id,
-				std::set<int>& sibling_ids) {
-    char str[1024];
-    snprintf(str, sizeof str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
-    FILE *f = fopen(str, "r");
-    if(!f) {
-      log_thread.warning() << "can't read '" << str << "' - skipping";
-      return false;
-    }
-    hwloc_bitmap_t set = hwloc_bitmap_alloc();
-    hwloc_linux_parse_cpumap_file(f, set);
-
-    fclose(f);
-
-    // loop over all siblings (except ourselves)
-    for(int siblingid = hwloc_bitmap_first(set);
-	siblingid != -1;
-	siblingid = hwloc_bitmap_next(set, siblingid)) {
-      if(siblingid == cpu_id) continue;
-
-      // don't filter siblings with the same core ID - this catches
-      //  hyperthreads too
-#if 0
-      snprintf(str, sizeof str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
-      f = fopen(str, "r");
-      if(!f) {
-	log_thread.warning() << "can't read '" << str << "' - skipping";
-	continue;
-      }
-      int sib_core_id;
-      int count = fscanf(f, "%d", &sib_core_id);
-      fclose(f);
-      if(count != 1) {
-	log_thread.warning() << "can't find core id in '" << str << "' - skipping";
-	continue;
-      }
-      if(sib_core_id == core_id) continue;
-#endif
-      sibling_ids.insert(siblingid);
-    }
-
-    hwloc_bitmap_free(set);
-
-    return true;
-  }
-#endif
-
-  static CoreMap *extract_core_map_from_hwloc(bool hyperthread_sharing)
-  {
-    CoreMap *cm = new CoreMap;
-
-    // hyperthreading sets are cores with the same node ID and physical core ID
-    std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
-    // bulldozer specific sets
-    std::map<int, std::set<CoreMap::Proc *> > bd_sets;
-
-    hwloc_topology_t topology;
-    hwloc_topology_init(&topology);
-    hwloc_topology_load(topology);
-
-    hwloc_obj_t obj = NULL;
-    int cpu_id, node_id, core_id;
-    while ((obj = hwloc_get_next_obj_by_type(topology, HWLOC_OBJ_CORE, obj)) != NULL) {
-      if(obj->online_cpuset && obj->allowed_cpuset) {
-        cpu_id = hwloc_bitmap_first(obj->cpuset);
-        while(cpu_id != -1) {
-
-          node_id = hwloc_bitmap_first(obj->nodeset);
-          core_id = obj->os_index;
-
-          CoreMap::Proc *p = new CoreMap::Proc;
-
-          p->id = cpu_id;
-          p->domain = node_id;
-          p->kernel_proc_ids.insert(cpu_id);
-
-          cm->all_procs[cpu_id] = p;
-          cm->by_domain[node_id][cpu_id] = p;
-
-          // add to HT sets to deal with in a bit
-          ht_sets[std::make_pair(node_id, core_id)].insert(p);
-
-#ifdef REALM_ON_LINUX
-          // add bulldozer sets
-	  std::set<int> sibling_ids;
-	  if(get_bd_sibling_id(cpu_id, core_id, sibling_ids) &&
-	     !sibling_ids.empty()) {
-	    bd_sets[cpu_id].insert(p);
-	    for(std::set<int>::const_iterator it = sibling_ids.begin();
-		it != sibling_ids.end();
-		++it)
-	      bd_sets[*it].insert(p);
-	  }
-#endif
-
-          cpu_id = hwloc_bitmap_next(obj->cpuset, cpu_id);
-        }
-      }
-    }
-    hwloc_topology_destroy(topology);
-
-    if(hyperthread_sharing) {
-      update_core_sharing(ht_sets, true /*alu*/, true /*fpu*/, true /*ldst*/);
-      update_core_sharing(bd_sets,
-			  false /*!alu*/, true /*fpu*/, false /*!ldst*/);
-    }
-
-    // all done!
-    return cm;
-  }
-#endif
-
-#ifdef REALM_ON_WINDOWS
-  static CoreMap *extract_core_map_from_windows_api(bool hyperthread_sharing)
-  {
-    DWORD_PTR process_mask, system_mask;
-    GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
-    if(process_mask == 0) {
-      log_thread.warning() << "process affinity mask is empty? (system = " << system_mask << ")";
-      return 0;
-    }
-    log_thread.debug() << "affinity_mask = " << process_mask << " system=" << system_mask;
-
-    PSYSTEM_LOGICAL_PROCESSOR_INFORMATION proc_info = NULL;
-    DWORD proc_info_size = 0;
-    DWORD rc;
-    rc = GetLogicalProcessorInformation(proc_info, &proc_info_size);
-    if((rc == TRUE) || (GetLastError() != ERROR_INSUFFICIENT_BUFFER) || (proc_info_size == 0)) {
-      log_thread.warning() << "unable to query processor info size";
-      return 0;
-    }
-    proc_info = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION)malloc(proc_info_size);
-    assert(proc_info != 0);
-    rc = GetLogicalProcessorInformation(proc_info, &proc_info_size);
-    assert(rc == TRUE);
-
-    // populate all_procs map
-    CoreMap *cm = new CoreMap;
-
-    for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= process_mask); i++)
-      if((process_mask & (DWORD_PTR(1) << i)) != 0) {
-        CoreMap::Proc *p = new CoreMap::Proc;
-        p->id = i;
-        p->domain = -1;  // fill in below
-        p->kernel_proc_ids.insert(i);
-        cm->all_procs[i] = p;
-      }
-
-    size_t num_infos = proc_info_size / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
-    for(size_t i = 0; i < num_infos; i++) {
-      DWORD_PTR eff_mask = process_mask & proc_info[i].ProcessorMask;
-      if(eff_mask == 0) continue;
-
-      switch(proc_info[i].Relationship) {
-        case RelationNumaNode:
-        {
-          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " numa node=" << proc_info[i].NumaNode.NodeNumber;
-          CoreMap::ProcMap& dm = cm->by_domain[proc_info[i].NumaNode.NodeNumber];
-          for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= eff_mask); i++)
-            if((eff_mask & (DWORD_PTR(1) << i)) != 0) {
-              CoreMap::Proc *p = cm->all_procs[i];
-              assert(p != 0);
-              p->domain = proc_info[i].NumaNode.NodeNumber;
-              dm[p->id] = p;
-            }
-          break;
-        }
-
-        case RelationProcessorCore:
-        {
-          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " hyperthreads";
-
-          // these are hyperthreads - do we care?
-          if(hyperthread_sharing) {
-            for(int i = 0; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << i) <= eff_mask); i++)
-              if((eff_mask & (DWORD_PTR(1) << i)) != 0) {
-                CoreMap::Proc *p1 = cm->all_procs[i];
-                for(int j = i + 1; (i < sizeof(DWORD_PTR)*8) && ((DWORD_PTR(1) << j) <= eff_mask); j++)
-                  if((eff_mask & (DWORD_PTR(1) << j)) != 0) {
-                    CoreMap::Proc *p2 = cm->all_procs[j];
-                    p1->shares_alu.insert(p2);
-                    p1->shares_fpu.insert(p2);
-                    p1->shares_ldst.insert(p2);
-
-                    p2->shares_alu.insert(p1);
-                    p2->shares_fpu.insert(p1);
-                    p2->shares_ldst.insert(p1);
-                  }
-              }
-          }
-          break;
-        }
-
-        default:
-        {
-          log_thread.debug() << "info[" << i << "]: eff_mask=" << proc_info[i].ProcessorMask << " rel=" << proc_info[i].Relationship;
-          break;
-        }
-      }
-    }
-
-    free(proc_info);
-
-    return cm;
-  }
-#endif
-
-  /*static*/ CoreMap *CoreMap::discover_core_map(bool hyperthread_sharing)
-  {
-    // we'll try a number of different strategies to discover the local cores:
-    // 1) a user-defined synthetic map, if REALM_SYNTHETIC_CORE_MAP is set
-    if(getenv("REALM_SYNTHETIC_CORE_MAP")) {
-      const char *p = getenv("REALM_SYNTHETIC_CORE_MAP");
-      int num_domains = 1;
-      int num_cores = 1;
-      int hyperthreads = 1;
-      int fp_cluster_size = 1;
-      while(true) {
-	if(!(p[0] && (p[1] == '=') && isdigit(p[2]))) break;
-
-	const char *p2;
-	int x = strtol(p+2, (char **)&p2, 10);
-	if(x == 0) { p+=2; break; }  // zero of anything is bad
-	if(p[0] == 'd') num_domains = x; else
-	if(p[0] == 'c') num_cores = x; else
-	if(p[0] == 'h') hyperthreads = x; else
-	if(p[0] == 'f') fp_cluster_size = x; else
-	  break;
-	p = p2;
-
-	// now we want a comma (to continue) or end-of-string
-	if(*p != ',') break;
-	p++;
-      }
-      // if parsing reached the end of string, we're good
-      if(*p == 0) {
-	return CoreMap::create_synthetic(num_domains, num_cores, hyperthreads, fp_cluster_size);
-      } else {
-	const char *orig = getenv("REALM_SYNTHETIC_CORE_MAP");
-	log_thread.error("Error parsing REALM_SYNTHETIC_CORE_MAP: '%.*s(^)%s'",
-			 (int)(p-orig), orig, p);
-      }
-    }
-
-    // 2) extracted from hwloc information
-#ifdef REALM_USE_HWLOC
-    {
-      CoreMap *cm = extract_core_map_from_hwloc(hyperthread_sharing);
-      if(cm) return cm;
-    }
-#endif
-
-    // 3) extracted from Linux's /sys
-#ifdef REALM_ON_LINUX
-    {
-      CoreMap *cm = extract_core_map_from_linux_sys(hyperthread_sharing);
-      if(cm) return cm;
-    }
-#endif
-
-    // 4) windows has an API for this
-#ifdef REALM_ON_WINDOWS
-    {
-      CoreMap *cm = extract_core_map_from_windows_api(hyperthread_sharing);
-      if(cm) return cm;
-    }
-#endif
-
-    // 5) as a final fallback a single-core synthetic map
-    {
-      CoreMap *cm = create_synthetic(1, 1);
-      return cm;
-    }
-  }
-  
-  static void show_share_set(std::ostream& os, const char *name,
-			     const std::set<CoreMap::Proc *>& sset)
-  {
-    if(sset.empty()) return;
-
-    os << ' ' << name << "=<";
-    std::set<CoreMap::Proc *>::const_iterator it = sset.begin();
-    while(true) {
-      os << (*it)->id;
-      if(++it == sset.end()) break;
-      os << ',';
-    }
-    os << ">";
-  }
-
-  /*friend*/ std::ostream& operator<<(std::ostream& os, const CoreMap& cm)
-  {
-    os << "core map {" << std::endl;
-    for(CoreMap::DomainMap::const_iterator it = cm.by_domain.begin();
-	it != cm.by_domain.end();
-	it++) {
-      os << "  domain " << it->first << " {" << std::endl;
-      for(CoreMap::ProcMap::const_iterator it2 = it->second.begin();
-	  it2 != it->second.end();
-	  it2++) {
-	os << "    core " << it2->first << " {";
-	const CoreMap::Proc *p = it2->second;
-	if(!p->kernel_proc_ids.empty()) {
-	  os << " ids=<";
-	  std::set<int>::const_iterator it3 = p->kernel_proc_ids.begin();
-	  while(true) {
-	    os << *it3;
-	    if(++it3 == p->kernel_proc_ids.end()) break;
-	    os << ',';
-	  }
-	  os << ">";
-	}
-
-	show_share_set(os, "alu", p->shares_alu);
-	show_share_set(os, "fpu", p->shares_fpu);
-	show_share_set(os, "ldst", p->shares_ldst);
-
-	os << " }" << std::endl;
-      }
-      os << "  }" << std::endl;
-    }
-    os << "}";
-    return os;
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
