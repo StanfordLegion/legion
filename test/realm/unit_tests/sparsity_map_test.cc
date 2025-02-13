@@ -391,7 +391,10 @@ struct WrappedComputeCoveringData : public BaseTestData {
   int get_dim() const override { return N; }
 };
 
-class ComputeCoveringTest : public ::testing::TestWithParam<BaseTestData *> {};
+class ComputeCoveringTest : public ::testing::TestWithParam<BaseTestData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
 
 template <int N>
 void run_test_case(const ComputeCoveringTestData<N> &test_case)
@@ -594,7 +597,10 @@ struct WrappedOverlapTestData : public BaseTestData {
   int get_dim() const override { return N; }
 };
 
-class OverlapTest : public ::testing::TestWithParam<BaseTestData *> {};
+class OverlapTest : public ::testing::TestWithParam<BaseTestData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
 
 template <int N>
 void run_test_case(const OverlapTestData<N> &test_case)
