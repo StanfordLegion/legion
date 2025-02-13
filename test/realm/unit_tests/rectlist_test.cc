@@ -118,6 +118,7 @@ TEST_P(DenseRectListTest, Add)
 
 // ---------------------------- HybridRectangleList Tests ----------------------------
 class HybridRectListTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+protected:
   void TearDown() override { delete GetParam(); }
 };
 
@@ -157,6 +158,7 @@ TEST_P(HybridRectListTest, Add)
 
 // ---------------------------- CoverageCounter Tests ----------------------------
 class CoverageCounterTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+protected:
   void TearDown() override { delete GetParam(); }
 };
 
