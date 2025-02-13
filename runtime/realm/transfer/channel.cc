@@ -4477,10 +4477,7 @@ namespace Realm {
     : channel(_channel)
   {}
 
-  bool SimpleXferDesFactory::needs_release()
-  {
-    return false;
-  }
+  bool SimpleXferDesFactory::needs_release() { return false; }
 
   void SimpleXferDesFactory::create_xfer_des(uintptr_t dma_op,
 					     NodeID launch_node,

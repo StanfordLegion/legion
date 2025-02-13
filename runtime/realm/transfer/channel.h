@@ -1193,7 +1193,7 @@ namespace Realm {
 
       long submit(Request** requests, long nr);
     };
-   
+
     class TransferOperation;
     struct NotifyXferDesCompleteMessage {
       TransferOperation *op;
