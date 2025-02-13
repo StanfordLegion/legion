@@ -83,7 +83,10 @@ struct WrappedTestCaseData : public BaseTestCaseData {
   int get_dim() const override { return N; }
 };
 
-class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {};
+class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
 
 template <int N>
 void run_test_case(const TestCaseData<N> &test_case)
