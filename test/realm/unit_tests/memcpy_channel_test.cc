@@ -39,13 +39,15 @@ protected:
 
 TEST_P(SupportsPathTest, CheckSupportsPath)
 {
-  auto test_case = GetParam();
+  SupportsPathTestCase test_case = GetParam();
   constexpr size_t bytes = 16;
 
   std::vector<std::byte> src_buffer(bytes);
-  auto src_mem = create_memory(test_case.src_mem_id, test_case.src_node_id, src_buffer);
+  MemoryImpl *src_mem =
+      create_memory(test_case.src_mem_id, test_case.src_node_id, src_buffer);
   std::vector<std::byte> dst_buffer(bytes);
-  auto dst_mem = create_memory(test_case.dst_mem_id, test_case.dst_node_id, dst_buffer);
+  MemoryImpl *dst_mem =
+      create_memory(test_case.dst_mem_id, test_case.dst_node_id, dst_buffer);
 
   node.memories.push_back(src_mem);
 
@@ -180,16 +182,33 @@ create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
   return impl;
 }
 
-template <int DIM>
-struct TypeWrapper {
-  static constexpr int value = DIM;
+template <int N>
+struct TestCaseData {
+  Rect<N> domain;
+  std::vector<Rect<N>> rects;
+  std::vector<int> dim_order;
+  std::vector<FieldID> field_ids;
+  std::vector<size_t> field_offsets;
+  std::vector<size_t> field_sizes;
+  std::vector<int> src_buffer;
+  std::vector<int> exp_buffer;
 };
 
-template <typename TypeWrapper>
-class GetAddressesTest : public ::testing::Test {
-public:
-  static constexpr int DIM = TypeWrapper::value;
+struct BaseTestCaseData {
+  virtual ~BaseTestCaseData() = default;
+  virtual int get_dim() const = 0;
+};
 
+template <int N>
+struct WrappedTestCaseData : public BaseTestCaseData {
+  TestCaseData<N> data;
+  explicit WrappedTestCaseData(TestCaseData<N> d)
+    : data(std::move(d))
+  {}
+  int get_dim() const override { return N; }
+};
+
+class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
   void SetUp() override
   {
     bgwork = new BackgroundWorkManager();
@@ -213,236 +232,239 @@ public:
   MemcpyChannel *channel;
 };
 
-template <int DIM>
-struct GetAddressesTestCase {
-  Rect<DIM> domain;
-  std::vector<Rect<DIM>> rects;
-  std::vector<int> dim_order;
-  std::vector<FieldID> field_ids;
-  std::vector<size_t> field_offsets;
-  std::vector<size_t> field_sizes;
-  std::vector<int> src_buffer;
-  std::vector<int> exp_buffer;
-};
-
-template <int DIM>
-std::vector<GetAddressesTestCase<DIM>> GetTestCases()
-{
-  if constexpr(DIM == 1) {
-    return {
-
-        // Dense 1D rects multifield
-        {
-            /*domain=*/{Rect<1>(1, 0)},
-            /*rects=*/{Rect<1>(1, 0)},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0, 1},
-            /*field_offsets=*/{0, 0},
-            /*field_sizes=*/{sizeof(int), sizeof(long long)},
-            {},
-            {},
-        },
-        // Empty 1D domain
-        {
-            /*domain=*/{Rect<1>(1, 0)},
-            /*rects=*/{},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {},
-        },
-        // Sparse 1D rects
-        {
-            /*domain=*/{Rect<1>(0, 8)},
-            /*rects=*/{Rect<1>(0, 1), Rect<1>(5, 6)},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3, 5, 6, 7},
-            {0, 1, 77, 77, 77, 6, 7},
-        },
-
-        // Dense 1D rects
-        {
-            /*domain=*/{Rect<1>(0, 3)},
-            /*rects=*/{Rect<1>(0, 3)},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3},
-            {0, 1, 2, 3},
-        },
-    };
-  } else if constexpr(DIM == 2) {
-    return {
-
-        // Full 2D dense reverse dims
-        {
-            /*domain=*/Rect<2>({0, 0}, {1, 1}),
-            /*rects*/ {Rect<2>({0, 0}, {1, 1})},
-            /*dim_order=*/{1, 0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3},
-            {0, 1, 2, 3},
-        },
-
-        // Full 2D sparse
-        {
-            /*domain=*/Rect<2>({0, 0}, {3, 1}),
-            /*rects*/
-            {Rect<2>({0, 0}, {0, 0}), Rect<2>({3, 0}, {3, 0}), Rect<2>({0, 1}, {0, 1}),
-             Rect<2>({3, 1}, {3, 1})},
-            /*dim_order=*/{0, 1},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3, 4, 5, 6, 7},
-            {0, 77, 77, 3, 4, 77, 77, 7},
-        },
-
-        // Full 2D dense
-        {
-            /*domain=*/Rect<2>({0, 0}, {1, 1}),
-            /*rects*/ {Rect<2>({0, 0}, {1, 1})},
-            /*dim_order=*/{0, 1},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3},
-            {0, 1, 2, 3},
-        },
-    };
-  } else if constexpr(DIM == 3) {
-    return {
-        // Full 3D domain
-        {
-            /*domain=*/Rect<3>({0, 0, 0}, {1, 1, 1}),
-            /*rects=*/{Rect<3>({0, 0, 0}, {1, 1, 1})},
-            /*dim_order=*/{0, 1, 2},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3, 4, 5, 6, 7},
-            {0, 1, 2, 3, 4, 5, 6, 7},
-        },
-        // Ful 3d domain with reverse dims
-        {
-            /*domain=*/Rect<3>({0, 0, 0}, {1, 1, 1}),
-            /*rects=*/{Rect<3>({0, 0, 0}, {1, 1, 1})},
-            /*dim_order=*/{2, 1, 0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-            {0, 1, 2, 3, 4, 5, 6, 7},
-            {0, 1, 2, 3, 4, 5, 6, 7},
-        },
-
-    };
-  }
-  return {};
-}
-
-TYPED_TEST_SUITE_P(GetAddressesTest);
-
-TYPED_TEST_P(GetAddressesTest, Base)
+template <int N>
+void run_test_case(const TestCaseData<N> &test_case)
 {
   using T = int;
-  constexpr int N = TypeParam::value;
-  auto test_cases = GetTestCases<N>();
 
-  for(const auto &test_case : test_cases) {
-    NodeSet subscribers;
-    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-    SparsityMapPublicImpl<N, T> *local_impl = nullptr;
-    SparsityMap<N, T>::ImplLookup::get_impl_ptr =
-        [&](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
-      if(local_impl == nullptr) {
-        local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
-      }
-      return local_impl;
-    };
+  XferDesID guid = 0;
+  int priority = 0;
+  NodeID owner = 0;
+  Node node_data;
+  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
+  XferDesRedopInfo redop_info;
+  BackgroundWorkManager *bgwork;
+  MemcpyChannel *channel;
 
-    SparsityMapImpl<N, T> *impl =
-        reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
-    impl->set_contributor_count(1);
-    impl->contribute_dense_rect_list(test_case.rects, true);
-    IndexSpace<N, T> domain = test_case.domain;
-    if(!test_case.rects.empty()) {
-      domain.sparsity = handle;
+  bgwork = new BackgroundWorkManager();
+  channel = new MemcpyChannel(bgwork, &node_data, remote_shared_memory_mappings);
+
+  NodeSet subscribers;
+  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+  SparsityMapPublicImpl<N, T> *local_impl = nullptr;
+  SparsityMap<N, T>::ImplLookup::get_impl_ptr =
+      [&](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
+    if(local_impl == nullptr) {
+      local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
     }
+    return local_impl;
+  };
 
-    TransferIteratorIndexSpace<N, T> *src_it = new TransferIteratorIndexSpace<N, T>(
-        domain,
-        create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
-        test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-        test_case.field_sizes, 0);
-
-    std::vector<XferDesPortInfo> inputs_info;
-    std::vector<XferDesPortInfo> outputs_info;
-
-    std::unique_ptr<MemcpyXferDes> xfer_desc(dynamic_cast<MemcpyXferDes *>(
-        this->channel->create_xfer_des(0, this->owner, this->guid, inputs_info,
-                                       outputs_info, this->priority, this->redop_info,
-                                       nullptr, 0, 0)));
-
-    xfer_desc->input_ports.resize(1);
-    XferDes::XferPort &input_port = xfer_desc->input_ports[0];
-
-    auto src_buffer = test_case.src_buffer;
-    std::unique_ptr<LocalCPUMemory> input_mem = std::make_unique<LocalCPUMemory>(
-        Memory::NO_MEMORY, src_buffer.size() * sizeof(int), 0, Memory::SYSTEM_MEM,
-        src_buffer.data());
-    input_port.mem = input_mem.get();
-    input_port.peer_port_idx = 0;
-    input_port.iter = src_it;
-    input_port.addrcursor.set_addrlist(&input_port.addrlist);
-
-    TransferIteratorIndexSpace<N, T> *dst_it = new TransferIteratorIndexSpace<N, T>(
-        domain,
-        create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
-        test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-        test_case.field_sizes, 0);
-
-    xfer_desc->output_ports.resize(1);
-    XferDes::XferPort &output_port = xfer_desc->output_ports[0];
-    size_t total_dst_size = src_buffer.size();
-    std::vector<int> dst_buffer(total_dst_size, 77);
-    std::unique_ptr<LocalCPUMemory> output_mem =
-        std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_dst_size * sizeof(int),
-                                         0, Memory::SYSTEM_MEM, dst_buffer.data());
-    output_port.mem = output_mem.get();
-    output_port.peer_port_idx = 0;
-    output_port.iter = dst_it;
-
-    output_port.addrcursor.set_addrlist(&output_port.addrlist);
-
-    while(xfer_desc->progress_xd(this->channel, TimeLimit::relative(10000000))) {
-    }
-
-    for(size_t i = 0; i < total_dst_size; i++) {
-      EXPECT_EQ(dst_buffer[i], test_case.exp_buffer[i]);
-    }
-
-    delete impl;
+  SparsityMapImpl<N, T> *impl = reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
+  impl->set_contributor_count(1);
+  impl->contribute_dense_rect_list(test_case.rects, true);
+  IndexSpace<N, T> domain = test_case.domain;
+  if(!test_case.rects.empty()) {
+    domain.sparsity = handle;
   }
+
+  TransferIteratorIndexSpace<N, T> *src_it = new TransferIteratorIndexSpace<N, T>(
+      domain,
+      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+      test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
+      test_case.field_sizes, 0);
+
+  std::vector<XferDesPortInfo> inputs_info;
+  std::vector<XferDesPortInfo> outputs_info;
+
+  std::unique_ptr<MemcpyXferDes> xfer_desc(dynamic_cast<MemcpyXferDes *>(
+      channel->create_xfer_des(0, owner, guid, inputs_info, outputs_info, priority,
+                               redop_info, nullptr, 0, 0)));
+
+  xfer_desc->input_ports.resize(1);
+  XferDes::XferPort &input_port = xfer_desc->input_ports[0];
+
+  std::vector<int> src_buffer = test_case.src_buffer;
+  std::unique_ptr<LocalCPUMemory> input_mem =
+      std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, src_buffer.size() * sizeof(int),
+                                       0, Memory::SYSTEM_MEM, src_buffer.data());
+  input_port.mem = input_mem.get();
+  input_port.peer_port_idx = 0;
+  input_port.iter = src_it;
+  input_port.addrcursor.set_addrlist(&input_port.addrlist);
+
+  TransferIteratorIndexSpace<N, T> *dst_it = new TransferIteratorIndexSpace<N, T>(
+      domain,
+      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+      test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
+      test_case.field_sizes, 0);
+
+  xfer_desc->output_ports.resize(1);
+  XferDes::XferPort &output_port = xfer_desc->output_ports[0];
+  size_t total_dst_size = src_buffer.size();
+  std::vector<int> dst_buffer(total_dst_size, 77);
+  std::unique_ptr<LocalCPUMemory> output_mem =
+      std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_dst_size * sizeof(int), 0,
+                                       Memory::SYSTEM_MEM, dst_buffer.data());
+  output_port.mem = output_mem.get();
+  output_port.peer_port_idx = 0;
+  output_port.iter = dst_it;
+
+  output_port.addrcursor.set_addrlist(&output_port.addrlist);
+
+  while(xfer_desc->progress_xd(channel, TimeLimit::relative(10000000))) {
+  }
+
+  for(size_t i = 0; i < total_dst_size; i++) {
+    EXPECT_EQ(dst_buffer[i], test_case.exp_buffer[i]);
+  }
+
+  delete impl;
+  channel->shutdown();
+  delete channel;
+  delete bgwork;
 }
 
-REGISTER_TYPED_TEST_SUITE_P(GetAddressesTest, Base);
+template <typename Func, size_t... Is>
+void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
+{
+  (
+      [&] {
+        if(dim == static_cast<int>(Is + 1)) {
+          func(std::integral_constant<int, Is + 1>{});
+        }
+      }(),
+      ...);
+}
 
-using TestTypes = ::testing::Types<TypeWrapper<1>
-#if REALM_MAX_DIM > 1
-                                   ,
-                                   TypeWrapper<2>
-#endif
-#if REALM_MAX_DIM > 2
-                                   ,
-                                   TypeWrapper<3>
-#endif
-                                   >;
+TEST_P(IndirectGetAddressesTest, Base)
+{
+  const BaseTestCaseData *base_test_case = GetParam();
 
-INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, GetAddressesTest, TestTypes);
+  dispatch_for_dimension(
+      base_test_case->get_dim(),
+      [&](auto Dim) {
+        constexpr int N = Dim;
+        auto &test_case =
+            static_cast<const WrappedTestCaseData<N> *>(base_test_case)->data;
+        run_test_case(test_case);
+      },
+      std::make_index_sequence<REALM_MAX_DIM>{});
+}
+
+INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
+                         ::testing::Values(
+                             // Case 1: All points are mergeable
+                             new WrappedTestCaseData<1>({
+                                 /*domain=*/{Rect<1>(1, 0)},
+                                 /*rects=*/{Rect<1>(1, 0)},
+                                 /*dim_order=*/{0},
+                                 /*field_ids=*/{0, 1},
+                                 /*field_offsets=*/{0, 0},
+                                 /*field_sizes=*/{sizeof(int), sizeof(long long)},
+                                 {},
+                                 {},
+                             }),
+
+                             new WrappedTestCaseData<1>(
+                                 // Empty 1D domain
+                                 {/*domain=*/{Rect<1>(1, 0)},
+                                  /*rects=*/{},
+                                  /*dim_order=*/{0},
+                                  /*field_ids=*/{0},
+                                  /*field_offsets=*/{0},
+                                  /*field_sizes=*/{sizeof(int)},
+                                  {}}),
+
+                             new WrappedTestCaseData<1>(
+                                 // Sparse 1D rects
+                                 {
+                                     /*domain=*/{Rect<1>(0, 8)},
+                                     /*rects=*/{Rect<1>(0, 1), Rect<1>(5, 6)},
+                                     /*dim_order=*/{0},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3, 5, 6, 7},
+                                     {0, 1, 77, 77, 77, 6, 7},
+                                 }),
+
+                             new WrappedTestCaseData<1>(
+                                 // Dense 1D rects
+                                 {
+                                     /*domain=*/{Rect<1>(0, 3)},
+                                     /*rects=*/{Rect<1>(0, 3)},
+                                     /*dim_order=*/{0},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3},
+                                     {0, 1, 2, 3},
+                                 }),
+
+                             new WrappedTestCaseData<2>(
+                                 // Full 2D dense reverse dims
+                                 {
+                                     /*domain=*/Rect<2>({0, 0}, {1, 1}),
+                                     /*rects*/ {Rect<2>({0, 0}, {1, 1})},
+                                     /*dim_order=*/{1, 0},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3},
+                                     {0, 1, 2, 3},
+                                 }),
+
+                             new WrappedTestCaseData<2>(
+                                 // Full 2D sparse
+                                 {
+                                     /*domain=*/Rect<2>({0, 0}, {3, 1}),
+                                     /*rects*/
+                                     {Rect<2>({0, 0}, {0, 0}), Rect<2>({3, 0}, {3, 0}),
+                                      Rect<2>({0, 1}, {0, 1}), Rect<2>({3, 1}, {3, 1})},
+                                     /*dim_order=*/{0, 1},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3, 4, 5, 6, 7},
+                                     {0, 77, 77, 3, 4, 77, 77, 7},
+                                 }),
+
+                             new WrappedTestCaseData<2>(
+                                 // Full 2D dense
+                                 {
+                                     /*domain=*/Rect<2>({0, 0}, {1, 1}),
+                                     /*rects*/ {Rect<2>({0, 0}, {1, 1})},
+                                     /*dim_order=*/{0, 1},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3},
+                                     {0, 1, 2, 3},
+                                 }),
+
+                             new WrappedTestCaseData<3>(
+                                 // Full 3D domain
+                                 {
+                                     /*domain=*/Rect<3>({0, 0, 0}, {1, 1, 1}),
+                                     /*rects=*/{Rect<3>({0, 0, 0}, {1, 1, 1})},
+                                     /*dim_order=*/{0, 1, 2},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3, 4, 5, 6, 7},
+                                     {0, 1, 2, 3, 4, 5, 6, 7},
+                                 }),
+
+                             new WrappedTestCaseData<3>(
+                                 // Ful 3d domain with reverse dims
+                                 {
+                                     /*domain=*/Rect<3>({0, 0, 0}, {1, 1, 1}),
+                                     /*rects=*/{Rect<3>({0, 0, 0}, {1, 1, 1})},
+                                     /*dim_order=*/{2, 1, 0},
+                                     /*field_ids=*/{0},
+                                     /*field_offsets=*/{0},
+                                     /*field_sizes=*/{sizeof(int)},
+                                     {0, 1, 2, 3, 4, 5, 6, 7},
+                                     {0, 1, 2, 3, 4, 5, 6, 7},
+                                 })));
