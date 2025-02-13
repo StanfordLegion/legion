@@ -46,10 +46,11 @@ static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_i
 }
 
 template <int N, typename T>
-static RegionInstanceImpl *
-create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
-            const std::vector<size_t> &field_sizes, RegionInstance inst = make_inst())
+static RegionInstanceImpl *create_inst(Rect<N, T> bounds,
+                                       const std::vector<FieldID> &field_ids,
+                                       const std::vector<size_t> &field_sizes)
 {
+  RegionInstance inst = ID::make_instance(0, 0, 0, 0).convert<RegionInstance>();
   InstanceLayout<N, T> *inst_layout = create_layout(bounds, field_ids, field_sizes);
   RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
   impl->metadata.layout = inst_layout;
@@ -57,117 +58,221 @@ create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
   return impl;
 }
 
-template <int DIM>
-struct TypeWrapper {
-  static constexpr int value = DIM;
+struct BaseTestCaseData {
+  virtual ~BaseTestCaseData() = default;
+  virtual int get_dim() const = 0;
 };
 
-template <typename TypeWrapper>
-class GetAddressesTest : public ::testing::Test {
-public:
-  static constexpr int DIM = TypeWrapper::value;
-};
-
-template <int DIM>
-struct GetAddressesTestCase {
-  Rect<DIM> domain;
-  std::vector<Rect<DIM>> rects;
-  std::vector<Rect<DIM>> expected;
+template <int N>
+struct TestCaseData {
+  Rect<N> domain;
+  std::vector<Rect<N>> rects;
+  std::vector<Rect<N>> expected;
   std::vector<int> dim_order;
   std::vector<FieldID> field_ids;
   std::vector<size_t> field_offsets;
   std::vector<size_t> field_sizes;
 };
 
-template <int DIM>
-std::vector<GetAddressesTestCase<DIM>> GetTestCases()
+template <int N>
+struct WrappedTestCaseData : public BaseTestCaseData {
+  TestCaseData<N> data;
+  explicit WrappedTestCaseData(TestCaseData<N> d)
+    : data(std::move(d))
+  {}
+  int get_dim() const override { return N; }
+};
+
+class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {};
+
+template <int N>
+void run_test_case(const TestCaseData<N> &test_case)
 {
-  if constexpr(DIM == 1) {
-    return {
-        // Empty 1D domain
-        {
-            /*domain=*/{Rect<1>(1, 0)},
-            /*rects=*/{},
-            /*expected=*/{},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0, 1},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-        },
+  using T = int;
+  NodeSet subscribers;
 
-        // Dense 1D rects multifield
-        {
-            /*domain=*/{Rect<1>(0, 14)},
-            /*rects=*/{Rect<1>(0, 14)},
-            /*expected=*/{Rect<1>(0, 14)},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0, 1},
-            /*field_offsets=*/{0, 0},
-            /*field_sizes=*/{sizeof(int), sizeof(long long)},
-        },
+  SparsityMapPublicImpl<N, T> *local_impl = nullptr;
+  SparsityMap<N, T>::ImplLookup::get_impl_ptr =
+      [&local_impl](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
+    if(local_impl == nullptr) {
+      SparsityMap<N, T> handle =
+          (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+      NodeSet subscribers;
+      local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
+    }
+    return local_impl;
+  };
 
-        // Dense 1D rects
-        {
-            /*domain=*/{Rect<1>(0, 14)},
-            /*rects=*/{Rect<1>(0, 14)},
-            /*expected=*/{Rect<1>(0, 14)},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-        },
+  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+  auto impl = reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
+  impl->set_contributor_count(1);
+  impl->contribute_dense_rect_list(test_case.rects, true);
+  IndexSpace<N, T> domain = test_case.domain;
+  if(!test_case.rects.empty()) {
+    domain.sparsity = handle;
+  }
 
-        // Sparse 1D rects
-        {
-            /*domain=*/{Rect<1>(0, 14)},
-            /*rects=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
-            /*expected=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
-            /*dim_order=*/{0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-        },
-    };
-  } else if constexpr(DIM == 2) {
-    return {
+  auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
+      domain,
+      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+      test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
+      test_case.field_sizes);
+  const InstanceLayoutPieceBase *nonaffine;
+  AddressList addrlist;
+  AddressListCursor cursor;
 
-        // Full 2D dense
-        {
-            /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*rects*/ {Rect<2>({0, 0}, {10, 10})},
-            /*expected=*/{Rect<2>({0, 0}, {10, 10})},
-            /*dim_order=*/{0, 1},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-        },
+  bool ok = it->get_addresses(addrlist, nonaffine);
 
-        // Full 2D sparse
-        {
-            /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*rects*/ {Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
-            /*expected=*/{Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
-            /*dim_order=*/{0, 1},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-        },
+  ASSERT_TRUE(ok);
+  ASSERT_TRUE(it->done());
 
-        // Full 2D dense reverse dims
-        {
-            /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*rects*/ {Rect<2>({0, 0}, {10, 10})},
-            /*expected=*/{Rect<2>({0, 0}, {10, 10})},
-            /*dim_order=*/{1, 0},
-            /*field_ids=*/{0},
-            /*field_offsets=*/{0},
-            /*field_sizes=*/{sizeof(int)},
-        },
-    };
-  } else if constexpr(DIM == 3) {
-    return {
-        // Full 3D domain
-        {
+  cursor.set_addrlist(&addrlist);
+  size_t total_volume = 0;
+  for(const auto &rect : test_case.expected) {
+    total_volume += rect.volume();
+  }
+
+  size_t bytes_pending = 0;
+  for(const size_t size : test_case.field_sizes) {
+    bytes_pending += total_volume * size;
+  }
+
+  ASSERT_EQ(addrlist.bytes_pending(), bytes_pending);
+
+  if(bytes_pending > 0 && cursor.get_dim() == 1) {
+    // TODO(apryakhin:@): Find better way to analyze the adddress list
+    // ASSERT_EQ(cursor.get_dim(), 1);
+    for(const size_t field_size : test_case.field_sizes) {
+      for(const auto &rect : test_case.expected) {
+        int dim = cursor.get_dim();
+        ASSERT_EQ(cursor.remaining(dim - 1), rect.volume() * field_size);
+        cursor.advance(dim - 1, cursor.remaining(dim - 1));
+      }
+    }
+
+    ASSERT_EQ(addrlist.bytes_pending(), 0);
+  }
+
+  delete impl;
+}
+
+template <typename Func, size_t... Is>
+void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
+{
+  (
+      [&] {
+        if(dim == static_cast<int>(Is + 1)) {
+          func(std::integral_constant<int, Is + 1>{});
+        }
+      }(),
+      ...);
+}
+
+TEST_P(IndirectGetAddressesTest, Base)
+{
+  const BaseTestCaseData *base_test_case = GetParam();
+
+  dispatch_for_dimension(
+      base_test_case->get_dim(),
+      [&](auto Dim) {
+        constexpr int N = Dim;
+        auto &test_case =
+            static_cast<const WrappedTestCaseData<N> *>(base_test_case)->data;
+        run_test_case(test_case);
+      },
+      std::make_index_sequence<REALM_MAX_DIM>{});
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    IndirectGetAddressesCases, IndirectGetAddressesTest,
+    ::testing::Values(
+
+        new WrappedTestCaseData<1>(
+
+            // Empty 1D domain
+            {
+                /*domain=*/{Rect<1>(1, 0)},
+                /*rects=*/{},
+                /*expected=*/{},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0, 1},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTestCaseData<1>(
+            // Dense 1D rects multifield
+            {
+                /*domain=*/{Rect<1>(0, 14)},
+                /*rects=*/{Rect<1>(0, 14)},
+                /*expected=*/{Rect<1>(0, 14)},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0, 1},
+                /*field_offsets=*/{0, 0},
+                /*field_sizes=*/{sizeof(int), sizeof(long long)},
+            }),
+
+        new WrappedTestCaseData<1>(
+            // Dense 1D rects
+            {
+                /*domain=*/{Rect<1>(0, 14)},
+                /*rects=*/{Rect<1>(0, 14)},
+                /*expected=*/{Rect<1>(0, 14)},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTestCaseData<1>(
+            // Sparse 1D rects
+            {
+                /*domain=*/{Rect<1>(0, 14)},
+                /*rects=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
+                /*expected=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTestCaseData<2>(
+            // Full 2D dense
+            {
+                /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                /*rects*/ {Rect<2>({0, 0}, {10, 10})},
+                /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+                /*dim_order=*/{0, 1},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTestCaseData<2>(
+            // Full 2D sparse
+            {
+                /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                /*rects*/ {Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
+                /*expected=*/{Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
+                /*dim_order=*/{0, 1},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTestCaseData<2>(
+            // Full 2D dense reverse dims
+            {
+                /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                /*rects*/ {Rect<2>({0, 0}, {10, 10})},
+                /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+                /*dim_order=*/{1, 0},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTestCaseData<3>({
             /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
             /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
             /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
@@ -175,103 +280,7 @@ std::vector<GetAddressesTestCase<DIM>> GetTestCases()
             /*field_ids=*/{0},
             /*field_offsets=*/{0},
             /*field_sizes=*/{sizeof(int)},
-        },
-
-    };
-  }
-  return {};
-}
-
-TYPED_TEST_SUITE_P(GetAddressesTest);
-
-TYPED_TEST_P(GetAddressesTest, Base)
-{
-  using T = int;
-  constexpr int N = TypeParam::value;
-  auto test_cases = GetTestCases<N>();
-  for(const auto &test_case : test_cases) {
-    NodeSet subscribers;
-
-    SparsityMapPublicImpl<N, T> *local_impl = nullptr;
-    SparsityMap<N, T>::ImplLookup::get_impl_ptr =
-        [&local_impl](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
-      if(local_impl == nullptr) {
-        SparsityMap<N, T> handle =
-            (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-        NodeSet subscribers;
-        local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
-      }
-      return local_impl;
-    };
-
-    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-    auto impl = reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
-    impl->set_contributor_count(1);
-    impl->contribute_dense_rect_list(test_case.rects, true);
-    IndexSpace<N, T> domain = test_case.domain;
-    if(!test_case.rects.empty()) {
-      domain.sparsity = handle;
-    }
-
-    auto it = std::make_unique<TransferIteratorIndexSpace<N, T>>(
-        domain,
-        create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
-        test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-        test_case.field_sizes);
-    const InstanceLayoutPieceBase *nonaffine;
-    AddressList addrlist;
-    AddressListCursor cursor;
-
-    bool ok = it->get_addresses(addrlist, nonaffine);
-
-    ASSERT_TRUE(ok);
-    ASSERT_TRUE(it->done());
-
-    cursor.set_addrlist(&addrlist);
-    size_t total_volume = 0;
-    for(const auto &rect : test_case.expected) {
-      total_volume += rect.volume();
-    }
-
-    size_t bytes_pending = 0;
-    for(const size_t size : test_case.field_sizes) {
-      bytes_pending += total_volume * size;
-    }
-
-    ASSERT_EQ(addrlist.bytes_pending(), bytes_pending);
-
-    if(bytes_pending > 0 && cursor.get_dim() == 1) {
-      // TODO(apryakhin:@): Find better way to analyze the adddress list
-      // ASSERT_EQ(cursor.get_dim(), 1);
-      for(const size_t field_size : test_case.field_sizes) {
-        for(const auto &rect : test_case.expected) {
-          int dim = cursor.get_dim();
-          ASSERT_EQ(cursor.remaining(dim - 1), rect.volume() * field_size);
-          cursor.advance(dim - 1, cursor.remaining(dim - 1));
-        }
-      }
-
-      ASSERT_EQ(addrlist.bytes_pending(), 0);
-    }
-
-    delete impl;
-  }
-}
-
-REGISTER_TYPED_TEST_SUITE_P(GetAddressesTest, Base);
-
-using TestTypes = ::testing::Types<TypeWrapper<1>
-#if REALM_MAX_DIM > 1
-                                   ,
-                                   TypeWrapper<2>
-#endif
-#if REALM_MAX_DIM > 2
-                                   ,
-                                   TypeWrapper<3>
-#endif
-                                   >;
-
-INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, GetAddressesTest, TestTypes);
+        })));
 
 constexpr static size_t kByteSize = sizeof(int);
 
