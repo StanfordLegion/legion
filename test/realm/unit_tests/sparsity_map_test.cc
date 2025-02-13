@@ -31,12 +31,12 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
   wrapper->init(ID::make_sparsity(0, 0, 0), 0);
   SparsityMapImpl<1, int> *impl = wrapper->get_or_create(handle);
   wrapper->add_references(subscribers.size() + 1);
-  for(const auto &node : subscribers) {
+  for(const NodeID node : subscribers) {
     impl->record_remote_contributor(node);
   }
 
   removed = subscribers;
-  for(const auto &node : subscribers) {
+  for(const NodeID node : subscribers) {
     wrapper->unsubscribe(node);
     removed.remove(node);
     if(removed.size() <= 1) {
@@ -44,7 +44,7 @@ TEST(SparistyMapImplWrapperTest, UnsubscribeWithoutRecycling)
     }
   }
 
-  for(const auto node : removed) {
+  for(const NodeID node : removed) {
     ASSERT_TRUE(wrapper->subscribers.contains(node));
   }
 }
@@ -74,13 +74,13 @@ TEST(SparistyMapImplWrapperTest, RemoveReferences)
   wrapper->init(ID::make_sparsity(0, 0, 0), 0);
   SparsityMapImpl<1, int> *impl = wrapper->get_or_create(handle);
   wrapper->add_references(2);
-  for(const auto node : subscribers) {
+  for(const NodeID node : subscribers) {
     impl->record_remote_contributor(node);
   }
   wrapper->remove_references(2, Event::NO_EVENT);
 
   ASSERT_NE(impl, nullptr);
-  for(const auto &node : subscribers) {
+  for(const NodeID node : subscribers) {
     ASSERT_TRUE(comm->unsubscribers.contains(node));
   }
 }
@@ -262,7 +262,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
   impl->contribute_dense_rect_list(rect_list,
                                    /*disjoint=*/false);
 
-  auto entries = public_impl->get_entries();
+  std::vector<SparsityMapEntry<N, T>> entries = public_impl->get_entries();
   ASSERT_TRUE(public_impl->is_valid());
   ASSERT_EQ(entries.size(), num_rects);
   ASSERT_EQ(entries.size(), rect_list.size());
@@ -288,7 +288,7 @@ TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
   impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
 
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
-  auto entries = public_impl->get_entries();
+  std::vector<SparsityMapEntry<N, T>> entries = public_impl->get_entries();
   ASSERT_EQ(entries.size(), rect_list.size());
   for(size_t i = 0; i < entries.size(); i++) {
     ASSERT_EQ(entries[i].bounds.lo, rect_list[i].lo);

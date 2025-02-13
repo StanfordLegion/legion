@@ -215,15 +215,15 @@ namespace Realm {
       return ID::make_sparsity(owner, 0, index);
     }
 
-    ID me = (ID::IDType)-1;
-    unsigned owner = std::numeric_limits<unsigned>::max();
-    SparsityMapImplWrapper *next_free{0};
+    ID me{(ID::IDType)-1};
+    unsigned owner{std::numeric_limits<unsigned>::max()};
+    SparsityMapImplWrapper *next_free{nullptr};
     atomic<DynamicTemplates::TagType> type_tag{0};
-    atomic<void *> map_impl{0}; // actual implementation
+    atomic<void *> map_impl{nullptr}; // actual implementation
     atomic<unsigned> references{0};
     NodeSet subscribers;
     std::unique_ptr<SparsityWrapperCommunicator> communicator;
-    bool report_leaks = false;
+    bool report_leaks{false};
 
     std::function<void(void *)> map_deleter;
 
