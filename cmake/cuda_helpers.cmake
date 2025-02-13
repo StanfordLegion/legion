@@ -37,6 +37,14 @@ macro(enable_cuda_language_and_find_cuda_toolkit)
     unset(CMAKE_CUDA_STANDARD CACHE)
   endif()
 
+  # CMake < 3.26 doesn't recognize >=20 as a CUDA standard,
+  # so unset CMAKE_CUDA_STANDARD before enabling the CUDA language.
+  if(CMAKE_VERSION VERSION_LESS_EQUAL "3.26" AND (CMAKE_CUDA_STANDARD GREATER_EQUAL 20))
+    set(CMAKE_CUDA20_STANDARD_COMPILE_OPTION "")
+    set(CMAKE_CUDA20_EXTENSION_COMPILE_OPTION "")
+    list(APPEND CMAKE_CUDA_FLAGS "-std=c++20")
+  endif()
+
   # Enable the CUDA language
   enable_language(CUDA)
 
@@ -107,6 +115,9 @@ function(populate_cuda_archs_list ARCHS)
       endif()
       if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "11.8.0")
         list(APPEND archs 90)
+      endif()
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "12.8.0")
+        list(APPEND archs 100)
       endif()
       # Compile all supported major real architectures (SASS),
       # and the highest major virtual architecture (PTX+SASS).

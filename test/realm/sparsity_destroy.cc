@@ -24,7 +24,6 @@ void node_task(const void *args, size_t arglen, const void *userdata, size_t use
 {
   TaskArgs &task_args = *(TaskArgs *)args;
 
-  task_args.sparsity_map.impl();
   task_args.sparsity_map.destroy();
 
   {

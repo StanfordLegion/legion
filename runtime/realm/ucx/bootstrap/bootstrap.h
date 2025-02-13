@@ -49,7 +49,14 @@ typedef struct bootstrap_handle {
   int (*finalize)(struct bootstrap_handle *handle);
 } bootstrap_handle_t;
 
-__attribute__((visibility("default")))
-int realm_ucp_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle);
+#ifdef __cplusplus
+extern "C" {
+extern int realm_ucp_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle)
+    __attribute__((visibility("default")));
+}
+#else
+__attribute__((visibility("default"))) int
+realm_ucp_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle);
+#endif
 
 #endif

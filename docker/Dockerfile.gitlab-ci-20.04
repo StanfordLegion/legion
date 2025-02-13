@@ -13,7 +13,7 @@ RUN dpkg --add-architecture i386 && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
     apt-get install -qq \
-      build-essential pkg-config gfortran git time wget curl \
+      build-essential pkg-config gfortran git time wget curl ccache \
       libpython3-dev python3-pip pypy3 \
       g++-9 g++-10 g++-11 \
       gfortran-9 gfortran-10 gfortran-11 \
@@ -21,7 +21,6 @@ RUN dpkg --add-architecture i386 && \
       clang-12 libclang-12-dev llvm-12-dev libomp-12-dev \
       libedit-dev libncurses5-dev libffi-dev libpfm4-dev libxml2-dev \
       zlib1g-dev zlib1g-dev:i386 \
-      libdw-dev \
       mpich libmpich-dev \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev \
@@ -32,14 +31,14 @@ RUN dpkg --add-architecture i386 && \
 
 RUN pip3 install --upgrade 'pip>=22,<23' && \
     pip3 install --upgrade 'setuptools>=62,<63' 'setuptools_rust>=1.3,<1.4' && \
-    pip3 install cffi github3.py 'numpy>=1.22,<1.23' 'cryptography>=37,<38' 'pandas>=1.4,<1.5' 'h5py>=3.10,<3.11' 'notebook>=6.4,<6.5' 'mypy>=1.7,<1.8' joblib daff tabulate
+    pip3 install 'cffi>=1.16,<1.17' github3.py 'numpy>=1.22,<1.23' 'cryptography>=37,<38' 'pandas>=1.4,<1.5' 'h5py>=3.10,<3.11' 'notebook>=6.4,<6.5' 'mypy>=1.7,<1.8' joblib daff tabulate
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.74.1 -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.84.0 -y
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.16.9/cmake-3.16.9-Linux-x86_64.tar.gz && \
-    echo "96d79367dcafb47d606573a4687021d3cb18dd53d83458fc1d6d9c89bf31b553  cmake-3.16.9-Linux-x86_64.tar.gz" | shasum --check && \
-    tar xfzC cmake-3.16.9-Linux-x86_64.tar.gz /usr/local --strip-components=1 && \
-    rm cmake-3.16.9-Linux-x86_64.tar.gz
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.22.6/cmake-3.22.6-linux-x86_64.tar.gz && \
+    echo "09e1b34026c406c5bf4d1b053eadb3a8519cb360e37547ebf4b70ab766d94fbc  cmake-3.22.6-linux-x86_64.tar.gz" | shasum --check && \
+    tar xfzC cmake-3.22.6-linux-x86_64.tar.gz /usr/local --strip-components=1 && \
+    rm cmake-3.22.6-linux-x86_64.tar.gz
 
 RUN git clone https://github.com/terralang/terra.git && \
     cd terra/build && \

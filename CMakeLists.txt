@@ -413,7 +413,7 @@ if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
     set(GASNet_GITREPO ${Legion_EMBED_GASNet_GITREPO})
 
     set(Legion_EMBED_GASNet_GITREF
-      "f356a41a43a67c63eb230a74931196434ba1212e" # master as of 2024-11-11
+      "a60da0f7e6bb2839957f473e4ef2ab61a83c6604" # master as of 2025-02-01
       CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
     set(GASNet_GITREF ${Legion_EMBED_GASNet_GITREF})
 
@@ -1070,36 +1070,19 @@ configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
 install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-install(
-  FILES
-    ${PROJECT_SOURCE_DIR}/tools/legion_prof.py
-    ${PROJECT_SOURCE_DIR}/tools/legion_util.py
-    ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
-  DESTINATION
-    ${CMAKE_INSTALL_BINDIR}
-  PERMISSIONS
-    OWNER_EXECUTE OWNER_WRITE OWNER_READ
-    GROUP_EXECUTE GROUP_WRITE GROUP_READ
-    WORLD_EXECUTE WORLD_READ)
-
-install(
-  FILES
-    ${PROJECT_SOURCE_DIR}/tools/legion_serializer.py
-    ${PROJECT_SOURCE_DIR}/tools/legion_prof_copy.html.template
-  DESTINATION
-    ${CMAKE_INSTALL_BINDIR}
-  PERMISSIONS
-    OWNER_WRITE OWNER_READ
-    GROUP_WRITE GROUP_READ
-    WORLD_READ)
-
-install(
-  DIRECTORY
-    ${PROJECT_SOURCE_DIR}/tools/serializer_examples
-    ${PROJECT_SOURCE_DIR}/tools/legion_prof_files
-  DESTINATION
-    ${CMAKE_INSTALL_BINDIR}
-  USE_SOURCE_PERMISSIONS)
+# Option to install additional Legion support tools
+option(Legion_INSTALL_TOOLS "Install Legion Tools" ON)
+if (Legion_INSTALL_TOOLS)
+  install(
+    FILES
+      ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
+    DESTINATION
+      ${CMAKE_INSTALL_BINDIR}
+    PERMISSIONS
+      OWNER_EXECUTE OWNER_WRITE OWNER_READ
+      GROUP_EXECUTE GROUP_WRITE GROUP_READ
+      WORLD_EXECUTE WORLD_READ)
+endif()
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :

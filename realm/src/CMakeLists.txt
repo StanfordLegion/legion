@@ -44,6 +44,7 @@ set(REALM_SOURCES
     tasks.cc
     threads.cc
     shm.cc
+    hardware_topology.cc
     transfer/lowlevel_disk.cc
     transfer/address_list.cc
     transfer/channel_common.cc
@@ -103,6 +104,8 @@ if(TARGET ucx::ucx)
     ucx/ucp_internal.cc
     ucx/ucp_context.cc
     ucx/mpool.cc
+    ucx/ucc_comm.cc
+    ucx/oob_group_comm.cc
     ucx/bootstrap/bootstrap.cc
     ucx/bootstrap/bootstrap_loader.cc
   )
