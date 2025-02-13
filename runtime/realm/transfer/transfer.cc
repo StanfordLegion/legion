@@ -628,15 +628,21 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
-      const IndexSpace<N, T> &_is, RegionInstanceImpl *_inst_impl,
       const int _dim_order[N], const std::vector<FieldID> &_fields,
-      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes)
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
+      RegionInstanceImpl *_inst_impl, const IndexSpace<N, T> &_is,
+      SparsityMapPublicImpl<N, T> *_sparsity_impl)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
     , field_idx(0)
+    , sparsity_impl(_sparsity_impl)
   {
     if(is.is_valid()) {
-      iter.reset(is);
+      if(sparsity_impl) {
+        iter.reset(is, is.bounds, sparsity_impl);
+      } else {
+        iter.reset(is);
+      }
       this->is_done = !iter.valid;
       iter_init_deferred = false;
     } else {
@@ -680,8 +686,8 @@ namespace Realm {
     }
 
     TransferIteratorIndexSpace<N, T> *tiis =
-        new TransferIteratorIndexSpace<N, T>(is, get_runtime()->get_instance_impl(inst),
-                                             dim_order, fields, fld_offsets, fld_sizes);
+        new TransferIteratorIndexSpace<N, T>(dim_order, fields, fld_offsets, fld_sizes,
+                                             get_runtime()->get_instance_impl(inst), is);
     return tiis;
   }
 
@@ -737,7 +743,11 @@ namespace Realm {
 
     iter.step();
     if(!iter.valid) {
-      iter.reset(is);
+      if(sparsity_impl) {
+        iter.reset(is, is.bounds, sparsity_impl);
+      } else {
+        iter.reset(is);
+      }
       field_idx++;
       if(field_idx == fields.size()) {
         this->is_done = true;
@@ -1557,7 +1567,8 @@ namespace Realm {
         num_rects = amt / sizeof(Rect<N, T>);
         assert(amt == (num_rects * sizeof(Rect<N, T>)));
 
-        // log_dma.print() << "got rects: " << rects[0] << "(+" << (num_rects - 1) << ")";
+        // log_dma.print() << "got rects: " << rects[0] << "(+" << (num_rects - 1) <<
+        // ")";
         if(indirect_xd != 0) {
           XferDes::XferPort &iip = indirect_xd->input_ports[indirect_port_idx];
           indirect_xd->update_bytes_read(indirect_port_idx, iip.local_bytes_total, amt);
@@ -2031,8 +2042,8 @@ namespace Realm {
   {
     assert(dim_order.size() == N);
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-    return new TransferIteratorIndexSpace<N, T>(is, impl, dim_order.data(), fields,
-                                                fld_offsets, fld_sizes);
+    return new TransferIteratorIndexSpace<N, T>(dim_order.data(), fields, fld_offsets,
+                                                fld_sizes, impl, is);
   }
 
   template <int N, typename T>
@@ -3228,8 +3239,9 @@ namespace Realm {
                                     domain_size() * bytes_per_element, &src_frags,
                                     &dst_frags, path_infos[idx]);
         if(!ok) {
-          // Couldn't find a path with the given indirect memory, so use a path without it
-          // and we'll move the indirection buffer somewhere that channel can access it
+          // Couldn't find a path with the given indirect memory, so use a path without
+          // it and we'll move the indirection buffer somewhere that channel can access
+          // it
           copy_info.ind_mem = Memory::NO_MEMORY;
           ok = find_fastest_path(nodes_info, path_cache, copy_info, serdez_id, 0,
                                  domain_size() * bytes_per_element, &src_frags,
@@ -3347,7 +3359,8 @@ namespace Realm {
              last_channel) {
             continue;
           }
-          // log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> "
+          // log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " ->
+          // "
           // << dst_ib_mem;
           bool ok = find_shortest_path(nodes_info, path_infos[i].path[0], dst_ib_mem,
                                        0 /*no serdez*/, 0 /*redop_id*/, path_infos[i]);
@@ -3547,8 +3560,9 @@ namespace Realm {
                                     serdez_id, 0, domain_size() * bytes_per_element,
                                     &src_frags, &dst_frags, path_infos[idx]);
         if(!ok) {
-          // Couldn't find a path with the given indirect memory, so use a path without it
-          // and we'll move the indirection buffer somewhere that channel can access it
+          // Couldn't find a path with the given indirect memory, so use a path without
+          // it and we'll move the indirection buffer somewhere that channel can access
+          // it
           copy_info.ind_mem = Memory::NO_MEMORY;
           ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info, serdez_id,
                                  0, domain_size() * bytes_per_element, &src_frags,

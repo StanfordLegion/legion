@@ -1205,27 +1205,31 @@ namespace Realm {
    * An IndexSpaceIterator iterates over the valid points in an IndexSpace,
    * rectangles at a time.
    */
+
   template <int N, typename T>
   struct REALM_PUBLIC_API IndexSpaceIterator {
-    Rect<N,T> rect;
-    IndexSpace<N,T> space;
-    Rect<N,T> restriction;
-    bool valid;
+    Rect<N, T> rect;
+    IndexSpace<N, T> space;
+    Rect<N, T> restriction;
+    bool valid{false};
     // for iterating over SparsityMap's
-    SparsityMapPublicImpl<N,T> *s_impl;
-    size_t cur_entry;
+    SparsityMapPublicImpl<N, T> *s_impl{nullptr};
+    size_t cur_entry{0};
 
     IndexSpaceIterator(void);
-    IndexSpaceIterator(const IndexSpace<N,T>& _space);
-    IndexSpaceIterator(const IndexSpace<N,T>& _space, const Rect<N,T>& _restrict);
+    IndexSpaceIterator(const IndexSpace<N, T> &_space);
+    IndexSpaceIterator(const IndexSpace<N, T> &_space, const Rect<N, T> &_restrict);
+    IndexSpaceIterator(const IndexSpace<N, T> &_space, const Rect<N, T> &_restrict,
+                       SparsityMapPublicImpl<N, T> *s_impl);
 
-    void reset(const IndexSpace<N,T>& _space);
-    void reset(const IndexSpace<N,T>& _space, const Rect<N,T>& _restrict);
+    void reset(const IndexSpace<N, T> &_space);
+    void reset(const IndexSpace<N, T> &_space, const Rect<N, T> &_restrict);
+    void reset(const IndexSpace<N, T> &_space, const Rect<N, T> &_restrict,
+               SparsityMapPublicImpl<N, T> *s_impl);
 
     // steps to the next subrect, returning true if a next subrect exists
     bool step(void);
   };
-
 }; // namespace Realm
 
 // specializations of std::less<T> for IndexSpace<N,T> allow
