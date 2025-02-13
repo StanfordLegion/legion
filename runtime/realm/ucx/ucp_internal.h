@@ -34,9 +34,10 @@
 #include "realm/ucx/ucp_context.h"
 #include "realm/ucx/spinlock.h"
 #include "realm/ucx/bootstrap/bootstrap_internal.h"
-
+#include "realm/ucx/ucc_comm.h"
 #include <ucp/api/ucp.h>
 
+#include <memory>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
@@ -243,6 +244,7 @@ namespace UCP {
         void *payload, size_t payload_size,
         const ucp_am_recv_param_t *param);
 
+    bool compute_shared_ranks();
     using WorkersMap = std::unordered_map<const UCPContext*, Workers>;
     using AttachMap  = std::unordered_map<const UCPContext*, std::vector<ucp_mem_h>>;
 
@@ -253,6 +255,9 @@ namespace UCP {
     bool                                    initialized_ucp{false};
     Config                                  config;
     bootstrap_handle_t                      boot_handle;
+    std::unique_ptr<ucc::UCCComm> ucc_comm{nullptr};
+    int num_shared_ranks{0};
+    std::vector<NodeID> shared_ranks;
     std::list<UCPContext>                   ucp_contexts;
 #ifdef REALM_USE_CUDA
     std::unordered_map<int, UCPContext*>    dev_ctx_map;

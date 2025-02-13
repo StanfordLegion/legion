@@ -41,6 +41,16 @@ namespace UCP {
           log_ucp.error() << "bootstrap_loader_init failed";
         }
         break;
+      case BOOTSTRAP_P2P:
+        if(config->plugin_name != NULL) {
+          status = bootstrap_loader_init(config->plugin_name, NULL, handle);
+        } else {
+          status = bootstrap_loader_init(BOOTSTRAP_P2P_PLUGIN, NULL, handle);
+        }
+        if(status != 0) {
+          log_ucp.error() << "bootstrap_loader_init failed";
+        }
+        break;
       case BOOTSTRAP_PLUGIN:
         status = bootstrap_loader_init(config->plugin_name, NULL, handle);
         if (status != 0) {
@@ -60,7 +70,6 @@ namespace UCP {
     if (status != 0) {
       log_ucp.error() << "bootstrap_finalize failed";
     }
-
     return status;
 }
 

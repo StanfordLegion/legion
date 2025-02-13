@@ -3728,6 +3728,50 @@ namespace Legion {
     };
 
     /**
+     * \class UntypedDeferredValue
+     * This is a type-erased deferred value with the type of the field.
+     */
+    class UntypedDeferredValue {
+    public:
+      UntypedDeferredValue(void);
+      UntypedDeferredValue(size_t field_size, Memory target_memory,
+                           const void *initial_value = NULL,
+                           size_t alignment = 16);
+      UntypedDeferredValue(size_t field_size,
+                           Memory::Kind memory_kind = Memory::Z_COPY_MEM,
+                           const void *initial_value = NULL,
+                           size_t alignment = 16);
+      UntypedDeferredValue(const UntypedDeferredValue &rhs);
+    public:
+      template<typename T>
+      inline operator DeferredValue<T>(void) const;
+      template<typename REDOP, bool EXCLUSIVE>
+      inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
+      inline size_t field_size(void) const;
+    public:
+      void finalize(Context ctx) const;
+      Realm::RegionInstance get_instance(void) const;
+    protected:
+      Realm::RegionInstance instance;
+    protected:
+      // Helper methods for DeferredValues and DeferredBuffers
+      static Memory get_memory_from_kind(Memory::Kind kind, bool value);
+      static Realm::RegionInstance allocate_instance(Memory memory,
+          Realm::InstanceLayoutGeneric *layout);
+      static void destroy_instance(Realm::RegionInstance,
+          Realm::Event precondition);
+      static Domain get_index_space_bounds(IndexSpace space);
+      template<PrivilegeMode,typename,int,typename,typename,bool>
+      friend class FieldAccessor;
+      template<typename,bool,int,typename,typename,bool>
+      friend class ReductionAccessor;
+      template<typename>
+      friend class UntypedDeferredBuffer;
+      template<typename,int,typename,bool>
+      friend class DeferredBuffer;
+    };
+
+    /**
      * \class DeferredValue
      * A deferred value is a special helper class for handling return values 
      * for tasks that do asynchronous operations (e.g. GPU kernel launches), 
@@ -3741,7 +3785,7 @@ namespace Legion {
      *  - T& operator(void) const
      */
     template<typename T>
-    class DeferredValue {
+    class DeferredValue : public UntypedDeferredValue {
     public:
       DeferredValue(T initial_value,
                     size_t alignment = std::alignment_of<T>());
@@ -3759,15 +3803,11 @@ namespace Legion {
       __CUDA_HD__
       inline DeferredValue<T>& operator=(T value);
     public:
-      inline void finalize(Context ctx) const;
-    public:
       typedef T value_type;
       typedef T& reference;
-      typedef const T& const_reference;
+      typedef const T& const_reference; 
     protected:
-      friend class UntypedDeferredValue;
       DeferredValue(void);
-      Realm::RegionInstance instance;
       Realm::AffineAccessor<T,1,coord_t> accessor;
     };
 
@@ -3794,42 +3834,7 @@ namespace Legion {
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
       typedef const typename REDOP::RHS& const_reference;
-    };
-
-    /**
-     * \class UntypedDeferredValue
-     * This is a type-erased deferred value with the type of the field.
-     */
-    class UntypedDeferredValue {
-    public:
-      UntypedDeferredValue(void);
-      UntypedDeferredValue(size_t field_size, Memory target_memory,
-                           const void *initial_value = NULL,
-                           size_t alignment = 16);
-      UntypedDeferredValue(size_t field_size,
-                           Memory::Kind memory_kind = Memory::Z_COPY_MEM,
-                           const void *initial_value = NULL,
-                           size_t alignment = 16);
-      template<typename T>
-      UntypedDeferredValue(const DeferredValue<T> &rhs);
-      template<typename REDOP, bool EXCLUSIVE>
-      UntypedDeferredValue(const DeferredReduction<REDOP,EXCLUSIVE> &rhs);
-    public:
-      template<typename T>
-      inline operator DeferredValue<T>(void) const;
-      template<typename REDOP, bool EXCLUSIVE>
-      inline operator DeferredReduction<REDOP,EXCLUSIVE>(void) const;
-    public:
-      void finalize(Context ctx) const;
-      Realm::RegionInstance get_instance(void) const;
-    private:
-      template<PrivilegeMode,typename,int,typename,typename,bool>
-      friend class FieldAccessor;
-      template<typename,bool,int,typename,typename,bool>
-      friend class ReductionAccessor;
-      Realm::RegionInstance instance;
-      size_t field_size;
-    };
+    }; 
 
     /**
      * \class DeferredBuffer
@@ -3904,7 +3909,6 @@ namespace Legion {
                      const T *initial_value = NULL,
                      size_t alignment = std::alignment_of<T>());
     protected:
-      inline Memory get_memory_from_kind(Memory::Kind kind);
       inline void initialize_layout(size_t alignment, bool fortran_order_dims);
       inline void initialize(Memory memory,
                              DomainT<DIM,COORD_T> bounds,
@@ -4889,8 +4893,11 @@ namespace Legion {
        * for this operation return all of the points that alias
        * with it. Dependences will be resolved in the order that
        * they are returned to the runtime. The returned result 
-       * must not be empty because it must contain at least the
-       * point for the given operation.
+       * can only be empty if the region to be inverted is not
+       * actually in the range of the projection given the launch
+       * domain. If the region is in the range of the projection 
+       * then the returned result cannot be empty because it must
+       * contain at least the one point that maps to the particular region.
        */
       virtual void invert(LogicalRegion region, LogicalRegion upper_bound,
                           const Domain &launch_domain,
@@ -10495,18 +10502,6 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-    private:
-      template<typename T>
-      friend class DeferredValue;
-      template<typename T, int DIM, typename COORD_T, bool CHECK_BOUNDS>
-      friend class DeferredBuffer;
-      friend class UntypedDeferredValue;
-      template<typename>
-      friend class UntypedDeferredBuffer;
-      Realm::RegionInstance create_task_local_instance(Memory memory,
-                                Realm::InstanceLayoutGeneric *layout);
-      void destroy_task_local_instance(Realm::RegionInstance instance,
-                                Realm::Event precondition);
     public:
       // This method is hidden down here and not publicly documented because
       // users shouldn't really need it for anything, however there are some

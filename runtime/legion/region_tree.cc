@@ -1617,19 +1617,35 @@ namespace Legion {
         return;
       // Then compute the logical user
       ProjectionSummary *shard_proj = NULL;
-      if (proj_info.is_sharding() && proj_info.is_projecting())
+      if (proj_info.is_projecting())
       {
-        // If we're doing a projection in a control replicated context then
-        // we need to compute the shard projection up front since it might
-        // involve a collective if we don't hit in the cache and we want
-        // that to appear nice and deterministic
-        RegionTreeNode *destination = 
-          (req.handle_type == LEGION_PARTITION_PROJECTION) ?
-          static_cast<RegionTreeNode*>(get_node(req.partition)) :
-          static_cast<RegionTreeNode*>(get_node(req.region));
-        shard_proj = destination->compute_projection_summary(op, idx, req,
-                                              logical_analysis, proj_info);
+        if (runtime->enable_pointwise_analysis)
+        {
+          RegionTreeNode *destination = 
+            (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+            static_cast<RegionTreeNode*>(get_node(req.partition)) :
+            static_cast<RegionTreeNode*>(get_node(req.region));
+          shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                logical_analysis, proj_info);
+        }
+        else
+        {
+          if(proj_info.is_sharding())
+          {
+            // If we're doing a projection in a control replicated context then
+            // we need to compute the shard projection up front since it might
+            // involve a collective if we don't hit in the cache and we want
+            // that to appear nice and deterministic
+            RegionTreeNode *destination = 
+              (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+              static_cast<RegionTreeNode*>(get_node(req.partition)) :
+              static_cast<RegionTreeNode*>(get_node(req.region));
+            shard_proj = destination->compute_projection_summary(op, idx, req,
+                                                  logical_analysis, proj_info);
+          }
+        }
       }
+
       LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),
           shard_proj, (op->get_must_epoch_op() == NULL) ? UINT_MAX :
           op->get_must_epoch_op()->find_operation_index(
@@ -16462,78 +16478,101 @@ namespace Legion {
               case LEGION_SIMULTANEOUS_DEPENDENCE:
               case LEGION_TRUE_DEPENDENCE:
                 {
-                  // If we can validate a region record which of our
-                  // predecessors regions we are validating, otherwise
-                  // just register a normal dependence
-                  user.op->register_region_dependence(user.idx, prev.op,
-                                                      prev.gen, prev.idx,
-                                                      dtype, overlap);
-#ifdef LEGION_SPY
-                  LegionSpy::log_mapping_dependence(
-                      user.op->get_context()->get_unique_id(),
-                      prev.uid, prev.idx, user.uid, user.idx, dtype);
-#endif
-                  if (prev.shard_proj != NULL)
+                  // Check to see if we can record a point-wise dependence
+                  // between these two operations. We can only do this if
+                  // it they are both projections and we've arrived so 
+                  // they are both projecting from the same node in the
+                  // region tree.
+                  bool dominates = false;
+                  if (arrived && state.record_pointwise_dependence(
+                        logical_analysis, prev, user, dominates))
                   {
-                    // Two operations from the same must epoch shouldn't
-                    // be recording close dependences on each other so
-                    // we can skip that part
-                    if ((prev.ctx_index == user.ctx_index) &&
-                        (user.op->get_must_epoch_op() != NULL))
-                      break;
-                    // If this is a sharding projection operation then check 
-                    // to see if we need to record a fence dependence here to
-                    // ensure that we get dependences between interfering 
-                    // points in different shards correct
-                    // There are three sceanrios here:
-                    // 1. We haven't arrived in which case we don't have any 
-                    //    good way to symbolically prove it is safe to elide
-                    //    the fence so just record the close
-                    // 2. We've arrived but we're not projection in which case
-                    //    we'll interfere with any projections anyway so we need
-                    //    a full fence for dependences anyway
-                    // 3. We've arrived and are projecting in which case we can
-                    //    try to elide things symbolically, if that doesn't work
-                    //    we may still need to do an expensive analysis to prove
-                    //    it is safe to elide the close which we'll only do it
-                    //    we are tracing
-                    if (arrived && proj_info.is_projecting())
-                    {
-                      // If we arrived and are projecting then we can test
-                      // these two projection trees for intereference with
-                      // each other and see if we can prove that they are
-                      // disjoint in which case we don't need a close
-#ifdef DEBUG_LEGION
-                      assert(proj_info.is_sharding());
-                      assert(user.shard_proj != NULL);
+                    user.op->register_pointwise_dependence(user.idx, prev);
+                    // See if we the new user dominates or not
+                    if (!dominates)
+                      dominator_mask -= overlap;
+#ifdef LEGION_SPY
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype, true);
 #endif
-                      bool dominates = true;
-                      if (!state.has_interfering_shards(logical_analysis,
-                            prev.shard_proj, user.shard_proj, dominates))
-                      {
-                        // If the two projections are non-interfering, then 
-                        // we can only consider the second projection as 
-                        // dominating the first if it uses all the same data.
-                        // Otherwise you can cases like those that occur in 
-                        // https://github.com/StanfordLegion/legion/issues/1765
-                        // where some index tasks push earlier index tasks out
-                        // of the set of current/previous epoch users and then 
-                        // we end up missing a merge close op fence.
-                        if (!dominates)
-                          dominator_mask -= it->second;
+                  }
+                  else
+                  {
+                    // If we can validate a region record which of our
+                    // predecessors regions we are validating, otherwise
+                    // just register a normal dependence
+                    user.op->register_region_dependence(user.idx, prev.op,
+                                                        prev.gen, prev.idx,
+                                                        dtype, overlap);
+#ifdef LEGION_SPY
+                    LegionSpy::log_mapping_dependence(
+                        user.op->get_context()->get_unique_id(),
+                        prev.uid, prev.idx, user.uid, user.idx, dtype);
+#endif
+                    if (prev.shard_proj != NULL)
+                    {
+                     // Two operations from the same must epoch shouldn't
+                      // be recording close dependences on each other so
+                      // we can skip that part
+                      if ((prev.ctx_index == user.ctx_index) &&
+                          (user.op->get_must_epoch_op() != NULL))
                         break;
+                      // If this is a sharding projection operation then check 
+                      // to see if we need to record a fence dependence here to
+                      // ensure that we get dependences between interfering 
+                      // points in different shards correct
+                      // There are three sceanrios here:
+                      // 1. We haven't arrived in which case we don't have any 
+                      //    good way to symbolically prove it is safe to elide
+                      //    the fence so just record the close
+                      // 2. We've arrived but we're not projection in which case
+                      //    we'll interfere with any projections anyway so we need
+                      //    a full fence for dependences anyway
+                      // 3. We've arrived and are projecting in which case we can
+                      //    try to elide things symbolically, if that doesn't work
+                      //    we may still need to do an expensive analysis to prove
+                      //    it is safe to elide the close which we'll only do it
+                      //    we are tracing
+                      if (arrived && proj_info.is_projecting())
+                      {
+                        // If we arrived and are projecting then we can test
+                        // these two projection trees for intereference with
+                        // each other and see if we can prove that they are
+                        // disjoint in which case we don't need a close
+#ifdef DEBUG_LEGION
+                        assert(runtime->enable_pointwise_analysis ||
+                            proj_info.is_sharding());
+                        assert(user.shard_proj != NULL);
+#endif
+                        dominates = true;
+                        if (!state.has_interfering_shards(logical_analysis,
+                              prev.shard_proj, user.shard_proj, dominates))
+                        {
+                          // If the two projections are non-interfering, then 
+                          // we can only consider the second projection as 
+                          // dominating the first if it uses all the same data.
+                          // Otherwise you can cases like those that occur in 
+                          // https://github.com/StanfordLegion/legion/issues/1765
+                          // where some index tasks push earlier index tasks out
+                          // of the set of current/previous epoch users and then 
+                          // we end up missing a merge close op fence.
+                          if (!dominates)
+                            dominator_mask -= it->second;
+                          break;
+                        }
                       }
+                      // We weren't able to prove that the projections were
+                      // non-interfering with each other so we need a close
+                      // Not able to do the symbolic elision so we need a fence
+                      // across the shards to be safe
+                      logical_analysis.record_close_dependence(root,
+                                    user.idx, this, &prev, overlap);
+                      it.filter(overlap);
+                      tighten = true;
+                      if (!it->second)
+                        to_delete.push_back(it->first);
                     }
-                    // We weren't able to prove that the projections were
-                    // non-interfering with each other so we need a close
-                    // Not able to do the symbolic elision so we need a fence
-                    // across the shards to be safe
-                    logical_analysis.record_close_dependence(root,
-                                  user.idx, this, &prev, overlap);
-                    it.filter(overlap);
-                    tighten = true;
-                    if (!it->second)
-                      to_delete.push_back(it->first);
                   }
                   break;
                 }

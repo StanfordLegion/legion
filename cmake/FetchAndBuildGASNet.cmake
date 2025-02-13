@@ -33,7 +33,7 @@ if (NOT GASNet_GITREPO)
 endif()
 if (NOT GASNet_GITREF)
   set(GASNet_GITREF
-    "0fb5a0556e76d1988ea5b59df2789a25d4e1ad99" # master as of 2024-03-11
+    "a60da0f7e6bb2839957f473e4ef2ab61a83c6604" # master as of 2025-02-01
     CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
 endif()
 if (NOT GASNet_VERSION)

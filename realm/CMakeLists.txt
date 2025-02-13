@@ -276,6 +276,22 @@ if(REALM_ENABLE_CUDA)
       set(CMAKE_CUDA_ARCHITECTURES ${compute_archs})
     endif()
     set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+
+    if (NOT CMAKE_CUDA_STANDARD)
+      set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+    endif()
+
+    # cmake's CUDA compiler component statically defines known standards rather than querying for them dynamically
+    # so, older cmake versions will error if newer unknown cuda standards are specified, even though
+    # nvcc supports them.  So trick cmake's CUDA compiler component into thinking it does have the specified
+    # cuda standard and pass in the necessacary nvcc flag ourselves.
+    # See https://gitlab.kitware.com/cmake/cmake/-/issues/23079
+    if(CMAKE_CUDA_STANDARD AND NOT DEFINED CMAKE_CUDA${CMAKE_CUDA_STANDARD}_STANDARD_COMPILE_OPTION)
+      set(CMAKE_CUDA${CMAKE_CUDA_STANDARD}_STANDARD_COMPILE_OPTION "")
+      set(CMAKE_CUDA${CMAKE_CUDA_STANDARD}_EXTENSION_COMPILE_OPTION "")
+      list(APPEND CMAKE_CUDA_FLAGS "-std=c++${CMAKE_CUDA_STANDARD}")
+    endif()
+
     enable_language(CUDA)
     get_filename_component(CUDAToolkit_LIBRARY_ROOT "${CUDAToolkit_BIN_DIR}" DIRECTORY CACHE)
     # Unfortunately, FindCUDAToolkit doesn't always find CUPTI due to directory changes in the

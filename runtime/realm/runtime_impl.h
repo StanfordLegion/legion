@@ -51,6 +51,8 @@
 #include "realm/dynamic_table.h"
 
 #include "realm/shm.h"
+#include "realm/hardware_topology.h"
+
 #include <unordered_map>
 
 namespace Realm {
@@ -109,7 +111,7 @@ namespace Realm {
       friend class CoreModule;
       friend class RuntimeImpl;
     protected:
-      CoreModuleConfig(void);
+      CoreModuleConfig(const HardwareTopology *topo);
 
       bool discover_resource(void);
 
@@ -171,6 +173,9 @@ namespace Realm {
 
       // barriers
       int barrier_broadcast_radix = 4;
+
+      // topology of the host
+      const HardwareTopology *host_topology = nullptr;
     };
 
     class CoreModule : public Module {
@@ -356,7 +361,8 @@ namespace Realm {
       std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
       std::unordered_map<realm_id_t, SharedMemoryInfo> local_shared_memory_mappings;
 
-      CoreMap *core_map;
+      HardwareTopology host_topology;
+      bool topology_init = false; // TODO: REMOVE it
       CoreReservationSet *core_reservations;
       BackgroundWorkManager bgwork;
       IncomingMessageManager *message_manager;

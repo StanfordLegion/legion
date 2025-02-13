@@ -169,7 +169,7 @@ namespace Legion {
                                            std::set<RtEvent> &applied) const;
     public:
       bool is_remote(void) const;
-      bool is_forward_progress_task(void) const;
+      bool is_forward_progress_task(void);
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicable(void) const { return replicate; }
@@ -256,8 +256,6 @@ namespace Legion {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      void compute_point_region_requirements(void);
-      void complete_point_projection(void);
       void finalize_output_region_trees(void);
     public:
       void compute_parent_indexes(InnerContext *alt_context = NULL);
@@ -619,7 +617,7 @@ namespace Legion {
      * This is the parent type for each of the multi-task
      * kinds of classes.
      */
-    class MultiTask : public CollectiveViewCreator<TaskOp> {
+    class MultiTask : public PointwiseAnalyzable<CollectiveViewCreator<TaskOp> > {
     public:
       typedef std::map<DomainPoint,DomainPoint> OutputExtentMap; 
       struct FutureHandles : public Collectable {
@@ -673,6 +671,7 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const { return DomainPoint(0); }
       virtual Domain get_shard_domain(void) const 
         { return Domain(DomainPoint(0),DomainPoint(0)); }
+      virtual bool is_pointwise_analyzable(void) const;
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -701,12 +700,6 @@ namespace Legion {
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance, ApEvent effects) = 0;
       virtual void register_must_epoch(void) = 0;
-    public:
-      // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point) = 0;
-      virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 const DomainPoint &next,
-                                                 RtEvent point_mapped) = 0;
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,
@@ -765,7 +758,9 @@ namespace Legion {
       void *predicate_false_result;
       size_t predicate_false_size;
     protected:
-      std::map<DomainPoint,RtEvent> intra_space_dependences; 
+      // These are the mapped events for individual point tasks in the
+      // index space launch for doing pointwise mapping dependences
+      std::map<DomainPoint,RtEvent> point_mapped_events; 
     };
 
     /**
@@ -827,9 +822,7 @@ namespace Legion {
       virtual void handle_future_size(size_t return_type_size,
                                       std::set<RtEvent> &applied_events);
       virtual void record_output_registered(RtEvent registered,
-                                      std::set<RtEvent> &applied_events);
-      virtual void perform_inlining(VariantImpl *variant,
-                    const std::deque<InstanceSet> &parent_regions);
+                                      std::set<RtEvent> &applied_events); 
       virtual bool is_stealable(void) const;
       virtual bool replicate_task(void);
     public:
@@ -964,6 +957,8 @@ namespace Legion {
       virtual bool finalize_map_task_output(Mapper::MapTaskInput &input,
                                             Mapper::MapTaskOutput &output,
                                             MustEpochOp *must_epoch_owner);
+      virtual void perform_inlining(VariantImpl *variant,
+                    const std::deque<InstanceSet> &parent_regions);
     public:
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -996,11 +991,14 @@ namespace Legion {
       virtual void set_projection_result(unsigned idx, LogicalRegion result);
       virtual void record_intra_space_dependences(unsigned index,
              const std::vector<DomainPoint> &dependences);
-      virtual const Mappable* as_mappable(void) const { return this; }
+      virtual void record_pointwise_dependence(uint64_t previous_context_index,
+          const DomainPoint &previous_point, ShardID shard_id);
+      virtual const Operation* as_operation(void) const { return this; }
     public:
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments, bool inline_task,
-                            const std::vector<FutureMap> &point_futures);
+                            const std::vector<FutureMap> &point_futures,
+                            bool record_future_pointwise_dependences);
       RtEvent perform_pointwise_analysis(void);
     public:
       // From MemoizableOp
@@ -1032,12 +1030,13 @@ namespace Legion {
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
             std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
+      void complete_point_projection(void);
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;
       SliceTask                   *slice_owner;
     protected:
-      std::vector<RtEvent> intra_space_mapping_dependences;
+      std::vector<RtEvent> pointwise_mapping_dependences;
     protected:
       Color concurrent_color;
       RtBarrier concurrent_task_barrier;
@@ -1137,6 +1136,8 @@ namespace Legion {
                                  bool own_functor); 
       virtual void handle_mispredication(void);
     public:
+      virtual uint64_t order_collectively_mapped_unbounded_pools(
+          uint64_t lamport_clock, bool need_result);
       virtual void concurrent_allreduce(ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);
@@ -1177,6 +1178,8 @@ namespace Legion {
                                               ShardID remote_shard);
       ApBarrier handle_find_trace_shard_frontier(size_t temp_index, ApEvent event,
                                                  ShardID remote_shard);
+      RtEvent handle_pointwise_dependence(uint64_t context_index, 
+          const DomainPoint &point, ShardID shard, RtUserEvent to_trigger);
       ReplicateContext* get_replicate_context(void) const;
     public:
       void initialize_implicit_task(TaskID tid, MapperID mid, Processor proxy);
@@ -1331,11 +1334,11 @@ namespace Legion {
       virtual uint64_t collective_lamport_allreduce(uint64_t lamport_clock,
                                           size_t points, bool need_result);
     public:
-      // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
-      virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 const DomainPoint &next,
-                                                 RtEvent point_mapped);
+      virtual RtEvent find_intra_space_dependence(const DomainPoint &point,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+      virtual RtEvent find_pointwise_dependence(
+          const DomainPoint &point, GenerationID gen,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
     public:
       void record_origin_mapped_slice(SliceTask *local_slice);
       void initialize_must_epoch_concurrent_group(Color color,
@@ -1347,12 +1350,12 @@ namespace Legion {
       // and provide an event for when the result is ready
       virtual void finish_index_task_reduction(void);
     public:
-      void return_slice_mapped(unsigned points, RtEvent applied_condition);
+      void return_point_mapped(const DomainPoint &point, RtEvent mapped);
       void return_slice_complete(unsigned points, ApEvent effects,
                              void *metadata = NULL, size_t metasize = 0);
       void return_slice_commit(unsigned points, RtEvent applied_condition);
     public:
-      void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
+      void unpack_point_mapped(Deserializer &derez, AddressSpaceID source);
       void unpack_slice_complete(Deserializer &derez);
       void unpack_slice_commit(Deserializer &derez);
       void unpack_slice_collective_versioning_rendezvous(Deserializer &derez,
@@ -1368,7 +1371,6 @@ namespace Legion {
       static void process_slice_complete(Deserializer &derez);
       static void process_slice_commit(Deserializer &derez);
       static void process_slice_find_intra_dependence(Deserializer &derez);
-      static void process_slice_record_intra_dependence(Deserializer &derez);
     protected:
       friend class SliceTask;
       Future reduction_future;
@@ -1386,7 +1388,7 @@ namespace Legion {
       std::vector<RtEvent> output_preconditions;
       std::set<RtEvent> commit_preconditions;
     protected:
-      std::map<DomainPoint,RtUserEvent> pending_intra_space_dependences;
+      std::map<DomainPoint,RtUserEvent> pending_pointwise_dependences;
     protected:
       std::vector<ProfilingMeasurementID>      task_profiling_requests;
       std::vector<ProfilingMeasurementID>      copy_profiling_requests;
@@ -1401,8 +1403,8 @@ namespace Legion {
       std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
 #ifdef DEBUG_LEGION
     public:
-      void check_point_requirements(
-          const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);
+      void check_point_requirements(const DomainPoint &point,
+          const std::vector<LogicalRegion> &point_regions);
 #endif
     };
 
@@ -1478,9 +1480,11 @@ namespace Legion {
     protected:
       virtual void trigger_task_commit(void);
     public:
+      RtEvent find_intra_space_dependence(const DomainPoint &point);
       void return_privileges(TaskContext *point_context,
                              std::set<RtEvent> &preconditions);
-      void record_point_mapped(RtEvent child_mapped, bool shard_off = false);
+      void record_point_mapped(PointTask *point,
+          RtEvent child_mapped, bool shard_off = false);
       void record_point_complete(ApEvent child_effects);
       void record_point_committed(RtEvent commit_precondition =
                                   RtEvent::NO_RT_EVENT);
@@ -1500,9 +1504,7 @@ namespace Legion {
           bool poisoned, VariantID vid, RtBarrier concurrent_task_barrier);
     protected:
       void send_rendezvous_concurrent_mapped(void);
-      void trigger_slice_mapped(void);
       void forward_completion_effects(void);
-      void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
       void pack_remote_complete(Serializer &rez, ApEvent slice_effects);
       void pack_remote_commit(Serializer &rez, RtEvent applied_condition);
     public:
@@ -1525,12 +1527,6 @@ namespace Legion {
       // From MemoizableOp
       virtual void trigger_replay(void);
       virtual void complete_replay(ApEvent instance_ready_event);
-    public:
-      // Methods for supporting intra-index-space mapping dependences
-      virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
-      virtual void record_intra_space_dependence(const DomainPoint &point,
-                                                 const DomainPoint &next,
-                                                 RtEvent point_mapped);
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
@@ -1587,10 +1583,7 @@ namespace Legion {
       bool origin_mapped;
       DomainPoint reduction_instance_point;
     protected:
-      std::set<RtEvent> map_applied_conditions;
       std::set<RtEvent> commit_preconditions;
-    protected:
-      std::set<std::pair<DomainPoint,DomainPoint> > unique_intra_space_deps;
     };
 
   }; // namespace Internal
