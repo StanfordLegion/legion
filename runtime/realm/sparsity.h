@@ -29,7 +29,6 @@
 
 #include <iostream>
 #include <vector>
-#include <functional>
 
 /**
  * \file sparsity.h
@@ -136,6 +135,7 @@ namespace Realm {
     static SparsityMap<N,T> construct(const std::vector<Rect<N,T> >& rects,
 				      bool always_create, bool disjoint);
     ///@}
+
   };
 
   template <int N, typename T>
