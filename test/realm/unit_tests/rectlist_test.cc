@@ -78,7 +78,10 @@ void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
 }
 
 // ---------------------------- DenseRectangleList Tests ----------------------------
-class DenseRectListTest : public ::testing::TestWithParam<BaseTestCaseData *> {};
+class DenseRectListTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
 
 template <int N>
 void run_dense_test_case(const DenseRectListTestCase<N> &test_case)
@@ -114,7 +117,9 @@ TEST_P(DenseRectListTest, Add)
 }
 
 // ---------------------------- HybridRectangleList Tests ----------------------------
-class HybridRectListTest : public ::testing::TestWithParam<BaseTestCaseData *> {};
+class HybridRectListTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+  void TearDown() override { delete GetParam(); }
+};
 
 template <int N>
 void run_hybrid_test_case(const HybridRectListTestCase<N> &test_case)
@@ -151,7 +156,9 @@ TEST_P(HybridRectListTest, Add)
 }
 
 // ---------------------------- CoverageCounter Tests ----------------------------
-class CoverageCounterTest : public ::testing::TestWithParam<BaseTestCaseData *> {};
+class CoverageCounterTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+  void TearDown() override { delete GetParam(); }
+};
 
 template <int N>
 void run_coverage_test_case(const CoverageCounterTestCase<N> &test_case)
