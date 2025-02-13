@@ -2688,7 +2688,7 @@ namespace Legion {
                     const char *warning_string = NULL,                        \
                     size_t offset = 0)                                        \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size()));\
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -2722,7 +2722,7 @@ namespace Legion {
                     const char *warning_string = NULL,                        \
                     size_t offset = 0)                                        \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size()));\
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -2837,7 +2837,7 @@ namespace Legion {
                     const char *warning_string = NULL,                        \
                     size_t offset = 0)                                        \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size())); \
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -2877,7 +2877,7 @@ namespace Legion {
                     const char *warning_string = NULL,                        \
                     size_t offset = 0)                                        \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size())); \
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -5395,7 +5395,7 @@ namespace Legion {
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
                         bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size())); \
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -5429,7 +5429,7 @@ namespace Legion {
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
                         bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size())); \
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -5546,7 +5546,7 @@ namespace Legion {
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
                         bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size())); \
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -5586,7 +5586,7 @@ namespace Legion {
                         size_t actual_field_size=sizeof(typename REDOP::RHS), \
                         bool check_field_size = FIELD_CHECK)                  \
       {                                                                       \
-        assert(!check_field_size || (actual_field_size == value.field_size)); \
+        assert(!check_field_size || (actual_field_size == value.field_size())); \
         const Realm::RegionInstance instance = value.instance;                \
         /* This mapping ignores the input points and sends */                 \
         /* everything to the 1-D origin */                                    \
@@ -15889,7 +15889,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline DeferredValue<T>::DeferredValue(void)
-      : instance(Realm::RegionInstance::NO_INST)
+      : UntypedDeferredValue()
     //--------------------------------------------------------------------------
     {
     }
@@ -15897,34 +15897,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     inline DeferredValue<T>::DeferredValue(T initial_value, size_t alignment)
+      : UntypedDeferredValue(sizeof(T), Memory::Z_COPY_MEM,
+          &initial_value, alignment)
     //--------------------------------------------------------------------------
     {
-      // Construct a Region of size 1 in the zero copy memory for now
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      Runtime *runtime = Runtime::get_runtime();
-      finder.has_affinity_to(
-          runtime->get_executing_processor(Runtime::get_context()));
-      finder.only_kind(Memory::Z_COPY_MEM);
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"Deferred Values currently need a local allocation "
-                       "of zero-copy memory to work correctly. Please provide "
-                       "a non-zero amount with the -ll:zsize flag");
-        assert(false);
-      }
-      const Memory memory = finder.first();
-      const Realm::Point<1,coord_t> zero(0);
-      Realm::IndexSpace<1,coord_t> bounds = Realm::Rect<1,coord_t>(zero, zero);
-      const std::vector<size_t> field_sizes(1,sizeof(T));
-      Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      int dim_order[1];
-      dim_order[0] = 0;
-      Realm::InstanceLayoutGeneric *layout = 
-        Realm::InstanceLayoutGeneric::choose_instance_layout(bounds, 
-            constraints, dim_order);
-      layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const bool is_compatible = 
@@ -15935,7 +15911,7 @@ namespace Legion {
       // We can make the accessor
       accessor = Realm::AffineAccessor<T,1,coord_t>(instance, 0/*field id*/);
       // Initialize the value
-      accessor[zero] = initial_value;
+      accessor[Point<1>::ZEROES()] = initial_value;
     }
 
     //--------------------------------------------------------------------------
@@ -15988,15 +15964,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    inline void DeferredValue<T>::finalize(Context ctx) const
-    //--------------------------------------------------------------------------
-    {
-      Runtime::legion_task_postamble(ctx, accessor.ptr(Point<1,coord_t>(0)),
-                                     sizeof(T), true/*owner*/, instance);
-    }
-
-    //--------------------------------------------------------------------------
     template<typename REDOP, bool EXCLUSIVE>
     inline DeferredReduction<REDOP,EXCLUSIVE>::DeferredReduction(size_t align)
       : DeferredValue<typename REDOP::RHS>(REDOP::identity, align)
@@ -16026,28 +15993,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline UntypedDeferredValue::UntypedDeferredValue(
-                                                    const DeferredValue<T> &rhs)
-      : instance(rhs.instance), field_size(sizeof(T))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename REDOP, bool EXCLUSIVE>
-    inline UntypedDeferredValue::UntypedDeferredValue(
-                                  const DeferredReduction<REDOP,EXCLUSIVE> &rhs)
-      : instance(rhs.instance), field_size(sizeof(REDOP::RHS))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
     inline UntypedDeferredValue::operator DeferredValue<T>(void) const
     //--------------------------------------------------------------------------
     {
-      assert(field_size == sizeof(T));
+      assert(sizeof(T) == field_size());
       DeferredValue<T> result;
       result.instance = instance;
 #ifdef DEBUG_LEGION
@@ -16069,7 +16018,7 @@ namespace Legion {
                                   DeferredReduction<REDOP,EXCLUSIVE>(void) const
     //--------------------------------------------------------------------------
     {
-      assert(field_size == sizeof(REDOP::RHS));
+      assert(sizeof(REDOP::RHS) == field_size());
       DeferredReduction<typename REDOP::RHS,EXCLUSIVE> result;
       result.instance = instance;
 #ifdef DEBUG_LEGION
@@ -16085,6 +16034,16 @@ namespace Legion {
         Realm::AffineAccessor<typename REDOP::RHS,1,coord_t>(instance,
                                                              0/*field id*/);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline size_t UntypedDeferredValue::field_size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (instance.exists())
+        return instance.get_layout()->bytes_used;
+      else
+        return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -16109,7 +16068,8 @@ namespace Legion {
         fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
         assert(false);
       }
-      const Realm::Memory memory = get_memory_from_kind(kind);
+      const Realm::Memory memory = 
+        UntypedDeferredValue::get_memory_from_kind(kind, false);
       initialize_layout(alignment, fortran_order_dims);
       initialize(memory, space, initial_value);
     }
@@ -16123,7 +16083,8 @@ namespace Legion {
                              bool fortran_order_dims /*= false*/)
     //--------------------------------------------------------------------------
     {
-      const Realm::Memory memory = get_memory_from_kind(kind);
+      const Realm::Memory memory = 
+        UntypedDeferredValue::get_memory_from_kind(kind, false);
       initialize_layout(alignment, fortran_order_dims);
       initialize(memory, rect, initial_value);
     }
@@ -16174,7 +16135,8 @@ namespace Legion {
         fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
         assert(false);
       }
-      const Realm::Memory memory = get_memory_from_kind(kind);
+      const Realm::Memory memory = 
+        UntypedDeferredValue::get_memory_from_kind(kind, false);
       initialize(memory, space, initial_value);
     }
 
@@ -16188,7 +16150,8 @@ namespace Legion {
       : ordering(_ordering), alignment(_alignment)
     //--------------------------------------------------------------------------
     {
-      const Realm::Memory memory = get_memory_from_kind(kind);
+      const Realm::Memory memory =
+        UntypedDeferredValue::get_memory_from_kind(kind, false);
       initialize(memory, rect, initial_value);
     }
 
@@ -16221,33 +16184,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(memory, rect, initial_value);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename FT, int N, typename T, bool CB>
-    Memory DeferredBuffer<FT,N,T,CB>::get_memory_from_kind(Memory::Kind kind)
-    //--------------------------------------------------------------------------
-    {
-      // Construct an instance of the right size in the corresponding memory
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      const Processor executing_processor =
-        Runtime::get_runtime()->get_executing_processor(Runtime::get_context());
-      finder.best_affinity_to(executing_processor);
-      finder.only_kind(kind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(executing_processor);
-        finder.only_kind(kind);
-      }
-      if (finder.count() == 0)
-      {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d\n",
-                kind);
-        assert(false);
-      }
-      return finder.first();
     }
 
     //--------------------------------------------------------------------------
@@ -16283,7 +16219,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(space.dense());
 #endif
-      Runtime *runtime = Runtime::get_runtime();
       const std::vector<size_t> field_sizes(1,sizeof(FT));
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       int dim_order[N];
@@ -16294,7 +16229,7 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout(
           space, constraints, dim_order);
       layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
+      instance = UntypedDeferredValue::allocate_instance(memory, layout);
       bounds = space.bounds;
       if (initial_value != NULL)
       {
@@ -16398,8 +16333,7 @@ namespace Legion {
     inline void DeferredBuffer<FT,N,T,CB>::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance, precondition);
+      UntypedDeferredValue::destroy_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
     }
 
@@ -16441,52 +16375,18 @@ namespace Legion {
     {
       assert(dims > 0);
       assert(dims <= LEGION_MAX_DIM);
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      Runtime *runtime = Runtime::get_runtime();
-      const Processor exec_proc = 
-        runtime->get_executing_processor(Runtime::get_context());
-      finder.best_affinity_to(exec_proc);
-      finder.only_kind(memkind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(exec_proc);
-        finder.only_kind(memkind);
-      }
-      if (finder.count() == 0)
-      {
-        const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-          REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-        };
-        const char *proc_names[] = {
-#define PROC_NAMES(name, desc) desc,
-          REALM_PROCESSOR_KINDS(PROC_NAMES)
-#undef PROC_NAMES
-        };
-        Context ctx = Runtime::get_context();
-        const Task *task = runtime->get_local_task(ctx);
-        fprintf(stderr,
-            "Unable to find associated %s memory for %s processor when "
-            "performing an UntypedBuffer creation in task %s (UID %lld)",
-            mem_names[memkind], proc_names[exec_proc.kind()],
-            task->get_task_name(), task->get_unique_id());
-        assert(false);
-      }
-      const Memory memory = finder.first();
+      const Memory memory =
+        UntypedDeferredValue::get_memory_from_kind(memkind, false);
       const std::vector<size_t> field_sizes(1, field_size);
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       Realm::InstanceLayoutGeneric *layout = NULL;
+      const Domain domain = UntypedDeferredValue::get_index_space_bounds(space);
       switch (dims)
       {
 #define DIMFUNC(DIM)                                                        \
         case DIM:                                                           \
           {                                                                 \
-            const DomainT<DIM,T> bounds =                                   \
-                      runtime->get_index_space_domain<DIM,T>(               \
-                          IndexSpaceT<DIM,T>(space));                       \
+            const DomainT<DIM,T> bounds = domain;                           \
             if (!bounds.dense())                                            \
             {                                                               \
               fprintf(stderr, "DeferredBuffer only allows a dense domain\n");\
@@ -16513,7 +16413,7 @@ namespace Legion {
           assert(false);
       }
       layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
+      instance = UntypedDeferredValue::allocate_instance(memory, layout);
       if (initial_value != NULL)
       {
         Realm::ProfilingRequestSet no_requests; 
@@ -16525,9 +16425,7 @@ namespace Legion {
 #define DIMFUNC(DIM)                                                      \
           case DIM:                                                       \
             {                                                             \
-              const DomainT<DIM,T> bounds =                               \
-                      runtime->get_index_space_domain<DIM,T>(             \
-                          IndexSpaceT<DIM,T>(space));                     \
+              const DomainT<DIM,T> bounds = domain;                       \
               wait_on = Internal::LgEvent(                                \
               bounds.fill(dsts, no_requests, initial_value, field_size)); \
               break;                                                      \
@@ -16560,41 +16458,8 @@ namespace Legion {
         fprintf(stderr, "DeferredBuffer only allows a dense domain\n");
         assert(false);
       }
-      Machine machine = Realm::Machine::get_machine();
-      Machine::MemoryQuery finder(machine);
-      Runtime *runtime = Runtime::get_runtime();
-      const Processor exec_proc =
-        runtime->get_executing_processor(Runtime::get_context());
-      finder.best_affinity_to(exec_proc);
-      finder.only_kind(memkind);
-      if (finder.count() == 0)
-      {
-        finder = Machine::MemoryQuery(machine);
-        finder.has_affinity_to(exec_proc);
-        finder.only_kind(memkind);
-      }
-      if (finder.count() == 0)
-      {
-        const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-          REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-        };
-        const char *proc_names[] = {
-#define PROC_NAMES(name, desc) desc,
-          REALM_PROCESSOR_KINDS(PROC_NAMES)
-#undef PROC_NAMES
-        };
-        Context ctx = Runtime::get_context();
-        const Task *task = runtime->get_local_task(ctx);
-        fprintf(stderr,
-            "Unable to find associated %s memory for %s processor when "
-            "performing an UntypedBuffer creation in task %s (UID %lld)",
-            mem_names[memkind], proc_names[exec_proc.kind()],
-            task->get_task_name(), task->get_unique_id());
-        assert(false);
-      }
-      const Memory memory = finder.first();
+      const Memory memory =
+        UntypedDeferredValue::get_memory_from_kind(memkind, false);
       const std::vector<size_t> field_sizes(1, field_size);
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
       Realm::InstanceLayoutGeneric *layout = NULL;
@@ -16625,7 +16490,7 @@ namespace Legion {
           assert(false);
       }
       layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
+      instance = UntypedDeferredValue::allocate_instance(memory, layout);
       if (initial_value != NULL)
       {
         Realm::ProfilingRequestSet no_requests; 
@@ -16667,16 +16532,14 @@ namespace Legion {
       assert(dims <= LEGION_MAX_DIM);
       const std::vector<size_t> field_sizes(1, field_size);
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      Runtime *runtime = Runtime::get_runtime();
       Realm::InstanceLayoutGeneric *layout = NULL;
+      const Domain domain = UntypedDeferredValue::get_index_space_bounds(space);
       switch (dims)
       {
 #define DIMFUNC(DIM)                                                        \
         case DIM:                                                           \
           {                                                                 \
-            const DomainT<DIM,T> bounds =                                   \
-                      runtime->get_index_space_domain<DIM,T>(               \
-                          IndexSpaceT<DIM,T>(space));                       \
+            const DomainT<DIM,T> bounds = domain;                           \
             if (!bounds.dense())                                            \
             {                                                               \
               fprintf(stderr, "DeferredBuffer only allows a dense domain\n");\
@@ -16703,7 +16566,7 @@ namespace Legion {
           assert(false);
       }
       layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
+      instance = UntypedDeferredValue::allocate_instance(memory, layout);
       if (initial_value != NULL)
       {
         Realm::ProfilingRequestSet no_requests; 
@@ -16715,9 +16578,7 @@ namespace Legion {
 #define DIMFUNC(DIM)                                                      \
           case DIM:                                                       \
             {                                                             \
-              const DomainT<DIM,T> bounds =                               \
-                      runtime->get_index_space_domain<DIM,T>(             \
-                          IndexSpaceT<DIM,T>(space));                     \
+              const DomainT<DIM,T> bounds = domain;                       \
               wait_on = Internal::LgEvent(                                \
               bounds.fill(dsts, no_requests, initial_value, field_size)); \
               break;                                                      \
@@ -16752,7 +16613,6 @@ namespace Legion {
       }
       const std::vector<size_t> field_sizes(1, field_size);
       Realm::InstanceLayoutConstraints constraints(field_sizes, 0/*blocking*/);
-      Runtime *runtime = Runtime::get_runtime();
       Realm::InstanceLayoutGeneric *layout = NULL;
       switch (dims)
       {
@@ -16781,7 +16641,7 @@ namespace Legion {
           assert(false);
       }
       layout->alignment_reqd = alignment;
-      instance = runtime->create_task_local_instance(memory, layout);
+      instance = UntypedDeferredValue::allocate_instance(memory, layout);
       if (initial_value != NULL)
       {
         Realm::ProfilingRequestSet no_requests; 
@@ -16847,8 +16707,7 @@ namespace Legion {
     inline void UntypedDeferredBuffer<T>::destroy(Realm::Event precondition)
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = Runtime::get_runtime();
-      runtime->destroy_task_local_instance(instance, precondition);
+      UntypedDeferredValue::destroy_instance(instance, precondition);
       instance = Realm::RegionInstance::NO_INST;
       field_size = 0;
       dims = 0;

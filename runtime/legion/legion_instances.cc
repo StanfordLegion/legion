@@ -3929,9 +3929,7 @@ namespace Legion {
             hole.redistrict(instance, inst_layout, requests, precondition));
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-              memory_manager->memory, inst_layout, requests, precondition));
-      if (ready.exists() && (implicit_profiler != NULL))
-        implicit_profiler->record_instance_ready(ready, unique_event);
+              memory_manager->memory, inst_layout, requests, precondition)); 
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
@@ -3957,6 +3955,9 @@ namespace Legion {
           *unsat_index = 0;
         return NULL;
       }
+      // Only record this if we succeeded in allocation
+      if (ready.exists() && (implicit_profiler != NULL))
+        implicit_profiler->record_instance_ready(ready, unique_event);
 #ifdef LEGION_DEBUG
       assert(!constraints.pointer_constraint.is_valid);
 #endif

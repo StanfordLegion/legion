@@ -22,6 +22,7 @@
 #include "realm/mutex.h"
 #include "realm/atomics.h"
 #include "realm/utils.h"
+#include "realm/hardware_topology.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef REALM_ON_MACOS
@@ -358,59 +359,16 @@ namespace Realm {
     void notify_listeners(void);
 
     std::list<NotificationListener *> listeners;
-  };    
-
-  // a description of the actual (host, for now) processor cores available in the system
-  // we are most interested in the enumeration of them and the ways in which the cores
-  //   share datapaths, which will impact how we assign reservations to cores
-  class CoreMap {
-  public:
-    CoreMap(void);
-    ~CoreMap(void);
-
-    void clear(void);
-
-    friend std::ostream& operator<<(std::ostream& os, const CoreMap& cm);
-
-    // in general, you'll want to discover the core map rather than set it up yourself
-    // hyperthread_sharing - if true, hyperthreads are considered to share a core, which prevents
-    //                         them both from being if a reservation asks for exclusive access to the
-    //                         core
-    //                       if false, hyperthreads are considered to be separate cores, making more
-    //                         cores available, but potentially exposing the app to contention issues
-    static CoreMap *discover_core_map(bool hyperthread_sharing);
-
-    // creates a simple synthetic core map - it is symmetric and hierarchical:
-    //   numa domains -> cores -> fp clusters (shared fpu) -> hyperthreads (shared alu/ldst)
-    static CoreMap *create_synthetic(int num_domains, int cores_per_domain,
-				     int hyperthreads = 1, int fp_cluster_size = 1);
-
-    struct Proc {
-      int id;      // a unique integer id
-      int domain;  // which (NUMA) domain is it in
-      std::set<int> kernel_proc_ids;  // set of kernel processor IDs (might be empty)
-      std::set<Proc *> shares_alu;    // which other procs does this share an ALU with
-      std::set<Proc *> shares_fpu;    // which other procs does this share an FPU with
-      std::set<Proc *> shares_ldst;   // which other procs does this share an LD/ST path with
-    };
-
-    typedef std::map<int, Proc *> ProcMap;
-    typedef std::map<int, ProcMap> DomainMap;
-
-    ProcMap all_procs;
-    DomainMap by_domain;
   };
 
   // manages a set of core reservations and if/how they are satisfied
   class CoreReservationSet {
   public:
-    // if constructed without a CoreMap, it'll attempt to discover one itself
-    CoreReservationSet(bool hyperthread_sharing);
-    CoreReservationSet(const CoreMap* _cm);
+    CoreReservationSet(const HardwareTopology *_cm);
 
     ~CoreReservationSet(void);
 
-    const CoreMap *get_core_map(void) const;
+    const HardwareTopology *get_core_map(void) const;
 
     void add_reservation(CoreReservation& rsrv);
 
@@ -421,8 +379,7 @@ namespace Realm {
     void report_reservations(std::ostream& os) const;
 
   protected:
-    bool owns_coremap;
-    const CoreMap *cm;
+    const HardwareTopology *cm;
     std::map<CoreReservation *, CoreReservation::Allocation *> allocations;
   };
 

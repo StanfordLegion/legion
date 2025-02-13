@@ -651,10 +651,14 @@ ifeq ($(strip $(GPU_ARCH)),hopper)
 override GPU_ARCH = 90
 NVCC_FLAGS	+= -DHOPPER_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),blackwell)
+override GPU_ARCH = 100
+NVCC_FLAGS	+= -DBLACKWELL_ARCH
+endif
 
 ifeq ($(strip $(GPU_ARCH)),auto)
   # detect based on what nvcc supports
-  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75 80 90
+  ALL_ARCHES = 20 30 32 35 37 50 52 53 60 61 62 70 72 75 80 90 100
   override GPU_ARCH = $(shell for X in $(ALL_ARCHES) ; do \
     $(NVCC) -gencode arch=compute_$$X,code=sm_$$X -cuda -x c++ /dev/null -o /dev/null 2> /dev/null && echo $$X; \
   done)
@@ -763,9 +767,15 @@ ifeq ($(strip $(REALM_NETWORKS)),ucx)
   REALM_CC_FLAGS  += -DREALM_USE_UCX
   UCX_LIBS        := -lucp
   LEGION_LD_FLAGS += $(UCX_LIBS)
+  UCC_LIBS        := -lucc
+  LEGION_LD_FLAGS += $(UCC_LIBS)
   ifdef UCX_ROOT
     CC_FLAGS        += -I$(UCX_ROOT)/include
     LEGION_LD_FLAGS += -L$(UCX_ROOT)/lib
+  endif
+  ifdef UCC_ROOT
+    CC_FLAGS        += -I$(UCC_ROOT)/include
+    LEGION_LD_FLAGS += -L$(UCC_ROOT)/lib
   endif
 else
   $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, mpi, or ucx)
@@ -1039,6 +1049,8 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/ucx/ucp_module.cc \
 			   $(LG_RT_DIR)/realm/ucx/ucp_internal.cc \
 			   $(LG_RT_DIR)/realm/ucx/ucp_context.cc \
 			   $(LG_RT_DIR)/realm/ucx/mpool.cc \
+			   $(LG_RT_DIR)/realm/ucx/ucc_comm.cc \
+			   $(LG_RT_DIR)/realm/ucx/oob_group_comm.cc \
 			   $(LG_RT_DIR)/realm/ucx/bootstrap/bootstrap.cc \
 			   $(LG_RT_DIR)/realm/ucx/bootstrap/bootstrap_loader.cc
 endif
@@ -1097,7 +1109,8 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/logging.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
 		   $(LG_RT_DIR)/realm/timers.cc \
-		   $(LG_RT_DIR)/realm/utils.cc
+		   $(LG_RT_DIR)/realm/utils.cc \
+       $(LG_RT_DIR)/realm/hardware_topology.cc
 
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \
@@ -1157,102 +1170,102 @@ endif
 
 # Header files for Legion installation
 INSTALL_HEADERS += legion.h \
-		   realm.h \
-		   legion/bitmask.h \
-		   legion/legion.inl \
-		   legion/legion_allocation.h \
-		   legion/legion_c.h \
-		   legion/legion_c_util.h \
-		   legion/legion_config.h \
-		   legion/legion_constraint.h \
-		   legion/legion_domain.h \
-		   legion/legion_domain.inl \
-		   legion/legion_mapping.h \
-		   legion/legion_mapping.inl \
-		   legion/legion_redop.h \
-		   legion/legion_redop.inl \
-		   legion/legion_types.h \
-		   legion/legion_utilities.h \
-		   mappers/debug_mapper.h \
-		   mappers/default_mapper.h \
-		   mappers/default_mapper.inl \
-		   mappers/mapping_utilities.h \
-		   mappers/null_mapper.h \
-		   mappers/replay_mapper.h \
-		   mappers/shim_mapper.h \
-		   mappers/test_mapper.h \
-		   mappers/wrapper_mapper.h \
-		   mappers/forwarding_mapper.h \
-		   mappers/logging_wrapper.h \
-		   realm/realm_config.h \
-		   realm/realm_c.h \
-		   realm/id.h \
-		   realm/id.inl \
-		   realm/profiling.h \
-		   realm/profiling.inl \
-		   realm/redop.h \
-		   realm/event.h \
-		   realm/event.inl \
-		   realm/reservation.h \
-		   realm/reservation.inl \
-		   realm/processor.h \
-		   realm/processor.inl \
-		   realm/memory.h \
-		   realm/mutex.h \
-		   realm/mutex.inl \
-		   realm/network.h \
-		   realm/network.inl \
-		   realm/nodeset.h \
-		   realm/nodeset.inl \
-		   realm/instance.h \
-		   realm/instance.inl \
-		   realm/inst_layout.h \
-		   realm/inst_layout.inl \
-		   realm/logging.h \
-		   realm/logging.inl \
-		   realm/machine.h \
-		   realm/machine.inl \
-		   realm/runtime.h \
-		   realm/module.h \
-		   realm/module_config.h \
-		   realm/module_config.inl \
-		   realm/indexspace.h \
-		   realm/indexspace.inl \
-		   realm/cmdline.h \
-		   realm/cmdline.inl \
-		   realm/codedesc.h \
-		   realm/codedesc.inl \
-		   realm/compiler_support.h \
-		   realm/bytearray.h \
-		   realm/bytearray.inl \
-		   realm/faults.h \
-		   realm/atomics.h \
-		   realm/atomics.inl \
-		   realm/point.h \
-		   realm/point.inl \
-		   realm/custom_serdez.h \
-		   realm/custom_serdez.inl \
-		   realm/sparsity.h \
-		   realm/sparsity.inl \
-		   realm/subgraph.h \
-		   realm/subgraph.inl \
-		   realm/dynamic_templates.h \
-		   realm/dynamic_templates.inl \
-		   realm/serialize.h \
-		   realm/serialize.inl \
-		   realm/threads.h \
-		   realm/threads.inl \
-		   realm/timers.h \
-		   realm/timers.inl \
-		   realm/utils.h \
-		   realm/utils.inl \
+                   realm.h \
+                   legion/bitmask.h \
+                   legion/legion.inl \
+                   legion/legion_allocation.h \
+                   legion/legion_c.h \
+                   legion/legion_c_util.h \
+                   legion/legion_config.h \
+                   legion/legion_constraint.h \
+                   legion/legion_domain.h \
+                   legion/legion_domain.inl \
+                   legion/legion_mapping.h \
+                   legion/legion_mapping.inl \
+                   legion/legion_redop.h \
+                   legion/legion_redop.inl \
+                   legion/legion_types.h \
+                   legion/legion_utilities.h \
+                   mappers/debug_mapper.h \
+                   mappers/default_mapper.h \
+                   mappers/default_mapper.inl \
+                   mappers/mapping_utilities.h \
+                   mappers/null_mapper.h \
+                   mappers/replay_mapper.h \
+                   mappers/shim_mapper.h \
+                   mappers/test_mapper.h \
+                   mappers/wrapper_mapper.h \
+                   mappers/forwarding_mapper.h \
+                   mappers/logging_wrapper.h \
+                   realm/realm_config.h \
+                   realm/realm_c.h \
+                   realm/id.h \
+                   realm/id.inl \
+                   realm/profiling.h \
+                   realm/profiling.inl \
+                   realm/redop.h \
+                   realm/event.h \
+                   realm/event.inl \
+                   realm/reservation.h \
+                   realm/reservation.inl \
+                   realm/processor.h \
+                   realm/processor.inl \
+                   realm/memory.h \
+                   realm/mutex.h \
+                   realm/mutex.inl \
+                   realm/network.h \
+                   realm/network.inl \
+                   realm/nodeset.h \
+                   realm/nodeset.inl \
+                   realm/instance.h \
+                   realm/instance.inl \
+                   realm/inst_layout.h \
+                   realm/inst_layout.inl \
+                   realm/logging.h \
+                   realm/logging.inl \
+                   realm/machine.h \
+                   realm/machine.inl \
+                   realm/runtime.h \
+                   realm/module.h \
+                   realm/module_config.h \
+                   realm/module_config.inl \
+                   realm/indexspace.h \
+                   realm/indexspace.inl \
+                   realm/cmdline.h \
+                   realm/cmdline.inl \
+                   realm/codedesc.h \
+                   realm/codedesc.inl \
+                   realm/compiler_support.h \
+                   realm/bytearray.h \
+                   realm/bytearray.inl \
+                   realm/faults.h \
+                   realm/atomics.h \
+                   realm/atomics.inl \
+                   realm/point.h \
+                   realm/point.inl \
+                   realm/custom_serdez.h \
+                   realm/custom_serdez.inl \
+                   realm/sparsity.h \
+                   realm/sparsity.inl \
+                   realm/subgraph.h \
+                   realm/subgraph.inl \
+                   realm/dynamic_templates.h \
+                   realm/dynamic_templates.inl \
+                   realm/serialize.h \
+                   realm/serialize.inl \
+                   realm/threads.h \
+                   realm/threads.inl \
+                   realm/timers.h \
+                   realm/timers.inl \
+                   realm/utils.h \
+                   realm/utils.inl \
                    realm/nvtx.h \
-		   realm/deppart/inst_helper.h \
-		   realm/cuda/cuda_module.h \
-		   realm/cuda/cuda_module.inl \
-		   realm/hip/hip_module.h \
-		   realm/hip/hip_module.inl \
-		   realm/numa/numa_module.h
+                   realm/deppart/inst_helper.h \
+                   realm/cuda/cuda_module.h \
+                   realm/cuda/cuda_module.inl \
+                   realm/hip/hip_module.h \
+                   realm/hip/hip_module.inl \
+                   realm/numa/numa_module.h
 
 ifeq ($(strip $(USE_CUDA)),1)
 INSTALL_HEADERS += realm/cuda/cuda_redop.h \

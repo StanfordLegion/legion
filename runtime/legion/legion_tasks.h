@@ -1136,6 +1136,8 @@ namespace Legion {
                                  bool own_functor); 
       virtual void handle_mispredication(void);
     public:
+      virtual uint64_t order_collectively_mapped_unbounded_pools(
+          uint64_t lamport_clock, bool need_result);
       virtual void concurrent_allreduce(ProcessorManager *manager,
           uint64_t lamport_clock, VariantID vid, bool poisoned);
       virtual void perform_concurrent_task_barrier(void);

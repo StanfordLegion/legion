@@ -220,18 +220,14 @@ namespace Realm {
   SparsityMapImplWrapper::~SparsityMapImplWrapper(void)
   {
     if(map_impl.load() != 0) {
-      // Only do this if we're single node for now since it is not safe with
-      // Realm's quiescence code in multi-node at the moment
-      if(Network::max_node_id == 0) {
-        bool report_leaks = false;
-        get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
-                                                               report_leaks);
-        if(report_leaks) {
-          log_part.fatal() << "leaking sparsity map me:" << me
-                           << " refs:" << references.load()
-                           << " node:" << Network::my_node_id;
-          assert(0);
-        }
+      bool report_leaks = false;
+      get_runtime()->get_module_config("core")->get_property("report_sparsity_leaks",
+                                                             report_leaks);
+      if(report_leaks) {
+        log_part.fatal() << "leaking sparsity map me:" << me
+                         << " refs:" << references.load()
+                         << " node:" << Network::my_node_id;
+        assert(0);
       }
       (*map_deleter)(map_impl.load());
     }
@@ -262,11 +258,7 @@ namespace Realm {
 
   void SparsityMapImplWrapper::add_references(unsigned count, Event wait_on)
   {
-    // Only do this if we're single node for now since it is not safe with
-    // Realm's quiescence code in multi-node at the moment
-    if(Network::max_node_id == 0) {
-      references.fetch_add_acqrel(count);
-    }
+    references.fetch_add_acqrel(count);
     if(wait_on != Event::NO_EVENT) {
       GenEventImpl::trigger(wait_on, false);
     }
@@ -290,11 +282,6 @@ namespace Realm {
   {
     // Should be on the owner node when we get these messages
     assert(Network::my_node_id == NodeID(me.sparsity_creator_node()));
-    // Only do this if we're single node for now since it is not safe with
-    // Realm's quiescence code in multi-node at the moment
-    if(Network::max_node_id > 0) {
-      return;
-    }
     if(wait_on.has_triggered()) {
       const unsigned remaining = references.fetch_sub_acqrel(count);
       assert(remaining >= count);
