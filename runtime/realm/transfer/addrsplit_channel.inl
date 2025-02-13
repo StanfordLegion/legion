@@ -142,18 +142,6 @@ namespace Realm {
         assert(ok);
       }
       comm->create(target_node, launch_node, guid, dma_op, buffer.get_buffer(), req_size);
-      return;
-      ActiveMessage<AddressSplitXferDesCreateMessage<N, T>> amsg(target_node, req_size);
-      // amsg->inst = inst;
-      amsg->launch_node = launch_node;
-      amsg->guid = guid;
-      amsg->dma_op = dma_op;
-      {
-        bool ok = ((amsg << inputs_info) && (amsg << outputs_info) &&
-                   (amsg << priority) && (amsg << bytes_per_element) && (amsg << spaces));
-        assert(ok);
-      }
-      amsg.commit();
     }
   }
 

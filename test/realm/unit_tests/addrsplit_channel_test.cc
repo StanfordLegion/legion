@@ -17,6 +17,67 @@ public:
   int num_xds = 0;
 };
 
+struct AddressSplitFactoryTest : public ::testing::Test {};
+
+TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
+{
+  std::vector<XferDesPortInfo> inputs_info;
+  std::vector<XferDesPortInfo> outputs_info;
+  XferDesRedopInfo redop_info;
+  Node node_data;
+  size_t bytes_per_element = 4;
+
+  std::unique_ptr<BackgroundWorkManager> bgwork =
+      std::make_unique<BackgroundWorkManager>();
+  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
+  std::vector<IndexSpace<1>> spaces(1);
+  std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
+      std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
+                                                           addrsplit_channel);
+  factory->create_xfer_des(/*dma_op=*/0, /*launch_node=*/0, /*target_node=*/0, /*guid=*/0,
+                           inputs_info, outputs_info, 0, redop_info, nullptr, 0, 0);
+
+  EXPECT_EQ(addrsplit_channel->num_xds, 1);
+}
+
+template <int N, typename T>
+class MockAddressSplitCommunicator : public AddressSplitCommunicator<N, T> {
+public:
+  void create(NodeID target_node, NodeID launch_node, XferDesID guid, uintptr_t dma_op,
+              const void *msgdata, size_t msglen) override
+  {
+    num_remote_xds++;
+  }
+  int num_remote_xds = 0;
+};
+
+TEST_F(AddressSplitFactoryTest, CreateXferDesRemote)
+{
+  std::vector<XferDesPortInfo> inputs_info;
+  std::vector<XferDesPortInfo> outputs_info;
+  XferDesRedopInfo redop_info;
+  XferDesID guid = 0;
+  NodeID launch_node = 1;
+  NodeID target_node = 1;
+  Node node_data;
+  size_t bytes_per_element = 4;
+
+  MockAddressSplitCommunicator<1, int> *comm = new MockAddressSplitCommunicator<1, int>();
+  std::unique_ptr<BackgroundWorkManager> bgwork =
+      std::make_unique<BackgroundWorkManager>();
+  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
+  std::vector<IndexSpace<1>> spaces(1);
+
+  std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
+      std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
+                                                           addrsplit_channel, comm);
+  factory->create_xfer_des(0, launch_node, target_node, guid, inputs_info, outputs_info,
+                           0, redop_info, nullptr, 0, 0);
+
+  EXPECT_EQ(addrsplit_channel->num_xds, 0);
+  EXPECT_EQ(comm->num_remote_xds, 1);
+}
+
 template <int DIM, typename T>
 class MockIterator : public TransferIterator {
 public:
