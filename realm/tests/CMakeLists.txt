@@ -93,6 +93,7 @@ list(
   lowlevel_dma_test.cc
   circ_queue_test.cc
   gather_scatter_test.cc
+  topology_test.cc
 )
 list(TRANSFORM REALM_UNIT_TESTS PREPEND "${REALM_TEST_DIR}/unit_tests/")
 

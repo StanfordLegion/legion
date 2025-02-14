@@ -2026,13 +2026,12 @@ namespace Legion {
         }
         // Otherwise we're going to fall through and do the allreduce
         if (collective_exchange == NULL)
-        {
           collective_exchange =
               new AllReduceCollective<MaxReduction<uint64_t>,false>(
                   repl_ctx, collective_exchange_id);
+        if (!need_result)
           commit_preconditions.insert(
                 collective_exchange->get_done_event());
-        }
       }
       collective_exchange->async_all_reduce(collective_lamport_clock);
       if (need_result)
@@ -5543,13 +5542,12 @@ namespace Legion {
         }
         // Otherwise we're going to fall through and do the allreduce
         if (collective_exchange == NULL)
-        {
           collective_exchange =
               new AllReduceCollective<MaxReduction<uint64_t>,false>(
                   repl_ctx, collective_exchange_id);
+        if (!need_result)
           commit_preconditions.insert(
                 collective_exchange->get_done_event());
-        }
       }
       collective_exchange->async_all_reduce(collective_lamport_clock);
       if (need_result)
@@ -14040,9 +14038,14 @@ namespace Legion {
                                                  Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
-      typename REDOP::RHS next;
-      derez.deserialize(next);
-      REDOP::template fold<true/*exclusive*/>(value, next);
+      if (this->participating)
+      {
+        typename REDOP::RHS next;
+        derez.deserialize(next);
+        REDOP::template fold<true/*exclusive*/>(value, next);
+      }
+      else // Just overwrite in this case since we're not participating
+        derez.deserialize(value);
     }
     
     //--------------------------------------------------------------------------
