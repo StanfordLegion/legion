@@ -1,193 +1,202 @@
-#include "realm/transfer/transfer.h"
+#include "realm/indexspace.h"
+#include "realm/deppart/sparsity_impl.h"
 #include <memory>
 #include <vector>
 #include <gtest/gtest.h>
 
 using namespace Realm;
 
-template <int DIM>
-struct TypeWrapper {
-  static constexpr int value = DIM;
+template <int N>
+struct TestCaseData {
+  Rect<N> domain;
+  Rect<N> restrictions;
+  std::vector<Rect<N>> rects;
+  std::vector<Rect<N>> expected;
 };
 
-template <typename TypeWrapper>
-class IndexSpaceIteratorTest : public ::testing::Test {
-public:
-  static constexpr int DIM = TypeWrapper::value;
+struct BaseTestCaseData {
+  virtual ~BaseTestCaseData() = default;
+  virtual int get_dim() const = 0;
 };
 
-template <int DIM>
-struct IndexSpaceIteratorTestCase {
-  Rect<DIM> domain;
-  Rect<DIM> restrictions;
-  std::vector<Rect<DIM>> rects;
-  std::vector<Rect<DIM>> expected;
+template <int N>
+struct WrappedTestCaseData : public BaseTestCaseData {
+  TestCaseData<N> data;
+  explicit WrappedTestCaseData(TestCaseData<N> d)
+    : data(std::move(d))
+  {}
+  int get_dim() const override { return N; }
 };
 
-template <int DIM>
-std::vector<IndexSpaceIteratorTestCase<DIM>> GetTestCases()
-{
-  if constexpr(DIM == 1) {
-    return {
-        // Full 1D no rects
-        {/*bounds=*/{Rect<1>(0, 10)},
-         /*restrictions=*/{Rect<1>(0, 10)},
-         /*rects=*/{},
-         /*exp_rects=*/{Rect<1>(0, 10)}},
+class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
 
-        // Full 1D iteration
-        {/*bounds=*/{Rect<1>(0, 10)},
-         /*restrictions=*/{Rect<1>(0, 10)},
-         /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
-         /*exp_rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)}},
-
-        // Full 1D iteration with restrictions
-        {/*bounds=*/{Rect<1>(0, 10)},
-         /*restrictions=*/{Rect<1>(4, 8)},
-         /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
-         /*exp_rects=*/{Rect<1>(4, 6), Rect<1>(8, 8)}},
-
-        // 1D Empty bounds
-        {/*bounds=*/{Rect<1>(1, 0)},
-         /*restrictions=*/{Rect<1>(4, 8)},
-         /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
-         /*exp_rects=*/{}},
-
-        // 1D empty restrictions
-        {/*bounds=*/{Rect<1>(0, 10)},
-         /*restrictions=*/{Rect<1>(1, 0)},
-         /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
-         /*exp_rects=*/{}},
-    };
-  } else if constexpr(DIM == 2) {
-    return {
-        // Full 2D domain
-        {
-            /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*restrictions=*/Rect<2>({0, 0}, {10, 10}),
-            /*rects=*/{Rect<2>({0, 0}, {10, 10})},
-            /*expected=*/{Rect<2>({0, 0}, {10, 10})},
-        },
-
-        // Restricted 2D domain
-        {
-            /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*restrictions=*/Rect<2>({2, 2}, {8, 8}),
-            /*rects=*/{Rect<2>({0, 0}, {10, 10})},
-            /*expected=*/{Rect<2>({2, 2}, {8, 8})},
-        },
-
-        // Sparse 2D domain
-        {
-            /*domain=*/Rect<2>({0, 0}, {10, 10}),
-            /*restrictions=*/Rect<2>({3, 3}, {7, 7}),
-            /*rects=*/
-            {
-                Rect<2>({1, 1}, {2, 2}),
-                Rect<2>({3, 3}, {4, 4}),
-                Rect<2>({6, 6}, {8, 8}),
-            },
-            /*expected=*/
-            {
-                Rect<2>({3, 3}, {4, 4}),
-                Rect<2>({6, 6}, {7, 7}),
-            },
-        },
-    };
-  } else if constexpr(DIM == 3) {
-    return {
-        // Full 3D domain
-        {
-            /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
-            /*restrictions=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
-            /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
-            /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
-        },
-
-        // Restricted 3D domain
-        {
-            /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
-            /*restrictions=*/Rect<3>({2, 2, 2}, {8, 8, 8}),
-            /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
-            /*expected=*/{Rect<3>({2, 2, 2}, {8, 8, 8})},
-        },
-
-        // Sparse 3D domain
-        {
-            /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
-            /*restrictions=*/Rect<3>({3, 3, 3}, {7, 7, 7}),
-            /*rects=*/
-            {
-                Rect<3>({1, 1, 1}, {2, 2, 2}),
-                Rect<3>({3, 3, 3}, {4, 4, 4}),
-                Rect<3>({6, 6, 6}, {8, 8, 8}),
-            },
-            /*expected=*/
-            {
-                Rect<3>({3, 3, 3}, {4, 4, 4}),
-                Rect<3>({6, 6, 6}, {7, 7, 7}),
-            },
-        },
-    };
-  }
-  return {};
-}
-
-TYPED_TEST_SUITE_P(IndexSpaceIteratorTest);
-
-TYPED_TEST_P(IndexSpaceIteratorTest, HandlesVariousCases)
+template <int N>
+void run_test_case(const TestCaseData<N> &test_case)
 {
   using T = int;
-  constexpr int N = TypeParam::value;
-  auto test_cases = GetTestCases<N>();
-  for(const auto &test_case : test_cases) {
-    NodeSet subscribers;
-    SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-    SparsityMapPublicImpl<N, T> *local_impl = nullptr;
-    SparsityMap<N, T>::ImplLookup::get_impl_ptr =
-        [&](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
-      if(local_impl == nullptr) {
-        local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
-      }
-      return local_impl;
-    };
+  NodeSet subscribers;
 
-    IndexSpace<N, T> domain = test_case.domain;
+  IndexSpace<N, T> domain = test_case.domain;
 
-    if(!test_case.rects.empty()) {
-      SparsityMapImpl<N, T> *impl =
-          reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
-      impl->set_contributor_count(1);
-      impl->contribute_dense_rect_list(test_case.rects, true);
-      domain.sparsity = handle;
-    }
+  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+  std::unique_ptr<SparsityMapImpl<N, T>> impl =
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
+  SparsityMapPublicImpl<N, T> *local_impl = nullptr;
 
-    size_t index = 0;
-    for(IndexSpaceIterator<N, T> it(domain, test_case.restrictions); it.valid;
-        it.step()) {
-      EXPECT_TRUE(index < test_case.expected.size());
-      ASSERT_EQ(it.rect.lo, test_case.expected[index].lo);
-      ASSERT_EQ(it.rect.hi, test_case.expected[index].hi);
-      index++;
-    }
-
-    ASSERT_EQ(index, test_case.expected.size());
-
-    delete local_impl;
+  if(!test_case.rects.empty()) {
+    impl->set_contributor_count(1);
+    impl->contribute_dense_rect_list(test_case.rects, true);
+    domain.sparsity = handle;
+    local_impl = reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
   }
+
+  size_t index = 0;
+  for(IndexSpaceIterator<N, T> it(domain, test_case.restrictions, local_impl); it.valid;
+      it.step()) {
+    EXPECT_TRUE(index < test_case.expected.size());
+    ASSERT_EQ(it.rect.lo, test_case.expected[index].lo);
+    ASSERT_EQ(it.rect.hi, test_case.expected[index].hi);
+    index++;
+  }
+
+  ASSERT_EQ(index, test_case.expected.size());
 }
 
-REGISTER_TYPED_TEST_SUITE_P(IndexSpaceIteratorTest, HandlesVariousCases);
+template <typename Func, size_t... Is>
+void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
+{
+  (
+      [&] {
+        if(dim == static_cast<int>(Is + 1)) {
+          func(std::integral_constant<int, Is + 1>{});
+        }
+      }(),
+      ...);
+}
 
-using TestTypes = ::testing::Types<TypeWrapper<1>
-#if REALM_MAX_DIM > 1
-                                   ,
-                                   TypeWrapper<2>
-#endif
-#if REALM_MAX_DIM > 2
-                                   ,
-                                   TypeWrapper<3>
-#endif
-                                   >;
+TEST_P(IndirectGetAddressesTest, Base)
+{
+  const BaseTestCaseData *base_test_case = GetParam();
 
-INSTANTIATE_TYPED_TEST_SUITE_P(AllDimensions, IndexSpaceIteratorTest, TestTypes);
+  dispatch_for_dimension(
+      base_test_case->get_dim(),
+      [&](auto Dim) {
+        constexpr int N = Dim;
+        auto &test_case =
+            static_cast<const WrappedTestCaseData<N> *>(base_test_case)->data;
+        run_test_case(test_case);
+      },
+      std::make_index_sequence<REALM_MAX_DIM>{});
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    IndirectGetAddressesCases, IndirectGetAddressesTest,
+    ::testing::Values(new WrappedTestCaseData<1>(
+                          // Full 1D no rects
+                          {/*bounds=*/{Rect<1>(0, 10)},
+                           /*restrictions=*/{Rect<1>(0, 10)},
+                           /*rects=*/{},
+                           /*exp_rects=*/{Rect<1>(0, 10)}}),
+
+                      new WrappedTestCaseData<1>(
+                          // Full 1D iteration
+                          {/*bounds=*/{Rect<1>(0, 10)},
+                           /*restrictions=*/{Rect<1>(0, 10)},
+                           /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
+                           /*exp_rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)}}),
+
+                      new WrappedTestCaseData<1>(
+                          // Full 1D iteration with restrictions
+                          {/*bounds=*/{Rect<1>(0, 10)},
+                           /*restrictions=*/{Rect<1>(4, 8)},
+                           /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
+                           /*exp_rects=*/{Rect<1>(4, 6), Rect<1>(8, 8)}}),
+
+                      new WrappedTestCaseData<1>(
+                          // 1D Empty bounds
+                          {/*bounds=*/{Rect<1>(1, 0)},
+                           /*restrictions=*/{Rect<1>(4, 8)},
+                           /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
+                           /*exp_rects=*/{}}),
+
+                      new WrappedTestCaseData<1>(
+                          // 1D empty restrictions
+                          {/*bounds=*/{Rect<1>(0, 10)},
+                           /*restrictions=*/{Rect<1>(1, 0)},
+                           /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
+                           /*exp_rects=*/{}}),
+
+                      new WrappedTestCaseData<2>(
+                          // Full 2D domain
+                          {
+                              /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                              /*restrictions=*/Rect<2>({0, 0}, {10, 10}),
+                              /*rects=*/{Rect<2>({0, 0}, {10, 10})},
+                              /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+                          }),
+
+                      new WrappedTestCaseData<2>(
+                          // Restricted 2D domain
+                          {
+                              /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                              /*restrictions=*/Rect<2>({2, 2}, {8, 8}),
+                              /*rects=*/{Rect<2>({0, 0}, {10, 10})},
+                              /*expected=*/{Rect<2>({2, 2}, {8, 8})},
+                          }),
+
+                      new WrappedTestCaseData<2>(
+                          // Sparse 2D domain
+                          {
+                              /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                              /*restrictions=*/Rect<2>({3, 3}, {7, 7}),
+                              /*rects=*/
+                              {
+                                  Rect<2>({1, 1}, {2, 2}),
+                                  Rect<2>({3, 3}, {4, 4}),
+                                  Rect<2>({6, 6}, {8, 8}),
+                              },
+                              /*expected=*/
+                              {
+                                  Rect<2>({3, 3}, {4, 4}),
+                                  Rect<2>({6, 6}, {7, 7}),
+                              },
+                          }),
+
+                      new WrappedTestCaseData<3>(
+                          // Full 3D domain
+                          {
+                              /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+                              /*restrictions=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+                              /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+                              /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+                          }),
+
+                      new WrappedTestCaseData<3>(
+                          // Restricted 3D domain
+                          {
+                              /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+                              /*restrictions=*/Rect<3>({2, 2, 2}, {8, 8, 8}),
+                              /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+                              /*expected=*/{Rect<3>({2, 2, 2}, {8, 8, 8})},
+                          }),
+
+                      new WrappedTestCaseData<3>(
+                          // Sparse 3D domain
+                          {
+                              /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+                              /*restrictions=*/Rect<3>({3, 3, 3}, {7, 7, 7}),
+                              /*rects=*/
+                              {
+                                  Rect<3>({1, 1, 1}, {2, 2, 2}),
+                                  Rect<3>({3, 3, 3}, {4, 4, 4}),
+                                  Rect<3>({6, 6, 6}, {8, 8, 8}),
+                              },
+                              /*expected=*/
+                              {
+                                  Rect<3>({3, 3, 3}, {4, 4, 4}),
+                                  Rect<3>({6, 6, 6}, {7, 7, 7}),
+                              },
+                          })));
