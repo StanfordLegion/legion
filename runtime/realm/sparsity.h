@@ -29,7 +29,6 @@
 
 #include <iostream>
 #include <vector>
-#include <functional>
 
 /**
  * \file sparsity.h
@@ -137,16 +136,6 @@ namespace Realm {
 				      bool always_create, bool disjoint);
     ///@}
 
-    struct ImplLookup {
-      static SparsityMapPublicImpl<N, T> *get_impl(const SparsityMap<N, T> &map)
-      {
-        return get_impl_ptr(map);
-      }
-      static SparsityMapPublicImpl<N, T> *default_get_impl(const SparsityMap<N, T> &map);
-      static inline std::function<SparsityMapPublicImpl<N, T> *(
-          const SparsityMap<N, T> &)>
-          get_impl_ptr = default_get_impl;
-    };
   };
 
   template <int N, typename T>

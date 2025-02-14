@@ -632,14 +632,19 @@ namespace Realm {
       const IndexSpace<N, T> &_is, RegionInstanceImpl *_inst_impl,
       const int _dim_order[N], const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
-      size_t _extra_elems)
+      size_t _extra_elems, SparsityMapPublicImpl<N, T> *_sparsity_impl)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
     , field_idx(0)
     , extra_elems(_extra_elems)
+    , sparsity_impl(_sparsity_impl)
   {
     if(is.is_valid()) {
-      iter.reset(is);
+      if(sparsity_impl) {
+        iter.reset(is, is.bounds, sparsity_impl);
+      } else {
+        iter.reset(is);
+      }
       this->is_done = !iter.valid;
       iter_init_deferred = false;
     } else {
@@ -742,7 +747,11 @@ namespace Realm {
 
     iter.step();
     if(!iter.valid) {
-      iter.reset(is);
+      if(sparsity_impl) {
+        iter.reset(is, is.bounds, sparsity_impl);
+      } else {
+        iter.reset(is);
+      }
       field_idx++;
       if(field_idx == fields.size()) {
         this->is_done = true;

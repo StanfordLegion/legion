@@ -1,3 +1,4 @@
+#include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
 #include "realm/transfer/memcpy_channel.h"
 #include <gtest/gtest.h>
@@ -209,27 +210,8 @@ struct WrappedTestCaseData : public BaseTestCaseData {
 };
 
 class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
-  void SetUp() override
-  {
-    bgwork = new BackgroundWorkManager();
-    channel = new MemcpyChannel(bgwork, &node_data, remote_shared_memory_mappings);
-  }
-
-  void TearDown() override
-  {
-    channel->shutdown();
-    delete channel;
-    delete bgwork;
-  }
-
-  XferDesID guid = 0;
-  int priority = 0;
-  NodeID owner = 0;
-  Node node_data;
-  std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
-  XferDesRedopInfo redop_info;
-  BackgroundWorkManager *bgwork;
-  MemcpyChannel *channel;
+protected:
+  void TearDown() override { delete GetParam(); }
 };
 
 template <int N>
@@ -243,36 +225,28 @@ void run_test_case(const TestCaseData<N> &test_case)
   Node node_data;
   std::unordered_map<realm_id_t, SharedMemoryInfo> remote_shared_memory_mappings;
   XferDesRedopInfo redop_info;
-  BackgroundWorkManager *bgwork;
-  MemcpyChannel *channel;
-
-  bgwork = new BackgroundWorkManager();
-  channel = new MemcpyChannel(bgwork, &node_data, remote_shared_memory_mappings);
+  std::unique_ptr<BackgroundWorkManager> bgwork =
+      std::make_unique<BackgroundWorkManager>();
+  std::unique_ptr<MemcpyChannel> channel = std::make_unique<MemcpyChannel>(
+      bgwork.get(), &node_data, remote_shared_memory_mappings);
 
   NodeSet subscribers;
-  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  SparsityMapPublicImpl<N, T> *local_impl = nullptr;
-  SparsityMap<N, T>::ImplLookup::get_impl_ptr =
-      [&](const SparsityMap<N, T> &map) -> SparsityMapPublicImpl<N, T> * {
-    if(local_impl == nullptr) {
-      local_impl = new SparsityMapImpl<N, T>(handle, subscribers);
-    }
-    return local_impl;
-  };
 
-  SparsityMapImpl<N, T> *impl = reinterpret_cast<SparsityMapImpl<N, T> *>(handle.impl());
+  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+  std::unique_ptr<SparsityMapImpl<N, T>> impl =
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
+  SparsityMapPublicImpl<N, T> *local_impl =
+      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
+
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(test_case.rects, true);
   IndexSpace<N, T> domain = test_case.domain;
-  if(!test_case.rects.empty()) {
-    domain.sparsity = handle;
-  }
 
   TransferIteratorIndexSpace<N, T> *src_it = new TransferIteratorIndexSpace<N, T>(
       domain,
       create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
       test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-      test_case.field_sizes, 0);
+      test_case.field_sizes, 0, local_impl);
 
   std::vector<XferDesPortInfo> inputs_info;
   std::vector<XferDesPortInfo> outputs_info;
@@ -297,7 +271,7 @@ void run_test_case(const TestCaseData<N> &test_case)
       domain,
       create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
       test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-      test_case.field_sizes, 0);
+      test_case.field_sizes, 0, local_impl);
 
   xfer_desc->output_ports.resize(1);
   XferDes::XferPort &output_port = xfer_desc->output_ports[0];
@@ -312,17 +286,14 @@ void run_test_case(const TestCaseData<N> &test_case)
 
   output_port.addrcursor.set_addrlist(&output_port.addrlist);
 
-  while(xfer_desc->progress_xd(channel, TimeLimit::relative(10000000))) {
+  while(xfer_desc->progress_xd(channel.get(), TimeLimit::relative(10000000))) {
   }
 
   for(size_t i = 0; i < total_dst_size; i++) {
     EXPECT_EQ(dst_buffer[i], test_case.exp_buffer[i]);
   }
 
-  delete impl;
   channel->shutdown();
-  delete channel;
-  delete bgwork;
 }
 
 template <typename Func, size_t... Is>
