@@ -155,6 +155,7 @@ TEST(SparsityMapImplTest, AddRemoteWaiter)
 TEST(SparsityMapImplTest, SetContributorCountRemote)
 {
   NodeSet subscribers;
+  constexpr int count = 2;
   std::vector<Rect<1>> rect_list{Rect<1>(Point<1>(0), Point<1>(1))};
   MockSparsityMapCommunicator<1> *sparsity_comm = new MockSparsityMapCommunicator<1>();
   SparsityMap<1> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<1>>();
@@ -163,9 +164,10 @@ TEST(SparsityMapImplTest, SetContributorCountRemote)
           handle, subscribers,
           reinterpret_cast<SparsityMapCommunicator<1, int> *>(sparsity_comm));
 
-  impl->set_contributor_count(2);
+  impl->set_contributor_count(count);
 
   ASSERT_EQ(sparsity_comm->sent_contributions, 1);
+  ASSERT_EQ(sparsity_comm->sent_piece_count, count);
 }
 
 TEST(SparsityMapImplTest, ContributeNothingRemote)
