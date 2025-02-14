@@ -184,142 +184,169 @@ TEST(SparsityMapImplTest, ContributeNothingRemote)
   ASSERT_EQ(sparsity_comm->sent_contributions, 1);
 }
 
-template <typename PointType>
-struct PointTraits;
-
-template <int N, typename T>
-struct PointTraits<Realm::Point<N, T>> {
-  static constexpr int DIM = N;
-  using value_type = T;
-};
-
-template <typename PointType>
-class SparsityMapImplTest : public ::testing::Test {
-public:
-  static constexpr int N = PointTraits<PointType>::DIM;
-  using T = typename PointTraits<PointType>::value_type;
-
-  void SetUp() override { sparsity_comm = new MockSparsityMapCommunicator<N, T>(); }
-
-  // constexpr static int num_rects = 3;
-  MockSparsityMapCommunicator<N, T> *sparsity_comm;
-};
-
-TYPED_TEST_SUITE_P(SparsityMapImplTest);
-
-TYPED_TEST_P(SparsityMapImplTest, RemoteDataReply)
+TEST(SparsityMapImplTest, ContributeDenseRectListRemote)
 {
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
+  using T = int;
+  constexpr int N = 3;
+  constexpr int num_rects = 3, gap = 3;
+  NodeSet subscribers;
+  MockSparsityMapCommunicator<N, T> *sparsity_comm =
+      new MockSparsityMapCommunicator<N, T>();
+  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
+  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
+  std::unique_ptr<SparsityMapImpl<N, T>> impl =
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, sparsity_comm);
+
+  impl->contribute_dense_rect_list(rect_list,
+                                   /*disjoint=*/false);
+
+  ASSERT_EQ(sparsity_comm->sent_contributions, num_rects);
+  ASSERT_EQ(sparsity_comm->sent_piece_count, num_rects);
+  ASSERT_EQ(sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
+}
+
+TEST(SparsityMapImplTest, RemoteDataReply)
+{
+  using T = int;
+  constexpr int N = 3;
   constexpr int gap = 3;
   constexpr size_t num_rects = 3;
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   NodeSet subscribers;
+  MockSparsityMapCommunicator<N, T> *sparsity_comm =
+      new MockSparsityMapCommunicator<N, T>();
   std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, sparsity_comm);
 
   impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
   impl->set_contributor_count(1);
   impl->remote_data_reply(/*requestor=*/2, /*reply_precise=*/true,
                           /*reply_approx=*/false);
 
-  ASSERT_EQ(this->sparsity_comm->sent_contributions, num_rects);
-  ASSERT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
-  ASSERT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
+  ASSERT_EQ(sparsity_comm->sent_contributions, num_rects);
+  ASSERT_EQ(sparsity_comm->sent_piece_count, num_rects);
+  ASSERT_EQ(sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
 }
 
-TYPED_TEST_P(SparsityMapImplTest, ContributeDenseRectListRemote)
+struct BaseTestData {
+  virtual ~BaseTestData() = default;
+  virtual int get_dim() const = 0;
+};
+
+template <int N>
+struct ContributeDenseRectTestData {
+  std::vector<Rect<N>> rects;
+  std::vector<Rect<N>> expected;
+  bool disjoint;
+};
+
+template <int N>
+struct WrappedContributeDenseRectData : public BaseTestData {
+  ContributeDenseRectTestData<N> data;
+  explicit WrappedContributeDenseRectData(ContributeDenseRectTestData<N> d)
+    : data(std::move(d))
+  {}
+  int get_dim() const override { return N; }
+};
+
+class ContributeDenseRectTest : public ::testing::TestWithParam<BaseTestData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
+
+template <int N>
+void run_contribute_dense_case(const ContributeDenseRectTestData<N> &test_case)
 {
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
-  constexpr int num_rects = 3, gap = 3;
+  using T = int;
   NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
-  SparsityMap<N, T> handle = (ID::make_sparsity(1, 1, 0)).convert<SparsityMap<N, T>>();
-  std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
-
-  impl->contribute_dense_rect_list(rect_list,
-                                   /*disjoint=*/false);
-
-  ASSERT_EQ(this->sparsity_comm->sent_contributions, num_rects);
-  ASSERT_EQ(this->sparsity_comm->sent_piece_count, num_rects);
-  ASSERT_EQ(this->sparsity_comm->sent_bytes, num_rects * sizeof(T) * N * 2);
-}
-
-TYPED_TEST_P(SparsityMapImplTest, ContributeDenseNotDisjoint)
-{
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
-  constexpr int num_rects = 3, gap = 3;
-  NodeSet subscribers;
-  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers, this->sparsity_comm);
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
   SparsityMapPublicImpl<N, T> *public_impl = impl.get();
-
   impl->set_contributor_count(1);
-  impl->contribute_dense_rect_list(rect_list,
-                                   /*disjoint=*/false);
+  impl->contribute_dense_rect_list(test_case.rects, test_case.disjoint);
 
   std::vector<SparsityMapEntry<N, T>> entries = public_impl->get_entries();
   ASSERT_TRUE(public_impl->is_valid());
-  ASSERT_EQ(entries.size(), num_rects);
-  ASSERT_EQ(entries.size(), rect_list.size());
+  ASSERT_EQ(entries.size(), test_case.expected.size());
   for(size_t i = 0; i < entries.size(); i++) {
-    ASSERT_EQ(entries[i].bounds.lo, rect_list[i].lo);
-    ASSERT_EQ(entries[i].bounds.hi, rect_list[i].hi);
+    ASSERT_EQ(entries[i].bounds.lo, test_case.expected[i].lo);
+    ASSERT_EQ(entries[i].bounds.hi, test_case.expected[i].hi);
   }
 }
 
-TYPED_TEST_P(SparsityMapImplTest, ContributeDenseDisjointRects)
+template <typename Func, size_t... Is>
+void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
 {
-  using T = typename TestFixture::T;
-  constexpr int N = TestFixture::N;
-  constexpr int num_rects = 2, gap = 3;
-  NodeSet subscribers;
-  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  std::vector<Rect<N, T>> rect_list = create_rects<N, T>(num_rects, gap);
-  std::unique_ptr<SparsityMapImpl<N, T>> impl = std::make_unique<SparsityMapImpl<N, T>>(
-      handle, subscribers,
-      reinterpret_cast<SparsityMapCommunicator<N, T> *>(this->sparsity_comm));
-
-  impl->set_contributor_count(1);
-  impl->contribute_dense_rect_list(rect_list, /*disjoint=*/true);
-
-  SparsityMapPublicImpl<N, T> *public_impl = impl.get();
-  std::vector<SparsityMapEntry<N, T>> entries = public_impl->get_entries();
-  ASSERT_EQ(entries.size(), rect_list.size());
-  for(size_t i = 0; i < entries.size(); i++) {
-    ASSERT_EQ(entries[i].bounds.lo, rect_list[i].lo);
-    ASSERT_EQ(entries[i].bounds.hi, rect_list[i].hi);
-  }
+  (
+      [&] {
+        if(dim == static_cast<int>(Is + 1)) {
+          func(std::integral_constant<int, Is + 1>{});
+        }
+      }(),
+      ...);
 }
 
-REGISTER_TYPED_TEST_SUITE_P(SparsityMapImplTest, RemoteDataReply,
-                            ContributeDenseRectListRemote, ContributeDenseNotDisjoint,
-                            ContributeDenseDisjointRects);
-
-template <typename T, int... Ns>
-auto GeneratePointTypes(std::integer_sequence<int, Ns...>)
+TEST_P(ContributeDenseRectTest, Base)
 {
-  return ::testing::Types<Realm::Point<Ns + 1, T>...>{};
+  const BaseTestData *base_test_case = GetParam();
+
+  dispatch_for_dimension(
+      base_test_case->get_dim(),
+      [&](auto Dim) {
+        constexpr int N = Dim;
+        auto &test_case =
+            static_cast<const WrappedContributeDenseRectData<N> *>(base_test_case)->data;
+        run_contribute_dense_case(test_case);
+      },
+      std::make_index_sequence<REALM_MAX_DIM>{});
 }
 
-template <typename T>
-auto GeneratePointTypesForAllDims()
-{
-  return GeneratePointTypes<T>(std::make_integer_sequence<int, REALM_MAX_DIM>{});
-}
+INSTANTIATE_TEST_SUITE_P(
+    ContributeDenseRectCases, ContributeDenseRectTest,
+    ::testing::Values(
+        new WrappedContributeDenseRectData<1>({// Case: Empty
+                                               /*rects=*/{},
+                                               /*expected=*/{}, /*disjoint=*/true}),
+        new WrappedContributeDenseRectData<1>({// Case: Empty
+                                               /*rects=*/{Rect<1>(1, 0)},
+                                               /*expected=*/{Rect<1>(1, 0)},
+                                               /*disjoint=*/true}),
+        new WrappedContributeDenseRectData<1>(
+            {// Case: Overlapping
+             /*rects=*/{Rect<1>(0, 0), Rect<1>(1, 1), Rect<1>(2, 3)},
+             /*expected=*/{Rect<1>(0, 3)}, /*disjoint=*/true}),
 
-#define INSTANTIATE_TEST_TYPES(BASE_TYPE, SUFFIX, FIXTURE)                               \
-  using N##SUFFIX = decltype(GeneratePointTypesForAllDims<BASE_TYPE>());                 \
-  INSTANTIATE_TYPED_TEST_SUITE_P(SUFFIX##Type, FIXTURE, N##SUFFIX)
+        new WrappedContributeDenseRectData<1>(
+            {// Case: Non-overlapping
+             /*rects=*/{Rect<1>(0, 0), Rect<1>(2, 2), Rect<1>(4, 4)},
+             /*expected=*/{Rect<1>(0, 0), Rect<1>(2, 2), Rect<1>(4, 4)},
+             /*disjoint=*/true}),
 
-INSTANTIATE_TEST_TYPES(int, Int, SparsityMapImplTest);
-INSTANTIATE_TEST_TYPES(long long, LongLong, SparsityMapImplTest);
+        new WrappedContributeDenseRectData<1>(
+            {// Case: Non-overlapping
+             /*rects=*/{Rect<1>(0, 0), Rect<1>(2, 2), Rect<1>(4, 4)},
+             /*expected=*/{Rect<1>(0, 0), Rect<1>(2, 2), Rect<1>(4, 4)},
+             /*disjoint=*/false}),
+
+        new WrappedContributeDenseRectData<2>(
+            {// Case: Non-overlapping 2D
+             /*rects=*/{Rect<2>({0, 0}, {0, 0}), Rect<2>({2, 2}, {2, 2}),
+                        Rect<2>({4, 4}, {4, 4})},
+             /*expected=*/
+             {Rect<2>({0, 0}, {0, 0}), Rect<2>({2, 2}, {2, 2}), Rect<2>({4, 4}, {4, 4})},
+             /*disjoint=*/false}),
+
+        new WrappedContributeDenseRectData<3>(
+            {// Case: Non-overlapping 3D
+             /*rects=*/{Rect<3>({0, 0, 0}, {0, 0, 0}), Rect<3>({2, 2, 2}, {2, 2, 2}),
+                        Rect<3>({4, 4, 4}, {4, 4, 4})},
+             /*expected=*/
+             {Rect<3>({0, 0, 0}, {0, 0, 0}), Rect<3>({2, 2, 2}, {2, 2, 2}),
+              Rect<3>({4, 4, 4}, {4, 4, 4})},
+             /*disjoint=*/false})
+            ));
 
 template <int N, typename T>
 static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
@@ -379,11 +406,6 @@ struct ComputeCoveringTestData {
   bool status = true;
 };
 
-struct BaseTestData {
-  virtual ~BaseTestData() = default;
-  virtual int get_dim() const = 0;
-};
-
 template <int N>
 struct WrappedComputeCoveringData : public BaseTestData {
   ComputeCoveringTestData<N> data;
@@ -422,18 +444,6 @@ void run_test_case(const ComputeCoveringTestData<N> &test_case)
     EXPECT_EQ(covering[i].lo, test_case.expected[i].lo);
     EXPECT_EQ(covering[i].hi, test_case.expected[i].hi);
   }
-}
-
-template <typename Func, size_t... Is>
-void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
-{
-  (
-      [&] {
-        if(dim == static_cast<int>(Is + 1)) {
-          func(std::integral_constant<int, Is + 1>{});
-        }
-      }(),
-      ...);
 }
 
 TEST_P(ComputeCoveringTest, Base)
