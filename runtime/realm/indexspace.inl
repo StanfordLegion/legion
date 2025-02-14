@@ -1262,12 +1262,10 @@ namespace Realm {
 
   template <int N, typename T>
   inline IndexSpaceIterator<N, T>::IndexSpaceIterator(void)
-    : valid(false)
   {}
 
   template <int N, typename T>
   inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space)
-    : valid(false)
   {
     reset(_space);
   }
@@ -1275,7 +1273,6 @@ namespace Realm {
   template <int N, typename T>
   inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space,
                                                       const Rect<N, T> &_restriction)
-    : valid(false)
   {
     reset(_space, _restriction);
   }
@@ -1284,7 +1281,6 @@ namespace Realm {
   inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space,
                                                       const Rect<N, T> &_restriction,
                                                       SparsityMapPublicImpl<N, T> *s_impl)
-    : valid(false)
   {
     reset(_space, _restriction, s_impl);
   }
@@ -1312,6 +1308,8 @@ namespace Realm {
     space = _space;
     restriction = space.bounds.intersection(_restriction);
     s_impl = impl;
+
+    rect = Rect<N, T>::make_empty();
 
     if(restriction.empty()) {
       valid = false;
