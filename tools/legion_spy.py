@@ -8979,8 +8979,17 @@ class Operation(object):
             title += ' Point: ' + self.task.point.to_string()
         if self.replayed:
             title += '  (replayed)'
+        # This case is for logical dependence graph visualization
         if self.task and self.task.shard is not None:
             title += '  (Shard '+str(self.task.shard)+')'
+        # These two cases are for physical event graph visualization
+        # and say which shard the operations where assigned to
+        elif self.index_owner is not None:
+            if self.index_owner.context.shard is not None:
+                title += '  (Assigned Shard '+str(self.index_owner.context.shard)+')'
+        else:
+            if self.context.shard is not None:
+                title += '  (Assigned Shard '+str(self.context.shard)+')'
         label = printer.generate_html_op_label(title, self.reqs, self.mappings,
                                        self.get_color(), self.state.detailed_graphs)
         if dataflow or self.task is None or len(self.task.operations) == 0:
