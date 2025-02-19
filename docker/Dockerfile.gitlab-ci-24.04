@@ -19,6 +19,7 @@ RUN dpkg --add-architecture i386 && \
       gfortran-10 gfortran-11 gfortran-12 \
       gcc-multilib g++-multilib \
       clang-18 clang-format-18 clang-tidy-18 libclang-18-dev llvm-18-dev libomp-18-dev libmlir-18-dev libpolly-18-dev \
+      clang-format-17 \
       libedit-dev libncurses5-dev libffi-dev libpfm4-dev libxml2-dev libzstd-dev \
       zlib1g-dev zlib1g-dev:i386 \
       mpich libmpich-dev \
