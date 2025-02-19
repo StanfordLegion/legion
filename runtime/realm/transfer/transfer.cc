@@ -1068,82 +1068,19 @@ namespace Realm {
   //
 
   template <int N, typename T>
-  class TransferIteratorIndirect : public TransferIteratorBase<N, T> {
-  protected:
-    TransferIteratorIndirect(void); // used by deserializer
-  public:
-    TransferIteratorIndirect(Memory _addrs_mem,
-                             // const IndexSpace<N,T> &_is,
-                             RegionInstance inst,
-                             // const int _dim_order[N],
-                             const std::vector<FieldID> &_fields,
-                             const std::vector<size_t> &_fld_offsets,
-                             const std::vector<size_t> &_fld_sizes);
-
-    template <typename S>
-    static TransferIterator *deserialize_new(S &deserializer);
-
-    virtual ~TransferIteratorIndirect(void);
-
-    virtual Event request_metadata(void);
-
-    // specify the xd port used for indirect address flow control, if any
-    virtual void set_indirect_input_port(XferDes *xd, int port_idx,
-                                         TransferIterator *inner_iter);
-    virtual void reset(void);
-
-    static Serialization::PolymorphicSerdezSubclass<TransferIterator,
-                                                    TransferIteratorIndirect<N, T>>
-        serdez_subclass;
-
-    template <typename S>
-    bool serialize(S &serializer) const;
-
-  protected:
-    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
-                               size_t &fsize);
-
-    TransferIterator *addrs_in;
-    Memory addrs_mem;
-    intptr_t addrs_mem_base;
-    // IndexSpace<N,T> is;
-    bool can_merge;
-    static const size_t MAX_POINTS = 64;
-    Point<N, T> points[MAX_POINTS];
-    size_t point_pos, num_points;
-    std::vector<FieldID> fields;
-    std::vector<size_t> fld_offsets, fld_sizes;
-    XferDes *indirect_xd;
-    int indirect_port_idx;
-  };
-
-  template <int N, typename T>
   TransferIteratorIndirect<N, T>::TransferIteratorIndirect(void)
-    : can_merge(true)
-    , point_pos(0)
-    , num_points(0)
   {}
 
   template <int N, typename T>
   TransferIteratorIndirect<N, T>::TransferIteratorIndirect(
-      Memory _addrs_mem,
-      // const IndexSpace<N,T> &_is,
-      RegionInstance inst,
-      // const int _dim_order[N],
+      Memory _addrs_mem, RegionInstanceImpl *_inst_impl,
       const std::vector<FieldID> &_fields, const std::vector<size_t> &_fld_offsets,
       const std::vector<size_t> &_fld_sizes)
-    : TransferIteratorBase<N, T>(get_runtime()->get_instance_impl(inst), 0)
-    , addrs_in(0)
+    : TransferIteratorBase<N, T>(_inst_impl, 0)
     , addrs_mem(_addrs_mem)
-    , addrs_mem_base(0)
-    , point_pos(0)
-    , num_points(0)
-    //, is(_is)
     , fields(_fields)
     , fld_offsets(_fld_offsets)
     , fld_sizes(_fld_sizes)
-    , indirect_xd(0)
-    , indirect_port_idx(-1)
   {}
 
   template <int N, typename T>
@@ -1176,8 +1113,9 @@ namespace Realm {
       return 0;
     }
 
-    return new TransferIteratorIndirect<N, T>(addrs_mem, inst, fields, fld_offsets,
-                                              fld_sizes);
+    return new TransferIteratorIndirect<N, T>(addrs_mem,
+                                              get_runtime()->get_instance_impl(inst),
+                                              fields, fld_offsets, fld_sizes);
   }
 
   template <int N, typename T>
@@ -1258,7 +1196,6 @@ namespace Realm {
         }
 
         size_t amt = addrs_in->step(addr_max_bytes, a_info, 0, false /*!tentative*/);
-
         if(amt == 0) {
           return nonempty;
         }
@@ -1322,6 +1259,7 @@ namespace Realm {
                   break;
                 }
               }
+
               // not mergeable
               merge_dim = -1;
               break;
@@ -3946,8 +3884,9 @@ namespace Realm {
         return new TransferIteratorIndirectRange<N2, T2>(addrs_mem, inst, fields,
                                                          fld_offsets, fld_sizes);
       } else {
-        return new TransferIteratorIndirect<N2, T2>(addrs_mem, inst, fields, fld_offsets,
-                                                    fld_sizes);
+        return new TransferIteratorIndirect<N2, T2>(
+            addrs_mem, get_runtime()->get_instance_impl(inst), fields, fld_offsets,
+            fld_sizes);
       }
     }
   }
