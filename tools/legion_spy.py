@@ -12385,7 +12385,7 @@ class RuntimeEquivalenceSet(object):
             self.users.append(key)
 
 
-prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_spy\}: "
+prefix    = r"\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\](?:\s+[0-9]+\.[0-9]+)? \{\w+\}\{legion_spy\}: "
 prefix_pat               = re.compile(prefix)
 # Configuration patterns
 config_pat               = re.compile(
@@ -12440,7 +12440,7 @@ index_space_point_pat    = re.compile(
     prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 index_space_rect_pat     = re.compile(
     prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
-decimal_pat              = re.compile("\-?[0-9]+")
+decimal_pat              = re.compile(r"\-?[0-9]+")
 empty_index_space_pat    = re.compile(
     prefix+"Empty Index Space (?P<uid>[0-9a-f]+)")
 index_expr_pat           = re.compile(
@@ -13569,7 +13569,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         index_expr = state.get_index_expr(int(m.group('expr')))
         remainder = line[m.end()+1:]
-        expr_ids = list(filter(None, re.split('\W+', remainder)))
+        expr_ids = list(filter(None, re.split(r'\W+', remainder)))
         count = int(m.group('count'))
         # Don't handle end-of-line characters well
         assert len(expr_ids) == count
@@ -13581,7 +13581,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         index_expr = state.get_index_expr(int(m.group('expr')))
         remainder = line[m.end()+1:]
-        expr_ids = list(filter(None, re.split('\W+', remainder)))
+        expr_ids = list(filter(None, re.split(r'\W+', remainder)))
         count = int(m.group('count'))
         # Don't handle end-of-line characters well
         assert len(expr_ids) == count
