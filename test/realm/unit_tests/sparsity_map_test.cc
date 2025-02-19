@@ -345,8 +345,7 @@ INSTANTIATE_TEST_SUITE_P(
              /*expected=*/
              {Rect<3>({0, 0, 0}, {0, 0, 0}), Rect<3>({2, 2, 2}, {2, 2, 2}),
               Rect<3>({4, 4, 4}, {4, 4, 4})},
-             /*disjoint=*/false})
-            ));
+             /*disjoint=*/false})));
 
 template <int N, typename T>
 static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
