@@ -351,7 +351,9 @@ target_link_libraries(
 # These executables use global registration and require -rdynamic to be set in order to retrieve the symbol name and offset
 set_target_properties(taskreg PROPERTIES ENABLE_EXPORTS TRUE)
 set_target_properties(scatter PROPERTIES ENABLE_EXPORTS TRUE)
-set_target_properties(cuda_scatter_test PROPERTIES ENABLE_EXPORTS TRUE)
+if (REALM_USE_CUDA)
+  set_target_properties(cuda_scatter_test PROPERTIES ENABLE_EXPORTS TRUE)
+endif()
 
 set_tests_properties(
   ${_integ_list}
