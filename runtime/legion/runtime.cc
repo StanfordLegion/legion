@@ -9071,7 +9071,7 @@ namespace Legion {
           }
 #ifdef DEBUG_LEGION
           allocators.emplace_back(
-              MemoryManager::TaskLocalInstanceAllocator());
+              MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
           bases.emplace_back(
               ProfilingResponseBase(&allocators[idx], creator_uid, false));
           Realm::ProfilingRequest &req = requests[idx].add_request(
@@ -9584,7 +9584,8 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests[idx],
                                   creator_uid, extra_unique_events[idx]);
 #ifdef DEBUG_LEGION
-          allocators.emplace_back(MemoryManager::TaskLocalInstanceAllocator());
+          allocators.emplace_back(MemoryManager::TaskLocalInstanceAllocator(
+                extra_unique_events[idx]));
           bases.emplace_back(
               ProfilingResponseBase(&allocators[idx], creator_uid, false));
           Realm::ProfilingRequest &req = requests[idx].add_request(
@@ -9656,7 +9657,7 @@ namespace Legion {
           }
 #ifdef DEBUG_LEGION
           allocators.emplace_back(
-              MemoryManager::TaskLocalInstanceAllocator());
+              MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
           bases.emplace_back(
               ProfilingResponseBase(&allocators[idx], creator_uid, false));
           Realm::ProfilingRequest &req = requests[idx].add_request(
@@ -10017,7 +10018,7 @@ namespace Legion {
             unique_event = LgEvent(unique);
           }
           // Try to do the redistrict the previous instance into a new one
-          MemoryManager::TaskLocalInstanceAllocator allocator;
+          MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
           ProfilingResponseBase base(&allocator, creator_uid, false);
           Realm::ProfilingRequestSet requests;
           Realm::ProfilingRequest &req = requests.add_request(
@@ -10098,7 +10099,7 @@ namespace Legion {
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a new instance
-          MemoryManager::TaskLocalInstanceAllocator allocator;
+          MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
           ProfilingResponseBase base(&allocator, creator_uid, false);
           Realm::ProfilingRequestSet requests;
           Realm::ProfilingRequest &req = requests.add_request(
@@ -13759,7 +13760,7 @@ namespace Legion {
         assert(!instance.exists());
 #endif
 #ifndef LEGION_MALLOC_INSTANCES
-        TaskLocalInstanceAllocator allocator;
+        TaskLocalInstanceAllocator allocator(unique_event);
         ProfilingResponseBase base(&allocator, creator_uid, false);
         Realm::ProfilingRequest &req = requests.add_request(
             runtime->find_local_group(), LG_LEGION_PROFILING_ID,
@@ -14000,9 +14001,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(void)
+    MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
+                                                                 LgEvent unique)
       : ready(Runtime::create_rt_user_event()),
-        caller_fevent(implicit_fevent), success(false)
+        unique_event(unique), caller_fevent(implicit_fevent), success(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -14010,7 +14012,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
                                                TaskLocalInstanceAllocator &&rhs)
-      : ready(rhs.ready), caller_fevent(implicit_fevent), success(rhs.success)
+      : ready(rhs.ready), unique_event(rhs.unique_event),
+        caller_fevent(implicit_fevent), success(rhs.success)
     //--------------------------------------------------------------------------
     {
       rhs.ready = RtUserEvent::NO_RT_USER_EVENT;
@@ -14041,7 +14044,10 @@ namespace Legion {
 #endif
       success = result.success; 
       failed_alloc = !success;
-      fevent = caller_fevent;
+      if (failed_alloc)
+        fevent = caller_fevent;
+      else
+        fevent = unique_event;
       // Can't read anything after trigger the event as the object
       // might be deleted after we do that
       Runtime::trigger_event(ready);

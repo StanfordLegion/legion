@@ -924,7 +924,7 @@ namespace Legion {
         }
 #ifdef DEBUG_LEGION
         allocators.emplace_back(
-            MemoryManager::TaskLocalInstanceAllocator());
+            MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
         bases.emplace_back(
             ProfilingResponseBase(&allocators[idx], get_unique_id(), false));
         Realm::ProfilingRequest &req = requests[idx].add_request(

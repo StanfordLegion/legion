@@ -11019,7 +11019,7 @@ namespace Legion {
         unique.trigger();
         unique_event = LgEvent(unique);
       }
-      MemoryManager::TaskLocalInstanceAllocator allocator;
+      MemoryManager::TaskLocalInstanceAllocator allocator(unique_event);
       ProfilingResponseBase base(&allocator, creator_uid, false);
       Realm::ProfilingRequestSet requests;
       Realm::ProfilingRequest &req = requests.add_request(
