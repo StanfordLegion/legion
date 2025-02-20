@@ -202,10 +202,10 @@ namespace Realm {
     IndexSpace<N, T> is;
     SparsityMapPublicImpl<N, T> *sparsity_impl;
     IndexSpaceIterator<N, T> iter;
-    bool iter_init_deferred;
+    bool iter_init_deferred{false};
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
-    size_t field_idx;
+    size_t field_idx{0};
   };
 
   class TransferDomain {

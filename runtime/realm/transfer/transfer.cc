@@ -634,7 +634,6 @@ namespace Realm {
       SparsityMapPublicImpl<N, T> *_sparsity_impl)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
-    , field_idx(0)
     , sparsity_impl(_sparsity_impl)
   {
     if(is.is_valid()) {
@@ -659,8 +658,6 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(void)
-    : iter_init_deferred(false)
-    , field_idx(0)
   {}
 
   template <int N, typename T>
