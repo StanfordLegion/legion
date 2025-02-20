@@ -19,7 +19,6 @@ RUN dpkg --add-architecture i386 && \
       gfortran-10 gfortran-11 gfortran-12 \
       gcc-multilib g++-multilib \
       clang-18 clang-format-18 clang-tidy-18 libclang-18-dev llvm-18-dev libomp-18-dev libmlir-18-dev libpolly-18-dev \
-      clang-format-19 \
       libedit-dev libncurses5-dev libffi-dev libpfm4-dev libxml2-dev libzstd-dev \
       zlib1g-dev zlib1g-dev:i386 \
       mpich libmpich-dev \
@@ -29,6 +28,15 @@ RUN dpkg --add-architecture i386 && \
       libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev libfontconfig-dev \
       gdb vim && \
     apt-get clean
+
+# Note: clang-format is NOT COMPATIBLE, even between POINT releases. (Ouch!!)
+# Vendor the specific version we need here; THIS MUST NOT CHANGE without
+# consulting the person who requires this version to be installed.
+RUN wget https://github.com/terralang/llvm-build/releases/download/llvm-19.1.7/clang+llvm-19.1.7-x86_64-linux-gnu.tar.xz && \
+    echo "1782684925971d8969b951ed941847b3871779346bd4df3b1ff92eed9dfa1319  clang+llvm-19.1.7-x86_64-linux-gnu.tar.xz" | shasum --check && \
+    tar xf clang+llvm-19.1.7-x86_64-linux-gnu.tar.xz clang+llvm-19.1.7-x86_64-linux-gnu/bin/clang-format && \
+    mv clang+llvm-19.1.7-x86_64-linux-gnu/bin/clang-format /usr/local/bin/clang-format-19 && \
+    rm -rf clang+llvm-19.1.7-x86_64-linux-gnu*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.84.0 -y
 
