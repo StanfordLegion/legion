@@ -10,15 +10,7 @@ struct BaseTestCaseData {
 };
 
 template <int N>
-struct DenseRectListTestCase {
-  size_t max_rects;
-  std::vector<Point<N>> points;
-  std::vector<Rect<N>> rects;
-  std::vector<Rect<N>> expected;
-};
-
-template <int N>
-struct HybridRectListTestCase {
+struct RectListTestCase {
   size_t max_rects;
   std::vector<Point<N>> points;
   std::vector<Rect<N>> rects;
@@ -34,9 +26,9 @@ struct CoverageCounterTestCase {
 
 template <int N>
 struct WrappedDenseTestCaseData : public BaseTestCaseData {
-  DenseRectListTestCase<N> dense_data;
+  RectListTestCase<N> dense_data;
 
-  explicit WrappedDenseTestCaseData(DenseRectListTestCase<N> d)
+  explicit WrappedDenseTestCaseData(RectListTestCase<N> d)
     : dense_data(std::move(d))
   {}
 
@@ -45,9 +37,9 @@ struct WrappedDenseTestCaseData : public BaseTestCaseData {
 
 template <int N>
 struct WrappedHybridTestCaseData : public BaseTestCaseData {
-  HybridRectListTestCase<N> hybrid_data;
+  RectListTestCase<N> hybrid_data;
 
-  explicit WrappedHybridTestCaseData(HybridRectListTestCase<N> h)
+  explicit WrappedHybridTestCaseData(RectListTestCase<N> h)
     : hybrid_data(std::move(h))
   {}
 
@@ -84,7 +76,7 @@ protected:
 };
 
 template <int N>
-void run_dense_test_case(const DenseRectListTestCase<N> &test_case)
+void run_dense_test_case(const RectListTestCase<N> &test_case)
 {
   DenseRectangleList<N, int> rectlist(test_case.max_rects);
 
@@ -123,7 +115,7 @@ protected:
 };
 
 template <int N>
-void run_hybrid_test_case(const HybridRectListTestCase<N> &test_case)
+void run_hybrid_test_case(const RectListTestCase<N> &test_case)
 {
   HybridRectangleList<N, int> rectlist;
 
