@@ -7,34 +7,34 @@
 using namespace Realm;
 
 template <int N>
-struct TestCaseData {
+struct ItTestCaseData {
   Rect<N> domain;
   Rect<N> restrictions;
   std::vector<Rect<N>> rects;
   std::vector<Rect<N>> expected;
 };
 
-struct BaseTestCaseData {
-  virtual ~BaseTestCaseData() = default;
+struct BaseItTestCaseData {
+  virtual ~BaseItTestCaseData() = default;
   virtual int get_dim() const = 0;
 };
 
 template <int N>
-struct WrappedTestCaseData : public BaseTestCaseData {
-  TestCaseData<N> data;
-  explicit WrappedTestCaseData(TestCaseData<N> d)
+struct WrappedItTestCaseData : public BaseItTestCaseData {
+  ItTestCaseData<N> data;
+  explicit WrappedItTestCaseData(ItTestCaseData<N> d)
     : data(std::move(d))
   {}
   int get_dim() const override { return N; }
 };
 
-class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+class IndexSpaceItTest : public ::testing::TestWithParam<BaseItTestCaseData *> {
 protected:
   void TearDown() override { delete GetParam(); }
 };
 
 template <int N>
-void run_test_case(const TestCaseData<N> &test_case)
+void run_test_case(const ItTestCaseData<N> &test_case)
 {
   using T = int;
   NodeSet subscribers;
@@ -77,59 +77,59 @@ void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
       ...);
 }
 
-TEST_P(IndirectGetAddressesTest, Base)
+TEST_P(IndexSpaceItTest, Base)
 {
-  const BaseTestCaseData *base_test_case = GetParam();
+  const BaseItTestCaseData *base_test_case = GetParam();
 
   dispatch_for_dimension(
       base_test_case->get_dim(),
       [&](auto Dim) {
         constexpr int N = Dim;
         auto &test_case =
-            static_cast<const WrappedTestCaseData<N> *>(base_test_case)->data;
+            static_cast<const WrappedItTestCaseData<N> *>(base_test_case)->data;
         run_test_case(test_case);
       },
       std::make_index_sequence<REALM_MAX_DIM>{});
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    IndirectGetAddressesCases, IndirectGetAddressesTest,
-    ::testing::Values(new WrappedTestCaseData<1>(
+    IndexSpaceItCases, IndexSpaceItTest,
+    ::testing::Values(new WrappedItTestCaseData<1>(
                           // Full 1D no rects
                           {/*bounds=*/{Rect<1>(0, 10)},
                            /*restrictions=*/{Rect<1>(0, 10)},
                            /*rects=*/{},
                            /*exp_rects=*/{Rect<1>(0, 10)}}),
 
-                      new WrappedTestCaseData<1>(
+                      new WrappedItTestCaseData<1>(
                           // Full 1D iteration
                           {/*bounds=*/{Rect<1>(0, 10)},
                            /*restrictions=*/{Rect<1>(0, 10)},
                            /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
                            /*exp_rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)}}),
 
-                      new WrappedTestCaseData<1>(
+                      new WrappedItTestCaseData<1>(
                           // Full 1D iteration with restrictions
                           {/*bounds=*/{Rect<1>(0, 10)},
                            /*restrictions=*/{Rect<1>(4, 8)},
                            /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
                            /*exp_rects=*/{Rect<1>(4, 6), Rect<1>(8, 8)}}),
 
-                      new WrappedTestCaseData<1>(
+                      new WrappedItTestCaseData<1>(
                           // 1D Empty bounds
                           {/*bounds=*/{Rect<1>(1, 0)},
                            /*restrictions=*/{Rect<1>(4, 8)},
                            /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
                            /*exp_rects=*/{}}),
 
-                      new WrappedTestCaseData<1>(
+                      new WrappedItTestCaseData<1>(
                           // 1D empty restrictions
                           {/*bounds=*/{Rect<1>(0, 10)},
                            /*restrictions=*/{Rect<1>(1, 0)},
                            /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
                            /*exp_rects=*/{}}),
 
-                      new WrappedTestCaseData<2>(
+                      new WrappedItTestCaseData<2>(
                           // Full 2D domain
                           {
                               /*domain=*/Rect<2>({0, 0}, {10, 10}),
@@ -138,7 +138,7 @@ INSTANTIATE_TEST_SUITE_P(
                               /*expected=*/{Rect<2>({0, 0}, {10, 10})},
                           }),
 
-                      new WrappedTestCaseData<2>(
+                      new WrappedItTestCaseData<2>(
                           // Restricted 2D domain
                           {
                               /*domain=*/Rect<2>({0, 0}, {10, 10}),
@@ -147,7 +147,7 @@ INSTANTIATE_TEST_SUITE_P(
                               /*expected=*/{Rect<2>({2, 2}, {8, 8})},
                           }),
 
-                      new WrappedTestCaseData<2>(
+                      new WrappedItTestCaseData<2>(
                           // Sparse 2D domain
                           {
                               /*domain=*/Rect<2>({0, 0}, {10, 10}),
@@ -165,7 +165,7 @@ INSTANTIATE_TEST_SUITE_P(
                               },
                           }),
 
-                      new WrappedTestCaseData<3>(
+                      new WrappedItTestCaseData<3>(
                           // Full 3D domain
                           {
                               /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
@@ -174,7 +174,7 @@ INSTANTIATE_TEST_SUITE_P(
                               /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
                           }),
 
-                      new WrappedTestCaseData<3>(
+                      new WrappedItTestCaseData<3>(
                           // Restricted 3D domain
                           {
                               /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
@@ -183,7 +183,7 @@ INSTANTIATE_TEST_SUITE_P(
                               /*expected=*/{Rect<3>({2, 2, 2}, {8, 8, 8})},
                           }),
 
-                      new WrappedTestCaseData<3>(
+                      new WrappedItTestCaseData<3>(
                           // Sparse 3D domain
                           {
                               /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
