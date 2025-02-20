@@ -22,6 +22,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
+  indirect_iterator_test.cc
   comp_queue_test.cc
   ucx_mpool_test.cc
   barrier_test.cc
@@ -43,6 +44,8 @@ list(APPEND REALM_TESTS
   circ_queue_test.cc
   gather_scatter_test.cc
   rectlist_test.cc
+  sparsity_map_test.cc
+  ucx_mpool_test.cc
   topology_test.cc
  )
 

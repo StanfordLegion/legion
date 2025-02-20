@@ -25,10 +25,9 @@
 #include "realm/activemsg.h"
 #include "realm/nodeset.h"
 #include "realm/atomics.h"
-
-#include "realm/event_impl.h"
-
-#include "realm/faults.h"
+#include <limits>
+#include <functional>
+#include <memory>
 
 namespace Realm {
 
@@ -73,6 +72,25 @@ namespace Realm {
         sparse_untyped_remove_references_message_handler_reg;
   };
 
+  template <int N, typename T>
+  class SparsityMapCommunicator {
+  public:
+    virtual ~SparsityMapCommunicator() = default;
+
+    virtual void send_request(SparsityMap<N, T> me, bool request_precise,
+                              bool request_approx);
+
+    virtual void send_contribute(SparsityMap<N, T> me, size_t piece_count,
+                                 size_t total_count, bool disjoint,
+                                 const void *data = nullptr, size_t datalen = 0);
+
+    virtual void send_contribute(NodeID target, SparsityMap<N, T> me, size_t piece_count,
+                                 size_t total_count, bool disjoint,
+                                 const void *data = nullptr, size_t datalen = 0);
+
+    virtual size_t recommend_max_payload(NodeID owner, bool with_congestion);
+  };
+
   /**
    * SparsityMapImpl is the actual dynamically allocated object that exists on
    * each "interested" node for a given SparsityMap - it inherits from
@@ -82,16 +100,17 @@ namespace Realm {
    * TODO(apryakhin@): Consider doing an doxygen style.
    */
   template <int N, typename T>
-  class SparsityMapImpl : public SparsityMapPublicImpl<N,T> {
+  class SparsityMapImpl : public SparsityMapPublicImpl<N, T> {
   public:
     SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers);
+
+    SparsityMapImpl(SparsityMap<N, T> _me, NodeSet &subscribers,
+                    SparsityMapCommunicator<N, T> *_sparsity_comm);
 
     // actual implementation - SparsityMapPublicImpl's version just calls this one
     Event make_valid(bool precise = true);
 
-    void destroy(Event wait_on = Event::NO_EVENT);
-
-    static SparsityMapImpl<N,T> *lookup(SparsityMap<N,T> sparsity);
+    static SparsityMapImpl<N, T> *lookup(SparsityMap<N, T> sparsity);
 
     // methods used in the population of a sparsity map
 
@@ -103,11 +122,9 @@ namespace Realm {
     void record_remote_contributor(NodeID contributor);
 
     void contribute_nothing(void);
-    void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects,
-                                    bool disjoint);
-    void contribute_raw_rects(const Rect<N,T>* rects, size_t count,
-			      size_t piece_count, bool disjoint,
-                              size_t total_count);
+    void contribute_dense_rect_list(const std::vector<Rect<N, T>> &rects, bool disjoint);
+    void contribute_raw_rects(const Rect<N, T> *rects, size_t count, size_t piece_count,
+                              bool disjoint, size_t total_count);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
@@ -117,38 +134,35 @@ namespace Realm {
     void remote_data_request(NodeID requestor, bool send_precise, bool send_approx);
     void remote_data_reply(NodeID requestor, bool send_precise, bool send_approx);
 
-    SparsityMap<N,T> me;
+    SparsityMap<N, T> me;
 
     struct RemoteSparsityRequest {
-      SparsityMap<N,T> sparsity;
+      SparsityMap<N, T> sparsity;
       bool send_precise;
       bool send_approx;
 
-      static void handle_message(NodeID sender,
-				 const RemoteSparsityRequest &msg,
-				 const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const RemoteSparsityRequest &msg,
+                                 const void *data, size_t datalen);
     };
 
     struct RemoteSparsityContrib {
-      SparsityMap<N,T> sparsity;
+      SparsityMap<N, T> sparsity;
       size_t piece_count; // non-zero only on last piece of contribution
-      bool disjoint; // if set, all rectangles (from this source and any other)
-                     //   are known to be disjoint
+      bool disjoint;      // if set, all rectangles (from this source and any other)
+                          //   are known to be disjoint
       size_t total_count; // if non-zero, advertises the known total number of
                           //  recangles in the sparsity map
 
-      static void handle_message(NodeID sender,
-				 const RemoteSparsityContrib &msg,
-				 const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const RemoteSparsityContrib &msg,
+                                 const void *data, size_t datalen);
     };
 
     struct SetContribCountMessage {
-      SparsityMap<N,T> sparsity;
+      SparsityMap<N, T> sparsity;
       size_t count;
 
-      static void handle_message(NodeID sender,
-				 const SetContribCountMessage &msg,
-				 const void *data, size_t datalen);
+      static void handle_message(NodeID sender, const SetContribCountMessage &msg,
+                                 const void *data, size_t datalen);
     };
 
   protected:
@@ -158,23 +172,35 @@ namespace Realm {
     static ActiveMessageHandlerReg<RemoteSparsityContrib> remote_sparsity_contrib_reg;
     static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
 
-    atomic<int> remaining_contributor_count;
-    atomic<int> total_piece_count, remaining_piece_count;
+    atomic<int> remaining_contributor_count{0};
+    atomic<int> total_piece_count{0}, remaining_piece_count{0};
     Mutex mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
-    bool precise_requested, approx_requested;
-    Event precise_ready_event, approx_ready_event;
+    bool precise_requested{0}, approx_requested{0};
+    Event precise_ready_event = Event::NO_EVENT;
+    Event approx_ready_event = Event::NO_EVENT;
     NodeSet remote_precise_waiters, remote_approx_waiters;
     NodeSet &remote_subscribers;
-    size_t sizeof_precise;
+    size_t sizeof_precise{0};
+
+    std::unique_ptr<SparsityMapCommunicator<N, T>> sparsity_comm;
+  };
+
+  class SparsityMapImplWrapper;
+  class SparsityWrapperCommunicator {
+  public:
+    virtual ~SparsityWrapperCommunicator() = default;
+    virtual void unsubscribe(SparsityMapImplWrapper *impl, NodeID sender, ID id);
   };
 
   // we need a type-erased wrapper to store in the runtime's lookup table
   class SparsityMapImplWrapper {
   public:
-    static const ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
+    static constexpr ID::ID_Types ID_TYPE = ID::ID_SPARSITY;
 
     SparsityMapImplWrapper(void);
+    SparsityMapImplWrapper(SparsityWrapperCommunicator *_communicator,
+                           bool _report_leaks);
     ~SparsityMapImplWrapper(void);
 
     void init(ID _me, unsigned _init_owner);
@@ -189,17 +215,17 @@ namespace Realm {
       return ID::make_sparsity(owner, 0, index);
     }
 
-    ID me;
-    unsigned owner;
-    SparsityMapImplWrapper *next_free;
-    atomic<DynamicTemplates::TagType> type_tag;
-    atomic<void *> map_impl;  // actual implementation
-    atomic<unsigned> references;
+    ID me{(ID::IDType)-1};
+    unsigned owner{std::numeric_limits<unsigned>::max()};
+    SparsityMapImplWrapper *next_free{nullptr};
+    atomic<DynamicTemplates::TagType> type_tag{0};
+    atomic<void *> map_impl{nullptr}; // actual implementation
+    atomic<unsigned> references{0};
     NodeSet subscribers;
+    std::unique_ptr<SparsityWrapperCommunicator> communicator;
+    bool report_leaks{false};
 
-    // need a type-erased deleter
-    typedef void(*Deleter)(void *);
-    Deleter map_deleter;
+    std::function<void(void *)> map_deleter;
 
     template <int N, typename T>
     SparsityMapImpl<N, T> *get_or_create(SparsityMap<N, T> me);
