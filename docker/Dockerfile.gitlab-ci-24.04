@@ -29,6 +29,15 @@ RUN dpkg --add-architecture i386 && \
       gdb vim && \
     apt-get clean
 
+# Note: clang-format is NOT COMPATIBLE, even between POINT releases. (Ouch!!)
+# Vendor the specific version we need here; THIS MUST NOT CHANGE without
+# consulting the person who requires this version to be installed.
+RUN wget https://github.com/terralang/llvm-build/releases/download/llvm-19.1.7/clang+llvm-19.1.7-x86_64-linux-gnu.tar.xz && \
+    echo "1782684925971d8969b951ed941847b3871779346bd4df3b1ff92eed9dfa1319  clang+llvm-19.1.7-x86_64-linux-gnu.tar.xz" | shasum --check && \
+    tar xf clang+llvm-19.1.7-x86_64-linux-gnu.tar.xz clang+llvm-19.1.7-x86_64-linux-gnu/bin/clang-format && \
+    mv clang+llvm-19.1.7-x86_64-linux-gnu/bin/clang-format /usr/local/bin/clang-format-19 && \
+    rm -rf clang+llvm-19.1.7-x86_64-linux-gnu*
+
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.84.0 -y
 
 RUN wget https://github.com/Kitware/CMake/releases/download/v3.22.6/cmake-3.22.6-linux-x86_64.tar.gz && \
