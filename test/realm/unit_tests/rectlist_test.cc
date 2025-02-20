@@ -248,6 +248,15 @@ INSTANTIATE_TEST_SUITE_P(
 
         }),
 
+        // All rects are overlapping
+        new WrappedDenseTestCaseData<1>({
+            /*max_rects=*/3,
+            /*points=*/{},
+            /*rects=*/{Rect<1>(0, 2), Rect<1>(1, 3), Rect<1>(2, 4)},
+            /*expected=*/{Rect<1>(0, 4)},
+
+        }),
+
         // All rects are disjoint
         new WrappedDenseTestCaseData<1>({
             /*max_rects=*/3,
