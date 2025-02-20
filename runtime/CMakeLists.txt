@@ -588,19 +588,22 @@ if(Legion_USE_CUDA)
   set_target_cuda_architectures(RealmStatic ARCHITECTURES ${Legion_CUDA_ARCH})
 
   # build cuda hook library
-  add_library(realm_cuhook SHARED
-    realm/cuda/cuda_hook.cc)
-  set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  if(REALM_LIMIT_SYMBOL_VISIBILITY)
-    set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
-    set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  option(REALM_BUILD_CUHOOK "Build cuhook sanity checker injection library" OFF)
+  if (REALM_BUILD_CUHOOK)
+    add_library(realm_cuhook SHARED
+      realm/cuda/cuda_hook.cc)
+    set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(REALM_LIMIT_SYMBOL_VISIBILITY)
+      set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
+      set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+    endif()
+    target_include_directories(realm_cuhook PRIVATE
+                              ${CMAKE_CURRENT_SOURCE_DIR}
+                              ${PROJECT_BINARY_DIR}/runtime
+                              ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+    target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
+    install(TARGETS realm_cuhook EXPORT LegionTargets)
   endif()
-  target_include_directories(realm_cuhook PRIVATE
-                            ${CMAKE_CURRENT_SOURCE_DIR}
-                            ${PROJECT_BINARY_DIR}/runtime
-                            ${CUDAToolkit_CUPTI_INCLUDE_DIR})
-  target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
-  install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
 if(Legion_USE_HIP)
