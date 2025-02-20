@@ -2771,9 +2771,7 @@ namespace Legion {
       increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_INST, op); 
-      info.creator = unique_event;
-      // Need this in case the allocation fails
-      info.id = implicit_fevent.id;
+      info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -2934,9 +2932,7 @@ namespace Legion {
       increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_INST, uid); 
-      info.creator = unique_event;
-      // Need this in case the allocation fails
-      info.id = implicit_fevent.id;
+      info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
@@ -3202,9 +3198,9 @@ namespace Legion {
         if (info->kind == LEGION_PROF_INST)
         {
           if (failed_alloc)
-            fevent.id = info->id;
-          else
             fevent = info->creator;
+          else
+            fevent.id = info->id;
           const long long stop = Realm::Clock::current_time_in_nanoseconds();
           implicit_profiler->record_proftask(proc, info->op_id,
               start, stop, fevent, implicit_fevent, true/*completion*/);

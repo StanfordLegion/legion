@@ -3921,7 +3921,7 @@ namespace Legion {
       if (runtime->profiler != NULL)
       {
         runtime->profiler->add_inst_request(requests, creator_id, unique_event);
-        calling_fevent = implicit_fevent;
+        current_unique_event = unique_event;
       }
 #ifndef LEGION_MALLOC_INSTANCES
       if (hole.exists())
@@ -4081,7 +4081,7 @@ namespace Legion {
       allocated = result.success;
       failed_alloc = !allocated;
       // Set the fevent in case we are profiling
-      fevent = calling_fevent;
+      fevent = current_unique_event;
       // No matter what trigger the event
       // Can't read anything after trigger the event as the object
       // might be deleted after we do that

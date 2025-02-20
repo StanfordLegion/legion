@@ -668,7 +668,7 @@ namespace Legion {
       void *piece_list;
       size_t piece_list_size;
     public:
-      LgEvent calling_fevent;
+      LgEvent current_unique_event;
       bool valid;
       bool allocated;
     };
