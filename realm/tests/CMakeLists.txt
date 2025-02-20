@@ -94,6 +94,7 @@ list(
   circ_queue_test.cc
   gather_scatter_test.cc
   sparsity_map_test.cc
+  addrsplit_channel_test.cc
   topology_test.cc
 )
 list(TRANSFORM REALM_UNIT_TESTS PREPEND "${REALM_TEST_DIR}/unit_tests/")

@@ -48,6 +48,7 @@ set(REALM_SOURCES
     transfer/lowlevel_disk.cc
     transfer/address_list.cc
     transfer/channel.cc
+    transfer/addrsplit_channel.cc
     transfer/channel_disk.cc
     transfer/transfer.cc
     transfer/lowlevel_dma.cc
