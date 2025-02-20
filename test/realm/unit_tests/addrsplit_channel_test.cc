@@ -1,3 +1,4 @@
+#include "realm/mem_impl.h"
 #include "realm/transfer/addrsplit_channel.h"
 #include <tuple>
 #include <gtest/gtest.h>
@@ -133,6 +134,7 @@ struct AddressSplitXferDescTestCase {
   std::vector<IndexSpace<N, T>> spaces;
   std::vector<Point<N, T>> src_points;
   std::vector<std::vector<Point<N, T>>> exp_points;
+  bool disabled = false;
 };
 
 struct BaseTestCaseData {
@@ -154,6 +156,10 @@ class AddressSplitTest : public ::testing::TestWithParam<BaseTestCaseData *> {};
 template <int N, typename T>
 void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
 {
+  if(test_case.disabled) {
+    return;
+  }
+
   std::unique_ptr<BackgroundWorkManager> bgwork =
       std::make_unique<BackgroundWorkManager>();
   std::unique_ptr<MockAddressSplitChannel> addrsplit_channel =
@@ -179,8 +185,8 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
   size_t total_src_bytes = sizeof(Point<N, T>) * src_points;
   Point<N, T> *src_buffer = new Point<N, T>[src_points];
   std::memcpy(src_buffer, test_case.src_points.data(), total_src_bytes);
-  auto input_mem = std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_src_bytes, 0,
-                                                    Memory::SYSTEM_MEM, src_buffer);
+  std::unique_ptr<LocalCPUMemory> input_mem = std::make_unique<LocalCPUMemory>(
+      Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, src_buffer);
   input_port.mem = input_mem.get();
   input_port.peer_port_idx = 0;
 
@@ -211,7 +217,7 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
 
   XferDes::XferPort &output_port = xfer_des.output_ports[num_spaces];
   Point<N, T> *dst_buffer_two = new Point<N, T>[src_points];
-  auto output_mem_two = std::make_unique<LocalCPUMemory>(
+  std::unique_ptr<LocalCPUMemory> output_mem_two = std::make_unique<LocalCPUMemory>(
       Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, dst_buffer_two);
   output_port.mem = output_mem_two.get();
   output_port.peer_port_idx = 0;
@@ -265,6 +271,19 @@ TEST_P(AddressSplitTest, ProgressXD)
 INSTANTIATE_TEST_SUITE_P(
     AddressSplitCases, AddressSplitTest,
     ::testing::Values(
+        // Case: Empty
+        // TODO(apryakhin@): Fix
+        new WrappedTestCaseData<1, int>({
+            /*expected_iterations=*/1,
+            /*bytes_per_element=*/4,
+            /*spaces=*/{},
+            /*src_points=*/
+            {},
+            /*exp_points=*/
+            {},
+            /*disabled=*/true,
+        }),
+
         // Case 0: All points inside one space
         new WrappedTestCaseData<1, int>(
             {/*expected_iterations=*/1,
