@@ -2771,27 +2771,17 @@ namespace Legion {
       increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_INST, op); 
-      // No ID here
       info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceAllocResult>();
+      req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
       req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::handle_failed_instance_allocation(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      decrement_total_outstanding_requests(LEGION_PROF_INST);
-#else
-      decrement_total_outstanding_requests();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2942,12 +2932,13 @@ namespace Legion {
       increment_total_outstanding_requests();
 #endif
       ProfilingInfo info(this, LEGION_PROF_INST, uid); 
-      // No ID here
       info.id = unique_event.id;
       // Instances use two profiling requests so that we can get MemoryUsage
       // right away - the Timeline doesn't come until we delete the instance
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                  LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
+      req.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceAllocResult>();
       req.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
       req.add_measurement<
@@ -3149,17 +3140,25 @@ namespace Legion {
         case LEGION_PROF_INST:
           {
 	    // Record data based on which measurements we got back this time
+            Realm::ProfilingMeasurements::InstanceAllocResult result;
             Realm::ProfilingMeasurements::InstanceTimeline timeline;
             Realm::ProfilingMeasurements::InstanceMemoryUsage usage;
-	    if (response.get_measurement<
-                    Realm::ProfilingMeasurements::InstanceTimeline>(timeline) &&
-                response.get_measurement<
-                    Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
+	    if (response.get_measurement(result) && result.success)
             {
-              implicit_profiler->process_mem_desc(usage.memory);
-	      implicit_profiler->process_inst_timeline(info,
-                                                      response, usage, timeline);
+              if (response.get_measurement<
+                      Realm::ProfilingMeasurements::InstanceTimeline>(timeline) &&
+                  response.get_measurement<
+                      Realm::ProfilingMeasurements::InstanceMemoryUsage>(usage))
+              {
+                implicit_profiler->process_mem_desc(usage.memory);
+                implicit_profiler->process_inst_timeline(info,
+                                                        response, usage, timeline);
+              }
+              else
+                std::abort();
             }
+            else
+              failed_alloc = true;
             break;
           }
         case LEGION_PROF_PARTITION:
@@ -3198,7 +3197,10 @@ namespace Legion {
         implicit_profiler->process_proc_desc(proc);
         if (info->kind == LEGION_PROF_INST)
         {
-          fevent.id = info->id;
+          if (failed_alloc)
+            fevent = info->creator;
+          else
+            fevent.id = info->id;
           const long long stop = Realm::Clock::current_time_in_nanoseconds();
           implicit_profiler->record_proftask(proc, info->op_id,
               start, stop, fevent, implicit_fevent, true/*completion*/);
