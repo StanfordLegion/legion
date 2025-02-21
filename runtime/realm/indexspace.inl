@@ -1255,7 +1255,6 @@ namespace Realm {
     return os;
   }
 
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndexSpaceIterator<N,T>
@@ -1278,11 +1277,11 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space,
-                                                      const Rect<N, T> &_restriction,
-                                                      SparsityMapPublicImpl<N, T> *s_impl)
+  inline IndexSpaceIterator<N, T>::IndexSpaceIterator(
+      const Rect<N, T> &_bounds, const Rect<N, T> &_restriction,
+      SparsityMapPublicImpl<N, T> *_s_impl)
   {
-    reset(_space, _restriction, s_impl);
+    reset(_bounds, _restriction, _s_impl);
   }
 
   template <int N, typename T>
@@ -1295,50 +1294,68 @@ namespace Realm {
   inline void IndexSpaceIterator<N, T>::reset(const IndexSpace<N, T> &_space,
                                               const Rect<N, T> &_restriction)
   {
-    SparsityMapPublicImpl<N, T> *s_impl =
-        (_space.dense() ? nullptr : _space.sparsity.impl());
-    reset(_space, _restriction, s_impl);
-  }
-
-  template <int N, typename T>
-  inline void IndexSpaceIterator<N, T>::reset(const IndexSpace<N, T> &_space,
-                                              const Rect<N, T> &_restriction,
-                                              SparsityMapPublicImpl<N, T> *impl)
-  {
     space = _space;
     restriction = space.bounds.intersection(_restriction);
-    s_impl = impl;
-
-    rect = Rect<N, T>::make_empty();
-
     if(restriction.empty()) {
       valid = false;
       return;
     }
-    if(!s_impl) {
+    if(space.dense()) {
       valid = true;
       rect = restriction;
+      s_impl = 0;
     } else {
-      const std::vector<SparsityMapEntry<N, T>> &entries = s_impl->get_entries();
-      // find the first entry that overlaps our restriction - speed this up with a
-      //  binary search on the low end of the restriction if we're 1-D
-
-      cur_entry = (N == 1) ? bsearch_map_entries(entries, restriction.lo) : 0;
-
-      while(cur_entry < entries.size()) {
-        const SparsityMapEntry<N, T> &e = entries[cur_entry];
-        rect = restriction.intersection(e.bounds);
-        if(!rect.empty()) {
-          assert(!e.sparsity.exists());
-          assert(e.bitmap == 0);
-          valid = true;
-          return;
-        }
-        cur_entry++;
-      }
-      // if we fall through, there was no intersection
-      valid = false;
+      reset_sparse(space.sparsity.impl());
     }
+  }
+
+  template <int N, typename T>
+  inline void IndexSpaceIterator<N, T>::reset(const Rect<N, T> &_bounds,
+                                              const Rect<N, T> &_restriction,
+                                              SparsityMapPublicImpl<N, T> *_s_impl)
+  {
+    space = _bounds;
+    restriction = _bounds.intersection(_restriction);
+    if(restriction.empty()) {
+      valid = false;
+      return;
+    }
+    if(!_s_impl) {
+      valid = true;
+      rect = restriction;
+      s_impl = 0;
+    } else {
+      reset_sparse(_s_impl);
+    }
+  }
+
+  template <int N, typename T>
+  inline void IndexSpaceIterator<N, T>::reset_sparse(SparsityMapPublicImpl<N, T> *_s_impl)
+  {
+    assert(_s_impl);
+    s_impl = _s_impl;
+
+    rect = Rect<N, T>::make_empty();
+
+    const std::vector<SparsityMapEntry<N, T>> &entries = s_impl->get_entries();
+    // find the first entry that overlaps our restriction - speed this up with a
+    //  binary search on the low end of the restriction if we're 1-D
+
+    cur_entry = (N == 1) ? bsearch_map_entries(entries, restriction.lo) : 0;
+
+    while(cur_entry < entries.size()) {
+      const SparsityMapEntry<N, T> &e = entries[cur_entry];
+      rect = restriction.intersection(e.bounds);
+      if(!rect.empty()) {
+        assert(!e.sparsity.exists());
+        assert(e.bitmap == 0);
+        valid = true;
+        return;
+      }
+      cur_entry++;
+    }
+    // if we fall through, there was no intersection
+    valid = false;
   }
 
   // steps to the next subrect, returning true if a next subrect exists

@@ -39,23 +39,19 @@ void run_test_case(const ItTestCaseData<N> &test_case)
   using T = int;
   NodeSet subscribers;
 
-  IndexSpace<N, T> domain = test_case.domain;
-
-  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
-  std::unique_ptr<SparsityMapImpl<N, T>> impl =
-      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
+  std::unique_ptr<SparsityMapImpl<N, T>> impl = std::make_unique<SparsityMapImpl<N, T>>(
+      (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>(), subscribers);
   SparsityMapPublicImpl<N, T> *local_impl = nullptr;
 
   if(!test_case.rects.empty()) {
     impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(test_case.rects, true);
-    domain.sparsity = handle;
     local_impl = reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
   }
 
   size_t index = 0;
-  for(IndexSpaceIterator<N, T> it(domain, test_case.restrictions, local_impl); it.valid;
-      it.step()) {
+  for(IndexSpaceIterator<N, T> it(test_case.domain, test_case.restrictions, local_impl);
+      it.valid; it.step()) {
     EXPECT_TRUE(index < test_case.expected.size());
     ASSERT_EQ(it.rect.lo, test_case.expected[index].lo);
     ASSERT_EQ(it.rect.hi, test_case.expected[index].hi);
@@ -95,18 +91,18 @@ TEST_P(IndexSpaceItTest, Base)
 INSTANTIATE_TEST_SUITE_P(
     IndexSpaceItCases, IndexSpaceItTest,
     ::testing::Values(new WrappedItTestCaseData<1>(
-                          // Full 1D no rects
-                          {/*bounds=*/{Rect<1>(0, 10)},
-                           /*restrictions=*/{Rect<1>(0, 10)},
-                           /*rects=*/{},
-                           /*exp_rects=*/{Rect<1>(0, 10)}}),
-
-                      new WrappedItTestCaseData<1>(
                           // Full 1D iteration
                           {/*bounds=*/{Rect<1>(0, 10)},
                            /*restrictions=*/{Rect<1>(0, 10)},
                            /*rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)},
                            /*exp_rects=*/{Rect<1>(0, 2), Rect<1>(4, 6), Rect<1>(8, 10)}}),
+
+                      new WrappedItTestCaseData<1>(
+                          // Full 1D no rects
+                          {/*bounds=*/{Rect<1>(0, 10)},
+                           /*restrictions=*/{Rect<1>(0, 10)},
+                           /*rects=*/{},
+                           /*exp_rects=*/{Rect<1>(0, 10)}}),
 
                       new WrappedItTestCaseData<1>(
                           // Full 1D iteration with restrictions
