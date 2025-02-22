@@ -1255,73 +1255,44 @@ namespace Realm {
     return os;
   }
 
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndexSpaceIterator<N,T>
 
   template <int N, typename T>
-  inline IndexSpaceIterator<N,T>::IndexSpaceIterator(void)
-    : valid(false)
+  inline IndexSpaceIterator<N, T>::IndexSpaceIterator(void)
   {}
 
   template <int N, typename T>
-  inline IndexSpaceIterator<N,T>::IndexSpaceIterator(const IndexSpace<N,T>& _space)
-    : valid(false)
+  inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space)
   {
     reset(_space);
   }
 
   template <int N, typename T>
-  inline IndexSpaceIterator<N,T>::IndexSpaceIterator(const IndexSpace<N,T>& _space,
-						       const Rect<N,T>& _restriction)
-    : valid(false)
+  inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space,
+                                                      const Rect<N, T> &_restriction)
   {
     reset(_space, _restriction);
   }
 
   template <int N, typename T>
-  inline void IndexSpaceIterator<N,T>::reset(const IndexSpace<N,T>& _space)
+  inline IndexSpaceIterator<N, T>::IndexSpaceIterator(
+      const Rect<N, T> &_bounds, const Rect<N, T> &_restriction,
+      SparsityMapPublicImpl<N, T> *_s_impl)
   {
-    space = _space;
-    restriction = space.bounds;
-    if(restriction.empty()) {
-      valid = false;
-      return;
-    }
-    if(space.dense()) {
-      valid = true;
-      rect = restriction;
-      s_impl = 0;
-    } else {
-      s_impl = space.sparsity.impl();
-      const std::vector<SparsityMapEntry<N,T> >& entries = s_impl->get_entries();
-      // find the first entry that overlaps our restriction - speed this up with a
-      //  binary search on the low end of the restriction if we're 1-D
-      if(N == 1)
-	cur_entry = bsearch_map_entries(entries, restriction.lo);
-      else
-	cur_entry = 0;
-
-      while(cur_entry < entries.size()) {
-	const SparsityMapEntry<N,T>& e = entries[cur_entry];
-	rect = restriction.intersection(e.bounds);
-	if(!rect.empty()) {
-	  assert(!e.sparsity.exists());
-	  assert(e.bitmap == 0);
-	  valid = true;
-	  return;
-	}
-	cur_entry++;
-      }
-      // if we fall through, there was no intersection
-      valid = false;
-    }
+    reset(_bounds, _restriction, _s_impl);
   }
 
   template <int N, typename T>
-  inline void IndexSpaceIterator<N,T>::reset(const IndexSpace<N,T>& _space,
-					      const Rect<N,T>& _restriction)
+  inline void IndexSpaceIterator<N, T>::reset(const IndexSpace<N, T> &_space)
+  {
+    reset(_space, _space.bounds);
+  }
+
+  template <int N, typename T>
+  inline void IndexSpaceIterator<N, T>::reset(const IndexSpace<N, T> &_space,
+                                              const Rect<N, T> &_restriction)
   {
     space = _space;
     restriction = space.bounds.intersection(_restriction);
@@ -1334,36 +1305,64 @@ namespace Realm {
       rect = restriction;
       s_impl = 0;
     } else {
-      s_impl = space.sparsity.impl();
-      const std::vector<SparsityMapEntry<N,T> >& entries = s_impl->get_entries();
-      // find the first entry that overlaps our restriction - speed this up with a
-      //  binary search on the low end of the restriction if we're 1-D
-      if(N == 1)
-	cur_entry = bsearch_map_entries(entries, restriction.lo);
-      else
-	cur_entry = 0;
-
-      while(cur_entry < entries.size()) {
-	const SparsityMapEntry<N,T>& e = entries[cur_entry];
-	rect = restriction.intersection(e.bounds);
-	if(!rect.empty()) {
-	  assert(!e.sparsity.exists());
-	  assert(e.bitmap == 0);
-	  valid = true;
-	  return;
-	}
-	cur_entry++;
-      }
-      // if we fall through, there was no intersection
-      valid = false;
+      reset_sparse(space.sparsity.impl());
     }
+  }
+
+  template <int N, typename T>
+  inline void IndexSpaceIterator<N, T>::reset(const Rect<N, T> &_bounds,
+                                              const Rect<N, T> &_restriction,
+                                              SparsityMapPublicImpl<N, T> *_s_impl)
+  {
+    space = _bounds;
+    restriction = _bounds.intersection(_restriction);
+    if(restriction.empty()) {
+      valid = false;
+      return;
+    }
+    if(!_s_impl) {
+      valid = true;
+      rect = restriction;
+      s_impl = 0;
+    } else {
+      reset_sparse(_s_impl);
+    }
+  }
+
+  template <int N, typename T>
+  inline void IndexSpaceIterator<N, T>::reset_sparse(SparsityMapPublicImpl<N, T> *_s_impl)
+  {
+    assert(_s_impl);
+    s_impl = _s_impl;
+
+    rect = Rect<N, T>::make_empty();
+
+    const std::vector<SparsityMapEntry<N, T>> &entries = s_impl->get_entries();
+    // find the first entry that overlaps our restriction - speed this up with a
+    //  binary search on the low end of the restriction if we're 1-D
+
+    cur_entry = (N == 1) ? bsearch_map_entries(entries, restriction.lo) : 0;
+
+    while(cur_entry < entries.size()) {
+      const SparsityMapEntry<N, T> &e = entries[cur_entry];
+      rect = restriction.intersection(e.bounds);
+      if(!rect.empty()) {
+        assert(!e.sparsity.exists());
+        assert(e.bitmap == 0);
+        valid = true;
+        return;
+      }
+      cur_entry++;
+    }
+    // if we fall through, there was no intersection
+    valid = false;
   }
 
   // steps to the next subrect, returning true if a next subrect exists
   template <int N, typename T>
-  inline bool IndexSpaceIterator<N,T>::step(void)
+  inline bool IndexSpaceIterator<N, T>::step(void)
   {
-    assert(valid);  // can't step an interator that's already done
+    assert(valid); // can't step an interator that's already done
 
     // a dense space is covered in the first step
     if(!s_impl) {
@@ -1374,17 +1373,18 @@ namespace Realm {
     // TODO: handle iteration within a sparsity entry
 
     // move onto the next sparsity entry (that overlaps our restriction)
-    const std::vector<SparsityMapEntry<N,T> >& entries = s_impl->get_entries();
+    const std::vector<SparsityMapEntry<N, T>> &entries = s_impl->get_entries();
     for(cur_entry++; cur_entry < entries.size(); cur_entry++) {
-      const SparsityMapEntry<N,T>& e = entries[cur_entry];
+      const SparsityMapEntry<N, T> &e = entries[cur_entry];
       rect = restriction.intersection(e.bounds);
+
       if(rect.empty()) {
-	// in 1-D, our entries are sorted, so the first one whose bounds fall
-	//   outside our restriction means we're completely done
-	if(N == 1)
-	  break;
-	else
-	  continue;
+        // in 1-D, our entries are sorted, so the first one whose bounds fall
+        //   outside our restriction means we're completely done
+        if(N == 1)
+          break;
+        else
+          continue;
       }
 
       assert(!e.sparsity.exists());
