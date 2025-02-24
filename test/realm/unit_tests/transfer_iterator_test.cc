@@ -58,13 +58,13 @@ static RegionInstanceImpl *create_inst(Rect<N, T> bounds,
   return impl;
 }
 
-struct BaseTestCaseData {
-  virtual ~BaseTestCaseData() = default;
+struct BaseTrasferItTestCaseData {
+  virtual ~BaseTrasferItTestCaseData() = default;
   virtual int get_dim() const = 0;
 };
 
 template <int N>
-struct TestCaseData {
+struct TrasferItTestCaseData {
   Rect<N> domain;
   std::vector<Rect<N>> rects;
   std::vector<Rect<N>> expected;
@@ -75,21 +75,22 @@ struct TestCaseData {
 };
 
 template <int N>
-struct WrappedTestCaseData : public BaseTestCaseData {
-  TestCaseData<N> data;
-  explicit WrappedTestCaseData(TestCaseData<N> d)
+struct WrappedTrasferItTestCaseData : public BaseTrasferItTestCaseData {
+  TrasferItTestCaseData<N> data;
+  explicit WrappedTrasferItTestCaseData(TrasferItTestCaseData<N> d)
     : data(std::move(d))
   {}
   int get_dim() const override { return N; }
 };
 
-class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+class TransferIteratorGetAddressesTest
+  : public ::testing::TestWithParam<BaseTrasferItTestCaseData *> {
 protected:
   void TearDown() override { delete GetParam(); }
 };
 
 template <int N>
-void run_test_case(const TestCaseData<N> &test_case)
+void run_test_case(const TrasferItTestCaseData<N> &test_case)
 {
   using T = int;
   NodeSet subscribers;
@@ -159,26 +160,26 @@ void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
       ...);
 }
 
-TEST_P(IndirectGetAddressesTest, Base)
+TEST_P(TransferIteratorGetAddressesTest, Base)
 {
-  const BaseTestCaseData *base_test_case = GetParam();
+  const BaseTrasferItTestCaseData *base_test_case = GetParam();
 
   dispatch_for_dimension(
       base_test_case->get_dim(),
       [&](auto Dim) {
         constexpr int N = Dim;
         auto &test_case =
-            static_cast<const WrappedTestCaseData<N> *>(base_test_case)->data;
+            static_cast<const WrappedTrasferItTestCaseData<N> *>(base_test_case)->data;
         run_test_case(test_case);
       },
       std::make_index_sequence<REALM_MAX_DIM>{});
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    IndirectGetAddressesCases, IndirectGetAddressesTest,
+    TransferIteratorGetAddressesCases, TransferIteratorGetAddressesTest,
     ::testing::Values(
 
-        new WrappedTestCaseData<1>(
+        new WrappedTrasferItTestCaseData<1>(
 
             // Empty 1D domain
             {
@@ -191,7 +192,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int)},
             }),
 
-        new WrappedTestCaseData<1>(
+        new WrappedTrasferItTestCaseData<1>(
             // Dense 1D rects multifield
             {
                 /*domain=*/{Rect<1>(0, 14)},
@@ -203,7 +204,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int), sizeof(long long)},
             }),
 
-        new WrappedTestCaseData<1>(
+        new WrappedTrasferItTestCaseData<1>(
             // Dense 1D rects
             {
                 /*domain=*/{Rect<1>(0, 14)},
@@ -215,7 +216,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int)},
             }),
 
-        new WrappedTestCaseData<1>(
+        new WrappedTrasferItTestCaseData<1>(
             // Sparse 1D rects
             {
                 /*domain=*/{Rect<1>(0, 14)},
@@ -227,7 +228,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int)},
             }),
 
-        new WrappedTestCaseData<2>(
+        new WrappedTrasferItTestCaseData<2>(
             // Full 2D dense
             {
                 /*domain=*/Rect<2>({0, 0}, {10, 10}),
@@ -239,7 +240,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int)},
             }),
 
-        new WrappedTestCaseData<2>(
+        new WrappedTrasferItTestCaseData<2>(
             // Full 2D sparse
             {
                 /*domain=*/Rect<2>({0, 0}, {10, 10}),
@@ -251,7 +252,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int)},
             }),
 
-        new WrappedTestCaseData<2>(
+        new WrappedTrasferItTestCaseData<2>(
             // Full 2D dense reverse dims
             {
                 /*domain=*/Rect<2>({0, 0}, {10, 10}),
@@ -263,7 +264,7 @@ INSTANTIATE_TEST_SUITE_P(
                 /*field_sizes=*/{sizeof(int)},
             }),
 
-        new WrappedTestCaseData<3>({
+        new WrappedTrasferItTestCaseData<3>({
             /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
             /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
             /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},

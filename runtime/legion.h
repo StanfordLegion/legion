@@ -3807,6 +3807,7 @@ namespace Legion {
       typedef T& reference;
       typedef const T& const_reference; 
     protected:
+      friend class UntypedDeferredValue;
       DeferredValue(void);
       Realm::AffineAccessor<T,1,coord_t> accessor;
     };
