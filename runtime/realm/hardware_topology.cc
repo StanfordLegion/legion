@@ -458,10 +458,10 @@ namespace Realm {
   discover_coremap_from_hwloc(hwloc_topology_t &topo,
                               std::vector<HardwareTopology::Proc> &logical_cores)
   {
-    cpu_set_t cset;
-    int ret = sched_getaffinity(0, sizeof(cset), &cset);
-    if(ret < 0) {
-      log_topo.warning() << "failed to get affinity info";
+    hwloc_cpuset_t cpuset = hwloc_bitmap_alloc();
+    if(hwloc_get_cpubind(topo, cpuset, HWLOC_CPUBIND_PROCESS) != 0) {
+      log_topo.warning() << "Failed to get CPU binding info";
+      hwloc_bitmap_free(cpuset);
       return REALM_TOPOLOGY_ERROR_NO_AFFINITY;
     }
 
@@ -485,7 +485,7 @@ namespace Realm {
       hwloc_obj_t pu = hwloc_get_obj_by_depth(topo, pu_depth, i);
       // Not an accessible cpu
       unsigned cpu_id = pu->os_index;
-      if(!CPU_ISSET(cpu_id, &cset)) {
+      if(!hwloc_bitmap_isset(cpuset, cpu_id)) {
         continue;
       }
       hwloc_obj_t core = hwloc_get_ancestor_obj_by_type(topo, HWLOC_OBJ_CORE, pu);
@@ -517,6 +517,8 @@ namespace Realm {
 #endif
       }
     }
+
+    hwloc_bitmap_free(cpuset);
 
     update_core_sharing(logical_cores, ht_sets, true /*alu*/, true /*fpu*/,
                         true /*ldst*/);
