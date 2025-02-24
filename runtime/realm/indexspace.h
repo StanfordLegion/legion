@@ -1210,7 +1210,6 @@ namespace Realm {
     Rect<N, T> rect{Rect<N, T>::make_empty()};
     IndexSpace<N, T> space;
     Rect<N, T> restriction{Rect<N, T>::make_empty()};
-
     bool valid{false};
     // for iterating over SparsityMap's
     SparsityMapPublicImpl<N, T> *s_impl{nullptr};

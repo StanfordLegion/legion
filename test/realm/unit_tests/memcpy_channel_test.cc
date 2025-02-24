@@ -140,7 +140,7 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
 
   inst_layout->piece_lists.resize(field_ids.size());
 
-  for(int i = 0; i < field_ids.size(); i++) {
+  for(size_t i = 0; i < field_ids.size(); i++) {
     InstanceLayoutGeneric::FieldLayout field_layout;
     field_layout.list_idx = i;
     field_layout.rel_offset = 0;
@@ -151,9 +151,9 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
     affine_piece->offset = 0;
     affine_piece->strides[0] = field_sizes[i];
     size_t mult = affine_piece->strides[0];
-    for(int i = 1; i < N; i++) {
-      affine_piece->strides[i] = (bounds.hi[i - 1] - bounds.lo[i - 1] + 1) * mult;
-      mult *= (bounds.hi[i - 1] - bounds.lo[i - 1] + 1);
+    for(int d = 1; d < N; d++) {
+      affine_piece->strides[d] = (bounds.hi[d - 1] - bounds.lo[d - 1] + 1) * mult;
+      mult *= (bounds.hi[d - 1] - bounds.lo[d - 1] + 1);
     }
 
     inst_layout->space = bounds;
@@ -164,18 +164,14 @@ static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
   return inst_layout;
 }
 
-// TODO(apryakhin@): Move to utils
-static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_idx = 0,
-                                       int inst_idx = 0)
-{
-  return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
-}
-
 template <int N, typename T>
-static RegionInstanceImpl *
-create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
-            const std::vector<size_t> &field_sizes, RegionInstance inst = make_inst())
+static RegionInstanceImpl *create_inst(Rect<N, T> bounds,
+                                       const std::vector<FieldID> &field_ids,
+                                       const std::vector<size_t> &field_sizes)
 {
+  RegionInstance inst =
+      ID::make_instance(/*owner=*/0, /*creator=*/0, /*mem_idx=*/0, /*inst_idx*/ 0)
+          .convert<RegionInstance>();
   InstanceLayout<N, T> *inst_layout = create_layout(bounds, field_ids, field_sizes);
   RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
   impl->metadata.layout = inst_layout;

@@ -1296,7 +1296,6 @@ namespace Realm {
   {
     space = _space;
     restriction = space.bounds.intersection(_restriction);
-
     if(restriction.empty()) {
       valid = false;
       return;
