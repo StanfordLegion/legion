@@ -1205,7 +1205,6 @@ namespace Realm {
    * An IndexSpaceIterator iterates over the valid points in an IndexSpace,
    * rectangles at a time.
    */
-
   template <int N, typename T>
   struct REALM_PUBLIC_API IndexSpaceIterator {
     Rect<N, T> rect{Rect<N, T>::make_empty()};
