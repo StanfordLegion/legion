@@ -209,6 +209,52 @@ namespace Realm {
     SparsityMapPublicImpl<N, T> *sparsity_impl{nullptr};
   };
 
+  template <int N, typename T>
+  class TransferIteratorIndirect : public TransferIteratorBase<N, T> {
+  protected:
+    TransferIteratorIndirect(void); // used by deserializer
+  public:
+    TransferIteratorIndirect(Memory _addrs_mem, RegionInstanceImpl *_inst_impl,
+                             const std::vector<FieldID> &_fields,
+                             const std::vector<size_t> &_fld_offsets,
+                             const std::vector<size_t> &_fld_sizes);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S &deserializer);
+
+    virtual ~TransferIteratorIndirect(void);
+
+    virtual Event request_metadata(void);
+
+    // specify the xd port used for indirect address flow control, if any
+    virtual void set_indirect_input_port(XferDes *xd, int port_idx,
+                                         TransferIterator *inner_iter);
+    virtual void reset(void);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator,
+                                                    TransferIteratorIndirect<N, T>>
+        serdez_subclass;
+
+    template <typename S>
+    bool serialize(S &serializer) const;
+
+  protected:
+    virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                               size_t &fsize);
+
+    TransferIterator *addrs_in{nullptr};
+    Memory addrs_mem{Memory::NO_MEMORY};
+    intptr_t addrs_mem_base{0};
+    bool can_merge{true};
+    static constexpr size_t MAX_POINTS = 64;
+    Point<N, T> points[MAX_POINTS];
+    size_t point_pos{0}, num_points{0};
+    std::vector<FieldID> fields;
+    std::vector<size_t> fld_offsets, fld_sizes;
+    XferDes *indirect_xd{nullptr};
+    int indirect_port_idx{-1};
+  };
+
   class TransferDomain {
   protected:
     TransferDomain(void);

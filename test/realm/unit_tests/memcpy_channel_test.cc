@@ -184,7 +184,7 @@ create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
 }
 
 template <int N>
-struct TestCaseData {
+struct MemcpyXferTestCaseData {
   Rect<N> domain;
   std::vector<Rect<N>> rects;
   std::vector<int> dim_order;
@@ -195,27 +195,27 @@ struct TestCaseData {
   std::vector<int> exp_buffer;
 };
 
-struct BaseTestCaseData {
-  virtual ~BaseTestCaseData() = default;
+struct BaseMemcpyXferTestCaseData {
+  virtual ~BaseMemcpyXferTestCaseData() = default;
   virtual int get_dim() const = 0;
 };
 
 template <int N>
-struct WrappedTestCaseData : public BaseTestCaseData {
-  TestCaseData<N> data;
-  explicit WrappedTestCaseData(TestCaseData<N> d)
+struct WrapedXferDesTestData : public BaseMemcpyXferTestCaseData {
+  MemcpyXferTestCaseData<N> data;
+  explicit WrapedXferDesTestData(MemcpyXferTestCaseData<N> d)
     : data(std::move(d))
   {}
   int get_dim() const override { return N; }
 };
 
-class IndirectGetAddressesTest : public ::testing::TestWithParam<BaseTestCaseData *> {
+class MemcpyChannelTest : public ::testing::TestWithParam<BaseMemcpyXferTestCaseData *> {
 protected:
   void TearDown() override { delete GetParam(); }
 };
 
 template <int N>
-void run_test_case(const TestCaseData<N> &test_case)
+void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
 {
   using T = int;
 
@@ -308,25 +308,25 @@ void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
       ...);
 }
 
-TEST_P(IndirectGetAddressesTest, Base)
+TEST_P(MemcpyChannelTest, Base)
 {
-  const BaseTestCaseData *base_test_case = GetParam();
+  const BaseMemcpyXferTestCaseData *base_test_case = GetParam();
 
   dispatch_for_dimension(
       base_test_case->get_dim(),
       [&](auto Dim) {
         constexpr int N = Dim;
         auto &test_case =
-            static_cast<const WrappedTestCaseData<N> *>(base_test_case)->data;
+            static_cast<const WrapedXferDesTestData<N> *>(base_test_case)->data;
         run_test_case(test_case);
       },
       std::make_index_sequence<REALM_MAX_DIM>{});
 }
 
-INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
+INSTANTIATE_TEST_SUITE_P(MemcpyChannelCases, MemcpyChannelTest,
                          ::testing::Values(
                              // Case 1: All points are mergeable
-                             new WrappedTestCaseData<1>({
+                             new WrapedXferDesTestData<1>({
                                  /*domain=*/{Rect<1>(1, 0)},
                                  /*rects=*/{Rect<1>(1, 0)},
                                  /*dim_order=*/{0},
@@ -337,7 +337,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                  {},
                              }),
 
-                             new WrappedTestCaseData<1>(
+                             new WrapedXferDesTestData<1>(
                                  // Empty 1D domain
                                  {/*domain=*/{Rect<1>(1, 0)},
                                   /*rects=*/{},
@@ -347,7 +347,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                   /*field_sizes=*/{sizeof(int)},
                                   {}}),
 
-                             new WrappedTestCaseData<1>(
+                             new WrapedXferDesTestData<1>(
                                  // Sparse 1D rects
                                  {
                                      /*domain=*/{Rect<1>(0, 8)},
@@ -360,7 +360,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                      {0, 1, 77, 77, 77, 6, 7},
                                  }),
 
-                             new WrappedTestCaseData<1>(
+                             new WrapedXferDesTestData<1>(
                                  // Dense 1D rects
                                  {
                                      /*domain=*/{Rect<1>(0, 3)},
@@ -373,7 +373,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                      {0, 1, 2, 3},
                                  }),
 
-                             new WrappedTestCaseData<2>(
+                             new WrapedXferDesTestData<2>(
                                  // Full 2D dense reverse dims
                                  {
                                      /*domain=*/Rect<2>({0, 0}, {1, 1}),
@@ -386,7 +386,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                      {0, 1, 2, 3},
                                  }),
 
-                             new WrappedTestCaseData<2>(
+                             new WrapedXferDesTestData<2>(
                                  // Full 2D sparse
                                  {
                                      /*domain=*/Rect<2>({0, 0}, {3, 1}),
@@ -401,7 +401,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                      {0, 77, 77, 3, 4, 77, 77, 7},
                                  }),
 
-                             new WrappedTestCaseData<2>(
+                             new WrapedXferDesTestData<2>(
                                  // Full 2D dense
                                  {
                                      /*domain=*/Rect<2>({0, 0}, {1, 1}),
@@ -414,7 +414,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                      {0, 1, 2, 3},
                                  }),
 
-                             new WrappedTestCaseData<3>(
+                             new WrapedXferDesTestData<3>(
                                  // Full 3D domain
                                  {
                                      /*domain=*/Rect<3>({0, 0, 0}, {1, 1, 1}),
@@ -427,7 +427,7 @@ INSTANTIATE_TEST_SUITE_P(IndirectGetAddressesCases, IndirectGetAddressesTest,
                                      {0, 1, 2, 3, 4, 5, 6, 7},
                                  }),
 
-                             new WrappedTestCaseData<3>(
+                             new WrapedXferDesTestData<3>(
                                  // Ful 3d domain with reverse dims
                                  {
                                      /*domain=*/Rect<3>({0, 0, 0}, {1, 1, 1}),

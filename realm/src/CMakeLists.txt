@@ -96,7 +96,7 @@ if(TARGET Python3::Python)
   list(APPEND REALM_SOURCES python/python_module.cc python/python_source.cc)
 endif()
 
-if(TARGET ucx::ucx)
+if(TARGET ucx::ucp)
   list(
     APPEND
     REALM_SOURCES

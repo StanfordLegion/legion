@@ -14002,9 +14002,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
-                                                                LgEvent unique)
+                                                                 LgEvent unique)
       : ready(Runtime::create_rt_user_event()),
-        unique_event(unique), success(false)
+        unique_event(unique), caller_fevent(implicit_fevent), success(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -14012,7 +14012,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MemoryManager::TaskLocalInstanceAllocator::TaskLocalInstanceAllocator(
                                                TaskLocalInstanceAllocator &&rhs)
-      : ready(rhs.ready), unique_event(rhs.unique_event), success(rhs.success)
+      : ready(rhs.ready), unique_event(rhs.unique_event),
+        caller_fevent(implicit_fevent), success(rhs.success)
     //--------------------------------------------------------------------------
     {
       rhs.ready = RtUserEvent::NO_RT_USER_EVENT;
@@ -14042,8 +14043,11 @@ namespace Legion {
       assert(measured);
 #endif
       success = result.success; 
-      fevent = unique_event;
-      failed_alloc = !result.success;
+      failed_alloc = !success;
+      if (failed_alloc)
+        fevent = caller_fevent;
+      else
+        fevent = unique_event;
       // Can't read anything after trigger the event as the object
       // might be deleted after we do that
       Runtime::trigger_event(ready);
@@ -36507,8 +36511,6 @@ namespace Legion {
         if (runtime->profiler->handle_profiling_response(response, args,
               arglen, fevent, failed_alloc))
         {
-          if (failed_alloc)
-            runtime->profiler->handle_failed_instance_allocation();
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);
@@ -36523,8 +36525,6 @@ namespace Legion {
         if (base->handler->handle_profiling_response(response, args, arglen, 
                                                      fevent, failed_alloc))
         {
-          if (failed_alloc)
-            runtime->profiler->handle_failed_instance_allocation();
           const long long t_stop = Realm::Clock::current_time_in_nanoseconds();
           const LgEvent finish_event(Processor::get_current_finish_event());
           implicit_profiler->process_proc_desc(p);

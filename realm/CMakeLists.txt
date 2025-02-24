@@ -95,13 +95,13 @@ check_ipo_supported(RESULT REALM_SUPPORTS_LTO LANGUAGES CXX C)
 
 #region Build options These should all be prefixed with 'REALM_' to prevent subproject name clashes
 set(REALM_MAX_DIM
-    3
-    CACHE STRING "Maximum dimension compiled for"
+  3
+  CACHE STRING "Maximum dimension compiled for"
 )
 set(REALM_LIMIT_SYMBOL_VISIBILITY 1)
 set(REALM_CXX_STANDARD
-    17
-    CACHE STRING "C++ standard used"
+  17
+  CACHE STRING "C++ standard used"
 )
 if(CMAKE_BUILD_TYPE STREQUAL Debug)
   set(DEBUG_REALM 1)
@@ -163,6 +163,10 @@ cmake_dependent_option(
   REALM_ENABLE_SHM "Enable shared memory support for inter-process communication" ON
   "UNIX; NOT APPLE" OFF
 )
+cmake_dependent_option(
+  REALM_ENABLE_UCC "Enable UCC for UCX networking module collectives" ON
+  "REALM_ENABLE_UCX" OFF
+)
 #endregion
 
 # TODO(cperry): move these under the current directory
@@ -179,6 +183,7 @@ set_package_properties(MPI PROPERTIES TYPE OPTIONAL)
 set_package_properties(OpenMP PROPERTIES TYPE OPTIONAL)
 set_package_properties(Kokkos PROPERTIES TYPE OPTIONAL)
 set_package_properties(ucx PROPERTIES TYPE OPTIONAL)
+set_package_properties(ucc PROPERTIES TYPE RECOMMENDED)
 set_package_properties(GASNet PROPERTIES TYPE OPTIONAL)
 set_package_properties(HWLOC PROPERTIES TYPE OPTIONAL)
 set_package_properties(PAPI PROPERTIES TYPE OPTIONAL)
@@ -237,7 +242,7 @@ if(REALM_ENABLE_COVERAGE)
   if(MSVC)
     find_program(
       OPENCPPCOV OpenCppCoverage.exe REQUIRED HINTS $ENV{ProgramFiles\(x86\)}/OpenCppCoverage
-                                                    $ENV{ProgramFiles}/OpenCppCoverage
+      $ENV{ProgramFiles}/OpenCppCoverage
     )
   else()
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CodeCoverage.cmake)
@@ -248,13 +253,13 @@ if(REALM_ENABLE_HIP)
   if(NOT DEFINED ROCM_PATH)
     if(NOT DEFINED ENV{ROCM_PATH})
       set(ROCM_PATH
-          "/opt/rocm"
-          CACHE PATH "Path to which HIP has been installed"
+        "/opt/rocm"
+        CACHE PATH "Path to which HIP has been installed"
       )
     else()
       set(HIP_PATH
-          $ENV{HIP_PATH}
-          CACHE PATH "Path to which HIP has been installed"
+        $ENV{HIP_PATH}
+        CACHE PATH "Path to which HIP has been installed"
       )
     endif()
   endif()
@@ -277,7 +282,7 @@ if(REALM_ENABLE_CUDA)
     endif()
     set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
 
-    if (NOT CMAKE_CUDA_STANDARD)
+    if(NOT CMAKE_CUDA_STANDARD)
       set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
     endif()
 
@@ -299,13 +304,13 @@ if(REALM_ENABLE_CUDA)
     find_path(
       CUDAToolkit_CUPTI_INCLUDE_DIR cupti.h
       PATHS ${CUDAToolkit_LIBRARY_ROOT}
-      PATH_SUFFIXES extras/CUPTI/include ../extras/CUPTI/include
+      PATH_SUFFIXES include ../include extras/CUPTI/include ../extras/CUPTI/include
     )
     # Deal with the library name change in older versions of cmake
     if(NOT TARGET CUDA::nvToolsExt)
       add_library(CUDA::nvToolsExt ALIAS CUDA::nvtx3)
     endif()
-    if (NOT REALM_CUDA_DYNAMIC_LOAD)
+    if(NOT REALM_CUDA_DYNAMIC_LOAD)
       list(APPEND REALM_STATIC_DEPENDS CUDAToolkit)
     endif()
   endif()
@@ -345,7 +350,7 @@ if(REALM_ENABLE_KOKKOS)
     list(APPEND KOKKOS_CONFIG_ARGS "KOKKOS_USE_OPENMP ON")
   endif()
   list(APPEND KOKKOS_CONFIG_ARGS "Kokkos_INSTALL_TESTING OFF" "CMAKE_SKIP_INSTALL_RULES ON"
-       "BUILD_SHARED_LIBS OFF" "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS OFF" "CMAKE_POSITION_INDEPENDENT_CODE ON"
   )
   cpmfindpackage(
     NAME
@@ -382,7 +387,7 @@ if(REALM_ENABLE_HDF5)
 endif()
 
 if(REALM_ENABLE_UCX)
-  find_package(ucx QUIET)
+  find_package(ucx QUIET CONFIG)
   if(NOT ucx_FOUND)
     list(
       APPEND
@@ -394,39 +399,100 @@ if(REALM_ENABLE_UCX)
       "--disable-doxygen-doc"
       "--enable-static"
     )
+    if(hip_FOUND)
+      list(APPEND UCC_CONFIG_ARGS "--with-rocm=${HIP_ROOT_DIR}")
+    endif()
     if(CUDAToolkit_FOUND)
       list(APPEND UCX_CONFIG_ARGS "--with-cuda=${CUDAToolkit_LIBRARY_ROOT}")
     endif()
+    set(ucx_ROOT_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install")
+    set(ucx_VERSION 1.17.0)
+    # cmake-format: off
     ExternalProject_Add(
       ucx_external
       URL https://github.com/openucx/ucx/releases/download/v1.17.0/ucx-1.17.0.tar.gz
       URL_HASH SHA256=34658e282f99f89ce7a991c542e9727552734ac6ad408c52f22b4c2653b04276
       SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx"
-      INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install"
+      INSTALL_DIR "${ucx_ROOT_DIR}"
       CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-                        contrib/configure-release-mt "--prefix=<INSTALL_DIR>" ${UCX_CONFIG_ARGS}
+      contrib/configure-release-mt "--prefix=<INSTALL_DIR>" ${UCX_CONFIG_ARGS}
       BUILD_COMMAND $(MAKE)
       INSTALL_COMMAND $(MAKE) install
       BUILD_IN_SOURCE TRUE
       BUILD_JOB_SERVER_AWARE TRUE
     )
+    # cmake-format: on
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install/include)
-    add_library(ucx SHARED IMPORTED)
+    add_library(ucp SHARED IMPORTED)
     set_target_properties(
-      ucx
+      ucp
       PROPERTIES
-        IMPORTED_LOCATION
-        "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install/lib/${CMAKE_SHARED_LIBRARY_PREFIX}ucp${CMAKE_SHARED_LIBRARY_SUFFIX}"
-        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install/include"
+      IMPORTED_LOCATION
+      "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install/lib/${CMAKE_SHARED_LIBRARY_PREFIX}ucp${CMAKE_SHARED_LIBRARY_SUFFIX}"
+      INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install/include"
     )
-    add_dependencies(ucx ucx_external)
-    add_library(ucx::ucx ALIAS ucx)
+    add_dependencies(ucp ucx_external)
+    add_library(ucx::ucp ALIAS ucp)
     set_property(GLOBAL APPEND PROPERTY PACKAGES_FOUND ucx)
     get_property(_NOT_FOUND GLOBAL PROPERTY PACKAGES_NOT_FOUND)
     list(REMOVE_ITEM _NOT_FOUND ucx)
     set_property(GLOBAL PROPERTY PACKAGES_NOT_FOUND "${_NOT_FOUND}")
-    list(APPEND REALM_STATIC_DEPENDS ucx)
+    list(APPEND REALM_STATIC_DEPENDS ucp)
   endif()
+
+  if(REALM_ENABLE_UCC)
+    find_package(ucc QUIET CONFIG)
+    if(NOT ucc_FOUND)
+      list(
+        APPEND
+        UCC_CONFIG_ARGS
+        "--with-ucx=${ucx_ROOT_DIR}"
+        "--disable-doxygen-doc"
+        "--with-pic"
+        "--enable-static"
+      )
+      if(hip_FOUND)
+        list(APPEND UCC_CONFIG_ARGS "--with-rocm=${HIP_ROOT_DIR}")
+      endif()
+      if(CUDAToolkit_FOUND)
+        list(APPEND UCC_CONFIG_ARGS "--with-cuda=${CUDAToolkit_LIBRARY_ROOT}")
+      endif()
+      set(ucc_VERSION 1.3.0)
+      # cmake-format: off
+      ExternalProject_Add(
+        ucc_external
+        URL "https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz"
+        URL_HASH SHA256=b56379abe5f1c125bfa83be305d78d81a64aa271b7b5fff0ac17b86725ff3acf
+        SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc"
+        INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install"
+        CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./autogen.sh
+        COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./configure "--prefix=<INSTALL_DIR>" ${UCC_CONFIG_ARGS}
+        BUILD_COMMAND $(MAKE)
+        INSTALL_COMMAND $(MAKE) install
+        BUILD_IN_SOURCE TRUE
+        BUILD_JOB_SERVER_AWARE TRUE
+      )
+      # cmake-format: on
+      add_dependencies(ucc_external ucx_external)
+      file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install/include)
+      add_library(ucc SHARED IMPORTED)
+      set_target_properties(
+        ucc
+        PROPERTIES
+        IMPORTED_LOCATION
+        "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install/lib/${CMAKE_SHARED_LIBRARY_PREFIX}ucc${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install/include"
+      )
+      add_dependencies(ucc ucc_external)
+      add_library(ucc::ucc ALIAS ucc)
+      set_property(GLOBAL APPEND PROPERTY PACKAGES_FOUND ucc)
+      get_property(_NOT_FOUND GLOBAL PROPERTY PACKAGES_NOT_FOUND)
+      list(REMOVE_ITEM _NOT_FOUND ucc)
+      set_property(GLOBAL PROPERTY PACKAGES_NOT_FOUND "${_NOT_FOUND}")
+      list(APPEND REALM_STATIC_DEPENDS ucc)
+    endif()
+  endif()
+
   # TODO(cperry): when we support more bootstraps, we should be able to select and pick one for testing
   if(REALM_BUILD_TESTS OR REALM_BUILD_BENCHMARKS)
     set(BOOTSTRAP_ENABLE_MPI ON)
@@ -436,15 +502,15 @@ endif()
 
 if(REALM_ENABLE_GASNETEX)
   set(GASNET_CONDUIT
-      ""
-      CACHE STRING "GASNet required conduit"
+    ""
+    CACHE STRING "GASNet required conduit"
   )
   option(GASNET_USE_MULTITHREADED "Use multithreaded gasnet" ON)
   option(GASNET_USE_SYNC "Use multithreaded sync gasnet" OFF)
   # Force cmake to always refresh its package database
   set(GASNet_FOUND
-      ""
-      CACHE INTERNAL "" FORCE
+    ""
+    CACHE INTERNAL "" FORCE
   )
   if(NOT GASNet_CONFIG_ARGS_INTERNAL)
     find_package(GASNet QUIET)
@@ -463,8 +529,8 @@ if(REALM_ENABLE_GASNETEX)
         get_target_property(_cuda_driver_path CUDA::cuda_driver LOCATION)
         cmake_path(REMOVE_FILENAME _cuda_driver_path)
         list(APPEND GASNet_CONFIG_ARGS "--with-cuda-home=${CUDAToolkit_LIBRARY_ROOT}"
-             "--with-cuda-ldflags=-L${_cuda_driver_path}"
-             --enable-kind-cuda-uva
+          "--with-cuda-ldflags=-L${_cuda_driver_path}"
+          --enable-kind-cuda-uva
         )
       endif()
       if(hip_FOUND)
@@ -472,7 +538,7 @@ if(REALM_ENABLE_GASNETEX)
       endif()
       if(MPI_FOUND)
         list(APPEND GASNet_CONFIG_ARGS --enable-mpi --with-mpi-cc=${MPI_C_COMPILER}
-             --with-mpi-cflags=${MPI_C_COMPILER_FLAGS} --with-mpi-libs=${MPI_C_LIBRARIES}
+          --with-mpi-cflags=${MPI_C_COMPILER_FLAGS} --with-mpi-libs=${MPI_C_LIBRARIES}
         )
       endif()
       if(HWLOC_FOUND)
@@ -514,9 +580,9 @@ if(REALM_ENABLE_GASNETEX)
       file(REMOVE ${GASNet_SOURCE_DIR}/config.cache)
       execute_process(
         COMMAND
-          "${CMAKE_COMMAND}" -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-          "${GASNet_SOURCE_DIR}/configure" ${GASNet_CONFIG_ARGS} COMMAND_ECHO STDOUT
-          COMMAND_ERROR_IS_FATAL ANY
+        "${CMAKE_COMMAND}" -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
+        "${GASNet_SOURCE_DIR}/configure" ${GASNet_CONFIG_ARGS} COMMAND_ECHO STDOUT
+        COMMAND_ERROR_IS_FATAL ANY
         WORKING_DIRECTORY ${GASNet_SOURCE_DIR}
       )
       execute_process(
@@ -524,8 +590,8 @@ if(REALM_ENABLE_GASNETEX)
         WORKING_DIRECTORY ${GASNet_SOURCE_DIR}
       )
       set(GASNet_CONFIG_ARGS_INTERNAL
-          ${GASNet_CONFIG_ARGS}
-          CACHE INTERNAL "for internal use only; do not modify" FORCE
+        ${GASNet_CONFIG_ARGS}
+        CACHE INTERNAL "for internal use only; do not modify" FORCE
       )
     endif()
 
@@ -578,7 +644,7 @@ endif()
 if(TARGET GASNet::GASNet)
   set(REALM_USE_GASNETEX TRUE)
 endif()
-if(TARGET ucx::ucx)
+if(TARGET ucx::ucp)
   set(REALM_USE_UCX TRUE)
 endif()
 if(TARGET HWLOC::HWLOC)
@@ -604,7 +670,7 @@ if(TARGET CUDA::cuda_driver)
   target_compile_options(
     realm_cuda_fatbin
     PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:
-            -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant --fatbin>
+    -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant --fatbin>
   )
   target_compile_definitions(realm_cuda_fatbin PRIVATE "CUDA_FATBIN_COMPILATION")
 
@@ -619,9 +685,9 @@ if(TARGET CUDA::cuda_driver)
   add_custom_command(
     OUTPUT "${realm_fatbin_cc}"
     COMMAND
-      ${CMAKE_COMMAND} "-DVAR_NAME=realm_fatbin" "-DDEFINES_HEADER=realm/realm_config.h"
-      "-DIN_FILE=$<TARGET_OBJECTS:realm_cuda_fatbin>" "-DOUT_FILE=${realm_fatbin_cc}" -P
-      ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/bin2c.cmake
+    ${CMAKE_COMMAND} "-DVAR_NAME=realm_fatbin" "-DDEFINES_HEADER=realm/realm_config.h"
+    "-DIN_FILE=$<TARGET_OBJECTS:realm_cuda_fatbin>" "-DOUT_FILE=${realm_fatbin_cc}" -P
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/bin2c.cmake
     VERBATIM
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS realm_cuda_fatbin
@@ -636,23 +702,23 @@ add_library(realm_obj OBJECT ${REALM_SOURCES})
 set_target_properties(
   realm_obj
   PROPERTIES C_VISIBILITY_PRESET hidden
-             CXX_VISIBILITY_PRESET hidden
-             CUDA_VISIBILITY_PRESET hidden
-             VISIBILITY_INLINES_HIDDEN ON
-             POSITION_INDEPENDENT_CODE ON
+  CXX_VISIBILITY_PRESET hidden
+  CUDA_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
+  POSITION_INDEPENDENT_CODE ON
 )
 add_library(realm ${REALM_RC_SOURCES})
 target_link_libraries(realm PUBLIC realm_obj)
 set_target_properties(
   realm
   PROPERTIES VERSION ${Realm_VERSION}
-             SOVERSION ${Realm_VERSION_MAJOR}
-             INTERPROCEDURAL_OPTIMIZATION ${REALM_ENABLE_LTO}
-             C_VISIBILITY_PRESET hidden
-             CXX_VISIBILITY_PRESET hidden
-             CUDA_VISIBILITY_PRESET hidden
-             VISIBILITY_INLINES_HIDDEN ON
-             POSITION_INDEPENDENT_CODE ON
+  SOVERSION ${Realm_VERSION_MAJOR}
+  INTERPROCEDURAL_OPTIMIZATION ${REALM_ENABLE_LTO}
+  C_VISIBILITY_PRESET hidden
+  CXX_VISIBILITY_PRESET hidden
+  CUDA_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
+  POSITION_INDEPENDENT_CODE ON
 )
 add_library(Realm::Realm ALIAS realm)
 
@@ -664,30 +730,31 @@ endif()
 target_link_libraries(
   realm_obj
   PRIVATE
-    $<TARGET_NAME_IF_EXISTS:hip::hip_host>
-    $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-    $<TARGET_NAME_IF_EXISTS:OpenMP::OpenMP_CXX>
-    $<TARGET_NAME_IF_EXISTS:Kokkos::kokkoscore>
-    $<TARGET_NAME_IF_EXISTS:LLVM::LLVM>
-    $<TARGET_NAME_IF_EXISTS:hdf5::hdf5>
-    $<$<NOT:$<BOOL:${REALM_ENABLE_GASNETEX_WRAPPER}>>:$<TARGET_NAME_IF_EXISTS:GASNet::GASNet>>
-    $<TARGET_NAME_IF_EXISTS:ucx::ucx>
-    $<TARGET_NAME_IF_EXISTS:HWLOC::HWLOC>
-    $<TARGET_NAME_IF_EXISTS:Papi::Papi>
-    $<TARGET_NAME_IF_EXISTS:cpptrace::cpptrace>
-    $<$<NOT:$<BOOL:${REALM_CUDA_DYNAMIC_LOAD}>>:$<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>>
-    $<$<BOOL:${REALM_ENABLE_NVTX}>:$<TARGET_NAME_IF_EXISTS:CUDA::nvToolsExt>>
-    $<$<NOT:$<BOOL:${REALM_ENABLE_GASNETEX_WRAPPER}>>:$<TARGET_NAME_IF_EXISTS:realm_gex_wrapper>>
-    $<$<BOOL:${REALM_ENABLE_LIBDL}>:${CMAKE_DL_LIBS}>
+  $<TARGET_NAME_IF_EXISTS:hip::hip_host>
+  $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+  $<TARGET_NAME_IF_EXISTS:OpenMP::OpenMP_CXX>
+  $<TARGET_NAME_IF_EXISTS:Kokkos::kokkoscore>
+  $<TARGET_NAME_IF_EXISTS:LLVM::LLVM>
+  $<TARGET_NAME_IF_EXISTS:hdf5::hdf5>
+  $<$<NOT:$<BOOL:${REALM_ENABLE_GASNETEX_WRAPPER}>>:$<TARGET_NAME_IF_EXISTS:GASNet::GASNet>>
+  $<TARGET_NAME_IF_EXISTS:ucx::ucp>
+  $<TARGET_NAME_IF_EXISTS:ucc::ucc>
+  $<TARGET_NAME_IF_EXISTS:HWLOC::HWLOC>
+  $<TARGET_NAME_IF_EXISTS:Papi::Papi>
+  $<TARGET_NAME_IF_EXISTS:cpptrace::cpptrace>
+  $<$<NOT:$<BOOL:${REALM_CUDA_DYNAMIC_LOAD}>>:$<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>>
+  $<$<BOOL:${REALM_ENABLE_NVTX}>:$<TARGET_NAME_IF_EXISTS:CUDA::nvToolsExt>>
+  $<$<NOT:$<BOOL:${REALM_ENABLE_GASNETEX_WRAPPER}>>:$<TARGET_NAME_IF_EXISTS:realm_gex_wrapper>>
+  $<$<BOOL:${REALM_ENABLE_LIBDL}>:${CMAKE_DL_LIBS}>
 )
 
 target_include_directories(
   realm_obj
   PUBLIC $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}> $<BUILD_INTERFACE:${REALM_SOURCE_DIR}/..>
-         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
   PRIVATE $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_CUPTI_INCLUDE_DIR}>
-          $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
-          $<$<TARGET_EXISTS:Python3::Python>:${Python_INCLUDE_DIRS}>
+  $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
+  $<$<TARGET_EXISTS:Python3::Python>:${Python_INCLUDE_DIRS}>
 )
 if(REALM_ENABLE_GASNETEX_WRAPPER)
   # Force the creation of the export header for the wrapper we need, but nothing else
@@ -698,17 +765,17 @@ target_compile_features(realm_obj PUBLIC cxx_std_${REALM_CXX_STANDARD})
 target_compile_options(
   realm_obj
   PRIVATE $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
-          -Wall
-          -Wextra
-          -Wno-unused-parameter>
-          $<$<CXX_COMPILER_ID:MSVC>:
-          /W4
-          /WX
-          /Zc:alignedNew
-          /utf-8
-          /Zi
-          /permissive-
-          /Zc:tlsGuards>
+  -Wall
+  -Wextra
+  -Wno-unused-parameter>
+  $<$<CXX_COMPILER_ID:MSVC>:
+  /W4
+  /WX
+  /Zc:alignedNew
+  /utf-8
+  /Zi
+  /permissive-
+  /Zc:tlsGuards>
 )
 if(REALM_ENABLE_COVERAGE AND NOT OPENCPPCOV_PATH)
   append_coverage_compiler_flags_to_target(realm_obj)
@@ -755,7 +822,7 @@ if(REALM_BUILD_DOCS AND DOXYGEN_FOUND)
   set(DOXYGEN_HTML_EXTRA_STYLESHEET ${CMAKE_CURRENT_SOURCE_DIR}/doxygen/customdoxygen.css)
   if(NOT REALM_BUILD_INTERNAL_DOCS)
     set(DOXYGEN_STRIP_FROM_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include
-                                ${CMAKE_CURRENT_BINARY_DIR}/include
+      ${CMAKE_CURRENT_BINARY_DIR}/include
     )
   endif()
   # This should include all public header files and nothing else.
