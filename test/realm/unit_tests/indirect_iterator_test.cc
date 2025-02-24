@@ -1,60 +1,9 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/transfer.h"
-#include "realm/inst_layout.h"
+#include "test_common.h"
 #include <gtest/gtest.h>
 
 using namespace Realm;
-
-template <int N, typename T>
-static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
-                                           const std::vector<FieldID> &field_ids,
-                                           const std::vector<size_t> &field_sizes)
-{
-  InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
-
-  inst_layout->piece_lists.resize(field_ids.size());
-
-  for(size_t i = 0; i < field_ids.size(); i++) {
-    InstanceLayoutGeneric::FieldLayout field_layout;
-    field_layout.list_idx = i;
-    field_layout.rel_offset = 0;
-    field_layout.size_in_bytes = field_sizes[i];
-
-    AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
-    affine_piece->bounds = bounds;
-    affine_piece->offset = 0;
-    affine_piece->strides[0] = field_sizes[i];
-    size_t mult = affine_piece->strides[0];
-    for(int i = 1; i < N; i++) {
-      affine_piece->strides[i] = (bounds.hi[i - 1] - bounds.lo[i - 1] + 1) * mult;
-      mult *= (bounds.hi[i - 1] - bounds.lo[i - 1] + 1);
-    }
-
-    inst_layout->space = bounds;
-    inst_layout->fields[field_ids[i]] = field_layout;
-    inst_layout->piece_lists[i].pieces.push_back(affine_piece);
-  }
-
-  return inst_layout;
-}
-
-static inline RegionInstance make_inst(int owner = 0, int creator = 0, int mem_idx = 0,
-                                       int inst_idx = 0)
-{
-  return ID::make_instance(owner, creator, mem_idx, inst_idx).convert<RegionInstance>();
-}
-
-template <int N, typename T>
-static RegionInstanceImpl *
-create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
-            const std::vector<size_t> &field_sizes, RegionInstance inst = make_inst())
-{
-  InstanceLayout<N, T> *inst_layout = create_layout(bounds, field_ids, field_sizes);
-  RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
-  impl->metadata.layout = inst_layout;
-  impl->metadata.inst_offset = 0;
-  return impl;
-}
 
 template <int N>
 struct TestCaseData {
@@ -141,18 +90,6 @@ void run_test_case(const TestCaseData<N> &test_case)
   }
 
   EXPECT_EQ(addrlist.bytes_pending(), 0);
-}
-
-template <typename Func, size_t... Is>
-void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
-{
-  (
-      [&] {
-        if(dim == static_cast<int>(Is + 1)) {
-          func(std::integral_constant<int, Is + 1>{});
-        }
-      }(),
-      ...);
 }
 
 TEST_P(IndirectGetAddressesTest, Base)
