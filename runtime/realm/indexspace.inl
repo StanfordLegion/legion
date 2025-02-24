@@ -1259,10 +1259,6 @@ namespace Realm {
   //
   // class IndexSpaceIterator<N,T>
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class IndexSpaceIterator<N,T>
-
   template <int N, typename T>
   inline IndexSpaceIterator<N, T>::IndexSpaceIterator(void)
   {}
@@ -1276,7 +1272,6 @@ namespace Realm {
   template <int N, typename T>
   inline IndexSpaceIterator<N, T>::IndexSpaceIterator(const IndexSpace<N, T> &_space,
                                                       const Rect<N, T> &_restriction)
-
   {
     reset(_space, _restriction);
   }
@@ -1402,6 +1397,7 @@ namespace Realm {
     valid = false;
     return false;
   }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

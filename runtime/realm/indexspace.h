@@ -1211,7 +1211,6 @@ namespace Realm {
     Rect<N, T> rect{Rect<N, T>::make_empty()};
     IndexSpace<N, T> space;
     Rect<N, T> restriction{Rect<N, T>::make_empty()};
-
     bool valid{false};
     // for iterating over SparsityMap's
     SparsityMapPublicImpl<N, T> *s_impl{nullptr};
@@ -1233,6 +1232,7 @@ namespace Realm {
   private:
     void reset_sparse(SparsityMapPublicImpl<N, T> *_s_impl);
   };
+
 }; // namespace Realm
 
 // specializations of std::less<T> for IndexSpace<N,T> allow
