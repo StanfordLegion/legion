@@ -81,10 +81,10 @@ type ProcKind = i32;
 type UniqueID = u64;
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Array(pub Vec<u64>);
+pub struct Array(pub Vec<i64>);
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Point(pub Vec<u64>);
+pub struct Point(pub Vec<i64>);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Uuid(pub Vec<u8>);
@@ -283,7 +283,7 @@ fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
 fn parse_array(input: &[u8], max_dim: i32) -> IResult<&[u8], Array> {
     assert!(max_dim > -1);
     let n = (max_dim * 2) as usize;
-    let (input, values) = many_m_n(n, n, le_u64)(input)?;
+    let (input, values) = many_m_n(n, n, le_i64)(input)?;
     Ok((input, Array(values)))
 }
 fn parse_bool(input: &[u8]) -> IResult<&[u8], bool> {
@@ -292,7 +292,7 @@ fn parse_bool(input: &[u8]) -> IResult<&[u8], bool> {
 fn parse_point(input: &[u8], max_dim: i32) -> IResult<&[u8], Point> {
     assert!(max_dim > -1);
     let n = max_dim as usize;
-    let (input, values) = many_m_n(n, n, le_u64)(input)?;
+    let (input, values) = many_m_n(n, n, le_i64)(input)?;
     Ok((input, Point(values)))
 }
 fn parse_cuda_device_uuid(input: &[u8]) -> IResult<&[u8], Uuid> {
