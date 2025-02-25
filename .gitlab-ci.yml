@@ -55,11 +55,10 @@ cache: &global_cache
   CC:  "clang-14"
   CXX: "clang++-14"
   F90: "gfortran-11"
-.hpcsdk2211: &hpcsdk2211
-  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc"
-  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc++"
-  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvfortran"
-  USE_CCACHE: "0"
+.hpcsdk251: &hpcsdk251
+  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/compilers/bin/nvc"
+  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/compilers/bin/nvc++"
+  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/25.1/compilers/bin/nvfortran"
   # cmake gets confused and can't figure out library arch
   EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 .icc212: &icc212
@@ -1356,14 +1355,14 @@ nvidia_cuda125_gcc11_cxx17_debug_shared_kokkos_cuda_openmp_legion:
     <<: [*gcc11, *debug, *shared, *cxx17_normal, *cuda125, *kokkos, *openmp, *cmake, *legion, *ctest, *short, *cpptrace]
 
 # HPCSDK (nvc++) tests:
-hpcsdk2211_cxx17_release_cmake_legion:
+hpcsdk251_cxx17_release_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *release, *cxx17_normal, *cmake, *legion, *ctest, *cpptrace]
-hpcsdk2211_cxx17_debug_cmake_legion:
+    <<: [*hpcsdk251, *release, *cxx17_normal, *cmake, *legion, *ctest, *cpptrace]
+hpcsdk251_cxx17_debug_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *debug, *cxx17_normal, *cmake, *legion, *ctest, *short, *cpptrace]
+    <<: [*hpcsdk251, *debug, *cxx17_normal, *cmake, *legion, *ctest, *short, *cpptrace]
 
 # Intel compiler (icx/icpx) tests:
 icc212_cxx17_release_legion:
