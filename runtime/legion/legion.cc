@@ -1096,7 +1096,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionRequirement::RegionRequirement(RegionRequirement &&rhs)
+    RegionRequirement::RegionRequirement(RegionRequirement &&rhs) noexcept
       : region(rhs.region), partition(rhs.partition), privilege(rhs.privilege),
         prop(rhs.prop), parent(rhs.parent), redop(rhs.redop), tag(rhs.tag),
         flags(rhs.flags), handle_type(rhs.handle_type), 
@@ -1104,6 +1104,18 @@ namespace Legion {
         projection_args_size(rhs.projection_args_size)
     //--------------------------------------------------------------------------
     {
+      static_assert(std::is_trivially_copyable<decltype(region)>::value);
+      static_assert(std::is_trivially_copyable<decltype(partition)>::value);
+      static_assert(std::is_trivially_copyable<decltype(privilege)>::value);
+      static_assert(std::is_trivially_copyable<decltype(prop)>::value);
+      static_assert(std::is_trivially_copyable<decltype(parent)>::value);
+      static_assert(std::is_trivially_copyable<decltype(redop)>::value);
+      static_assert(std::is_trivially_copyable<decltype(tag)>::value);
+      static_assert(std::is_trivially_copyable<decltype(flags)>::value);
+      static_assert(std::is_trivially_copyable<decltype(handle_type)>::value);
+      static_assert(std::is_trivially_copyable<decltype(projection)>::value);
+      static_assert(std::is_trivially_copyable<decltype(projection_args)>::value);
+      static_assert(std::is_trivially_copyable<decltype(projection_args_size)>::value);
       privilege_fields.swap(rhs.privilege_fields);
       instance_fields.swap(rhs.instance_fields);
       rhs.projection_args = nullptr;
@@ -1150,7 +1162,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionRequirement& RegionRequirement::operator=(RegionRequirement &&rhs)
+    RegionRequirement& RegionRequirement::operator=(RegionRequirement &&rhs) noexcept
     //--------------------------------------------------------------------------
     {
       region = rhs.region;

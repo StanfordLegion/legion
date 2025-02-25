@@ -956,10 +956,10 @@ namespace Legion {
                         bool _verified = false);
     public:
       RegionRequirement(const RegionRequirement &rhs);
-      RegionRequirement(RegionRequirement &&rhs);
+      RegionRequirement(RegionRequirement &&rhs) noexcept;
       ~RegionRequirement(void);
       RegionRequirement& operator=(const RegionRequirement &rhs);
-      RegionRequirement& operator=(RegionRequirement &&rhs);
+      RegionRequirement& operator=(RegionRequirement &&rhs) noexcept;
     public:
       bool operator==(const RegionRequirement &req) const;
       bool operator<(const RegionRequirement &req) const;
