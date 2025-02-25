@@ -530,15 +530,15 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:250130
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:250225
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:250130
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:250225
 .image_2404: &image_2404
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-24.04:250219
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-24.04:250225
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:250130
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:250225
 .image_icc: &image_icc
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:250130
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:250225
 .image_msvc178: &image_msvc178
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc:250206
 
