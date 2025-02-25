@@ -15,7 +15,7 @@ RUN dpkg --add-architecture i386 && \
     apt-add-repository -y "deb https://apt.repos.intel.com/oneapi all main" && \
     apt-get update -qq && \
     apt-get install -qq \
-      build-essential pkg-config gfortran git time wget curl ccache \
+      build-essential autoconf pkg-config gfortran git time wget curl ccache \
       libpython3-dev python3-pip pypy3 \
       g++-9 \
       gfortran-9 \
