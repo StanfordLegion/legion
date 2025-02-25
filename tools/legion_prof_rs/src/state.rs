@@ -1760,12 +1760,12 @@ impl Container for Chan {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Bounds {
     Point {
-        point: Vec<u64>,
+        point: Vec<i64>,
         dim: u32,
     },
     Rect {
-        lo: Vec<u64>,
-        hi: Vec<u64>,
+        lo: Vec<i64>,
+        hi: Vec<i64>,
         dim: u32,
     },
     Empty,
@@ -1806,7 +1806,7 @@ impl ISpace {
     // sparse instance. In this case the bounds will NOT be
     // accurate. But we don't use bounds in such cases anyway since we
     // refer to the dense/sparse sizes.
-    fn set_point(&mut self, dim: u32, values: &[u64]) -> &mut Self {
+    fn set_point(&mut self, dim: u32, values: &[i64]) -> &mut Self {
         let new_bounds = Bounds::Point {
             point: values.to_owned(),
             dim,
@@ -1814,7 +1814,7 @@ impl ISpace {
         self.bounds = new_bounds;
         self
     }
-    fn set_rect(&mut self, dim: u32, values: &[u64], max_dim: i32) -> &mut Self {
+    fn set_rect(&mut self, dim: u32, values: &[i64], max_dim: i32) -> &mut Self {
         let new_bounds = Bounds::Rect {
             lo: values[0..(dim as usize)].to_owned(),
             hi: values[(max_dim as usize)..(max_dim as usize) + (dim as usize)].to_owned(),
