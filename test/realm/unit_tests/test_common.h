@@ -27,8 +27,8 @@ namespace Realm {
                                   const std::vector<FieldID> &field_ids,
                                   const std::vector<size_t> &field_sizes);
 
-template <typename Func, size_t... Is>
-void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>);
+  template <typename Func, size_t... Is>
+  void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>);
 
 } // namespace Realm
 
