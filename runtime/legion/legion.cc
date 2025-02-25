@@ -1096,6 +1096,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(RegionRequirement &&rhs)
+      : region(rhs.region), partition(rhs.partition), privilege(rhs.privilege),
+        prop(rhs.prop), parent(rhs.parent), redop(rhs.redop), tag(rhs.tag),
+        flags(rhs.flags), handle_type(rhs.handle_type), 
+        projection(rhs.projection), projection_args(rhs.projection_args),
+        projection_args_size(rhs.projection_args_size)
+    //--------------------------------------------------------------------------
+    {
+      privilege_fields.swap(rhs.privilege_fields);
+      instance_fields.swap(rhs.instance_fields);
+      rhs.projection_args = nullptr;
+      rhs.projection_args_size = 0;
+    }
+
+    //--------------------------------------------------------------------------
     RegionRequirement::~RegionRequirement(void)
     //--------------------------------------------------------------------------
     {
@@ -1131,6 +1146,31 @@ namespace Legion {
         projection_args = malloc(projection_args_size);
         memcpy(projection_args, rhs.projection_args, projection_args_size);
       }
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement& RegionRequirement::operator=(RegionRequirement &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      region = rhs.region;
+      partition = rhs.partition;
+      privilege_fields.swap(rhs.privilege_fields);
+      instance_fields.swap(rhs.instance_fields);
+      privilege = rhs.privilege;
+      prop = rhs.prop;
+      parent = rhs.parent;
+      redop = rhs.redop;
+      tag = rhs.tag;
+      flags = rhs.flags;
+      handle_type = rhs.handle_type;
+      projection = rhs.projection;
+      if (projection_args_size > 0)
+        free(projection_args);
+      projection_args_size = rhs.projection_args_size;
+      projection_args = rhs.projection_args;
+      rhs.projection_args = nullptr;
+      rhs.projection_args_size = 0;
       return *this;
     }
 
