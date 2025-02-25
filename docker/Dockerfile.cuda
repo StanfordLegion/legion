@@ -62,9 +62,9 @@ RUN rm /usr/local/cuda
 
 
 RUN wget https://download.open-mpi.org/release/open-mpi/v5.0/openmpi-5.0.5.tar.gz && \
-    echo "8b3f8d3eb10ad0e9a4fb94ab10a574e4fde6e32c  openmpi-5.0.5.tar.gz" | shasum --check && \
+    echo "5cbefa0780b84f4126743c40cdd6a334b2f0574cd7fd95050fb1ac0ddbb7f0b8  openmpi-5.0.5.tar.gz" | shasum --check && \
     tar -xf openmpi-5.0.5.tar.gz && \
-		mkdir -p openmpi-5.0.5/build /usr/local/ompi && \
+    mkdir -p openmpi-5.0.5/build /usr/local/ompi && \
     (cd openmpi-5.0.5/build && \
     ../configure --prefix=/usr/local/ompi --enable-mpirun-prefix-by-default && \
     make -j install) && \
