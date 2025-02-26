@@ -24,7 +24,6 @@
 #include "realm/atomics.h"
 #include "realm/network.h"
 #include "realm/operation.h"
-#include "realm/sparsity.h"
 #include "realm/transfer/channel.h"
 #include "realm/profiling.h"
 
@@ -176,8 +175,8 @@ namespace Realm {
                                RegionInstanceImpl *_inst_impl, const int _dim_order[N],
                                const std::vector<FieldID> &_fields,
                                const std::vector<size_t> &_fld_offsets,
-                               const std::vector<size_t> &_fld_sizes, size_t _extra_elems,
-                               SparsityMapPublicImpl<N, T> *_sparsity_impl = nullptr);
+                               const std::vector<size_t> &_fld_sizes,
+                               size_t _extra_elems);
 
     template <typename S>
     static TransferIterator *deserialize_new(S &deserializer);
@@ -206,7 +205,6 @@ namespace Realm {
     std::vector<size_t> fld_offsets, fld_sizes;
     size_t field_idx;
     size_t extra_elems;
-    SparsityMapPublicImpl<N, T> *sparsity_impl{nullptr};
   };
 
   template <int N, typename T>
