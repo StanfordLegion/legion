@@ -630,7 +630,7 @@ namespace Realm {
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
       const int _dim_order[N], const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
-      RegionInstanceImpl *_inst_impl, IndexSpace<N, T> _is)
+      RegionInstanceImpl *_inst_impl, const IndexSpace<N, T> &_is)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
   {
