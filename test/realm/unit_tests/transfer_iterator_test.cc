@@ -46,12 +46,9 @@ void run_test_case(const TrasferItTestCaseData<N> &test_case)
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   std::unique_ptr<SparsityMapImpl<N, T>> impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
-  SparsityMapPublicImpl<N, T> *local_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
 
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(test_case.rects, true);
-  IndexSpace<N, T> domain = test_case.domain;
 
   std::unique_ptr<TransferIteratorIndexSpace<N, T>> it =
       std::make_unique<TransferIteratorIndexSpace<N, T>>(
