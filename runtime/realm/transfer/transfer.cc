@@ -1993,7 +1993,6 @@ namespace Realm {
       const std::vector<FieldID> &fields, const std::vector<size_t> &fld_offsets,
       const std::vector<size_t> &fld_sizes) const
   {
-    size_t extra_elems = 0;
     assert(dim_order.size() == N);
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
     return new TransferIteratorIndexSpace<N, T>(dim_order.data(), fields, fld_offsets,
