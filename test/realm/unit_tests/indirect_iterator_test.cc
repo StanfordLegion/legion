@@ -70,7 +70,7 @@ void run_test_case(const TestCaseData<N> &test_case)
           test_case.dim_order.data(), indirect_fields, test_case.field_offsets,
           indirect_field_sizes,
           create_inst<1, T>(addr_domain, indirect_fields, indirect_field_sizes),
-          addr_domain, /*sparsity=*/nullptr);
+          addr_domain);
 
   it->set_indirect_input_port(xd.get(), /*indirect_port_idx=*/0, addr_it.get());
 

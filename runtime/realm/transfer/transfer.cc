@@ -630,26 +630,37 @@ namespace Realm {
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
       const int _dim_order[N], const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
-      RegionInstanceImpl *_inst_impl, IndexSpace<N, T> _is,
-      SparsityMapPublicImpl<N, T> *_sparsity_impl)
+      RegionInstanceImpl *_inst_impl, IndexSpace<N, T> _is)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
-    , sparsity_impl(_sparsity_impl)
   {
     if(is.is_valid()) {
-      if(sparsity_impl) {
-        iter.reset(is.bounds, is.bounds, sparsity_impl);
-      } else {
-        iter.reset(is);
-      }
-      this->is_done = !iter.valid;
-      iter_init_deferred = false;
+      reset_internal();
     } else {
       iter_init_deferred = true;
     }
 
     // special case - skip a lot of the init if we know the space is empty
     if(iter_init_deferred || iter.valid) {
+      fields = _fields;
+      fld_offsets = _fld_offsets;
+      fld_sizes = _fld_sizes;
+    }
+  }
+
+  template <int N, typename T>
+  TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
+      const int _dim_order[N], const std::vector<FieldID> &_fields,
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
+      RegionInstanceImpl *_inst_impl, const Rect<N, T> &_bounds,
+      SparsityMapImpl<N, T> *_sparsity_impl)
+    : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
+    , is(_bounds, _sparsity_impl->me)
+    , sparsity_impl(_sparsity_impl)
+  {
+    assert(sparsity_impl);
+    reset_internal();
+    if(iter.valid) {
       fields = _fields;
       fld_offsets = _fld_offsets;
       fld_sizes = _fld_sizes;
@@ -709,8 +720,21 @@ namespace Realm {
   {
     TransferIteratorBase<N, T>::reset();
     field_idx = 0;
-    assert(!iter_init_deferred);
-    iter.reset(iter.space);
+    reset_internal();
+  }
+
+  template <int N, typename T>
+  void TransferIteratorIndexSpace<N, T>::reset_internal(void)
+  {
+    // assert(!iter_init_deferred);
+    if(!sparsity_impl) {
+      assert(is.is_valid());
+      iter.reset(is);
+    } else {
+      iter.reset(is.bounds, is.bounds,
+                 reinterpret_cast<SparsityMapPublicImpl<N, T> *>(sparsity_impl));
+    }
+    iter_init_deferred = false;
     this->is_done = !iter.valid;
   }
 
@@ -720,9 +744,7 @@ namespace Realm {
   {
     if(iter_init_deferred) {
       // index space must be valid now (i.e. somebody should have waited)
-      assert(is.is_valid());
-      iter.reset(is);
-      iter_init_deferred = false;
+      reset_internal();
       if(!iter.valid) {
         this->is_done = true;
         return false;
@@ -740,11 +762,7 @@ namespace Realm {
 
     iter.step();
     if(!iter.valid) {
-      if(sparsity_impl) {
-        iter.reset(is.bounds, is.bounds, sparsity_impl);
-      } else {
-        iter.reset(is);
-      }
+      reset_internal();
       field_idx++;
       if(field_idx == fields.size()) {
         this->is_done = true;

@@ -175,8 +175,14 @@ namespace Realm {
                                const std::vector<FieldID> &_fields,
                                const std::vector<size_t> &_fld_offsets,
                                const std::vector<size_t> &_fld_sizes,
-                               RegionInstanceImpl *_inst_impl, IndexSpace<N, T> _is,
-                               SparsityMapPublicImpl<N, T> *_sparsity_impl = nullptr);
+                               RegionInstanceImpl *_inst_impl, IndexSpace<N, T> _is);
+
+    TransferIteratorIndexSpace(const int _dim_order[N],
+                               const std::vector<FieldID> &_fields,
+                               const std::vector<size_t> &_fld_offsets,
+                               const std::vector<size_t> &_fld_sizes,
+                               RegionInstanceImpl *_inst_impl, const Rect<N, T> &_bounds,
+                               SparsityMapImpl<N, T> *_sparsity_impl);
 
     template <typename S>
     static TransferIterator *deserialize_new(S &deserializer);
@@ -195,11 +201,12 @@ namespace Realm {
     bool serialize(S &serializer) const;
 
   protected:
+    void reset_internal(void);
     virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
                                size_t &fsize);
 
     IndexSpace<N, T> is;
-    SparsityMapPublicImpl<N, T> *sparsity_impl;
+    SparsityMapImpl<N, T> *sparsity_impl{nullptr};
     IndexSpaceIterator<N, T> iter;
     bool iter_init_deferred{false};
     std::vector<FieldID> fields;

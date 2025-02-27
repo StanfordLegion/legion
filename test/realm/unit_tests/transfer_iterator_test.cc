@@ -58,7 +58,7 @@ void run_test_case(const TrasferItTestCaseData<N> &test_case)
           test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
           test_case.field_sizes,
           create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
-          domain, local_impl);
+          test_case.domain, impl.get());
   const InstanceLayoutPieceBase *nonaffine;
   AddressList addrlist;
   AddressListCursor cursor;
