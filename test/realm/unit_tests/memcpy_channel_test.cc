@@ -320,7 +320,6 @@ void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
 
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(test_case.rects, true);
-  IndexSpace<N, T> domain = test_case.domain;
 
   MockIteratorIndexSpace<N, T> *src_it = new MockIteratorIndexSpace<N, T>(
       create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
