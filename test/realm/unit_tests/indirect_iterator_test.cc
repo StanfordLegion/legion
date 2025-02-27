@@ -119,11 +119,11 @@ void run_test_case(const TestCaseData<N> &test_case)
   std::vector<size_t> indirect_field_sizes{sizeof(Point<N, T>)};
   std::unique_ptr<TransferIteratorIndexSpace<1, T>> addr_it =
       std::make_unique<TransferIteratorIndexSpace<1, T>>(
-          addr_domain,
-          create_inst<1, T>(addr_domain, indirect_fields, indirect_field_sizes),
           test_case.dim_order.data(), indirect_fields, test_case.field_offsets,
           indirect_field_sizes,
-          /*extra_elems=*/0);
+          create_inst<1, T>(addr_domain, indirect_fields, indirect_field_sizes),
+          addr_domain);
+
   it->set_indirect_input_port(xd.get(), /*indirect_port_idx=*/0, addr_it.get());
 
   bool done_early = it->done();

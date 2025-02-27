@@ -210,90 +210,6 @@ protected:
   void TearDown() override { delete GetParam(); }
 };
 
-template <int N, typename T>
-class MockIteratorIndexSpace : public TransferIteratorBase<N, T> {
-protected:
-  MockIteratorIndexSpace(void) {}
-
-public:
-  MockIteratorIndexSpace(RegionInstanceImpl *_inst_impl, const int _dim_order[N],
-                         const std::vector<FieldID> &_fields,
-                         const std::vector<size_t> &_fld_offsets,
-                         const std::vector<size_t> &_fld_sizes, const Rect<N, T> &_bounds,
-                         SparsityMapPublicImpl<N, T> *_sparsity_impl = nullptr)
-    : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
-    , fields(_fields)
-    , fld_offsets(_fld_offsets)
-    , fld_sizes(_fld_sizes)
-    , field_idx(0)
-    , bounds(_bounds)
-    , sparsity_impl(_sparsity_impl)
-  {
-    iter.reset(bounds, bounds, sparsity_impl);
-  }
-
-  template <typename S>
-  static TransferIterator *deserialize_new(S &deserializer)
-  {
-    return nullptr;
-  }
-
-  virtual ~MockIteratorIndexSpace(void) {}
-
-  virtual Event request_metadata(void) { return Event::NO_EVENT; }
-
-  virtual void reset(void)
-  {
-    TransferIteratorBase<N, T>::reset();
-    field_idx = 0;
-    assert(!iter_init_deferred);
-    iter.reset(bounds, bounds, sparsity_impl);
-    this->is_done = !iter.valid;
-  }
-
-  static Serialization::PolymorphicSerdezSubclass<TransferIterator,
-                                                  TransferIteratorIndexSpace<N, T>>
-      serdez_subclass;
-
-  template <typename S>
-  bool serialize(S &serializer) const
-  {
-    return false;
-  }
-
-protected:
-  virtual bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset, size_t &fsize)
-  {
-    if(this->is_done || !iter.valid) {
-      this->is_done = true;
-      return false;
-    }
-
-    r = iter.rect;
-    fid = fields[field_idx];
-    offset = fld_offsets[field_idx];
-    fsize = fld_sizes[field_idx];
-
-    iter.step();
-    if(!iter.valid) {
-      iter.reset(bounds, bounds, sparsity_impl);
-      field_idx++;
-      if(field_idx == fields.size()) {
-        this->is_done = true;
-      }
-    }
-    return true;
-  }
-
-  IndexSpaceIterator<N, T> iter;
-  bool iter_init_deferred;
-  std::vector<FieldID> fields;
-  std::vector<size_t> fld_offsets, fld_sizes;
-  size_t field_idx{0};
-  Rect<N, T> bounds;
-  SparsityMapPublicImpl<N, T> *sparsity_impl{nullptr};
-};
-
 template <int N>
 void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
 {
@@ -315,16 +231,15 @@ void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
   SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
   std::unique_ptr<SparsityMapImpl<N, T>> impl =
       std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
-  SparsityMapPublicImpl<N, T> *local_impl =
-      reinterpret_cast<SparsityMapPublicImpl<N, T> *>(impl.get());
 
   impl->set_contributor_count(1);
   impl->contribute_dense_rect_list(test_case.rects, true);
 
-  MockIteratorIndexSpace<N, T> *src_it = new MockIteratorIndexSpace<N, T>(
-      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+  TransferIteratorIndexSpace<N, T> *src_it = new TransferIteratorIndexSpace<N, T>(
       test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-      test_case.field_sizes, test_case.domain, local_impl);
+      test_case.field_sizes,
+      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+      test_case.domain, impl.get());
 
   std::vector<XferDesPortInfo> inputs_info;
   std::vector<XferDesPortInfo> outputs_info;
@@ -345,10 +260,11 @@ void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
   input_port.iter = src_it;
   input_port.addrcursor.set_addrlist(&input_port.addrlist);
 
-  MockIteratorIndexSpace<N, T> *dst_it = new MockIteratorIndexSpace<N, T>(
-      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+  TransferIteratorIndexSpace<N, T> *dst_it = new TransferIteratorIndexSpace<N, T>(
       test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
-      test_case.field_sizes, test_case.domain, local_impl);
+      test_case.field_sizes,
+      create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+      test_case.domain, impl.get());
 
   xfer_desc->output_ports.resize(1);
   XferDes::XferPort &output_port = xfer_desc->output_ports[0];
