@@ -1337,10 +1337,10 @@ clang14_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_2204, *tests]
   variables:
     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
-nvidia_cuda117_clang10_cxx17_debug_kokkos_cuda_legion:
+nvidia_cuda117_clang12_cxx17_debug_kokkos_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *cuda117, *kokkos, *cmake, *legion, *ctest, *cpptrace]
+    <<: [*clang12, *debug, *cxx17_normal, *cuda117, *kokkos, *cmake, *legion, *ctest, *cpptrace]
 nvidia_cuda125_clang12_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*nvidia, *tests]
   variables:
