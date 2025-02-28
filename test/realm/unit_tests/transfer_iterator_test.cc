@@ -1,10 +1,213 @@
-#include "realm/transfer/transfer_utils.h"
 #include "realm/transfer/transfer.h"
 #include "realm/inst_layout.h"
 #include <tuple>
+#include "test_common.h"
 #include <gtest/gtest.h>
 
 using namespace Realm;
+
+struct BaseTrasferItTestCaseData {
+  virtual ~BaseTrasferItTestCaseData() = default;
+  virtual int get_dim() const = 0;
+};
+
+template <int N>
+struct TrasferItTestCaseData {
+  Rect<N> domain;
+  std::vector<Rect<N>> rects;
+  std::vector<Rect<N>> expected;
+  std::vector<int> dim_order;
+  std::vector<FieldID> field_ids;
+  std::vector<size_t> field_offsets;
+  std::vector<size_t> field_sizes;
+};
+
+template <int N>
+struct WrappedTrasferItTestCaseData : public BaseTrasferItTestCaseData {
+  TrasferItTestCaseData<N> data;
+  explicit WrappedTrasferItTestCaseData(TrasferItTestCaseData<N> d)
+    : data(std::move(d))
+  {}
+  int get_dim() const override { return N; }
+};
+
+class TransferIteratorGetAddressesTest
+  : public ::testing::TestWithParam<BaseTrasferItTestCaseData *> {
+protected:
+  void TearDown() override { delete GetParam(); }
+};
+
+template <int N>
+void run_test_case(const TrasferItTestCaseData<N> &test_case)
+{
+  using T = int;
+  NodeSet subscribers;
+
+  SparsityMap<N, T> handle = (ID::make_sparsity(0, 0, 0)).convert<SparsityMap<N, T>>();
+  std::unique_ptr<SparsityMapImpl<N, T>> impl =
+      std::make_unique<SparsityMapImpl<N, T>>(handle, subscribers);
+
+  impl->set_contributor_count(1);
+  impl->contribute_dense_rect_list(test_case.rects, true);
+
+  std::unique_ptr<TransferIteratorIndexSpace<N, T>> it =
+      std::make_unique<TransferIteratorIndexSpace<N, T>>(
+          test_case.dim_order.data(), test_case.field_ids, test_case.field_offsets,
+          test_case.field_sizes,
+          create_inst<N, T>(test_case.domain, test_case.field_ids, test_case.field_sizes),
+          test_case.domain, impl.get());
+  const InstanceLayoutPieceBase *nonaffine;
+  AddressList addrlist;
+  AddressListCursor cursor;
+
+  bool ok = it->get_addresses(addrlist, nonaffine);
+
+  ASSERT_TRUE(ok);
+  ASSERT_TRUE(it->done());
+
+  cursor.set_addrlist(&addrlist);
+  size_t total_volume = 0;
+  for(const auto &rect : test_case.expected) {
+    total_volume += rect.volume();
+  }
+
+  size_t bytes_pending = 0;
+  for(const size_t size : test_case.field_sizes) {
+    bytes_pending += total_volume * size;
+  }
+
+  ASSERT_EQ(addrlist.bytes_pending(), bytes_pending);
+
+  if(bytes_pending > 0 && cursor.get_dim() == 1) {
+    // TODO(apryakhin:@): Find better way to analyze the adddress list
+    // ASSERT_EQ(cursor.get_dim(), 1);
+    for(const size_t field_size : test_case.field_sizes) {
+      for(const auto &rect : test_case.expected) {
+        int dim = cursor.get_dim();
+        ASSERT_EQ(cursor.remaining(dim - 1), rect.volume() * field_size);
+        cursor.advance(dim - 1, cursor.remaining(dim - 1));
+      }
+    }
+
+    ASSERT_EQ(addrlist.bytes_pending(), 0);
+  }
+}
+
+TEST_P(TransferIteratorGetAddressesTest, Base)
+{
+  const BaseTrasferItTestCaseData *base_test_case = GetParam();
+
+  dispatch_for_dimension(
+      base_test_case->get_dim(),
+      [&](auto Dim) {
+        constexpr int N = Dim;
+        auto &test_case =
+            static_cast<const WrappedTrasferItTestCaseData<N> *>(base_test_case)->data;
+        run_test_case(test_case);
+      },
+      std::make_index_sequence<REALM_MAX_DIM>{});
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TransferIteratorGetAddressesCases, TransferIteratorGetAddressesTest,
+    ::testing::Values(
+
+        new WrappedTrasferItTestCaseData<1>(
+
+            // Empty 1D domain
+            {
+                /*domain=*/{Rect<1>(1, 0)},
+                /*rects=*/{},
+                /*expected=*/{},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0, 1},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTrasferItTestCaseData<1>(
+            // Dense 1D rects multifield
+            {
+                /*domain=*/{Rect<1>(0, 14)},
+                /*rects=*/{Rect<1>(0, 14)},
+                /*expected=*/{Rect<1>(0, 14)},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0, 1},
+                /*field_offsets=*/{0, 0},
+                /*field_sizes=*/{sizeof(int), sizeof(long long)},
+            }),
+
+        new WrappedTrasferItTestCaseData<1>(
+            // Dense 1D rects
+            {
+                /*domain=*/{Rect<1>(0, 14)},
+                /*rects=*/{Rect<1>(0, 14)},
+                /*expected=*/{Rect<1>(0, 14)},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTrasferItTestCaseData<1>(
+            // Sparse 1D rects
+            {
+                /*domain=*/{Rect<1>(0, 14)},
+                /*rects=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
+                /*expected=*/{Rect<1>(2, 4), Rect<1>(6, 8), Rect<1>(10, 12)},
+                /*dim_order=*/{0},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTrasferItTestCaseData<2>(
+            // Full 2D dense
+            {
+                /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                /*rects*/ {Rect<2>({0, 0}, {10, 10})},
+                /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+                /*dim_order=*/{0, 1},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTrasferItTestCaseData<2>(
+            // Full 2D sparse
+            {
+                /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                /*rects*/ {Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
+                /*expected=*/{Rect<2>({0, 0}, {2, 2}), Rect<2>({4, 4}, {8, 8})},
+                /*dim_order=*/{0, 1},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTrasferItTestCaseData<2>(
+            // Full 2D dense reverse dims
+            {
+                /*domain=*/Rect<2>({0, 0}, {10, 10}),
+                /*rects*/ {Rect<2>({0, 0}, {10, 10})},
+                /*expected=*/{Rect<2>({0, 0}, {10, 10})},
+                /*dim_order=*/{1, 0},
+                /*field_ids=*/{0},
+                /*field_offsets=*/{0},
+                /*field_sizes=*/{sizeof(int)},
+            }),
+
+        new WrappedTrasferItTestCaseData<3>({
+            /*domain=*/Rect<3>({0, 0, 0}, {10, 10, 10}),
+            /*rects=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+            /*expected=*/{Rect<3>({0, 0, 0}, {10, 10, 10})},
+            /*dim_order=*/{0, 1, 2},
+            /*field_ids=*/{0},
+            /*field_offsets=*/{0},
+            /*field_sizes=*/{sizeof(int)},
+        })));
+
+constexpr static size_t kByteSize = sizeof(int);
 
 struct IteratorStepTestCase {
   TransferIterator *it;
@@ -24,64 +227,16 @@ TEST_P(TransferIteratorStepTest, Base)
     TransferIterator::AddressInfo info;
     size_t bytes = test_case.it->step(test_case.max_bytes[i], info, 0, 0);
 
-    EXPECT_EQ(bytes, test_case.exp_bytes[i]);
+    ASSERT_EQ(bytes, test_case.exp_bytes[i]);
 
     if(!test_case.infos.empty()) {
-      EXPECT_EQ(info.base_offset, test_case.infos[i].base_offset);
-      EXPECT_EQ(info.bytes_per_chunk, test_case.infos[i].bytes_per_chunk);
-      EXPECT_EQ(info.num_lines, test_case.infos[i].num_lines);
-      EXPECT_EQ(info.line_stride, test_case.infos[i].line_stride);
-      EXPECT_EQ(info.num_planes, test_case.infos[i].num_planes);
-      // EXPECT_FALSE(it.done());
+      ASSERT_EQ(info.base_offset, test_case.infos[i].base_offset);
+      ASSERT_EQ(info.bytes_per_chunk, test_case.infos[i].bytes_per_chunk);
+      ASSERT_EQ(info.num_lines, test_case.infos[i].num_lines);
+      ASSERT_EQ(info.line_stride, test_case.infos[i].line_stride);
+      ASSERT_EQ(info.num_planes, test_case.infos[i].num_planes);
     }
   }
-}
-
-constexpr static size_t kByteSize = sizeof(int);
-
-template <int N, typename T>
-static InstanceLayout<N, T> *create_layout(Rect<N, T> bounds,
-                                           const std::vector<FieldID> &field_ids,
-                                           const std::vector<size_t> &field_sizes)
-{
-  InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
-
-  inst_layout->piece_lists.resize(field_ids.size());
-
-  for(size_t i = 0; i < field_ids.size(); i++) {
-    InstanceLayoutGeneric::FieldLayout field_layout;
-    field_layout.list_idx = i;
-    field_layout.rel_offset = 0;
-    field_layout.size_in_bytes = field_sizes[i];
-
-    AffineLayoutPiece<N, T> *affine_piece = new AffineLayoutPiece<N, T>();
-    affine_piece->bounds = bounds;
-    affine_piece->offset = 0;
-    affine_piece->strides[0] = field_sizes[i];
-    size_t mult = affine_piece->strides[0];
-    for(int d = 1; d < N; d++) {
-      affine_piece->strides[d] = (bounds.hi[d - 1] - bounds.lo[d - 1] + 1) * mult;
-      mult *= (bounds.hi[d - 1] - bounds.lo[d - 1] + 1);
-    }
-
-    inst_layout->space = bounds;
-    inst_layout->fields[field_ids[i]] = field_layout;
-    inst_layout->piece_lists[i].pieces.push_back(affine_piece);
-  }
-
-  return inst_layout;
-}
-
-template <int N, typename T>
-RegionInstanceImpl *create_inst(Rect<N, T> bounds, const std::vector<FieldID> &field_ids,
-                                const std::vector<size_t> &field_sizes)
-{
-  RegionInstance inst = ID::make_instance(0, 0, 0, 0).convert<RegionInstance>();
-  InstanceLayout<N, T> *inst_layout = create_layout(bounds, field_ids, field_sizes);
-  RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
-  impl->metadata.layout = inst_layout;
-  impl->metadata.inst_offset = 0;
-  return impl;
 }
 
 const static IteratorStepTestCase kIteratorStepTestCases[] = {
