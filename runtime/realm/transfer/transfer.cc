@@ -492,7 +492,6 @@ namespace Realm {
 #ifdef DEBUG_REALM
     assert(!tentative_valid);
 #endif
-
     nonaffine = 0;
 
     const InstanceLayout<N, T> *inst_layout =
@@ -629,19 +628,14 @@ namespace Realm {
 
   template <int N, typename T>
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
-      const IndexSpace<N, T> &_is, RegionInstanceImpl *_inst_impl,
       const int _dim_order[N], const std::vector<FieldID> &_fields,
       const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
-      size_t _extra_elems)
+      RegionInstanceImpl *_inst_impl, const IndexSpace<N, T> &_is)
     : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
     , is(_is)
-    , field_idx(0)
-    , extra_elems(_extra_elems)
   {
     if(is.is_valid()) {
-      iter.reset(is);
-      this->is_done = !iter.valid;
-      iter_init_deferred = false;
+      reset_internal();
     } else {
       iter_init_deferred = true;
     }
@@ -655,9 +649,26 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(
+      const int _dim_order[N], const std::vector<FieldID> &_fields,
+      const std::vector<size_t> &_fld_offsets, const std::vector<size_t> &_fld_sizes,
+      RegionInstanceImpl *_inst_impl, const Rect<N, T> &_bounds,
+      SparsityMapImpl<N, T> *_sparsity_impl)
+    : TransferIteratorBase<N, T>(_inst_impl, _dim_order)
+    , is(_bounds, _sparsity_impl->me)
+    , sparsity_impl(_sparsity_impl)
+  {
+    assert(sparsity_impl);
+    reset_internal();
+    if(iter.valid) {
+      fields = _fields;
+      fld_offsets = _fld_offsets;
+      fld_sizes = _fld_sizes;
+    }
+  }
+
+  template <int N, typename T>
   TransferIteratorIndexSpace<N, T>::TransferIteratorIndexSpace(void)
-    : iter_init_deferred(false)
-    , field_idx(0)
   {}
 
   template <int N, typename T>
@@ -669,12 +680,10 @@ namespace Realm {
     RegionInstance inst;
     std::vector<FieldID> fields;
     std::vector<size_t> fld_offsets, fld_sizes;
-    size_t extra_elems;
     int dim_order[N];
 
     if(!((deserializer >> is) && (deserializer >> inst) && (deserializer >> fields) &&
-         (deserializer >> fld_offsets) && (deserializer >> fld_sizes) &&
-         (deserializer >> extra_elems))) {
+         (deserializer >> fld_offsets) && (deserializer >> fld_sizes))) {
       return 0;
     }
 
@@ -684,9 +693,9 @@ namespace Realm {
       }
     }
 
-    TransferIteratorIndexSpace<N, T> *tiis = new TransferIteratorIndexSpace<N, T>(
-        is, get_runtime()->get_instance_impl(inst), dim_order, fields, fld_offsets,
-        fld_sizes, extra_elems);
+    TransferIteratorIndexSpace<N, T> *tiis =
+        new TransferIteratorIndexSpace<N, T>(dim_order, fields, fld_offsets, fld_sizes,
+                                             get_runtime()->get_instance_impl(inst), is);
     return tiis;
   }
 
@@ -711,8 +720,21 @@ namespace Realm {
   {
     TransferIteratorBase<N, T>::reset();
     field_idx = 0;
-    assert(!iter_init_deferred);
-    iter.reset(iter.space);
+    reset_internal();
+  }
+
+  template <int N, typename T>
+  void TransferIteratorIndexSpace<N, T>::reset_internal(void)
+  {
+    // assert(!iter_init_deferred);
+    if(!sparsity_impl) {
+      assert(is.is_valid());
+      iter.reset(is);
+    } else {
+      iter.reset(is.bounds, is.bounds,
+                 reinterpret_cast<SparsityMapPublicImpl<N, T> *>(sparsity_impl));
+    }
+    iter_init_deferred = false;
     this->is_done = !iter.valid;
   }
 
@@ -722,9 +744,7 @@ namespace Realm {
   {
     if(iter_init_deferred) {
       // index space must be valid now (i.e. somebody should have waited)
-      assert(is.is_valid());
-      iter.reset(is);
-      iter_init_deferred = false;
+      reset_internal();
       if(!iter.valid) {
         this->is_done = true;
         return false;
@@ -742,7 +762,7 @@ namespace Realm {
 
     iter.step();
     if(!iter.valid) {
-      iter.reset(is);
+      reset_internal();
       field_idx++;
       if(field_idx == fields.size()) {
         this->is_done = true;
@@ -762,7 +782,7 @@ namespace Realm {
   {
     if(!((serializer << iter.space) && (serializer << this->inst_impl->me) &&
          (serializer << fields) && (serializer << fld_offsets) &&
-         (serializer << fld_sizes) && (serializer << extra_elems))) {
+         (serializer << fld_sizes))) {
       return false;
     }
 
@@ -1500,7 +1520,8 @@ namespace Realm {
         num_rects = amt / sizeof(Rect<N, T>);
         assert(amt == (num_rects * sizeof(Rect<N, T>)));
 
-        // log_dma.print() << "got rects: " << rects[0] << "(+" << (num_rects - 1) << ")";
+        // log_dma.print() << "got rects: " << rects[0] << "(+" << (num_rects - 1) <<
+        // ")";
         if(indirect_xd != 0) {
           XferDes::XferPort &iip = indirect_xd->input_ports[indirect_port_idx];
           indirect_xd->update_bytes_read(indirect_port_idx, iip.local_bytes_total, amt);
@@ -1972,11 +1993,10 @@ namespace Realm {
       const std::vector<FieldID> &fields, const std::vector<size_t> &fld_offsets,
       const std::vector<size_t> &fld_sizes) const
   {
-    size_t extra_elems = 0;
     assert(dim_order.size() == N);
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-    return new TransferIteratorIndexSpace<N, T>(is, impl, dim_order.data(), fields,
-                                                fld_offsets, fld_sizes, extra_elems);
+    return new TransferIteratorIndexSpace<N, T>(dim_order.data(), fields, fld_offsets,
+                                                fld_sizes, impl, is);
   }
 
   template <int N, typename T>
@@ -3172,8 +3192,9 @@ namespace Realm {
                                     domain_size() * bytes_per_element, &src_frags,
                                     &dst_frags, path_infos[idx]);
         if(!ok) {
-          // Couldn't find a path with the given indirect memory, so use a path without it
-          // and we'll move the indirection buffer somewhere that channel can access it
+          // Couldn't find a path with the given indirect memory, so use a path without
+          // it and we'll move the indirection buffer somewhere that channel can access
+          // it
           copy_info.ind_mem = Memory::NO_MEMORY;
           ok = find_fastest_path(nodes_info, path_cache, copy_info, serdez_id, 0,
                                  domain_size() * bytes_per_element, &src_frags,
@@ -3291,7 +3312,8 @@ namespace Realm {
              last_channel) {
             continue;
           }
-          // log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " -> "
+          // log_new_dma.print() << "fix " << i << " " << path_infos[i].path[0] << " ->
+          // "
           // << dst_ib_mem;
           bool ok = find_shortest_path(nodes_info, path_infos[i].path[0], dst_ib_mem,
                                        0 /*no serdez*/, 0 /*redop_id*/, path_infos[i]);
@@ -3491,8 +3513,9 @@ namespace Realm {
                                     serdez_id, 0, domain_size() * bytes_per_element,
                                     &src_frags, &dst_frags, path_infos[idx]);
         if(!ok) {
-          // Couldn't find a path with the given indirect memory, so use a path without it
-          // and we'll move the indirection buffer somewhere that channel can access it
+          // Couldn't find a path with the given indirect memory, so use a path without
+          // it and we'll move the indirection buffer somewhere that channel can access
+          // it
           copy_info.ind_mem = Memory::NO_MEMORY;
           ok = find_fastest_path(get_runtime()->nodes, path_cache, copy_info, serdez_id,
                                  0, domain_size() * bytes_per_element, &src_frags,
