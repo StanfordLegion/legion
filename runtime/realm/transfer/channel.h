@@ -513,32 +513,6 @@ namespace Realm {
 
     class MemcpyChannel;
 
-    class MemcpyXferDes : public XferDes {
-    public:
-      MemcpyXferDes(uintptr_t _dma_op, Channel *_channel,
-		    NodeID _launch_node, XferDesID _guid,
-		    const std::vector<XferDesPortInfo>& inputs_info,
-		    const std::vector<XferDesPortInfo>& outputs_info,
-		    int _priority);
-
-      long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
-
-      virtual bool request_available();
-      virtual Request* dequeue_request();
-      virtual void enqueue_request(Request* req);
-
-      bool progress_xd(MemcpyChannel *channel, TimeLimit work_until);
-
-    private:
-      bool memcpy_req_in_use;
-      MemcpyRequest memcpy_req;
-      bool has_serdez;
-      //const char *src_buf_base, *dst_buf_base;
-    };
-
     class MemfillChannel;
 
     class MemfillXferDes : public XferDes {
@@ -1066,45 +1040,6 @@ namespace Realm {
       virtual long progress_xd(XferDes *xd, long max_nr) { assert(0); return 0; }
     protected:
       XDQueue<CHANNEL, XD> xdq;
-    };
-
-    class MemcpyChannel : public SingleXDQChannel<MemcpyChannel, MemcpyXferDes> {
-    public:
-      MemcpyChannel(BackgroundWorkManager *bgwork);
-
-      // multiple concurrent memcpys ok
-      static const bool is_ordered = false;
-
-      ~MemcpyChannel();
-
-      // helper to list all memories that can be reached by load/store instructions
-      //  on the cpu in the current process
-      static void enumerate_local_cpu_memories(std::vector<Memory>& mems);
-
-      virtual uint64_t supports_path(ChannelCopyInfo channel_copy_info,
-                                     CustomSerdezID src_serdez_id,
-                                     CustomSerdezID dst_serdez_id,
-                                     ReductionOpID redop_id,
-                                     size_t total_bytes,
-                                     const std::vector<size_t> *src_frags,
-                                     const std::vector<size_t> *dst_frags,
-                                     XferDesKind *kind_ret = 0,
-                                     unsigned *bw_ret = 0,
-                                     unsigned *lat_ret = 0);
-
-      virtual XferDes *create_xfer_des(uintptr_t dma_op,
-				       NodeID launch_node,
-				       XferDesID guid,
-				       const std::vector<XferDesPortInfo>& inputs_info,
-				       const std::vector<XferDesPortInfo>& outputs_info,
-				       int priority,
-				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size,
-                                       size_t fill_total);
-
-      virtual long submit(Request** requests, long nr);
-
-      bool is_stopped;
     };
 
     class MemfillChannel : public SingleXDQChannel<MemfillChannel, MemfillXferDes> {

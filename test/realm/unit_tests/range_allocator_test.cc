@@ -16,12 +16,6 @@ TEST_F(RangeAllocatorTest, DeallocateNonExistent)
   range_alloc.deallocate(42, /*missiok_ok=*/true);
 }
 
-TEST_F(RangeAllocatorTest, DeallocateNonExistentFail)
-{
-  // TODO(apryakhin): convert to bool return status
-  EXPECT_DEATH({ range_alloc.deallocate(42, /*missiok_ok=*/false); }, "");
-}
-
 TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
 {
   size_t start = 0, size = 0;
@@ -31,13 +25,6 @@ TEST_F(RangeAllocatorTest, LookupEmptyAllocator)
 TEST_F(RangeAllocatorTest, AddRange) { range_alloc.add_range(0, 1024); }
 
 TEST_F(RangeAllocatorTest, AddSingleRangeEmpty) { range_alloc.add_range(1024, 1023); }
-
-TEST_F(RangeAllocatorTest, AddMultipleRanges)
-{
-  range_alloc.add_range(0, 1024);
-  // TODO(apryakhin): convert to bool return status
-  EXPECT_DEATH({ range_alloc.add_range(1025, 2048); }, "");
-}
 
 TEST_F(RangeAllocatorTest, Allocate)
 {

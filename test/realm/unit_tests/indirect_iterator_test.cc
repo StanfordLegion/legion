@@ -1,4 +1,5 @@
 #include "realm/transfer/channel.h"
+#include "realm/transfer/memcpy_channel.h"
 #include "realm/transfer/transfer.h"
 #include "test_common.h"
 #include <gtest/gtest.h>
