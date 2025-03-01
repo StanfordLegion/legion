@@ -46,6 +46,9 @@ namespace p2p {
     // @brief Allgather collective using p2p communication.
     int Allgather(void *sbuf, int sendcount, uint8_t sendtype, void *rbuf, int recvcount,
                   uint8_t recvtype);
+
+    // @brief shutdown the p2p communicator
+    int Shutdown();
   };
 } // namespace p2p
 #endif
