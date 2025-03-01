@@ -18,6 +18,7 @@
 
 #include <vector>
 #include <cstddef>
+#include <cstdint>
 
 #include "realm/memory.h"
 
