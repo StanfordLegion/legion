@@ -24,9 +24,14 @@ static int bootstrap_p2p_allgather(const void *sendbuf, void *recvbuf, int lengt
   status =
       p2p_comm->Allgather(const_cast<void *>(sendbuf), length, 0, recvbuf, length, 0);
   BOOTSTRAP_NE_ERROR_JMP(status, 0, BOOTSTRAP_ERROR_INTERNAL, out,
-                         "MPI_Allgather failed\n");
+                         "P2P_Allgather failed\n");
 out:
   return status;
+}
+
+static int bootstrap_p2p_finalize(bootstrap_handle_t *handle)
+{
+  return p2p_comm->Shutdown();
 }
 
 // Read the environment variables.
@@ -106,6 +111,6 @@ extern "C" int realm_ucp_bootstrap_plugin_init(void *arg, bootstrap_handle_t *ha
   handle->alltoall = nullptr;
   handle->allreduce_ull = nullptr;
   handle->allgatherv = nullptr;
-  handle->finalize = nullptr;
+  handle->finalize = bootstrap_p2p_finalize;
   return 0;
 }
