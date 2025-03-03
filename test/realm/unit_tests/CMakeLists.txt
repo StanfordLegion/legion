@@ -23,9 +23,11 @@ endif()
 
 list(APPEND REALM_TESTS
   addrsplit_channel_test.cc
+  memcpy_channel_test.cc
   indirect_iterator_test.cc
   comp_queue_test.cc
   ucx_mpool_test.cc
+  indexspace_iterator_test.cc
   barrier_test.cc
   event_test.cc
   path_cache_test.cc
@@ -44,6 +46,7 @@ list(APPEND REALM_TESTS
   lowlevel_dma_test.cc
   circ_queue_test.cc
   gather_scatter_test.cc
+  rectlist_test.cc
   sparsity_map_test.cc
   ucx_mpool_test.cc
   topology_test.cc

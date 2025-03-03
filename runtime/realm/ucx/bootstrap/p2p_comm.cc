@@ -68,4 +68,10 @@ namespace p2p {
     }
     return 0;
   }
+
+  int P2PComm::Shutdown()
+  {
+    worker_->shutdown();
+    return 0;
+  }
 } // namespace p2p

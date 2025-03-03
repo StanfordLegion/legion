@@ -32,6 +32,8 @@ list(APPEND REALM_SRC
   realm/transfer/addrsplit_channel.h       realm/transfer/addrsplit_channel.cc
   realm/transfer/addrsplit_channel.inl
   realm/transfer/channel.h                 realm/transfer/channel.cc
+  realm/transfer/channel_common.h          realm/transfer/channel_common.cc
+  realm/transfer/memcpy_channel.h          realm/transfer/memcpy_channel.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
