@@ -257,14 +257,17 @@ if(REALM_ENABLE_HIP)
         CACHE PATH "Path to which HIP has been installed"
       )
     else()
-      set(HIP_PATH
-        $ENV{HIP_PATH}
+      set(ROCM_PATH
+        $ENV{ROCM_PATH}
         CACHE PATH "Path to which HIP has been installed"
       )
     endif()
   endif()
   list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
   find_package(hip CONFIG)
+  if (NOT HIP_ROOT_DIR)
+    set(HIP_ROOT_DIR "${ROCM_PATH}")
+  endif()
   list(APPEND REALM_STATIC_DEPENDS hip)
 endif()
 
@@ -400,7 +403,7 @@ if(REALM_ENABLE_UCX)
       "--enable-static"
     )
     if(hip_FOUND)
-      list(APPEND UCC_CONFIG_ARGS "--with-rocm=${HIP_ROOT_DIR}")
+      list(APPEND UCX_CONFIG_ARGS "--with-rocm=${HIP_ROOT_DIR}")
     endif()
     if(CUDAToolkit_FOUND)
       list(APPEND UCX_CONFIG_ARGS "--with-cuda=${CUDAToolkit_LIBRARY_ROOT}")
@@ -534,7 +537,7 @@ if(REALM_ENABLE_GASNETEX)
         )
       endif()
       if(hip_FOUND)
-        list(APPEND GASNet_CONFIG_ARGS --with-hip-home=${HIP_ROOT_DIR} --enable-kind-hip)
+        list(APPEND GASNet_CONFIG_ARGS "--with-hip-home=${HIP_ROOT_DIR}" --enable-kind-hip)
       endif()
       if(MPI_FOUND)
         list(APPEND GASNet_CONFIG_ARGS --enable-mpi --with-mpi-cc=${MPI_C_COMPILER}
