@@ -59,7 +59,7 @@ Regent requires:
       * LLVM 13.0 is recommended
       * See the [version support table](https://github.com/terralang/terra#supported-llvm-versions) for more details
       * Pre-built binaries are available [here](https://github.com/terralang/llvm-build/releases)
-  * *Optional (but strongly recommended)*: CMake 3.16 or newer
+  * *Optional (but strongly recommended)*: CMake 3.22 or newer
 
 Regent also has a number of transitive dependencies via Legion:
 

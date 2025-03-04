@@ -120,7 +120,7 @@ To get started with Legion, you'll need:
 
   * Linux, macOS, or another Unix
   * A C++ 17 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
-  * *Optional*: CMake 3.16 or newer
+  * *Optional*: CMake 3.22 or newer
   * *Optional*: Python 3.5 or newer (used for tools and Python bindings)
       * Note: Python 3.8 or newer is required for `tools/legion_prof.py`
   * *Optional*: Rust 1.74 or newer (used for Rust profiler)
