@@ -1109,6 +1109,11 @@ do
 
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
+    var next_cycle = cycle + 1
+    var next_time = time + dt
+
+    cont = continue_simulation(next_cycle, cstop, next_time, tstop)
+
     -- FIXME: this code violates the trace consistency
     -- if cycle > 0 and cycle % interval == 0 then
     --   var current_time = c.legion_get_current_time_in_micros()/1.e6
@@ -1305,10 +1310,8 @@ do
       dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv, enable)
     end
 
-    cycle += 1
-    time += dt
-
-    cont = continue_simulation(cycle, cstop, time, tstop)
+    cycle = next_cycle
+    time = next_time
   end
   end
   if prune == 0 then
