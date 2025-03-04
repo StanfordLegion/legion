@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 project(LegionTest_realm_unittest)
 
 if(NOT Legion_SOURCE_DIR)

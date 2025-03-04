@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 project(LegionExample_ghost_pull)
 
 # Only search if were building stand-alone and not as part of Legion

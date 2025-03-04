@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #------------------------------------------------------------------------------#
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
 if(NOT Realm_VERSION)
   message(FATAL_ERROR "Realm version not defined!")
