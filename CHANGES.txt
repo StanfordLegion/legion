@@ -1,6 +1,12 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 25.03.0 (March ??, 2025)
+  * Build
+    - Minimum required CUDA version is now 11.7
+  * Legion
+  * Realm
+
 Version 24.12.0 (December 20, 2024)
   * Legion
     - Numerous bug fixes
