@@ -6,13 +6,18 @@ Version 25.03.0 (March ??, 2025)
     - Minimum required CMake version is now 3.22
     - Minimum required CUDA version is now 11.7
   * Legion
-    - The one-pool branch of Legion has merged to remove the need for
-       eager allocation percentage
-    - Added support for automatic tracing discovery that is now on
-       by default (but can be disabled with a command line flag)
+    - Legion now uses a "one pool" memory allocation strategy that removes the
+       need to split memory into two pools via the `-lg:eager_alloc_percentage`
+       flag. Applications may take advantage of the new support to specify the
+       additional memory required by each task
+    - Legion now automatically discovers traces of repeated sequences of tasks
+       by default. Existing traces specified with `begin_trace` and `end_trace`
+       are still respected and take priority over automatic traces. If
+       automatic traces are not desired, they can be disabled with
+       `-lg:no_auto_tracing`
     - Added support for user-specified profiling ranges
-    - Reference count sparsity maps correctly so the memory
-       associated with them are now reclaimed
+    - Reference count sparsity maps correctly so the memory associated with
+       them is now reclaimed
   * Realm
 
 Version 24.12.0 (December 20, 2024)
