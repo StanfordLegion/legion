@@ -18,6 +18,10 @@ Version 25.03.0 (March ??, 2025)
     - Added support for user-specified profiling ranges
     - Reference count sparsity maps correctly so the memory associated with
        them is now reclaimed
+  * Tools
+    - Minimum required Rust version is now 1.84
+    - Fix for correctly processing negative points and rects
+    - Support for profiling external handshake objects
   * Realm
 
 Version 24.12.0 (December 20, 2024)
