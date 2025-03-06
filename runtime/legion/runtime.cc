@@ -8839,7 +8839,8 @@ namespace Legion {
     ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
         size_t alignment, RtEvent use, MemoryManager *man)
       : MemoryPool(alignment), manager(man), limit(remain),
-        remaining_bytes(remain), first_unused_range(SENTINEL), released(false)
+        remaining_bytes(remain), first_unused_range(SENTINEL),
+        ranges_initialized(false), released(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8848,29 +8849,25 @@ namespace Legion {
 #endif
       // Might not have an instance if this is a zero-sized pool
       if (inst.exists())
-      {
         backing_instances.emplace(std::make_pair(inst, use));
-        // If we're on the local node for the instance then set up the ranges
-        const void *base = inst.pointer_untyped(0, 0);
-        if (base != NULL)
-        {
-          // Initialize the first range with the full allocated space
-          Range &r = ranges.emplace_back(Range());
-          r.first = reinterpret_cast<uintptr_t>(base);
-          r.last = r.first + limit;
-          r.prev = r.next = r.prev_free = r.next_free = SENTINEL;
-          r.instance = inst;
-          const unsigned log2_size = floor_log2(limit);
-          size_based_free_lists.resize(log2_size+1, SENTINEL);
-          size_based_free_lists[log2_size] = 0;
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
     ConcretePool::~ConcretePool(void)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ConcretePool::get_ready_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (backing_instances.empty())
+        return ApEvent::NO_AP_EVENT;
+#ifdef DEBUG_LEGION
+      assert(backing_instances.size() == 1);
+#endif
+      return ApEvent(backing_instances.begin()->second);
     }
 
     //--------------------------------------------------------------------------
@@ -9162,6 +9159,38 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(size > 0);
 #endif
+      // Make sure we've inserted the initial range if from the backing
+      // instance if we haven't already done that
+      if (!ranges_initialized)
+      {
+        if (!backing_instances.empty())
+        {
+          
+#ifdef DEBUG_LEGION
+          assert(backing_instances.size() == 1);
+#endif
+          std::map<PhysicalInstance,RtEvent>::const_iterator it =
+            backing_instances.begin();
+#ifdef DEBUG_LEGION
+          assert(it->second.has_triggered());
+#endif
+          // If we're on the local node for the instance then set up the ranges
+          const void *base = it->first.pointer_untyped(0, 0);
+          if (base != NULL)
+          {
+            // Initialize the first range with the full allocated space
+            Range &r = ranges.emplace_back(Range());
+            r.first = reinterpret_cast<uintptr_t>(base);
+            r.last = r.first + limit;
+            r.prev = r.next = r.prev_free = r.next_free = SENTINEL;
+            r.instance = it->first;
+            const unsigned log2_size = floor_log2(limit);
+            size_based_free_lists.resize(log2_size+1, SENTINEL);
+            size_based_free_lists[log2_size] = 0;
+          }
+        }
+        ranges_initialized = true;
+      }
       bool try_again = true;
       while (try_again)
       {
@@ -9949,6 +9978,13 @@ namespace Legion {
     UnboundPool::~UnboundPool(void)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent UnboundPool::get_ready_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
