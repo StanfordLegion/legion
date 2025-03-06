@@ -38,6 +38,7 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
                           inputs_info, outputs_info, 0, redop_info, nullptr, 0, 0);
 
   EXPECT_EQ(addrsplit_channel.num_xds, 1);
+  addrsplit_channel.shutdown();
 }
 
 template <int N, typename T>
@@ -74,6 +75,7 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesRemote)
 
   EXPECT_EQ(addrsplit_channel.num_xds, 0);
   EXPECT_EQ(comm->num_remote_xds, 1);
+  addrsplit_channel.shutdown();
 }
 
 template <int DIM, typename T>
