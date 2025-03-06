@@ -1,5 +1,6 @@
 #include "realm/mem_impl.h"
 #include "realm/transfer/addrsplit_channel.h"
+#include "test_common.h"
 #include <tuple>
 #include <gtest/gtest.h>
 #include <cstring>
@@ -29,15 +30,14 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
   size_t bytes_per_element = 4;
 
   BackgroundWorkManager bgwork;
-  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(&bgwork);
+  MockAddressSplitChannel addrsplit_channel(&bgwork);
   std::vector<IndexSpace<1>> spaces(1);
-  std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
-      std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
-                                                           addrsplit_channel);
-  factory->create_xfer_des(/*dma_op=*/0, /*launch_node=*/0, /*target_node=*/0, /*guid=*/0,
-                           inputs_info, outputs_info, 0, redop_info, nullptr, 0, 0);
+  AddressSplitXferDesFactory<1, int> factory(bytes_per_element, spaces,
+                                             &addrsplit_channel);
+  factory.create_xfer_des(/*dma_op=*/0, /*launch_node=*/0, /*target_node=*/0, /*guid=*/0,
+                          inputs_info, outputs_info, 0, redop_info, nullptr, 0, 0);
 
-  EXPECT_EQ(addrsplit_channel->num_xds, 1);
+  EXPECT_EQ(addrsplit_channel.num_xds, 1);
 }
 
 template <int N, typename T>
@@ -64,16 +64,15 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesRemote)
 
   MockAddressSplitCommunicator<1, int> *comm = new MockAddressSplitCommunicator<1, int>();
   BackgroundWorkManager bgwork;
-  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(&bgwork);
+  MockAddressSplitChannel addrsplit_channel(&bgwork);
   std::vector<IndexSpace<1>> spaces(1);
 
-  std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
-      std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
-                                                           addrsplit_channel, comm);
-  factory->create_xfer_des(0, launch_node, target_node, guid, inputs_info, outputs_info,
-                           0, redop_info, nullptr, 0, 0);
+  AddressSplitXferDesFactory<1, int> factory(bytes_per_element, spaces,
+                                             &addrsplit_channel, comm);
+  factory.create_xfer_des(0, launch_node, target_node, guid, inputs_info, outputs_info, 0,
+                          redop_info, nullptr, 0, 0);
 
-  EXPECT_EQ(addrsplit_channel->num_xds, 0);
+  EXPECT_EQ(addrsplit_channel.num_xds, 0);
   EXPECT_EQ(comm->num_remote_xds, 1);
 }
 
@@ -159,8 +158,7 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
   }
 
   BackgroundWorkManager bgwork;
-  std::unique_ptr<MockAddressSplitChannel> addrsplit_channel =
-      std::make_unique<MockAddressSplitChannel>(&bgwork);
+  MockAddressSplitChannel addrsplit_channel(&bgwork);
 
   std::vector<XferDesPortInfo> inputs_info;
   std::vector<XferDesPortInfo> outputs_info;
@@ -171,7 +169,7 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
   NodeID owner = 0;
   Node node_data;
 
-  AddressSplitXferDes<N, T> xfer_des(0, addrsplit_channel.get(), owner, guid, inputs_info,
+  AddressSplitXferDes<N, T> xfer_des(0, &addrsplit_channel, owner, guid, inputs_info,
                                      outputs_info, priority, sizeof(Point<N, T>),
                                      test_case.spaces);
 
@@ -223,7 +221,7 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
       new MockIterator<1, int>(test_case.expected_iterations, total_src_bytes);
 
   while(!xfer_des.transfer_completed.load()) {
-    xfer_des.progress_xd(addrsplit_channel.get(), TimeLimit::relative(1000000));
+    xfer_des.progress_xd(&addrsplit_channel, TimeLimit::relative(1000000));
   }
 
   for(size_t i = 0; i < test_case.exp_points.size(); i++) {
@@ -235,19 +233,7 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
     }
   }
 
-  addrsplit_channel->shutdown();
-}
-
-template <typename Func, size_t... Is>
-void dispatch_for_dimension(int dim, Func &&func, std::index_sequence<Is...>)
-{
-  (
-      [&] {
-        if(dim == static_cast<int>(Is + 1)) {
-          func(std::integral_constant<int, Is + 1>{});
-        }
-      }(),
-      ...);
+  addrsplit_channel.shutdown();
 }
 
 TEST_P(AddressSplitTest, ProgressXD)
