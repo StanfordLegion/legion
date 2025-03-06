@@ -22,6 +22,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 list(APPEND REALM_TESTS
+  addrsplit_channel_test.cc
   memcpy_channel_test.cc
   indirect_iterator_test.cc
   comp_queue_test.cc

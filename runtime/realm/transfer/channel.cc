@@ -3713,10 +3713,7 @@ namespace Realm {
     : channel(_channel)
   {}
 
-  void SimpleXferDesFactory::release()
-  {
-    // do nothing since we are a singleton
-  }
+  bool SimpleXferDesFactory::needs_release() { return false; }
 
   void SimpleXferDesFactory::create_xfer_des(uintptr_t dma_op,
 					     NodeID launch_node,

@@ -18,6 +18,7 @@
 #include "realm/transfer/transfer.h"
 #include "realm/transfer/transfer_utils.h"
 #include "realm/transfer/channel.h"
+#include "realm/transfer/addrsplit_channel.h"
 
 #include "realm/transfer/lowlevel_dma.h"
 #include "realm/transfer/ib_memory.h"
@@ -41,6 +42,22 @@ namespace Realm {
     size_t path_cache_lru_size = 0;
     size_t ib_size_bytes = 65536;
   }; // namespace Config
+
+  static AddressSplitChannel *local_addrsplit_channel = 0;
+
+  AddressSplitChannel *get_local_addrsplit_channel()
+  {
+    if(local_addrsplit_channel == nullptr) {
+      const Node &n = get_runtime()->nodes[Network::my_node_id];
+      for(Channel *ch : n.dma_channels) {
+        if(ch->kind == XFER_ADDR_SPLIT) {
+          local_addrsplit_channel = reinterpret_cast<AddressSplitChannel *>(ch);
+          break;
+        }
+      }
+    }
+    return local_addrsplit_channel;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -540,6 +557,7 @@ namespace Realm {
       // figure out the largest iteration-consistent subrectangle that fits in
       //  the current piece
       Rect<N, T> target_subrect;
+
       have_rect = compute_target_subrect(layout_piece->bounds, cur_rect, cur_point,
                                          target_subrect, &dim_order[0]);
       log_dma.debug() << "step: cur_rect=" << cur_rect
@@ -2113,470 +2131,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class AddressSplitChannel
-  //
-
-  static AddressSplitChannel *local_addrsplit_channel = 0;
-
-  AddressSplitChannel::AddressSplitChannel(BackgroundWorkManager *bgwork)
-    : SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase>(
-          bgwork, XFER_ADDR_SPLIT, "address split")
-  {
-    assert(!local_addrsplit_channel);
-    local_addrsplit_channel = this;
-  }
-
-  AddressSplitChannel::~AddressSplitChannel()
-  {
-    assert(local_addrsplit_channel == this);
-    local_addrsplit_channel = 0;
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class XferDesCreateMessage<AddressSplitXferDes<N,T>>
-  //
-
-  template <int N, typename T>
-  class AddressSplitXferDes;
-
-  template <int N, typename T>
-  struct AddressSplitXferDesCreateMessage : public XferDesCreateMessageBase {
-  public:
-    static void handle_message(NodeID sender,
-                               const AddressSplitXferDesCreateMessage<N, T> &args,
-                               const void *msgdata, size_t msglen)
-    {
-      std::vector<XferDesPortInfo> inputs_info, outputs_info;
-      int priority = 0;
-      size_t element_size = 0;
-      std::vector<IndexSpace<N, T>> spaces;
-
-      Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
-
-      bool ok = ((fbd >> inputs_info) && (fbd >> outputs_info) && (fbd >> priority) &&
-                 (fbd >> element_size) && (fbd >> spaces));
-      assert(ok);
-      assert(fbd.bytes_left() == 0);
-
-      // assert(!args.inst.exists());
-      assert(local_addrsplit_channel);
-      XferDes *xd = new AddressSplitXferDes<N, T>(
-          args.dma_op, local_addrsplit_channel, args.launch_node, args.guid, inputs_info,
-          outputs_info, priority, element_size, spaces);
-
-      local_addrsplit_channel->enqueue_ready_xd(xd);
-    }
-  };
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AddressSplitXferDesFactory<N,T>
-  //
-
-  template <int N, typename T>
-  class AddressSplitXferDesFactory : public XferDesFactory {
-  public:
-    AddressSplitXferDesFactory(size_t _bytes_per_element,
-                               const std::vector<IndexSpace<N, T>> &_spaces);
-
-  protected:
-    virtual ~AddressSplitXferDesFactory();
-
-  public:
-    virtual void release();
-
-    virtual void create_xfer_des(uintptr_t dma_op, NodeID launch_node, NodeID target_node,
-                                 XferDesID guid,
-                                 const std::vector<XferDesPortInfo> &inputs_info,
-                                 const std::vector<XferDesPortInfo> &outputs_info,
-                                 int priority, XferDesRedopInfo redop_info,
-                                 const void *fill_data, size_t fill_size,
-                                 size_t fill_total);
-
-    static ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>> areg;
-
-  protected:
-    size_t bytes_per_element;
-    std::vector<IndexSpace<N, T>> spaces;
-  };
-
-  template <int N, typename T>
-  /*static*/ ActiveMessageHandlerReg<AddressSplitXferDesCreateMessage<N, T>>
-      AddressSplitXferDesFactory<N, T>::areg;
-
-  template <int N, typename T>
-  class AddressSplitXferDes : public AddressSplitXferDesBase {
-  protected:
-    friend class AddressSplitXferDesFactory<N, T>;
-    friend struct AddressSplitXferDesCreateMessage<N, T>;
-
-    AddressSplitXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
-                        XferDesID _guid, const std::vector<XferDesPortInfo> &inputs_info,
-                        const std::vector<XferDesPortInfo> &outputs_info, int _priority,
-                        size_t _element_size,
-                        const std::vector<IndexSpace<N, T>> &_spaces);
-
-  public:
-    ~AddressSplitXferDes();
-
-    virtual Event request_metadata();
-
-    virtual bool progress_xd(AddressSplitChannel *channel, TimeLimit work_until);
-
-  protected:
-    int find_point_in_spaces(Point<N, T> p, int guess_idx) const;
-
-    std::vector<IndexSpace<N, T>> spaces;
-    size_t element_size;
-    static const size_t MAX_POINTS = 64;
-    size_t point_index, point_count;
-    Point<N, T> points[MAX_POINTS];
-    int output_space_id;
-    unsigned output_count;
-    ControlPort::Encoder ctrl_encoder;
-  };
-
-  template <int N, typename T>
-  AddressSplitXferDesFactory<N, T>::AddressSplitXferDesFactory(
-      size_t _bytes_per_element, const std::vector<IndexSpace<N, T>> &_spaces)
-    : bytes_per_element(_bytes_per_element)
-    , spaces(_spaces)
-  {}
-
-  template <int N, typename T>
-  AddressSplitXferDesFactory<N, T>::~AddressSplitXferDesFactory()
-  {}
-
-  template <int N, typename T>
-  void AddressSplitXferDesFactory<N, T>::release()
-  {
-    delete this;
-  }
-
-  template <int N, typename T>
-  void AddressSplitXferDesFactory<N, T>::create_xfer_des(
-      uintptr_t dma_op, NodeID launch_node, NodeID target_node, XferDesID guid,
-      const std::vector<XferDesPortInfo> &inputs_info,
-      const std::vector<XferDesPortInfo> &outputs_info, int priority,
-      XferDesRedopInfo redop_info, const void *fill_data, size_t fill_size,
-      size_t fill_total)
-  {
-    assert(redop_info.id == 0);
-    assert(fill_size == 0);
-    if(target_node == Network::my_node_id) {
-      // local creation
-      // assert(!inst.exists());
-      assert(local_addrsplit_channel != 0);
-
-      XferDes *xd = new AddressSplitXferDes<N, T>(
-          dma_op, local_addrsplit_channel, launch_node, guid, inputs_info, outputs_info,
-          priority, bytes_per_element, spaces);
-
-      local_addrsplit_channel->enqueue_ready_xd(xd);
-    } else {
-      // remote creation
-      Serialization::ByteCountSerializer bcs;
-      {
-        bool ok = ((bcs << inputs_info) && (bcs << outputs_info) && (bcs << priority) &&
-                   (bcs << bytes_per_element) && (bcs << spaces));
-        assert(ok);
-      }
-      size_t req_size = bcs.bytes_used();
-      ActiveMessage<AddressSplitXferDesCreateMessage<N, T>> amsg(target_node, req_size);
-      // amsg->inst = inst;
-      amsg->launch_node = launch_node;
-      amsg->guid = guid;
-      amsg->dma_op = dma_op;
-      {
-        bool ok = ((amsg << inputs_info) && (amsg << outputs_info) &&
-                   (amsg << priority) && (amsg << bytes_per_element) && (amsg << spaces));
-        assert(ok);
-      }
-      amsg.commit();
-    }
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AddressSplitXferDes<N,T>
-  //
-
-  AddressSplitXferDesBase::AddressSplitXferDesBase(
-      uintptr_t _dma_op, Channel *_channel, NodeID _launch_node, XferDesID _guid,
-      const std::vector<XferDesPortInfo> &inputs_info,
-      const std::vector<XferDesPortInfo> &outputs_info, int _priority)
-    : XferDes(_dma_op, _channel, _launch_node, _guid, inputs_info, outputs_info,
-              _priority, 0, 0)
-  {}
-
-  long AddressSplitXferDesBase::get_requests(Request **requests, long nr)
-  {
-    // unused
-    assert(0);
-    return 0;
-  }
-
-  void AddressSplitXferDesBase::notify_request_read_done(Request *req)
-  {
-    // unused
-    assert(0);
-  }
-
-  void AddressSplitXferDesBase::notify_request_write_done(Request *req)
-  {
-    // unused
-    assert(0);
-  }
-
-  void AddressSplitXferDesBase::flush()
-  {
-    // do nothing
-  }
-
-  template <int N, typename T>
-  AddressSplitXferDes<N, T>::AddressSplitXferDes(
-      uintptr_t _dma_op, Channel *_channel, NodeID _launch_node, XferDesID _guid,
-      const std::vector<XferDesPortInfo> &inputs_info,
-      const std::vector<XferDesPortInfo> &outputs_info, int _priority,
-      size_t _element_size, const std::vector<IndexSpace<N, T>> &_spaces)
-    : AddressSplitXferDesBase(_dma_op, _channel, _launch_node, _guid, inputs_info,
-                              outputs_info, _priority)
-    , spaces(_spaces)
-    , element_size(_element_size)
-    , point_index(0)
-    , point_count(0)
-    , output_space_id(-1)
-    , output_count(0)
-  {
-    ctrl_encoder.set_port_count(spaces.size());
-  }
-
-  template <int N, typename T>
-  AddressSplitXferDes<N, T>::~AddressSplitXferDes()
-  {}
-
-  template <int N, typename T>
-  int AddressSplitXferDes<N, T>::find_point_in_spaces(Point<N, T> p, int guess_idx) const
-  {
-    // try the guessed (e.g. same as previous hit) space first
-    if(guess_idx >= 0) {
-      if(spaces[guess_idx].contains(p)) {
-        return guess_idx;
-      }
-    }
-
-    // try all the rest
-    for(size_t i = 0; i < spaces.size(); i++) {
-      if(i != size_t(guess_idx)) {
-        if(spaces[i].contains(p)) {
-          return i;
-        }
-      }
-    }
-
-    return -1;
-  }
-
-  template <int N, typename T>
-  Event AddressSplitXferDes<N, T>::request_metadata()
-  {
-    std::vector<Event> events;
-
-    for(size_t i = 0; i < spaces.size(); i++) {
-      Event e = spaces[i].make_valid();
-      if(e.exists()) {
-        events.push_back(e);
-      }
-    }
-
-    return Event::merge_events(events);
-  }
-
-  template <int N, typename T>
-  bool AddressSplitXferDes<N, T>::progress_xd(AddressSplitChannel *channel,
-                                              TimeLimit work_until)
-  {
-    assert(!iteration_completed.load());
-
-    ReadSequenceCache rseqcache(this);
-    WriteSequenceCache wseqcache(this);
-
-    bool did_work = false;
-    while(true) {
-      size_t output_bytes = 0;
-      bool input_done = false;
-      while(true) {
-        // step 1: get some points if we are out
-        if(point_index >= point_count) {
-          if(input_ports[0].iter->done()) {
-            input_done = true;
-            break;
-          }
-
-          TransferIterator::AddressInfo p_info;
-          size_t max_bytes = MAX_POINTS * sizeof(Point<N, T>);
-          if(input_ports[0].peer_guid != XFERDES_NO_GUID) {
-            max_bytes = input_ports[0].seq_remote.span_exists(
-                input_ports[0].local_bytes_total, max_bytes);
-            // round down to multiple of sizeof(Point<N,T>)
-            size_t rem = max_bytes % sizeof(Point<N, T>);
-            if(rem > 0) {
-              max_bytes -= rem;
-            }
-            if(max_bytes < sizeof(Point<N, T>)) {
-              // check to see if this is the end of the input
-              if(input_ports[0].local_bytes_total ==
-                 input_ports[0].remote_bytes_total.load_acquire()) {
-                input_done = true;
-              }
-              break;
-            }
-          }
-          size_t bytes =
-              input_ports[0].iter->step(max_bytes, p_info, 0, false /*!tentative*/);
-          if(bytes == 0) {
-            break;
-          }
-          const void *srcptr =
-              input_ports[0].mem->get_direct_ptr(p_info.base_offset, bytes);
-          assert(srcptr != 0);
-          memcpy(points, srcptr, bytes);
-          // handle reads of partial points
-          while((bytes % sizeof(Point<N, T>)) != 0) {
-            // get some more - should never be empty
-            size_t todo = input_ports[0].iter->step(max_bytes - bytes, p_info, 0,
-                                                    false /*!tentative*/);
-            assert(todo > 0);
-            const void *srcptr =
-                input_ports[0].mem->get_direct_ptr(p_info.base_offset, todo);
-            assert(srcptr != 0);
-            memcpy(reinterpret_cast<char *>(points) + bytes, srcptr, todo);
-            bytes += todo;
-          }
-
-          point_count = bytes / sizeof(Point<N, T>);
-          assert(bytes == (point_count * sizeof(Point<N, T>)));
-          point_index = 0;
-          rseqcache.add_span(0, input_ports[0].local_bytes_total, bytes);
-          input_ports[0].local_bytes_total += bytes;
-          did_work = true;
-        }
-
-        // step 2: process the first point we've got on hand
-        int new_space_id = find_point_in_spaces(points[point_index], output_space_id);
-
-        // can only extend an existing run with another point from the same
-        //  space
-        if(output_count == 0) {
-          output_space_id = new_space_id;
-        } else if(new_space_id != output_space_id) {
-          break;
-        }
-
-        // if it matched a space, we have to emit the point to that space's
-        //  output address stream before we can accept the point
-        if(output_space_id != -1) {
-          XferPort &op = output_ports[output_space_id];
-          if(op.seq_remote.span_exists(op.local_bytes_total + output_bytes,
-                                       sizeof(Point<N, T>)) < sizeof(Point<N, T>)) {
-            break;
-          }
-          TransferIterator::AddressInfo o_info;
-          size_t partial = 0;
-          while(partial < sizeof(Point<N, T>)) {
-            size_t bytes = op.iter->step(sizeof(Point<N, T>) - partial, o_info, 0,
-                                         false /*!tentative*/);
-            void *dstptr = op.mem->get_direct_ptr(o_info.base_offset, bytes);
-            assert(dstptr != 0);
-            memcpy(dstptr, reinterpret_cast<const char *>(&points[point_index]) + partial,
-                   bytes);
-            partial += bytes;
-          }
-          output_bytes += sizeof(Point<N, T>);
-        }
-        output_count++;
-        point_index++;
-      }
-
-      // if we wrote any points out, update their validity now
-      if(output_bytes > 0) {
-        assert(output_space_id >= 0);
-        wseqcache.add_span(output_space_id,
-                           output_ports[output_space_id].local_bytes_total, output_bytes);
-        output_ports[output_space_id].local_bytes_total += output_bytes;
-        output_ports[output_space_id].local_bytes_cons.fetch_add(output_bytes);
-        did_work = true;
-      }
-
-      // now try to write the control information
-      if((output_count > 0) || input_done) {
-        XferPort &cp = output_ports[spaces.size()];
-
-        // may take us a few tries to send the control word
-        bool ctrl_sent = false;
-        size_t old_lbt = cp.local_bytes_total;
-        do {
-          if(cp.seq_remote.span_exists(cp.local_bytes_total, sizeof(unsigned)) <
-             sizeof(unsigned)) {
-            break; // no room to write control work
-          }
-
-          TransferIterator::AddressInfo c_info;
-          size_t bytes = cp.iter->step(sizeof(unsigned), c_info, 0, false /*!tentative*/);
-          assert(bytes == sizeof(unsigned));
-          void *dstptr = cp.mem->get_direct_ptr(c_info.base_offset, sizeof(unsigned));
-          assert(dstptr != 0);
-
-          unsigned cword;
-          ctrl_sent = ctrl_encoder.encode(cword, output_count * element_size,
-                                          output_space_id, input_done);
-          memcpy(dstptr, &cword, sizeof(unsigned));
-
-          cp.local_bytes_total += sizeof(unsigned);
-          cp.local_bytes_cons.fetch_add(sizeof(unsigned));
-        } while(!ctrl_sent);
-
-        if(input_done && ctrl_sent) {
-          begin_completion();
-
-          // mark all address streams as done (dummy write update)
-          for(size_t i = 0; i < spaces.size(); i++) {
-            wseqcache.add_span(i, output_ports[i].local_bytes_total, 0);
-          }
-        }
-
-        // push out the partial write even if we're not done
-        if(cp.local_bytes_total > old_lbt) {
-          wseqcache.add_span(spaces.size(), old_lbt, cp.local_bytes_total - old_lbt);
-          did_work = true;
-        }
-
-        // but only actually clear the output_count if we sent the whole
-        //  control packet
-        if(!ctrl_sent) {
-          break;
-        }
-
-        output_space_id = -1;
-        output_count = 0;
-      } else {
-        break;
-      }
-
-      if(iteration_completed.load() || work_until.is_expired()) {
-        break;
-      }
-    }
-
-    rseqcache.flush();
-    wseqcache.flush();
-
-    return did_work;
-  }
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // transfer path search logic
   //
 
@@ -3859,7 +3413,8 @@ namespace Realm {
   XferDesFactory *IndirectionInfoTyped<N, T, N2, T2>::create_addrsplit_factory(
       size_t bytes_per_element) const
   {
-    return new AddressSplitXferDesFactory<N2, T2>(bytes_per_element, spaces);
+    return new AddressSplitXferDesFactory<N2, T2>(bytes_per_element, spaces,
+                                                  local_addrsplit_channel);
   }
 
   template <int N, typename T, int N2, typename T2>
@@ -3937,9 +3492,9 @@ namespace Realm {
   IndirectionInfo *CopyIndirection<N, T>::Unstructured<N2, T2>::create_info(
       const IndexSpace<N, T> &is) const
   {
-    // The next indirection is not allowed to be specified yet.
     assert(next_indirection == nullptr);
-    return new IndirectionInfoTyped<N, T, N2, T2>(is, *this, local_addrsplit_channel);
+    return new IndirectionInfoTyped<N, T, N2, T2>(is, *this,
+                                                  get_local_addrsplit_channel());
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -5342,7 +4897,9 @@ namespace Realm {
       xd_factory->create_xfer_des(reinterpret_cast<uintptr_t>(this), Network::my_node_id,
                                   xd_target_node, xd_guid, inputs_info, outputs_info,
                                   priority, xdn.redop, fill_data, fill_size, fill_total);
-      xd_factory->release();
+      if(xd_factory->needs_release()) {
+        delete xd_factory;
+      }
     }
 
     // record requested profiling information
@@ -5470,8 +5027,9 @@ namespace Realm {
   template class TransferIteratorIndirect<N, T>;                                         \
   template class WrappingTransferIteratorIndirect<N, T>;                                 \
   template class TransferIteratorIndirectRange<N, T>;                                    \
-  template class TransferDomainIndexSpace<N, T>;                                         \
-  template class AddressSplitXferDesFactory<N, T>;
+  template class AddressSplitXferDesFactory<N, T>;                                       \
+  template class AddressSplitCommunicator<N, T>;                                         \
+  template class TransferDomainIndexSpace<N, T>;
   FOREACH_NT(DOIT)
 
 #define DOIT2(N, T, N2, T2)                                                              \

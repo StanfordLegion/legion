@@ -629,12 +629,9 @@ namespace Realm {
     };
 
     class XferDesFactory {
-    protected:
-      // do not destroy directly - use release()
-      virtual ~XferDesFactory() {}
-
     public:
-      virtual void release() = 0;
+      virtual ~XferDesFactory() {}
+      virtual bool needs_release() = 0;
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
@@ -669,7 +666,7 @@ namespace Realm {
     public:
       SimpleXferDesFactory(uintptr_t _channel);
 
-      virtual void release();
+      virtual bool needs_release();
 
       virtual void create_xfer_des(uintptr_t dma_op,
 				   NodeID launch_node,
@@ -1131,51 +1128,7 @@ namespace Realm {
 
       long submit(Request** requests, long nr);
     };
-   
-    class AddressSplitChannel;
 
-    class AddressSplitXferDesBase : public XferDes {
-    protected:
-      AddressSplitXferDesBase(uintptr_t dma_op, Channel *_channel,
-			      NodeID _launch_node, XferDesID _guid,
-			      const std::vector<XferDesPortInfo>& inputs_info,
-			      const std::vector<XferDesPortInfo>& outputs_info,
-			      int _priority);
-
-    public:
-      virtual bool progress_xd(AddressSplitChannel *channel, TimeLimit work_until) = 0;
-
-      long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
-    };
-
-    class AddressSplitChannel : public SingleXDQChannel<AddressSplitChannel, AddressSplitXferDesBase> {
-    public:
-      AddressSplitChannel(BackgroundWorkManager *bgwork);
-      virtual ~AddressSplitChannel();
-
-      // do as many of these concurrently as we like
-      static const bool is_ordered = false;
-
-      // override this to make sure it's never called
-      virtual XferDes *create_xfer_des(uintptr_t dma_op,
-				       NodeID launch_node,
-				       XferDesID guid,
-				       const std::vector<XferDesPortInfo>& inputs_info,
-				       const std::vector<XferDesPortInfo>& outputs_info,
-				       int priority,
-				       XferDesRedopInfo redop_info,
-				       const void *fill_data, size_t fill_size,
-                                       size_t fill_total) { assert(0); return 0; }
-
-      virtual long submit(Request** requests, long nr) { assert(0); return 0; }
-
-    protected:
-      static AddressSplitChannel *local_channel;
-    };
-  
     class TransferOperation;
     struct NotifyXferDesCompleteMessage {
       TransferOperation *op;

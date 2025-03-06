@@ -50,6 +50,7 @@ set(REALM_SOURCES
     transfer/channel_common.cc
     transfer/memcpy_channel.cc
     transfer/channel.cc
+    transfer/addrsplit_channel.cc
     transfer/channel_disk.cc
     transfer/transfer.cc
     transfer/lowlevel_dma.cc
