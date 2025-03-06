@@ -28,9 +28,8 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesLocal)
   Node node_data;
   size_t bytes_per_element = 4;
 
-  std::unique_ptr<BackgroundWorkManager> bgwork =
-      std::make_unique<BackgroundWorkManager>();
-  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
+  BackgroundWorkManager bgwork;
+  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(&bgwork);
   std::vector<IndexSpace<1>> spaces(1);
   std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
       std::make_unique<AddressSplitXferDesFactory<1, int>>(bytes_per_element, spaces,
@@ -64,9 +63,8 @@ TEST_F(AddressSplitFactoryTest, CreateXferDesRemote)
   size_t bytes_per_element = 4;
 
   MockAddressSplitCommunicator<1, int> *comm = new MockAddressSplitCommunicator<1, int>();
-  std::unique_ptr<BackgroundWorkManager> bgwork =
-      std::make_unique<BackgroundWorkManager>();
-  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(bgwork.get());
+  BackgroundWorkManager bgwork;
+  MockAddressSplitChannel *addrsplit_channel = new MockAddressSplitChannel(&bgwork);
   std::vector<IndexSpace<1>> spaces(1);
 
   std::unique_ptr<AddressSplitXferDesFactory<1, int>> factory =
@@ -160,10 +158,9 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
     return;
   }
 
-  std::unique_ptr<BackgroundWorkManager> bgwork =
-      std::make_unique<BackgroundWorkManager>();
+  BackgroundWorkManager bgwork;
   std::unique_ptr<MockAddressSplitChannel> addrsplit_channel =
-      std::make_unique<MockAddressSplitChannel>(bgwork.get());
+      std::make_unique<MockAddressSplitChannel>(&bgwork);
 
   std::vector<XferDesPortInfo> inputs_info;
   std::vector<XferDesPortInfo> outputs_info;
