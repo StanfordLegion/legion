@@ -1470,6 +1470,7 @@ namespace Legion {
     public:
       MemoryPool(size_t alignment) : max_alignment(alignment) { }
       virtual ~MemoryPool(void) { }
+      virtual ApEvent get_ready_event(void) const = 0;
       virtual size_t query_memory_limit(void) = 0;
       virtual size_t query_available_memory(void) = 0;
       virtual PoolBounds get_bounds(void) const = 0;
@@ -1518,6 +1519,7 @@ namespace Legion {
       ConcretePool(PhysicalInstance instance, size_t size, size_t alignment, 
           RtEvent use_event, MemoryManager *manager);
       virtual ~ConcretePool(void) override;
+      virtual ApEvent get_ready_event(void) const override;
       virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
       virtual PoolBounds get_bounds(void) const override;
@@ -1559,7 +1561,7 @@ namespace Legion {
       std::vector<Range> ranges;
       // Each external instance has a range that it corresponds to
       std::map<PhysicalInstance,unsigned> allocated;
-      // Each backing instance has a start range and use event
+      // Vector of backing instances with their ready events
       std::map<PhysicalInstance,RtEvent> backing_instances;
       // Instances that are freed with event preconditions
       std::map<unsigned,RtEvent> pending_frees;
@@ -1571,6 +1573,8 @@ namespace Legion {
       std::vector<unsigned> size_based_free_lists;
       // Linked list of ranges not currently be used
       unsigned first_unused_range;
+      // Whether the ranges have been initialized
+      bool ranges_initialized;
       // Whether this pool has been released
       bool released;
     };
@@ -1589,6 +1593,7 @@ namespace Legion {
       UnboundPool(MemoryManager *manager, UnboundPoolScope scope,
                   TaskTreeCoordinates &coordinates, size_t max_free_bytes);
       virtual ~UnboundPool(void) override;
+      virtual ApEvent get_ready_event(void) const override;
       virtual size_t query_memory_limit(void) override;
       virtual size_t query_available_memory(void) override;
       virtual PoolBounds get_bounds(void) const override;
