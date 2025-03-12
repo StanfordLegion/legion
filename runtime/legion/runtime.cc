@@ -1404,8 +1404,11 @@ namespace Legion {
       if (empty.load())
         pending_instances.emplace(std::make_pair(target, 
               PendingInstance(instance, task_uid)));
-      else
+      else if (future_size > 0)
         record_instance(instance, task_uid);
+      // Future is zero-sized so don't need the instance
+      else if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+        delete instance;
       return true;
     }
 
@@ -1534,8 +1537,11 @@ namespace Legion {
       if (empty.load())
         pending_instances.emplace(std::make_pair(runtime->runtime_system_memory,
               PendingInstance(instance, op->get_unique_op_id())));
-      else
+      else if (future_size > 0)
         record_instance(instance, op->get_unique_op_id());
+      // Future is zero-sized so don't need the instance
+      else if (!instance->defer_deletion(ApEvent::NO_AP_EVENT))
+        delete instance;
     }
 
     //--------------------------------------------------------------------------
