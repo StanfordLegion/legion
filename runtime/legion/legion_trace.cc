@@ -7428,7 +7428,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_replay_mapping(ApEvent lhs,
-                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo,
+                 unsigned op_kind, const TraceLocalID &tlid,
                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -7437,8 +7437,7 @@ namespace Legion {
       assert(is_recording());
 #endif
       unsigned lhs_ = convert_event(lhs);
-      if (register_memo)
-        record_memo_entry(tlid, lhs_, op_kind);
+      record_memo_entry(tlid, lhs_, op_kind);
       insert_instruction(new ReplayMapping(*this, lhs_, tlid));
     }
 
