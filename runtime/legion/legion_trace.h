@@ -1006,7 +1006,7 @@ namespace Legion {
       void initialize_concurrent_groups(IndexTask *task);
     public:
       virtual void record_replay_mapping(ApEvent lhs, unsigned op_kind,
-                          const TraceLocalID &tlid, bool register_memo,
+                          const TraceLocalID &tlid,
                           std::set<RtEvent> &applied_events);
       virtual void request_term_event(ApUserEvent &term_event);
       virtual void record_create_ap_user_event(ApUserEvent &lhs, 

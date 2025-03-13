@@ -4250,8 +4250,7 @@ namespace Legion {
       // If we'r recording then record the replay map task
       if (is_recording())
         trace_info.record_replay_mapping(single_task_termination,
-            TASK_OP_KIND, (get_task_kind() != INDIVIDUAL_TASK_KIND),
-            map_applied_conditions);
+            TASK_OP_KIND, map_applied_conditions);
       ApEvent init_precondition = compute_sync_precondition(trace_info);
       // After we've got our results, apply the state to the region tree
       size_t region_count = get_region_count();
