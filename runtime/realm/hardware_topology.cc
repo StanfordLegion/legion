@@ -217,17 +217,6 @@ namespace Realm {
     struct sysinfo memInfo;
     sysinfo(&memInfo);
 
-    // Cross-check with NUMA memory
-    // On 32-bit machines, memInfo may be less than the actual memory if it exceeds 32-bit
-    // bounds
-#if defined(__x86_64__) || defined(_M_X64)
-    size_t system_mem = 0;
-    for(const HardwareTopology::MemoryInfo &memory : memories) {
-      system_mem += memory.bytes;
-    }
-    assert(system_mem == memInfo.totalram);
-#endif
-
     host_memory = memInfo.totalram;
 
     return REALM_SUCCESS;
