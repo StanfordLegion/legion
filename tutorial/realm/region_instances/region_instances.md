@@ -42,7 +42,7 @@ of the data structure have fixed sizes and types, and when the data
 access pattern is column-wise.
 
 ## Creating Instances
-Realm uses `RegionInstances` to store persistent application data.
+Realm uses `RegionInstance` objects to store persistent application data.
 Region instances offer a comprehensive interface that allows defining
 various data layouts and to accessing them efficiently. Region instances
 are instantiated using the static member function
@@ -55,7 +55,7 @@ static Event create_instance(RegionInstance& inst, Memory memory,
                              Event wait_on = Event::NO_EVENT);
 ```
 
-, which takes as input a `Memory` and an `InstanceLayoutGeneric` object
+which takes as input a `Memory` and an `InstanceLayoutGeneric` object
 containing information necessary to create a data layout. The operation
 of instance creation, including underlying allocation, is asynchronous
 and returns a runtime event, which can serve as a precondition for any
@@ -65,7 +65,7 @@ It should be noted that region instances are always associated with a
 particular memory and cannot be moved; thus, data migration should only
 be accomplished through data copy operations in Realm.
 
-The InstanceLayoutGeneric object provides a powerful interface to
+The `InstanceLayoutGeneric` object provides a powerful interface to
 create any data layout commonly used in HPC applications, including
 AOS, SOA, hybrid layouts, compact layouts, and more complex layouts
 that involve interleaving fields with dimensions or non-trivial tiling.
@@ -102,7 +102,7 @@ pieces.
 
 In this example, the `main_task` creates a region instance with an
 affine layout and stores it in the system memory (`SYSTEM_MEM`)
-accessible by the executing processor `p`. The reader and writer tasks 
+accessible by the executing processor `p`. The reader and writer tasks
 are launched on the same processor as the `main_task` which
 allowing them to use the `AffineAccessor` to access individual
 elements of an instance provided within `TaskArguments`:
@@ -132,7 +132,7 @@ void writer_task(const void *args, size_t arglen, const void *userdata,
 
 The example demonstrates the control dependency between the writer and
 reader tasks, where the writer task waits for the instance
-completion event (`create_event`), and the reader task waits for the 
+completion event (`create_event`), and the reader task waits for the
 writer to complete:
 
 ```c++
@@ -155,7 +155,7 @@ column-major order.
 SOA is generally more efficient when accessing a specific
 field of data for a large number of objects, as each field is
 stored contiguously in memory. This can lead to better data locality
-and cache performance, especially when processing large amounts of 
+and cache performance, especially when processing large amounts of
 data.
 
 AOS, on the other hand, is more convenient when accessing
