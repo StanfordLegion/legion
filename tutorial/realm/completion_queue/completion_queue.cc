@@ -121,7 +121,7 @@ void main_task(const void *args, size_t arglen, const void *userdata,
       // pick the next processor after p for the CLEANCQ_TASK
       cleancq_proc = *(pq.begin().operator++());
     } else {
-      // pick a remote processor for the CLEANCQ_TASK, this is used to demostrate get_nonempty_event on non-owner node
+      // pick a remote processor for the CLEANCQ_TASK, this is used to demonstrate get_nonempty_event on non-owner node
       for(Machine::ProcessorQuery::iterator it = pq.begin(); it; it++) {
         if (it->address_space() != p.address_space()) {
           cleancq_proc = *it;
