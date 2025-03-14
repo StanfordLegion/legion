@@ -49,7 +49,7 @@ void run_set_operations() {
     isect_it.step();
   }
   if (diffs_it.valid || isect_it.valid) {
-    log_app.error() << "At least one iterator is invalid";
+    log_app.error() << "At least one iterator is still valid";
   }
 }
 

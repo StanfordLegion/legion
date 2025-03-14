@@ -6,8 +6,8 @@ title: Realm Index Spaces
 
 ## Introduction
 Index space is a core data structure offered by Realm to applications
-as part of it's public interface. This tutorial introduces the basic 
-knowledge necessary to work with index spaces and discusses how to 
+as part of it's public interface. This tutorial introduces the basic
+knowledge necessary to work with index spaces and discusses how to
 manage index spaces in the application code.
 
 Here is a list of covered topics:
@@ -105,7 +105,7 @@ dense rectangle:
 IndexSpace<N,T> tighten(bool precise = true) const;
 ```
 
-Next, we continue by cutting out a small index space from the center 
+Next, we continue by cutting out a small index space from the center
 of `union_is` to obtain a sparse index space containing four disjoint
 rectangles. This is done using `compute_difference`, and the resulting
 index space is assigned to the variable `diffs_is`:
@@ -145,12 +145,12 @@ validates that this is indeed the case:
     isect_it.step();
   }
   if (diffs_it.valid || isect_it.valid) {
-    log_app.error() << "At least one iterator is invalid";
+    log_app.error() << "At least one iterator is still valid";
   }
 ```
 
 ## Managing Memory In Index Spaces
-As discussed earlier, Realm dynamically allocates an underlying sparsity 
+As discussed earlier, Realm dynamically allocates an underlying sparsity
 map on the owner node when creating sparse index spaces.
 The allocated sparsity maps are being held during the whole application
 lifetime. This will likely be fixed in one of the upcoming Realm
