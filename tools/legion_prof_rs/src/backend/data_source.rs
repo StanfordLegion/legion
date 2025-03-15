@@ -225,6 +225,7 @@ impl StateDataSource {
                         continue;
                     }
                 }
+
                 let kind_name = format!("{:?}", kind);
                 let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
 
