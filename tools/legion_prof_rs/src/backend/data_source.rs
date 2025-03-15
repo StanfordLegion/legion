@@ -214,96 +214,97 @@ impl StateDataSource {
                 // Not all kinds might exist on all nodes if the machine model
                 // is not symmetric or if we didn't load some processors from
                 // remote nodes when only loading logfiles from a subset of nodes
-                if let Some(procs) = proc_groups.get(&group) {
-                    if node.is_some() {
-                        // Don't render kind if all processors of the kind are empty
-                        let empty = procs.iter().all(|p| state.procs.get(p).unwrap().is_empty());
-                        node_empty = node_empty && empty;
-                        if empty {
-                            continue;
-                        }
+                let Some(procs) = proc_groups.get(&group) else {
+                    continue;
+                };
+                if node.is_some() {
+                    // Don't render kind if all processors of the kind are empty
+                    let empty = procs.iter().all(|p| state.procs.get(p).unwrap().is_empty());
+                    node_empty = node_empty && empty;
+                    if empty {
+                        continue;
                     }
-                    let kind_name = format!("{:?}", kind);
-                    let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
-
-                    let short_suffix = match device {
-                        Some(DeviceKind::Device) => "d",
-                        Some(DeviceKind::Host) => "h",
-                        None => "",
-                    };
-
-                    let medium_suffix = match device {
-                        Some(DeviceKind::Device) => " dev",
-                        Some(DeviceKind::Host) => " host",
-                        None => "",
-                    };
-
-                    let long_suffix = match device {
-                        Some(DeviceKind::Device) => " Device",
-                        Some(DeviceKind::Host) => " Host",
-                        None => "",
-                    };
-
-                    let kind_id = node_id.child(kind_index);
-                    kind_index += 1;
-
-                    let color = match (kind, device) {
-                        (ProcKind::GPU, Some(DeviceKind::Device)) => Color::OLIVEDRAB,
-                        (ProcKind::GPU, Some(DeviceKind::Host)) => Color::ORANGERED,
-                        (ProcKind::CPU, None) => Color::STEELBLUE,
-                        (ProcKind::Utility, None) => Color::CRIMSON,
-                        (ProcKind::IO, None) => Color::ORANGERED,
-                        (ProcKind::ProcGroup, None) => Color::ORANGERED,
-                        (ProcKind::ProcSet, None) => Color::ORANGERED,
-                        (ProcKind::OpenMP, None) => Color::ORANGERED,
-                        (ProcKind::Python, None) => Color::OLIVEDRAB,
-                        _ => unreachable!(),
-                    };
-                    let color: Color32 = color.into();
-
-                    let mut proc_slots = Vec::new();
-                    if node.is_some() {
-                        let mut proc_index = 0;
-                        for proc in procs {
-                            let proc_id = kind_id.child(proc_index as u64);
-                            entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc, *device));
-                            proc_entries.insert(*proc, proc_id);
-
-                            let short_name = format!(
-                                "{}{}{}",
-                                kind_first_letter,
-                                proc.proc_in_node(),
-                                short_suffix
-                            );
-                            let long_name = format!(
-                                "{} {} {}{}",
-                                node_long_name,
-                                kind_name,
-                                proc.proc_in_node(),
-                                long_suffix
-                            );
-
-                            let max_rows =
-                                state.procs.get(proc).unwrap().max_levels(*device) as u64 + 1;
-                            proc_slots.push(EntryInfo::Slot {
-                                short_name,
-                                long_name,
-                                max_rows,
-                            });
-                            proc_index += 1;
-                        }
-                    }
-
-                    let summary_id = kind_id.summary();
-                    entry_map.insert(summary_id, EntryKind::ProcKind(group));
-
-                    kind_slots.push(EntryInfo::Panel {
-                        short_name: format!("{}{}", kind_name.to_lowercase(), medium_suffix),
-                        long_name: format!("{} {}{}", node_long_name, kind_name, long_suffix),
-                        summary: Some(Box::new(EntryInfo::Summary { color })),
-                        slots: proc_slots,
-                    });
                 }
+                let kind_name = format!("{:?}", kind);
+                let kind_first_letter = kind_name.chars().next().unwrap().to_lowercase();
+
+                let short_suffix = match device {
+                    Some(DeviceKind::Device) => "d",
+                    Some(DeviceKind::Host) => "h",
+                    None => "",
+                };
+
+                let medium_suffix = match device {
+                    Some(DeviceKind::Device) => " dev",
+                    Some(DeviceKind::Host) => " host",
+                    None => "",
+                };
+
+                let long_suffix = match device {
+                    Some(DeviceKind::Device) => " Device",
+                    Some(DeviceKind::Host) => " Host",
+                    None => "",
+                };
+
+                let kind_id = node_id.child(kind_index);
+                kind_index += 1;
+
+                let color = match (kind, device) {
+                    (ProcKind::GPU, Some(DeviceKind::Device)) => Color::OLIVEDRAB,
+                    (ProcKind::GPU, Some(DeviceKind::Host)) => Color::ORANGERED,
+                    (ProcKind::CPU, None) => Color::STEELBLUE,
+                    (ProcKind::Utility, None) => Color::CRIMSON,
+                    (ProcKind::IO, None) => Color::ORANGERED,
+                    (ProcKind::ProcGroup, None) => Color::ORANGERED,
+                    (ProcKind::ProcSet, None) => Color::ORANGERED,
+                    (ProcKind::OpenMP, None) => Color::ORANGERED,
+                    (ProcKind::Python, None) => Color::OLIVEDRAB,
+                    _ => unreachable!(),
+                };
+                let color: Color32 = color.into();
+
+                let mut proc_slots = Vec::new();
+                if node.is_some() {
+                    let mut proc_index = 0;
+                    for proc in procs {
+                        let proc_id = kind_id.child(proc_index as u64);
+                        entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc, *device));
+                        proc_entries.insert(*proc, proc_id);
+
+                        let short_name = format!(
+                            "{}{}{}",
+                            kind_first_letter,
+                            proc.proc_in_node(),
+                            short_suffix
+                        );
+                        let long_name = format!(
+                            "{} {} {}{}",
+                            node_long_name,
+                            kind_name,
+                            proc.proc_in_node(),
+                            long_suffix
+                        );
+
+                        let max_rows =
+                            state.procs.get(proc).unwrap().max_levels(*device) as u64 + 1;
+                        proc_slots.push(EntryInfo::Slot {
+                            short_name,
+                            long_name,
+                            max_rows,
+                        });
+                        proc_index += 1;
+                    }
+                }
+
+                let summary_id = kind_id.summary();
+                entry_map.insert(summary_id, EntryKind::ProcKind(group));
+
+                kind_slots.push(EntryInfo::Panel {
+                    short_name: format!("{}{}", kind_name.to_lowercase(), medium_suffix),
+                    long_name: format!("{} {}{}", node_long_name, kind_name, long_suffix),
+                    summary: Some(Box::new(EntryInfo::Summary { color })),
+                    slots: proc_slots,
+                });
             }
 
             // Don't render node if all processors of the node are empty
