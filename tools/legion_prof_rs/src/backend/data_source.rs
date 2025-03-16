@@ -211,7 +211,12 @@ impl StateDataSource {
             for (kind, device) in &proc_kinds {
                 let group = ProcGroup(*node, *kind, *device);
 
-                let procs = proc_groups.get(&group).unwrap();
+                // Not all kinds might exist on all nodes if the machine model
+                // is not symmetric or if we didn't load some processors from
+                // remote nodes when only loading logfiles from a subset of nodes
+                let Some(procs) = proc_groups.get(&group) else {
+                    continue;
+                };
                 if node.is_some() {
                     // Don't render kind if all processors of the kind are empty
                     let empty = procs.iter().all(|p| state.procs.get(p).unwrap().is_empty());
