@@ -48,6 +48,12 @@ REALM_ATTR_UNUSED(static const void *ignore_gasnet_warning2) = (void *)_gasnett_
   } \
 } while(0)
 
+#define REALM_GEX_API ((10000 * GEX_SPEC_VERSION_MAJOR) + (100 * GEX_SPEC_VERSION_MINOR))
+#if REALM_GEX_API < 500
+#error Realm depends on GASNet features that is at least 0.5 spec, first available in the 2018.6.0 Beta release.
+#include <stop_compilation_due_to_gasnet_version_mismatch>
+#endif
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -691,11 +697,6 @@ namespace Realm {
     // Put this here so that it complies with the GASNet specification and
     // doesn't make any calls between gasnet_init and gasnet_attach
     gasnet_set_waitmode(GASNET_WAIT_BLOCK);
-
-#if ((GEX_SPEC_VERSION_MAJOR << 8) + GEX_SPEC_VERSION_MINOR) < 5
-    // this needs to happen after init_endpoints
-    gasnet_coll_init(0, 0, 0, 0, 0);
-#endif
 
     gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[Network::max_node_id + 1];
     CHECK_GASNET( gasnet_getSegmentInfo(seginfos, Network::max_node_id + 1) );
