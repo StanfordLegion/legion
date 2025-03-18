@@ -16,6 +16,11 @@ else()
   set(lib_type "static")
 endif()
 
+get_property(REALM_COMPILE_DEFINITIONS TARGET realm_obj PROPERTY COMPILE_DEFINITIONS)
+
+# Adding realm_obj doesn't really do anything there, it won't install object
+# files or anything, it just makes it so it's exported since it's referenced
+# by the realm target
 install(
   TARGETS realm realm_obj
   EXPORT Realm_targets
@@ -38,6 +43,13 @@ install(
   FILES_MATCHING
   PATTERN "*.h"
 )
+install(
+  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
+  COMPONENT Realm_devel
+  FILES_MATCHING
+  PATTERN "*.inl"
+)
 
 install(
   DIRECTORY examples/
@@ -59,14 +71,21 @@ write_basic_package_version_file(
 )
 
 # Get a list of pkgconf dependencies
-list(TRANSFORM REALM_STATIC_DEPENDS TOLOWER OUTPUT_VARIABLE REALM_PKGCONF_REQUIRES)
+list(
+  TRANSFORM REALM_STATIC_DEPENDS
+  TOLOWER
+  OUTPUT_VARIABLE REALM_PKGCONF_REQUIRES
+)
 string(REPLACE ";" " " REALM_PKGCONF_REQUIRES "${REALM_PKGCONF_REQUIRES}")
+
+# Setup pkgconfig module
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/realm.pc.in realm.pc
   INSTALL_DESTINATION "${CMAKE_INSTALL_ROOTDATADIR}/pkgconfig"
   PATH_VARS CMAKE_INSTALL_PREFIX CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR
 )
 
+# Set up RealmConfig file.
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RealmConfig.cmake.in" "RealmConfig.cmake"
   INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
@@ -80,6 +99,15 @@ install(
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/RealmConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/RealmConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
+  COMPONENT Realm_devel
+)
+
+# Make sure to install all the find modules as a last resort for RealmConfig to find them
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/FindGASNet.cmake" "${CMAKE_CURRENT_BINARY_DIR}/FindHWLOC.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FindLLVM.cmake" "${CMAKE_CURRENT_BINARY_DIR}/FindPapi.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/Finducx.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
   COMPONENT Realm_devel
 )

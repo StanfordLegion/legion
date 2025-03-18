@@ -124,12 +124,16 @@ option(REALM_ENABLE_MPI "Compile with MPI support" OFF)
 option(REALM_ENABLE_OPENMP "Compile with OpenMP support" ON)
 option(REALM_ENABLE_KOKKOS "Compile with kokkos support" OFF)
 option(REALM_ENABLE_UCX "Compile with UCX support" ON)
-option(REALM_ENABLE_GASNETEX "Compile with GASNetEx support" ON)
-option(REALM_ENABLE_GASNETEX_WRAPPER "Compile with dynamic GASNetEx ABI stability wrapper" OFF)
 option(REALM_ENABLE_HWLOC "Compile with hwloc hardware discovery support" OFF)
 option(REALM_ENABLE_PAPI "Compile with PAPI thread profiling support" ON)
 option(REALM_ENABLE_CPPTRACE "Compile with cpptrace backtrace support" ON)
 option(REALM_ENABLE_LIBDL "Compile with dynamic runtime linking support" ON)
+cmake_dependent_option(
+  REALM_ENABLE_GASNETEX "Compile with GASNetEx support" ON "NOT WIN32" OFF
+)
+cmake_dependent_option(
+  REALM_ENABLE_GASNETEX_WRAPPER "Compile with dynamic GASNetEx ABI stability wrapper" OFF "NOT WIN32; REALM_ENABLE_LIBDL" OFF
+)
 cmake_dependent_option(
   REALM_ENABLE_PYTHON "Compile with Python support" ON "REALM_ENABLE_LIBDL" OFF
 )
@@ -391,7 +395,9 @@ endif()
 
 if(REALM_ENABLE_UCX)
   find_package(ucx QUIET CONFIG)
-  if(NOT ucx_FOUND)
+  # TODO(cperry): UCX compilation on OSX currently runs into the following issue:
+  # https://github.com/openucx/ucx/issues/9
+  if(NOT ucx_FOUND AND NOT APPLE)
     list(
       APPEND
       UCX_CONFIG_ARGS
@@ -413,7 +419,7 @@ if(REALM_ENABLE_UCX)
     # cmake-format: off
     ExternalProject_Add(
       ucx_external
-      URL https://github.com/openucx/ucx/releases/download/v1.17.0/ucx-1.17.0.tar.gz
+      URL "https://github.com/openucx/ucx/releases/download/v1.17.0/ucx-1.17.0.tar.gz"
       URL_HASH SHA256=34658e282f99f89ce7a991c542e9727552734ac6ad408c52f22b4c2653b04276
       SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx"
       INSTALL_DIR "${ucx_ROOT_DIR}"
@@ -423,6 +429,7 @@ if(REALM_ENABLE_UCX)
       INSTALL_COMMAND $(MAKE) install
       BUILD_IN_SOURCE TRUE
       BUILD_JOB_SERVER_AWARE TRUE
+      BUILD_BYPRODUCTS <INSTALL_DIR>/lib/${CMAKE_SHARED_LIBRARY_PREFIX}ucp${CMAKE_SHARED_LIBRARY_SUFFIX}
     )
     # cmake-format: on
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install/include)
@@ -443,7 +450,7 @@ if(REALM_ENABLE_UCX)
     list(APPEND REALM_STATIC_DEPENDS ucp)
   endif()
 
-  if(REALM_ENABLE_UCC)
+  if(REALM_ENABLE_UCC AND TARGET ucx::ucp)
     find_package(ucc QUIET CONFIG)
     if(NOT ucc_FOUND)
       list(
@@ -460,6 +467,7 @@ if(REALM_ENABLE_UCX)
       if(CUDAToolkit_FOUND)
         list(APPEND UCC_CONFIG_ARGS "--with-cuda=${CUDAToolkit_LIBRARY_ROOT}")
       endif()
+      set(ucc_ROOT_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install")
       set(ucc_VERSION 1.3.0)
       # cmake-format: off
       ExternalProject_Add(
@@ -474,9 +482,10 @@ if(REALM_ENABLE_UCX)
         INSTALL_COMMAND $(MAKE) install
         BUILD_IN_SOURCE TRUE
         BUILD_JOB_SERVER_AWARE TRUE
+        BUILD_BYPRODUCTS <INSTALL_DIR>/lib/${CMAKE_SHARED_LIBRARY_PREFIX}ucc${CMAKE_SHARED_LIBRARY_SUFFIX}
       )
       # cmake-format: on
-      add_dependencies(ucc_external ucx_external)
+      add_dependencies(ucc_external ucx::ucp)
       file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install/include)
       add_library(ucc SHARED IMPORTED)
       set_target_properties(
@@ -661,6 +670,7 @@ if(TARGET cpptrace::cpptrace)
 endif()
 
 set(REALM_USE_LIBDL ${REALM_ENABLE_LIBDL})
+add_feature_info(libdl REALM_USE_LIBDL "Enables use of dlopen")
 set(REALM_USE_SHM ${REALM_ENABLE_SHM})
 add_feature_info(shm REALM_USE_SHM "Enables use of shared memory for CPU IPC")
 #endregion
