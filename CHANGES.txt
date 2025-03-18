@@ -23,6 +23,10 @@ Version 25.03.0 (March ??, 2025)
     - Fix for correctly processing negative points and rects
     - Support for profiling external handshake objects
   * Realm
+    - The hwloc support for topology discovery in Realm, which had bitrotted, has been revived and substantially improved
+    - Support for NVIDIA Blackwell GPU architecture
+    - Realm now features an experimental CMake build system in the /realm directory for standalone builds.
+    - Expanded unit test coverage
 
 Version 24.12.0 (December 20, 2024)
   * Legion
