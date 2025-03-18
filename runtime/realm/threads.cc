@@ -1766,22 +1766,28 @@ namespace Realm {
 
       int ret = PAPI_add_event(ctrs->papi_event_set, *it);
       if(ret == PAPI_OK) {
-	ctrs->event_codes[*it] = count;
-	ctrs->event_counts.push_back(0);
-	count++;
-	continue;
+        log_papi.debug() << "event " << std::showbase << std::hex << *it << std::dec
+                         << " added";
+        ctrs->event_codes[*it] = count;
+        ctrs->event_counts.push_back(0);
+        count++;
+        continue;
       }
       // two kinds of tolerable error
       if(ret == PAPI_ENOEVNT) {
-	log_papi.debug() << "event " << *it << " not available on hardware - skipping";
-	continue;
+        log_papi.debug() << "event " << std::showbase << std::hex << *it << std::dec
+                         << " not available on hardware - skipping";
+        continue;
       }
       if(ret == PAPI_ECNFLCT) {
-	log_papi.debug() << "event " << *it << " conflicts with previously added events - skipping";
-	continue;
+        log_papi.debug()
+            << "event " << std::showbase << std::hex << *it << std::dec
+            << " cannot be counted due to counter resource limitations - skipping";
+        continue;
       }
       // anything else is a real problem
-      log_papi.fatal() << "add event: " << PAPI_strerror(ret) << " (" << ret << ")";
+      log_papi.fatal() << "add event: " << std::showbase << std::hex << *it << std::dec
+                       << ", error: " << PAPI_strerror(ret) << " (" << ret << ")";
       assert(false);
     }
 
@@ -1932,14 +1938,17 @@ namespace Realm {
 	  } else {
 	    log_papi.warning() << "thread init error: " << PAPI_strerror(ret) << " (" << ret << ")";
 	  }
-	} else {
-	  // failure could be due to a version mismatch or some other error
-	  if(ret > 0) {
-	    log_papi.warning() << "version mismatch - wanted: " << PAPI_VER_CURRENT << ", got: " << ret;
-	  } else {
-	    log_papi.warning() << "initialization error: " << PAPI_strerror(ret) << " (" << ret << ")";
-	  }
-	}
+          // TODO: enable PAPI_multiplex_init if we see a lot of PAPI_ECNFLCT errors
+        } else {
+          // failure could be due to a version mismatch or some other error
+          if(ret > 0) {
+            log_papi.warning() << "version mismatch - wanted: " << PAPI_VER_CURRENT
+                               << ", got: " << ret;
+          } else {
+            log_papi.warning() << "initialization error: " << PAPI_strerror(ret) << " ("
+                               << ret << ")";
+          }
+        }
       }
 #endif
 

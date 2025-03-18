@@ -314,10 +314,11 @@ namespace Realm {
 	  mark_finished(true /*successful*/);
 	}
 	catch (const ExecutionException& e) {
-	  e.populate_profiling_measurements(measurements);
-	  thread->stop_operation(this);
-	  mark_terminated(e.error_code, e.details);
-	}
+          thread->stop_perf_counters();
+          e.populate_profiling_measurements(measurements);
+          thread->stop_operation(this);
+          mark_terminated(e.error_code, e.details);
+        }
       } else
 #endif
       {
