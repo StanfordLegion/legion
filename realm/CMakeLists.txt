@@ -209,6 +209,10 @@ if(UNIX)
   check_function_exists(posix_fallocate64 REALM_HAS_POSIX_FALLOCATE64)
 endif()
 
+if (REALM_ENABLE_LIBDL)
+  list(APPEND REALM_LIBRARIES ${CMAKE_DL_LIBS})
+endif()
+
 if(REALM_ENABLE_CPPTRACE)
   cpmfindpackage(
     NAME
@@ -222,7 +226,7 @@ if(REALM_ENABLE_CPPTRACE)
     SYSTEM
     YES
     OPTIONS
-    "CMAKE_SKIP_INSTALL_RULES ON"
+    "CMAKE_SKIP_INSTALL_RULES OFF"
     "BUILD_SHARED_LIBS OFF"
   )
   set_property(GLOBAL APPEND PROPERTY PACKAGES_FOUND cpptrace)
@@ -230,16 +234,23 @@ if(REALM_ENABLE_CPPTRACE)
   list(REMOVE_ITEM _NOT_FOUND cpptrace)
   set_property(GLOBAL PROPERTY PACKAGES_NOT_FOUND "${_NOT_FOUND}")
   list(APPEND REALM_STATIC_DEPENDS cpptrace)
+  list(APPEND REALM_LIBRARIES cpptrace::cpptrace)
 endif()
 
 if(REALM_ENABLE_HWLOC)
   find_package(HWLOC)
-  list(APPEND REALM_STATIC_DEPENDS HWLOC)
+  if (HWLOC_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS HWLOC)
+    list(APPEND REALM_LIBRARIES HWLOC::HWLOC)
+  endif()
 endif()
 
 if(REALM_ENABLE_PAPI)
   find_package(Papi)
-  list(APPEND REALM_STATIC_DEPENDS Papi)
+  if (Papi_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS Papi)
+    list(APPEND REALM_LIBRARIES Papi::Papi)
+  endif()
 endif()
 
 if(REALM_ENABLE_COVERAGE)
@@ -272,7 +283,10 @@ if(REALM_ENABLE_HIP)
   if (NOT HIP_ROOT_DIR)
     set(HIP_ROOT_DIR "${ROCM_PATH}")
   endif()
-  list(APPEND REALM_STATIC_DEPENDS hip)
+  if(HIP_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS hip)
+    list(APPEND REALM_LIBRARIES hip::hip_host)
+  endif()
 endif()
 
 if(REALM_ENABLE_CUDA)
@@ -317,8 +331,10 @@ if(REALM_ENABLE_CUDA)
     if(NOT TARGET CUDA::nvToolsExt)
       add_library(CUDA::nvToolsExt ALIAS CUDA::nvtx3)
     endif()
+    list(APPEND REALM_LIBRARIES CUDA::nvToolsExt)
     if(NOT REALM_CUDA_DYNAMIC_LOAD)
       list(APPEND REALM_STATIC_DEPENDS CUDAToolkit)
+      list(APPEND REALM_LIBRARIES CUDA::cuda_driver)
     endif()
   endif()
 endif()
@@ -330,20 +346,26 @@ if(REALM_ENABLE_MPI)
     list(APPEND CMAKE_REQUIRED_LIBRARIES ${MPI_mpi_LIBRARY})
     check_function_exists(MPI_Comm_split_type REALM_MPI_HAS_COMM_SPLIT_TYPE)
     cmake_pop_check_state()
+    list(APPEND REALM_STATIC_DEPENDS MPI)
+    list(APPEND REALM_LIBRARIES MPI::MPI_CXX)
   endif()
-  list(APPEND REALM_STATIC_DEPENDS MPI)
 endif()
 
 if(REALM_ENABLE_OPENMP)
   if(REALM_OPENMP_SYSTEM_RUNTIME)
     find_package(OpenMP COMPONENTS C CXX)
   endif()
-  list(APPEND REALM_STATIC_DEPENDS OpenMP)
+  if (OpenMP_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS OpenMP)
+    list(APPEND REALM_LIBRARIES OpenMPI::OpenMP_CXX)
+  endif()
 endif()
 
 if(REALM_ENABLE_PYTHON)
   find_package(Python3 COMPONENTS Development)
-  list(APPEND REALM_STATIC_DEPENDS Python3)
+  if (Python3_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS Python3)
+  endif()
 endif()
 
 if(REALM_ENABLE_KOKKOS)
@@ -378,19 +400,25 @@ if(REALM_ENABLE_KOKKOS)
     get_property(_NOT_FOUND GLOBAL PROPERTY PACKAGES_NOT_FOUND)
     list(REMOVE_ITEM _NOT_FOUND Kokkos)
     set_property(GLOBAL PROPERTY PACKAGES_NOT_FOUND "${_NOT_FOUND}")
-  else()
-    list(APPEND REALM_STATIC_DEPENDS Kokkos)
   endif()
+  list(APPEND REALM_STATIC_DEPENDS Kokkos)
+  list(APPEND REALM_LIBRARIES Kokkos::kokkoscore)
 endif()
 
 if(REALM_ENABLE_LLVM)
   find_package(LLVM)
-  list(APPEND REALM_STATIC_DEPENDS LLVM)
+  if (LLVM_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS LLVM)
+    list(APPEND REALM_LIBRARIES LLVM::LLVM)
+  endif()
 endif()
 
 if(REALM_ENABLE_HDF5)
   find_package(HDF5)
-  list(APPEND REALM_STATIC_DEPENDS HDF5)
+  if (HDF5_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS HDF5)
+    list(APPEND REALM_LIBRARIES hdf5::hdf5)
+  endif()
 endif()
 
 if(REALM_ENABLE_UCX)
@@ -447,7 +475,8 @@ if(REALM_ENABLE_UCX)
     get_property(_NOT_FOUND GLOBAL PROPERTY PACKAGES_NOT_FOUND)
     list(REMOVE_ITEM _NOT_FOUND ucx)
     set_property(GLOBAL PROPERTY PACKAGES_NOT_FOUND "${_NOT_FOUND}")
-    list(APPEND REALM_STATIC_DEPENDS ucp)
+    list(APPEND REALM_STATIC_DEPENDS ucx)
+    list(APPEND REALM_LIBRARIES ucx::ucp)
   endif()
 
   if(REALM_ENABLE_UCC AND TARGET ucx::ucp)
@@ -502,6 +531,7 @@ if(REALM_ENABLE_UCX)
       list(REMOVE_ITEM _NOT_FOUND ucc)
       set_property(GLOBAL PROPERTY PACKAGES_NOT_FOUND "${_NOT_FOUND}")
       list(APPEND REALM_STATIC_DEPENDS ucc)
+      list(APPEND REALM_LIBRARIES ucc::ucc)
     endif()
   endif()
 
@@ -613,15 +643,25 @@ if(REALM_ENABLE_GASNETEX)
     message(FATAL_ERROR "Failed to find GASNet")
   endif()
   list(APPEND REALM_STATIC_DEPENDS GASNet)
+  if (NOT REALM_ENABLE_GASNETEX_WRAPPER)
+    list(APPEND REALM_LIBRARIES GASNet::GASNet)
+  endif()
 endif()
 
 if(GASNet_FOUND)
   set(GEX_WRAPPER_BUILD_SHARED ${REALM_ENABLE_GASNETEX_WRAPPER})
-  set(GEX_NO_INSTALL NOT ${REALM_ENABLE_GASNETEX_WRAPPER})
+  if (GEX_WRAPPER_BUILD_SHARED OR NOT BUILD_SHARED_LIBS)
+    set(GEX_NO_INSTALL FALSE)
+  else()
+    set(GEX_NO_INSTALL TRUE)
+  endif()
   add_subdirectory(
     ${REALM_SOURCE_DIR}/gasnetex/gasnetex_wrapper ${CMAKE_CURRENT_BINARY_DIR}/gasnetex_wrapper
     EXCLUDE_FROM_ALL
   )
+  if (NOT REALM_ENABLE_GASNETEX_WRAPPER)
+    list(APPEND REALM_LIBRARIES realm_gex_wrapper)
+  endif()
 endif()
 #endregion
 
@@ -666,7 +706,7 @@ if(TARGET Papi::Papi)
   set(REALM_USE_PAPI TRUE)
 endif()
 if(TARGET cpptrace::cpptrace)
-  set(REALM_USE_CPPTRACE cpptrace::cpptace)
+  set(REALM_USE_CPPTRACE TRUE)
 endif()
 
 set(REALM_USE_LIBDL ${REALM_ENABLE_LIBDL})
@@ -710,6 +750,14 @@ endif()
 #endregion
 
 #region Library compilation
+# Remove NDEBUG from definitions for cxx, c, and cuda release flags.
+# TODO(cperry): remove this once we clean up all the asserts that have side effects
+string( REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+string( REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+string( REPLACE "/DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+string( REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+string( REPLACE "/DNDEBUG" "" CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE}")
+string( REPLACE "-DNDEBUG" "" CMAKE_CUDA_FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE}")
 
 add_library(realm_obj OBJECT ${REALM_SOURCES})
 set_target_properties(
@@ -720,8 +768,7 @@ set_target_properties(
   VISIBILITY_INLINES_HIDDEN ON
   POSITION_INDEPENDENT_CODE ON
 )
-add_library(realm ${REALM_RC_SOURCES})
-target_link_libraries(realm PUBLIC realm_obj)
+add_library(realm ${REALM_RC_SOURCES} ${REALM_SOURCES})
 set_target_properties(
   realm
   PROPERTIES VERSION ${Realm_VERSION}
@@ -743,22 +790,12 @@ endif()
 target_link_libraries(
   realm_obj
   PRIVATE
-  $<TARGET_NAME_IF_EXISTS:hip::hip_host>
-  $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
-  $<TARGET_NAME_IF_EXISTS:OpenMP::OpenMP_CXX>
-  $<TARGET_NAME_IF_EXISTS:Kokkos::kokkoscore>
-  $<TARGET_NAME_IF_EXISTS:LLVM::LLVM>
-  $<TARGET_NAME_IF_EXISTS:hdf5::hdf5>
-  $<$<NOT:$<BOOL:${REALM_ENABLE_GASNETEX_WRAPPER}>>:$<TARGET_NAME_IF_EXISTS:GASNet::GASNet>>
-  $<TARGET_NAME_IF_EXISTS:ucx::ucp>
-  $<TARGET_NAME_IF_EXISTS:ucc::ucc>
-  $<TARGET_NAME_IF_EXISTS:HWLOC::HWLOC>
-  $<TARGET_NAME_IF_EXISTS:Papi::Papi>
-  $<TARGET_NAME_IF_EXISTS:cpptrace::cpptrace>
-  $<$<NOT:$<BOOL:${REALM_CUDA_DYNAMIC_LOAD}>>:$<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>>
-  $<$<BOOL:${REALM_ENABLE_NVTX}>:$<TARGET_NAME_IF_EXISTS:CUDA::nvToolsExt>>
-  $<$<NOT:$<BOOL:${REALM_ENABLE_GASNETEX_WRAPPER}>>:$<TARGET_NAME_IF_EXISTS:realm_gex_wrapper>>
-  $<$<BOOL:${REALM_ENABLE_LIBDL}>:${CMAKE_DL_LIBS}>
+  ${REALM_LIBRARIES}
+)
+target_link_libraries(
+  realm
+  PRIVATE
+  ${REALM_LIBRARIES}
 )
 
 target_include_directories(
@@ -769,12 +806,37 @@ target_include_directories(
   $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
   $<$<TARGET_EXISTS:Python3::Python>:${Python_INCLUDE_DIRS}>
 )
+target_include_directories(
+  realm
+  PUBLIC $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}> $<BUILD_INTERFACE:${REALM_SOURCE_DIR}/..>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+  PRIVATE $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_CUPTI_INCLUDE_DIR}>
+  $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
+  $<$<TARGET_EXISTS:Python3::Python>:${Python_INCLUDE_DIRS}>
+)
 if(REALM_ENABLE_GASNETEX_WRAPPER)
   # Force the creation of the export header for the wrapper we need, but nothing else
+  add_dependencies(realm ${CMAKE_CURRENT_BINARY_DIR}/gasnetex_wrapper/exports/gex_export.h)
   add_dependencies(realm_obj ${CMAKE_CURRENT_BINARY_DIR}/gasnetex_wrapper/exports/gex_export.h)
 endif()
 
+target_compile_features(realm PUBLIC cxx_std_${REALM_CXX_STANDARD})
 target_compile_features(realm_obj PUBLIC cxx_std_${REALM_CXX_STANDARD})
+target_compile_options(
+  realm
+  PRIVATE $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+  -Wall
+  -Wextra
+  -Wno-unused-parameter>
+  $<$<CXX_COMPILER_ID:MSVC>:
+  /W4
+  /WX
+  /Zc:alignedNew
+  /utf-8
+  /Zi
+  /permissive-
+  /Zc:tlsGuards>
+)
 target_compile_options(
   realm_obj
   PRIVATE $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:

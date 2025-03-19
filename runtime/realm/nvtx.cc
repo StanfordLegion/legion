@@ -130,7 +130,7 @@ namespace Realm {
 #ifdef REALM_ON_WINDOWS
     nvtxNameOsThread(GetCurrentThreadId(), thread_name)
 #else
-    nvtxNameOsThread(gettid(), thread_name);
+    nvtxNameOsThread(pthread_self(), thread_name);
 #endif
 
     nvtx_categories = new std::map<std::string, NvtxCategory *>();

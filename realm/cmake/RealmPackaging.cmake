@@ -16,13 +16,8 @@ else()
   set(lib_type "static")
 endif()
 
-get_property(REALM_COMPILE_DEFINITIONS TARGET realm_obj PROPERTY COMPILE_DEFINITIONS)
-
-# Adding realm_obj doesn't really do anything there, it won't install object
-# files or anything, it just makes it so it's exported since it's referenced
-# by the realm target
 install(
-  TARGETS realm realm_obj
+  TARGETS realm
   EXPORT Realm_targets
   RUNTIME COMPONENT Realm_runtime
   LIBRARY COMPONENT Realm_runtime
@@ -31,6 +26,17 @@ install(
   INCLUDES
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
 )
+
+# Install the realm_gex_wrapper as well if we have to link directly to it
+if (NOT REALM_USE_GASNETEX_WRAPPER AND NOT BUILD_SHARED_LIBS)
+  install(
+    TARGETS realm_gex_wrapper realm_gex_wrapper_objs
+    EXPORT Realm_targets
+    RUNTIME COMPONENT Realm_runtime
+    LIBRARY COMPONENT Realm_runtime
+    ARCHIVE COMPONENT Realm_devel
+  )
+endif()
 
 # TODO(cperry): Separate out public headers from internal ones
 # Unfortunately public and internal headers are all mixed up, so we need to glob together
