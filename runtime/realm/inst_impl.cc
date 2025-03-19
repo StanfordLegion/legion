@@ -449,7 +449,7 @@ namespace Realm {
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
-						     InstanceLayoutGeneric *ilg,
+						     const InstanceLayoutGeneric *ilg,
 						     const ProfilingRequestSet& prs,
 						     Event wait_on)
     {
@@ -459,7 +459,7 @@ namespace Realm {
 
     /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
 							      Memory memory,
-							      InstanceLayoutGeneric *ilg,
+							      const InstanceLayoutGeneric *ilg,
 							      const ExternalInstanceResource& res,
 							      const ProfilingRequestSet& prs,
 							      Event wait_on)
@@ -790,7 +790,7 @@ namespace Realm {
 
     /*static*/ Event RegionInstanceImpl::create_instance(RegionInstance& inst,
 							 Memory memory,
-							 InstanceLayoutGeneric *ilg,
+							 const InstanceLayoutGeneric *ilg,
 							 const ExternalInstanceResource *res,
 							 const ProfilingRequestSet& prs,
 							 Event wait_on)
@@ -811,7 +811,8 @@ namespace Realm {
       //  profiling callback containing this instance handle
       inst = impl->me;
 
-      impl->metadata.layout = ilg;
+      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
+      impl->metadata.layout = ilg->clone();
       if(res)
 	impl->metadata.ext_resource = res->clone();
       else
@@ -829,8 +830,6 @@ namespace Realm {
 
       impl->metadata.need_alloc_result = need_alloc_result;
       impl->metadata.need_notify_dealloc = false;
-
-      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
 
       // request allocation of storage - note that due to the asynchronous
       //  nature of any profiling responses, it is not safe to refer to the
