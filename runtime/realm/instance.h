@@ -181,9 +181,15 @@ namespace Realm {
      */
     static Event create_instance(RegionInstance& inst,
 				 Memory memory,
-				 const InstanceLayoutGeneric *ilg,
+				 const InstanceLayoutGeneric& ilg,
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
+    REALM_ATTR_DEPRECATED("use RegionInstance::create_instance with layout reference instead",
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 InstanceLayoutGeneric *ilg,
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT));
 
     /**
      * Create a new region instance backed by an external resource.
@@ -199,10 +205,17 @@ namespace Realm {
      */
     static Event create_external_instance(RegionInstance& inst,
 					  Memory memory,
-					  const InstanceLayoutGeneric *ilg,
+					  const InstanceLayoutGeneric& ilg,
 					  const ExternalInstanceResource& resource,
 					  const ProfilingRequestSet& prs,
 					  Event wait_on = Event::NO_EVENT);
+    REALM_ATTR_DEPRECATED("use RegionInstance::create_external_instance with layout reference instead",
+    static Event create_external_instance(RegionInstance& inst,
+					  Memory memory,
+					  InstanceLayoutGeneric *ilg,
+					  const ExternalInstanceResource& resource,
+					  const ProfilingRequestSet& prs,
+					  Event wait_on = Event::NO_EVENT));
 
     ///@{
     /**

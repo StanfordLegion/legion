@@ -449,7 +449,17 @@ namespace Realm {
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
-						     const InstanceLayoutGeneric *ilg,
+						     const InstanceLayoutGeneric &ilg,
+						     const ProfilingRequestSet& prs,
+						     Event wait_on)
+    {
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), 0,
+						 prs, wait_on);
+    }
+
+    /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
+						     Memory memory,
+						     InstanceLayoutGeneric *ilg,
 						     const ProfilingRequestSet& prs,
 						     Event wait_on)
     {
@@ -459,7 +469,18 @@ namespace Realm {
 
     /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
 							      Memory memory,
-							      const InstanceLayoutGeneric *ilg,
+							      const InstanceLayoutGeneric& ilg,
+							      const ExternalInstanceResource& res,
+							      const ProfilingRequestSet& prs,
+							      Event wait_on)
+    {
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), &res,
+						 prs, wait_on);
+    }
+
+    /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
+							      Memory memory,
+							      InstanceLayoutGeneric *ilg,
 							      const ExternalInstanceResource& res,
 							      const ProfilingRequestSet& prs,
 							      Event wait_on)
@@ -790,7 +811,7 @@ namespace Realm {
 
     /*static*/ Event RegionInstanceImpl::create_instance(RegionInstance& inst,
 							 Memory memory,
-							 const InstanceLayoutGeneric *ilg,
+							 InstanceLayoutGeneric *ilg,
 							 const ExternalInstanceResource *res,
 							 const ProfilingRequestSet& prs,
 							 Event wait_on)
@@ -800,6 +821,7 @@ namespace Realm {
       // we can fail to get a valid pointer if we are out of instance slots
       if(!impl) {
         inst = RegionInstance::NO_INST;
+        delete ilg;
         // generate a poisoned event for completion
         GenEventImpl *ev = GenEventImpl::create_genevent();
         Event ready_event = ev->current_event();
@@ -812,7 +834,7 @@ namespace Realm {
       inst = impl->me;
 
       log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
-      impl->metadata.layout = ilg->clone();
+      impl->metadata.layout = ilg;
       if(res)
 	impl->metadata.ext_resource = res->clone();
       else

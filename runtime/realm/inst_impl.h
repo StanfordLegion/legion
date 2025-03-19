@@ -88,7 +88,7 @@ namespace Realm {
       // entry point for both create_instance and create_external_instance
       static Event create_instance(RegionInstance& inst,
 				   Memory memory,
-				   const InstanceLayoutGeneric *ilg,
+				   InstanceLayoutGeneric *ilg,
 				   const ExternalInstanceResource *res,
 				   const ProfilingRequestSet& prs,
 				   Event wait_on);
