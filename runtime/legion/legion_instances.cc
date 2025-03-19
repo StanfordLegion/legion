@@ -3881,16 +3881,12 @@ namespace Legion {
           return NULL;
         }
       }
-      // Clone the realm layout each time since (realm will take ownership 
-      // after every instance call, so we need a new one each time)
-      Realm::InstanceLayoutGeneric *inst_layout = 
-        hole.exists() ? realm_layout : realm_layout->clone();
 #ifdef DEBUG_LEGION
-      assert(inst_layout != NULL);
+      assert(realm_layout != NULL);
 #endif
       // Have to grab this now since realm is going to take ownership of
       // the instance layout generic object once we do the creation call
-      const size_t instance_footprint = inst_layout->bytes_used;
+      const size_t instance_footprint = realm_layout->bytes_used;
       // Save the footprint size if we need to
       if (footprint != NULL)
         *footprint = instance_footprint;
@@ -3927,17 +3923,17 @@ namespace Legion {
 #ifndef LEGION_MALLOC_INSTANCES
       if (hole.exists())
         ready = ApEvent(
-            hole.redistrict(instance, inst_layout, requests, precondition));
+            hole.redistrict(instance, realm_layout, requests, precondition));
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-              memory_manager->memory, inst_layout, requests, precondition)); 
+              memory_manager->memory, realm_layout, requests, precondition)); 
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout,
+      ready = ApEvent(memory_manager->allocate_legion_instance(realm_layout,
             requests, instance, unique_event));
       allocated = instance.exists();
 #endif

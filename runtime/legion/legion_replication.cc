@@ -6884,6 +6884,7 @@ namespace Legion {
         ready_event = ApEvent(PhysicalInstance::create_external_instance(
               instance, external_resource->suggested_memory(), ilg, 
               *external_resource, requests));
+        delete ilg;
         if (single_broadcast != NULL)
           single_broadcast->broadcast({instance, ready_event, unique_event});
         if (implicit_profiler != NULL)

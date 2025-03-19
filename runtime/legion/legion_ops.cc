@@ -20425,6 +20425,7 @@ namespace Legion {
       ready_event = ApEvent(PhysicalInstance::create_external_instance(
             result, external_resource->suggested_memory(), ilg, 
             *external_resource, requests));
+      delete ilg;
       if (implicit_profiler != NULL)
       {
         implicit_profiler->register_physical_instance_region(unique_event,
