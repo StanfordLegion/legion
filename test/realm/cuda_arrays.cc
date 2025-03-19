@@ -112,7 +112,7 @@ void gpu_task(const void *data, size_t datalen,
       ExternalCudaArrayResource external(devid, arr1);
       RegionInstance::create_external_instance(arr_inst1,
                                                external.suggested_memory(),
-                                               layout.clone(),
+                                               layout,
                                                external,
                                                ProfilingRequestSet()).wait();
     }
@@ -120,7 +120,7 @@ void gpu_task(const void *data, size_t datalen,
       ExternalCudaArrayResource external(devid, arr2);
       RegionInstance::create_external_instance(arr_inst2,
                                                external.suggested_memory(),
-                                               layout.clone(),
+                                               layout,
                                                external,
                                                ProfilingRequestSet()).wait();
     }
@@ -135,9 +135,10 @@ void gpu_task(const void *data, size_t datalen,
     ExternalCudaMemoryResource external(devid, linear, elems * sizeof(float));
     RegionInstance::create_external_instance(linear_inst,
                                              external.suggested_memory(),
-                                             ilg,
+                                             *ilg,
                                              external,
                                              ProfilingRequestSet()).wait();
+    delete ilg
   }
 #endif
 
@@ -241,8 +242,9 @@ bool test_cuda_arrays(Rect<N,T> extent, Memory src_mem,
       InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T>(bloated),
                                                     InstanceLayoutConstraints(field_sizes, 0),
                                                     dim_order);
-    RegionInstance::create_instance(src_data, src_mem, layout,
+    RegionInstance::create_instance(src_data, src_mem, *layout,
                                     ProfilingRequestSet()).wait();
+    delete layout;
   }
 
   {

@@ -110,9 +110,9 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
                                                                     ilc,
                                                                     dim_order);
   }
-  RegionInstance::create_instance(start_inst, src_mem, abs_layout->clone(),
+  RegionInstance::create_instance(start_inst, src_mem, *abs_layout,
                                   ProfilingRequestSet()).wait();
-  RegionInstance::create_instance(check_inst, src_mem, abs_layout->clone(),
+  RegionInstance::create_instance(check_inst, src_mem, *abs_layout,
                                   ProfilingRequestSet()).wait();
 
   // create a relatively-indexed alias for the start instance
@@ -125,7 +125,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     }
     RegionInstance::create_external_instance(start_inst_rel,
                                              extres->suggested_memory(),
-                                             rel_layout->clone(),
+                                             *rel_layout,
                                              *extres,
                                              ProfilingRequestSet()).wait();
     delete extres;
@@ -151,7 +151,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     }
     RegionInstance::create_external_instance(start_inst_flat,
                                              extres->suggested_memory(),
-                                             flat_layout->clone(),
+                                             *flat_layout,
                                              *extres,
                                              ProfilingRequestSet()).wait();
     delete extres;
@@ -191,10 +191,10 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     //  memory)
     RegionInstance tgt_inst_dummy, tgt_inst_abs;
     RegionInstance::create_instance(tgt_inst_dummy, tgt_mem,
-                                    abs_layout->clone(),
+                                    *abs_layout,
                                     ProfilingRequestSet()).wait();
     RegionInstance::create_instance(tgt_inst_abs, tgt_mem,
-                                    abs_layout->clone(),
+                                    *abs_layout,
                                     ProfilingRequestSet()).wait();
 
     // create a relatively-indexed alias for the target instance
@@ -207,7 +207,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
       }
       RegionInstance::create_external_instance(tgt_inst_rel,
                                                extres->suggested_memory(),
-                                               rel_layout->clone(),
+                                               *rel_layout,
                                                *extres,
                                                ProfilingRequestSet()).wait();
       delete extres;
@@ -287,7 +287,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
       }
       RegionInstance::create_external_instance(tgt_inst_flat,
                                                extres->suggested_memory(),
-                                               flat_layout->clone(),
+                                               *flat_layout,
                                                *extres,
                                                ProfilingRequestSet()).wait();
       delete extres;
