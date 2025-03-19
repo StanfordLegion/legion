@@ -6882,7 +6882,7 @@ namespace Legion {
               hdf5_field_files, layout_constraint_set.ordering_constraint);
         footprint = ilg->bytes_used;
         ready_event = ApEvent(PhysicalInstance::create_external_instance(
-              instance, external_resource->suggested_memory(), ilg, 
+              instance, external_resource->suggested_memory(), *ilg, 
               *external_resource, requests));
         delete ilg;
         if (single_broadcast != NULL)

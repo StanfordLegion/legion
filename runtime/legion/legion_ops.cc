@@ -20423,7 +20423,7 @@ namespace Legion {
             layout_constraint_set.ordering_constraint);
       const size_t footprint = ilg->bytes_used;
       ready_event = ApEvent(PhysicalInstance::create_external_instance(
-            result, external_resource->suggested_memory(), ilg, 
+            result, external_resource->suggested_memory(), *ilg, 
             *external_resource, requests));
       delete ilg;
       if (implicit_profiler != NULL)

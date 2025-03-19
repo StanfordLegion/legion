@@ -3926,7 +3926,7 @@ namespace Legion {
             hole.redistrict(instance, realm_layout, requests, precondition));
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
-              memory_manager->memory, realm_layout, requests, precondition)); 
+              memory_manager->memory, *realm_layout, requests, precondition)); 
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
         profiling_ready.wait();

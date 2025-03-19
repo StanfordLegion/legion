@@ -11032,7 +11032,7 @@ namespace Legion {
                                             unique_event);
       PhysicalInstance result;
       const RtEvent ready(PhysicalInstance::create_instance(result, memory,
-            shadow_layout, requests));
+            *shadow_layout, requests));
       if (allocator.succeeded())
       {
         if (ready.exists())
