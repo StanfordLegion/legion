@@ -20,17 +20,17 @@ set(REALM_VERSION @Realm_VERSION@)
 set(realm_known_comps static shared)
 set(realm_static_comp NO)
 set(realm_shared_comp NO)
-for(_comp IN LISTS ${CMAKE_FIND_PACKAGE_NAME}_COMPONENTS)
-if(_comp IN_LIST realm_known_comps)
-  set(realm_${_comp}_comp YES)
-else()
-  set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
-      "${CMAKE_FIND_PACKAGE_NAME} does not recognize ${_comp}"
-  )
-  set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
-  return()
-endif()
-endfor()
+foreach(_comp IN LISTS ${CMAKE_FIND_PACKAGE_NAME}_COMPONENTS)
+  if(_comp IN_LIST realm_known_comps)
+    set(realm_${_comp}_comp YES)
+  else()
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+        "${CMAKE_FIND_PACKAGE_NAME} does not recognize ${_comp}"
+    )
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    return()
+  endif()
+endforeach()
 
 if(realm_static_comp AND realm_shared_comp)
   set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
