@@ -10,6 +10,10 @@
 # or implied. See the License for the specific language governing permissions and limitations under
 # the License.
 
+if(Papi_FOUND)
+  return()
+endif()
+
 if(UNIX)
   find_package(PkgConfig)
   if(NOT PkgConfig_FOUND)

@@ -37,6 +37,11 @@ install(
 # all the header files in the source directory and install them.  Ideally we would just
 # add the public headers to a cmake FILE_SET
 install(
+  FILES "${REALM_SOURCE_DIR}/../realm.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
+  COMPONENT Realm_devel
+)
+install(
   DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
   COMPONENT Realm_devel

@@ -10,6 +10,10 @@
 # or implied. See the License for the specific language governing permissions and limitations under
 # the License.
 
+if(GASNet_FOUND)
+  return()
+endif()
+
 find_package(PkgConfig)
 if (NOT PkgConfig_FOUND)
   return()
