@@ -76,7 +76,7 @@ include(CMakeFindDependencyMacro)
 # Use the installed Find* modules as a last resort for dependencies
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 if(${CMAKE_FIND_PACKAGE_NAME}_static_FOUND)
-  foreach (_dep IN LISTS @REALM_STATIC_DEPENDS@)
+  foreach (_dep @REALM_STATIC_DEPENDS@)
    find_dependency(${_dep})
   endforeach()
 endif()
