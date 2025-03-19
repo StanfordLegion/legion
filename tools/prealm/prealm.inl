@@ -222,8 +222,7 @@ public:
                         Event critical);
   void add_task_request(ProfilingRequestSet &requests,
                         Processor::TaskFuncID task_id, Event critical);
-  Event add_inst_request(ProfilingRequestSet &requests,
-                         const InstanceLayoutGeneric *ilg, Event critical);
+  Event add_inst_request(ProfilingRequestSet &requests, Event critical);
 
 public:
   void process_proc_desc(const Processor &p);
@@ -630,7 +629,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
-  inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
   Event result = Realm::RegionInstance::create_instance(inst, memory, ilg,
                                                         alt_requests, wait_on);
   return profiler.record_instance_ready(inst, result, wait_on);
@@ -641,7 +640,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
-  inst.unique_event = profiler.add_inst_request(alt_requests, *ilg, wait_on);
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
   Event result = Realm::RegionInstance::create_instance(inst, memory, ilg,
                                                         alt_requests, wait_on);
   delete ilg;
@@ -654,7 +653,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
-  inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
   Event result = Realm::RegionInstance::create_external_instance(
       inst, memory, ilg, resource, alt_requests, wait_on);
   return profiler.record_instance_ready(inst, result, wait_on);
@@ -666,7 +665,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
-  inst.unique_event = profiler.add_inst_request(alt_requests, *ilg, wait_on);
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
   Event result = Realm::RegionInstance::create_external_instance(
       inst, memory, ilg, resource, alt_requests, wait_on);
   delete ilg;

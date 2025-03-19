@@ -352,7 +352,6 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
 }
 
 Event ThreadProfiler::add_inst_request(ProfilingRequestSet &requests,
-                                       const InstanceLayoutGeneric *ilg,
                                        Event critical) {
   Profiler &profiler = Profiler::get_profiler();
   if (!profiler.enabled)
