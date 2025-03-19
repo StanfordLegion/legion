@@ -105,9 +105,9 @@ install(
 
 # Make sure to install all the find modules as a last resort for RealmConfig to find them
 install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/FindGASNet.cmake" "${CMAKE_CURRENT_BINARY_DIR}/FindHWLOC.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/FindLLVM.cmake" "${CMAKE_CURRENT_BINARY_DIR}/FindPapi.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/Finducx.cmake"
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindGASNet.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindHWLOC.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake/FindLLVM.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindPapi.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake/Finducx.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
   COMPONENT Realm_devel
 )
