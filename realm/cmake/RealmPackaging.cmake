@@ -107,7 +107,6 @@ install(
 install(
   FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindGASNet.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindHWLOC.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLLVM.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindPapi.cmake"
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Finducx.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
   COMPONENT Realm_devel
 )
