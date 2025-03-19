@@ -626,7 +626,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
 }
 
 /*static*/ inline Event RegionInstance::create_instance(
-    RegionInstance &inst, Memory memory, InstanceLayoutGeneric *ilg,
+    RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
@@ -636,8 +636,20 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
   return profiler.record_instance_ready(inst, result, wait_on);
 }
 
-/*static*/ inline Event RegionInstance::create_external_instance(
+/*static*/ inline Event RegionInstance::create_instance(
     RegionInstance &inst, Memory memory, InstanceLayoutGeneric *ilg,
+    const ProfilingRequestSet &requests, Event wait_on) {
+  ProfilingRequestSet alt_requests = requests;
+  ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
+  inst.unique_event = profiler.add_inst_request(alt_requests, *ilg, wait_on);
+  Event result = Realm::RegionInstance::create_instance(inst, memory, ilg,
+                                                        alt_requests, wait_on);
+  delete ilg;
+  return profiler.record_instance_ready(inst, result, wait_on);
+}
+
+/*static*/ inline Event RegionInstance::create_external_instance(
+    RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
     const ExternalInstanceResource &resource,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
@@ -645,6 +657,19 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
   inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
   Event result = Realm::RegionInstance::create_external_instance(
       inst, memory, ilg, resource, alt_requests, wait_on);
+  return profiler.record_instance_ready(inst, result, wait_on);
+}
+
+/*static*/ inline Event RegionInstance::create_external_instance(
+    RegionInstance &inst, Memory memory, InstanceLayoutGeneric *ilg,
+    const ExternalInstanceResource &resource,
+    const ProfilingRequestSet &requests, Event wait_on) {
+  ProfilingRequestSet alt_requests = requests;
+  ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
+  inst.unique_event = profiler.add_inst_request(alt_requests, *ilg, wait_on);
+  Event result = Realm::RegionInstance::create_external_instance(
+      inst, memory, ilg, resource, alt_requests, wait_on);
+  delete ilg;
   return profiler.record_instance_ready(inst, result, wait_on);
 }
 
