@@ -28,7 +28,7 @@ install(
 )
 
 # Install the realm_gex_wrapper as well if we have to link directly to it
-if (NOT REALM_USE_GASNETEX_WRAPPER AND NOT BUILD_SHARED_LIBS)
+if (REALM_USE_GASNETEX AND NOT REALM_USE_GASNETEX_WRAPPER AND NOT BUILD_SHARED_LIBS)
   install(
     TARGETS realm_gex_wrapper realm_gex_wrapper_objs
     EXPORT Realm_targets
