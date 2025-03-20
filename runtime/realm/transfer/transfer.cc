@@ -2201,14 +2201,14 @@ namespace Realm {
   // class PathLRU::LRUKey
 
   PathLRU::LRUKey::LRUKey(const CustomSerdezID serdez_id, const ReductionOpID redop_id,
-                          const size_t total_bytes, const std::vector<size_t> src_frags,
-                          const std::vector<size_t> dst_frags)
+                          const size_t total_bytes, const std::vector<size_t> *src_frags,
+                          const std::vector<size_t> *dst_frags)
     : timestamp(0)
     , serdez_id(serdez_id)
     , redop_id(redop_id)
     , total_bytes(total_bytes)
-    , src_frags(src_frags)
-    , dst_frags(dst_frags)
+    , src_frags(src_frags ? *src_frags : std::vector<size_t>{})
+    , dst_frags(dst_frags ? *dst_frags : std::vector<size_t>{})
   {}
 
   bool PathLRU::LRUKey::operator==(const LRUKey &rhs) const
@@ -2414,7 +2414,7 @@ namespace Realm {
       assert(lru != nullptr);
       // check if we can find the LRU key inside the LRU. If yes, we call the hit
       {
-        PathLRU::LRUKey lru_key(serdez_id, redop_id, total_bytes, *src_frags, *dst_frags);
+        PathLRU::LRUKey lru_key{serdez_id, redop_id, total_bytes, src_frags, dst_frags};
         RWLock::AutoReaderLock arl(lru->rwlock);
         PathLRU::PathLRUIterator lru_it = lru->find(lru_key);
         if(lru_it != lru->end()) {
@@ -2605,7 +2605,7 @@ namespace Realm {
     if(path_cache_inited) {
       std::pair<realm_id_t, realm_id_t> key(src_mem.id, dst_mem.id);
       PathLRU *lru = path_cache.find(key)->second;
-      PathLRU::LRUKey lru_key(serdez_id, redop_id, total_bytes, *src_frags, *dst_frags);
+      PathLRU::LRUKey lru_key{serdez_id, redop_id, total_bytes, src_frags, dst_frags};
       // the LRU key is not in the LRU, now we cache it
       {
         RWLock::AutoWriterLock awl(lru->rwlock);

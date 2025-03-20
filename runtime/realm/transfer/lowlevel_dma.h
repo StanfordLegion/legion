@@ -69,11 +69,11 @@ namespace Realm {
         size_t total_bytes;
         std::vector<size_t> src_frags;
         std::vector<size_t> dst_frags;
-      public:  
-        LRUKey(const CustomSerdezID serdez_id, const ReductionOpID redop_id, 
-               const size_t total_bytes, 
-               const std::vector<size_t> src_frags, 
-               const std::vector<size_t> dst_frags);
+
+      public:
+        LRUKey(const CustomSerdezID serdez_id, const ReductionOpID redop_id,
+               const size_t total_bytes, const std::vector<size_t> *src_frags,
+               const std::vector<size_t> *dst_frags);
 
         // 2 LRUKeys are equal only if all private members are the same
         bool operator==(const LRUKey &rhs) const;
