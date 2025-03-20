@@ -373,7 +373,7 @@ public:
       const ExternalInstanceResource &resource, const ProfilingRequestSet &prs,
       Event wait_on = Event::NO_EVENT);
   static Event create_external_instance(
-      RegionInstance &inst, Memory memory, InstanceLayoutGeneric &ilg,
+      RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
       const ExternalInstanceResource &resource, const ProfilingRequestSet &prs,
       Event wait_on = Event::NO_EVENT);
   static Event create_external(RegionInstance &inst, Memory memory,
