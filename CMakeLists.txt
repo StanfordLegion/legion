@@ -723,19 +723,25 @@ if(Legion_USE_Fortran)
 endif()
 
 #------------------------------------------------------------------------------#
+# CPM
+#------------------------------------------------------------------------------#
+set(CPM_URL https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.40.2/CPM.cmake)
+if (NOT EXISTS "${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake")
+  file(
+    DOWNLOAD
+    ${CPM_URL}
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake"
+    EXPECTED_HASH SHA256=c8cdc32c03816538ce22781ed72964dc864b2a34a310d3b7104812a5ca2d835d
+  )
+endif()
+include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
+
+#------------------------------------------------------------------------------#
 # Backtrace configuration
 #------------------------------------------------------------------------------#
 option(Legion_BACKTRACE_USE_CPPTRACE "Use cpptrace to capture backtrace" OFF)
 if(Legion_BACKTRACE_USE_CPPTRACE)
   set(REALM_USE_CPPTRACE ON)
-  # TODO: move CPM outside when we download other packages through CPM
-  set(CPM_URL https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.40.2/CPM.cmake)
-  file(
-    DOWNLOAD
-    ${CPM_URL}
-    ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake
-  )
-  include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
   CPMFindPackage(
     NAME cpptrace
     GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
