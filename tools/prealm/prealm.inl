@@ -641,7 +641,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
   inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
-  Event result = Realm::RegionInstance::create_instance(inst, memory, ilg,
+  Event result = Realm::RegionInstance::create_instance(inst, memory, *ilg,
                                                         alt_requests, wait_on);
   delete ilg;
   return profiler.record_instance_ready(inst, result, wait_on);
@@ -667,7 +667,7 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
   inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
   Event result = Realm::RegionInstance::create_external_instance(
-      inst, memory, ilg, resource, alt_requests, wait_on);
+      inst, memory, *ilg, resource, alt_requests, wait_on);
   delete ilg;
   return profiler.record_instance_ready(inst, result, wait_on);
 }
@@ -699,7 +699,9 @@ template <int N, typename T>
   InstanceLayoutGeneric *layout =
       InstanceLayoutGeneric::choose_instance_layout<N, T>(space, ilc,
                                                           dim_order);
-  return create_instance(inst, memory, layout, reqs, wait_on);
+  Event result = create_instance(inst, memory, *layout, reqs, wait_on);
+  delete layout;
+  return result;
 }
 
 template <int N, typename T>
@@ -718,7 +720,9 @@ template <int N, typename T>
   InstanceLayoutGeneric *layout =
       InstanceLayoutGeneric::choose_instance_layout<N, T>(space, ilc,
                                                           dim_order);
-  return create_instance(inst, memory, layout, reqs, wait_on);
+  Event result = create_instance(inst, memory, *layout, reqs, wait_on);
+  delete layout;
+  return result;
 }
 
 template <int N, typename T>

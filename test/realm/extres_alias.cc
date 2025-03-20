@@ -110,10 +110,10 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
                                                                     ilc,
                                                                     dim_order);
   }
-  RegionInstance::create_instance(start_inst, src_mem, *abs_layout,
-                                  ProfilingRequestSet()).wait();
-  RegionInstance::create_instance(check_inst, src_mem, *abs_layout,
-                                  ProfilingRequestSet()).wait();
+  RegionInstance::create_instance(start_inst, src_mem, *abs_layout, ProfilingRequestSet())
+      .wait();
+  RegionInstance::create_instance(check_inst, src_mem, *abs_layout, ProfilingRequestSet())
+      .wait();
 
   // create a relatively-indexed alias for the start instance
   RegionInstance start_inst_rel;
@@ -123,11 +123,9 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
       log_app.fatal() << "could not generate resource info for instance " << start_inst;
       abort();
     }
-    RegionInstance::create_external_instance(start_inst_rel,
-                                             extres->suggested_memory(),
-                                             *rel_layout,
-                                             *extres,
-                                             ProfilingRequestSet()).wait();
+    RegionInstance::create_external_instance(start_inst_rel, extres->suggested_memory(),
+                                             *rel_layout, *extres, ProfilingRequestSet())
+        .wait();
     delete extres;
   }
 
@@ -149,11 +147,9 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
       log_app.fatal() << "could not generate subset resource info for instance " << start_inst;
       abort();
     }
-    RegionInstance::create_external_instance(start_inst_flat,
-                                             extres->suggested_memory(),
-                                             *flat_layout,
-                                             *extres,
-                                             ProfilingRequestSet()).wait();
+    RegionInstance::create_external_instance(start_inst_flat, extres->suggested_memory(),
+                                             *flat_layout, *extres, ProfilingRequestSet())
+        .wait();
     delete extres;
   }
 
@@ -190,12 +186,12 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     //  improve coverage by making sure the instance isn't at the start of the
     //  memory)
     RegionInstance tgt_inst_dummy, tgt_inst_abs;
-    RegionInstance::create_instance(tgt_inst_dummy, tgt_mem,
-                                    *abs_layout,
-                                    ProfilingRequestSet()).wait();
-    RegionInstance::create_instance(tgt_inst_abs, tgt_mem,
-                                    *abs_layout,
-                                    ProfilingRequestSet()).wait();
+    RegionInstance::create_instance(tgt_inst_dummy, tgt_mem, *abs_layout,
+                                    ProfilingRequestSet())
+        .wait();
+    RegionInstance::create_instance(tgt_inst_abs, tgt_mem, *abs_layout,
+                                    ProfilingRequestSet())
+        .wait();
 
     // create a relatively-indexed alias for the target instance
     RegionInstance tgt_inst_rel;
@@ -205,11 +201,10 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
         log_app.fatal() << "could not generate resource info for instance " << tgt_inst_abs;
         abort();
       }
-      RegionInstance::create_external_instance(tgt_inst_rel,
-                                               extres->suggested_memory(),
-                                               *rel_layout,
-                                               *extres,
-                                               ProfilingRequestSet()).wait();
+      RegionInstance::create_external_instance(tgt_inst_rel, extres->suggested_memory(),
+                                               *rel_layout, *extres,
+                                               ProfilingRequestSet())
+          .wait();
       delete extres;
     }
 
@@ -285,11 +280,10 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
         log_app.fatal() << "could not generate subset resource info for instance " << tgt_inst_abs;
         abort();
       }
-      RegionInstance::create_external_instance(tgt_inst_flat,
-                                               extres->suggested_memory(),
-                                               *flat_layout,
-                                               *extres,
-                                               ProfilingRequestSet()).wait();
+      RegionInstance::create_external_instance(tgt_inst_flat, extres->suggested_memory(),
+                                               *flat_layout, *extres,
+                                               ProfilingRequestSet())
+          .wait();
       delete extres;
     }
 

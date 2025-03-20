@@ -447,14 +447,13 @@ namespace Realm {
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
     }
 
-    /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
-						     Memory memory,
-						     const InstanceLayoutGeneric &ilg,
-						     const ProfilingRequestSet& prs,
-						     Event wait_on)
+    /*static*/ Event RegionInstance::create_instance(RegionInstance &inst, Memory memory,
+                                                     const InstanceLayoutGeneric &ilg,
+                                                     const ProfilingRequestSet &prs,
+                                                     Event wait_on)
     {
-      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), 0,
-						 prs, wait_on);
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), 0, prs,
+                                                 wait_on);
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
@@ -467,15 +466,13 @@ namespace Realm {
 						 prs, wait_on);
     }
 
-    /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
-							      Memory memory,
-							      const InstanceLayoutGeneric& ilg,
-							      const ExternalInstanceResource& res,
-							      const ProfilingRequestSet& prs,
-							      Event wait_on)
+    /*static*/ Event RegionInstance::create_external_instance(
+        RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
+        const ExternalInstanceResource &res, const ProfilingRequestSet &prs,
+        Event wait_on)
     {
-      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), &res,
-						 prs, wait_on);
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), &res, prs,
+                                                 wait_on);
     }
 
     /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,

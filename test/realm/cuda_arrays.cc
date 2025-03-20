@@ -110,19 +110,15 @@ void gpu_task(const void *data, size_t datalen,
     layout.piece_lists[0].pieces.push_back(clp);
     {
       ExternalCudaArrayResource external(devid, arr1);
-      RegionInstance::create_external_instance(arr_inst1,
-                                               external.suggested_memory(),
-                                               layout,
-                                               external,
-                                               ProfilingRequestSet()).wait();
+      RegionInstance::create_external_instance(arr_inst1, external.suggested_memory(),
+                                               layout, external, ProfilingRequestSet())
+          .wait();
     }
     {
       ExternalCudaArrayResource external(devid, arr2);
-      RegionInstance::create_external_instance(arr_inst2,
-                                               external.suggested_memory(),
-                                               layout,
-                                               external,
-                                               ProfilingRequestSet()).wait();
+      RegionInstance::create_external_instance(arr_inst2, external.suggested_memory(),
+                                               layout, external, ProfilingRequestSet())
+          .wait();
     }
   }
   {
@@ -133,11 +129,9 @@ void gpu_task(const void *data, size_t datalen,
     for(int i = 0; i < N; i++) dim_order[i] = i;
     InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,T>(args.extent, ilc, dim_order);
     ExternalCudaMemoryResource external(devid, linear, elems * sizeof(float));
-    RegionInstance::create_external_instance(linear_inst,
-                                             external.suggested_memory(),
-                                             *ilg,
-                                             external,
-                                             ProfilingRequestSet()).wait();
+    RegionInstance::create_external_instance(linear_inst, external.suggested_memory(),
+                                             *ilg, external, ProfilingRequestSet())
+        .wait();
     delete ilg
   }
 #endif
@@ -242,8 +236,8 @@ bool test_cuda_arrays(Rect<N,T> extent, Memory src_mem,
       InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T>(bloated),
                                                     InstanceLayoutConstraints(field_sizes, 0),
                                                     dim_order);
-    RegionInstance::create_instance(src_data, src_mem, *layout,
-                                    ProfilingRequestSet()).wait();
+    RegionInstance::create_instance(src_data, src_mem, *layout, ProfilingRequestSet())
+        .wait();
     delete layout;
   }
 

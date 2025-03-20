@@ -104,9 +104,9 @@ namespace Realm {
 							Event wait_on /*= Event::NO_EVENT*/)
   {
     // construct an instance layout for the new instance
-    InstanceLayout<N,T> layout;
+    InstanceLayout<N, T> layout;
     layout.bytes_used = 0;
-    layout.alignment_reqd = 0;  // no allocation being made
+    layout.alignment_reqd = 0; // no allocation being made
     layout.space = space;
     layout.piece_lists.resize(field_infos.size());
 
@@ -129,7 +129,7 @@ namespace Realm {
           hlp->offset[j] = it->offset[j];
 	for(int j = 0; j < N; j++)
 	  hlp->dim_order[j] = it->dim_order[j];
-	layout.piece_lists[idx].pieces.push_back(hlp);
+        layout.piece_lists[idx].pieces.push_back(hlp);
       }
       idx++;
     }
