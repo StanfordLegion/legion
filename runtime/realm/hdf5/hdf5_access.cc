@@ -115,7 +115,7 @@ namespace Realm {
 	it != field_infos.end();
 	++it) {
       FieldID id = it->field_id;
-      InstanceLayoutGeneric::FieldLayout& fl = layout.fields[id];
+      InstanceLayoutGeneric::FieldLayout &fl = layout.fields[id];
       fl.list_idx = idx;
       fl.rel_offset = 0;
       fl.size_in_bytes = it->field_size;
