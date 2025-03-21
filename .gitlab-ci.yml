@@ -12,14 +12,24 @@ variables:
   TIMELIMIT: "600"  # each test should take less than 10 minutes
   USE_DEFCHECK: "1"
   CCACHE_BASEDIR: $CI_PROJECT_DIR
-  CCACHE_DIR: $CI_PROJECT_DIR/ccache
+  DEP_CACHE: $CI_PROJECT_DIR/.cache/deps
+  CCACHE_DIR: $CI_PROJECT_DIR/.cache/ccache
   USE_CCACHE: "1"
+  CPM_SOURCE_CACHE: $CI_PROJECT_DIR/.cache/cpm_src
   REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
+  GASNET_SHA256: "f3b379b2c650b8deb24e33ca101303c1af2482e996e603291ebf16c02a708da1"
+  GASNET_COMMIT: "3db4ea2f92ea6bfba6fe9538cb001b6a34b2f373"
 
 cache: &global_cache
-  key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
-  paths:
-    - $CCACHE_DIR
+  - key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+    paths:
+      - $CCACHE_DIR
+  - key: "cpm_src_cache"
+    paths:
+      - $CPM_SOURCE_CACHE
+  - key: "external-deps"
+    paths:
+      - $DEP_CACHE
 
 
 # Local variables (included on a case-by-case basis in each job):
@@ -174,14 +184,16 @@ cache: &global_cache
 .gasnetex_ucx : &gasnetex_ucx
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
+  UCX_VERSION: "1.14.1"
+  UCX_SHA256: "baa0634cafb269a3112f626eb226bcd2ca8c9fcf0fec3b8e2a3553baad5f77aa"
   UCX_WARN_UNUSED_ENV_VARS: "n"
 .gasnetex_wrapper: &gasnetex_wrapper
   USE_GASNETEX_WRAPPER: "1"
 .gasnet1_ucx : &gasnet1_ucx
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
+  UCX_VERSION: "1.14.1"
+  UCX_SHA256: "baa0634cafb269a3112f626eb226bcd2ca8c9fcf0fec3b8e2a3553baad5f77aa"
   UCX_WARN_UNUSED_ENV_VARS: "n"
 .gasnet_embed_local : &gasnet_embed_local
   EMBED_GASNET: "1"
@@ -196,10 +208,11 @@ cache: &global_cache
   MPIR_CVAR_NOLOCAL: "1"
 .ucx: &ucx
   REALM_NETWORKS: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
-  UCC_SOURCE: "https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz"
+  UCX_VERSION: "1.14.1"
+  UCX_SHA256: "baa0634cafb269a3112f626eb226bcd2ca8c9fcf0fec3b8e2a3553baad5f77aa"
+  UCC_VERSION: "1.3.0"
+  UCC_SHA256: "b56379abe5f1c125bfa83be305d78d81a64aa271b7b5fff0ac17b86725ff3acf"
   UCX_WARN_UNUSED_ENV_VARS: "n"
-  UCX_BRANCH: "v1.14.1"
   # mpi_interop example requires MPI to build correctly
   USE_MPI: "1"
 .ucx_dynamic: &ucx_dynamic
@@ -209,7 +222,8 @@ cache: &global_cache
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_TAG: "4.0.01"
-  KKERNELS_BRANCH: "4.0.01"
+  KOKKOS_SHA256: "bb942de8afdd519fd6d5d3974706bfc22b6585a62dd565c12e53bdb82cd154f0"
+  KKERNELS_SHA256: "3f493fcb0244b26858ceb911be64092fbf7785616ad62c81abde0ea1ce86688a"
 
 .prof: &prof
   USE_PROF: "1"
@@ -277,6 +291,7 @@ cache: &global_cache
 before_script:
   - set -e
   - uname -a
+  - mkdir -p $DEP_CACHE
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       export THREADS=$(nproc --all)
@@ -287,10 +302,14 @@ before_script:
       export THREADS=1
     fi
   - |
-    if [[ "$UCX_SOURCE" != "" ]]; then
-      mkdir ucx
+    if [[ "$UCX_VERSION" != "" ]]; then
+      mkdir -p ucx
       cd ucx
-      wget -nv -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
+      if ! echo "$UCX_SHA256  $DEP_CACHE/ucx-$UCX_VERSION.tar.gz" | sha256sum -c; then 
+        wget -nv https://github.com/openucx/ucx/releases/download/v$UCX_VERSION/ucx-$UCX_VERSION.tar.gz -O $DEP_CACHE/ucx-$UCX_VERSION.tar.gz
+        echo "$UCX_SHA256  $DEP_CACHE/ucx-$UCX_VERSION.tar.gz" | sha256sum -c
+      fi
+      tar --strip-components=1 -zxf $DEP_CACHE/ucx-$UCX_VERSION.tar.gz
       export UCX_ROOT=$PWD/install
       if [[ -n "$CUDA" ]]; then
         UCX_CONFIG_OPTS="--with-cuda=$CUDA"
@@ -308,11 +327,15 @@ before_script:
       export CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH:$UCX_ROOT
       cd -
     fi
-    if [[ "$UCC_SOURCE" != "" ]]; then
+    if [[ "$UCC_VERSION" != "" ]]; then
       apt update -qq -yy && apt install -qq -yy autoconf automake libtool # needed for autogen.sh
-      mkdir ucc
+      mkdir -p ucc
       cd ucc
-      wget -nv -O - $UCC_SOURCE | tar --strip-components=1 -zxf -
+      if ! echo "$UCC_SHA256  $DEP_CACHE/ucc-$UCC_VERSION.tar.gz" | sha256sum -c; then
+        wget -nv https://github.com/openucx/ucc/archive/refs/tags/v$UCC_VERSION.tar.gz -O $DEP_CACHE/ucc-$UCC_VERSION.tar.gz
+        echo "$UCC_SHA256  $DEP_CACHE/ucc-$UCC_VERSION.tar.gz" | sha256sum -c
+      fi
+      tar --strip-components=1 -zxf $DEP_CACHE/ucc-$UCC_VERSION.tar.gz
       export UCC_ROOT=$PWD/install
 
       # Remove offload-arch=native.
@@ -336,16 +359,22 @@ before_script:
         if [[ "$EMBED_GASNET" -eq 1 ]]; then
           if [[ "$EMBED_GASNET_LOCAL" -eq 1 ]]; then
             # clone gasnet, but make it read only since we want an embedded build
-            # git clone https://github.com/StanfordLegion/gasnet.git gasnet
-            wget -nv -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
-            mv gasnet-master gasnet
+            if ! echo "$GASNET_SHA256  $DEP_CACHE/gasnet-${GASNET_COMMIT}.tar.gz" | sha256sum -c; then
+              wget -nv https://github.com/StanfordLegion/gasnet/archive/${GASNET_COMMIT}.tar.gz -O ${DEP_CACHE}/gasnet-${GASNET_COMMIT}.tar.gz
+              echo "$GASNET_SHA256  $DEP_CACHE/gasnet-${GASNET_COMMIT}.tar.gz" | sha256sum -c
+            fi
+            tar -zxf ${DEP_CACHE}/gasnet-${GASNET_COMMIT}.tar.gz
+            mv gasnet-${GASNET_COMMIT} gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
           fi
         else
-          # git clone https://github.com/StanfordLegion/gasnet.git gasnet
-          wget -nv -O - https://github.com/StanfordLegion/gasnet/archive/refs/heads/master.tar.gz | tar -zxf -
-          mv gasnet-master gasnet
+          if ! echo "$GASNET_SHA256  $DEP_CACHE/gasnet-${GASNET_COMMIT}.tar.gz" | sha256sum -c; then
+            wget -nv https://github.com/StanfordLegion/gasnet/archive/${GASNET_COMMIT}.tar.gz -O ${DEP_CACHE}/gasnet-${GASNET_COMMIT}.tar.gz
+            echo "$GASNET_SHA256  $DEP_CACHE/gasnet-${GASNET_COMMIT}.tar.gz" | sha256sum -c
+          fi
+          tar -zxf ${DEP_CACHE}/gasnet-${GASNET_COMMIT}.tar.gz
+          mv gasnet-${GASNET_COMMIT} gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
             export GASNET_ROOT="$PWD/gasnet/debug"
@@ -379,9 +408,13 @@ before_script:
     fi
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
-      wget -nv -O - https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      if ! echo "$KOKKOS_SHA256  $DEP_CACHE/kokkos-$KOKKOS_TAG.tar.gz" | sha256sum -c; then
+        wget -nv https://github.com/kokkos/kokkos/archive/refs/tags/$KOKKOS_TAG.tar.gz -O $DEP_CACHE/kokkos-$KOKKOS_TAG.tar.gz
+        echo "$KOKKOS_SHA256  $DEP_CACHE/kokkos-$KOKKOS_TAG.tar.gz" | sha256sum -c
+      fi
+      tar -zxf $DEP_CACHE/kokkos-$KOKKOS_TAG.tar.gz
       mv kokkos-$KOKKOS_TAG kokkos
-      mkdir kokkos/build
+      mkdir -p kokkos/build
       cd kokkos/build
       KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
       # the following line is a workaround for Kokkos issue #2652
@@ -418,11 +451,15 @@ before_script:
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
 
-      wget -nv -O - https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz | tar -zxf -
+      if ! echo "$KKERNELS_SHA256  $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz" | sha256sum -c; then
+        wget -nv https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz -O $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz
+        echo "$KKERNELS_SHA256  $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz" | sha256sum -c
+      fi
+      tar -zxf $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz
       mv kokkos-kernels-$KOKKOS_TAG kokkos-kernels
 
       # now build kokkos-kernels
-      mkdir kokkos-kernels/build
+      mkdir -p kokkos-kernels/build
       cd kokkos-kernels/build
       KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
       # FIXME (Wei): disable sparse for now because it does not compile
@@ -651,7 +688,7 @@ before_script:
 .realm_sanitizer_tests: &realm_sanitizer_tests
   <<: *test_rules
   script:
-    - mkdir build
+    - mkdir -p build
     - cd build
     - cmake -DCMAKE_BUILD_TYPE=${SANITIZER_TYPE} -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON -DLegion_BACKTRACE_USE_CPPTRACE=ON ..
     - make -j8
