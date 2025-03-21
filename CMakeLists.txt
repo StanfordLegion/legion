@@ -725,16 +725,7 @@ endif()
 #------------------------------------------------------------------------------#
 # CPM
 #------------------------------------------------------------------------------#
-set(CPM_URL https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.40.2/CPM.cmake)
-if (NOT EXISTS "${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake")
-  file(
-    DOWNLOAD
-    ${CPM_URL}
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake"
-    EXPECTED_HASH SHA256=c8cdc32c03816538ce22781ed72964dc864b2a34a310d3b7104812a5ca2d835d
-  )
-endif()
-include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPM.cmake)
 
 #------------------------------------------------------------------------------#
 # Backtrace configuration

@@ -77,16 +77,7 @@ include(ExternalProject)
 include(FetchContent)
 include(FeatureSummary)
 
-set(_CPM_REQUESTED_VERSION 0.40.2)
-if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM-v${CPM_REQUESTED_VERSION}.cmake)
-  file(
-    DOWNLOAD
-    https://github.com/cpm-cmake/CPM.cmake/releases/download/v${_CPM_REQUESTED_VERSION}/CPM.cmake
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM-v${_CPM_REQUESTED_VERSION}.cmake"
-    EXPECTED_HASH SHA256=c8cdc32c03816538ce22781ed72964dc864b2a34a310d3b7104812a5ca2d835d
-  )
-  include("${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM-v${_CPM_REQUESTED_VERSION}.cmake")
-endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPM.cmake")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
