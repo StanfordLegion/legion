@@ -66,8 +66,9 @@ bool test_case(Processor curr_proc, Processor write_proc,
     InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,T>(space,
 										    InstanceLayoutConstraints(field_sizes, 0 /*SOA*/),
 										    dim_order);
-    RegionInstance::create_instance(inst_check, m_check, ilg,
-				    ProfilingRequestSet()).wait();
+    RegionInstance::create_instance(inst_check, m_check, *ilg, ProfilingRequestSet())
+        .wait();
+    delete ilg;
   }
 
   // write instance is chopped up into pieces and reordered
@@ -105,8 +106,9 @@ bool test_case(Processor curr_proc, Processor write_proc,
 										    pieces,
 										    InstanceLayoutConstraints(field_sizes, 0 /*SOA*/),
 										    dim_order);
-    RegionInstance::create_instance(inst_write, m_write, ilg,
-				    ProfilingRequestSet()).wait();
+    RegionInstance::create_instance(inst_write, m_write, *ilg, ProfilingRequestSet())
+        .wait();
+    delete ilg;
   }
 
   // zero out write instance

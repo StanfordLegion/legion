@@ -368,9 +368,11 @@ bool test_copies(Memory m,
   }
 
   // create instances
-  for(int i = 0; i < num_layouts; i++)
-    RegionInstance::create_instance(inst[i], m, ilc[i], ProfilingRequestSet()).wait();
-  
+  for(int i = 0; i < num_layouts; i++) {
+    RegionInstance::create_instance(inst[i], m, *ilc[i], ProfilingRequestSet()).wait();
+    delete ilc[i];
+  }
+
   // fill insts
   for(int i = 0; i < num_layouts; i++) {
     std::vector<CopySrcDstField> fill_src(2), fill_dst(2);

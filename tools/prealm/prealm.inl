@@ -222,8 +222,7 @@ public:
                         Event critical);
   void add_task_request(ProfilingRequestSet &requests,
                         Processor::TaskFuncID task_id, Event critical);
-  Event add_inst_request(ProfilingRequestSet &requests,
-                         const InstanceLayoutGeneric *ilg, Event critical);
+  Event add_inst_request(ProfilingRequestSet &requests, Event critical);
 
 public:
   void process_proc_desc(const Processor &p);
@@ -626,13 +625,37 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
 }
 
 /*static*/ inline Event RegionInstance::create_instance(
+    RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
+    const ProfilingRequestSet &requests, Event wait_on) {
+  ProfilingRequestSet alt_requests = requests;
+  ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
+  Event result = Realm::RegionInstance::create_instance(inst, memory, ilg,
+                                                        alt_requests, wait_on);
+  return profiler.record_instance_ready(inst, result, wait_on);
+}
+
+/*static*/ inline Event RegionInstance::create_instance(
     RegionInstance &inst, Memory memory, InstanceLayoutGeneric *ilg,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
-  inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
-  Event result = Realm::RegionInstance::create_instance(inst, memory, ilg,
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
+  Event result = Realm::RegionInstance::create_instance(inst, memory, *ilg,
                                                         alt_requests, wait_on);
+  delete ilg;
+  return profiler.record_instance_ready(inst, result, wait_on);
+}
+
+/*static*/ inline Event RegionInstance::create_external_instance(
+    RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
+    const ExternalInstanceResource &resource,
+    const ProfilingRequestSet &requests, Event wait_on) {
+  ProfilingRequestSet alt_requests = requests;
+  ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
+  Event result = Realm::RegionInstance::create_external_instance(
+      inst, memory, ilg, resource, alt_requests, wait_on);
   return profiler.record_instance_ready(inst, result, wait_on);
 }
 
@@ -642,9 +665,10 @@ inline Event Processor::spawn(TaskFuncID func_id, const void *args,
     const ProfilingRequestSet &requests, Event wait_on) {
   ProfilingRequestSet alt_requests = requests;
   ThreadProfiler &profiler = ThreadProfiler::get_thread_profiler();
-  inst.unique_event = profiler.add_inst_request(alt_requests, ilg, wait_on);
+  inst.unique_event = profiler.add_inst_request(alt_requests, wait_on);
   Event result = Realm::RegionInstance::create_external_instance(
-      inst, memory, ilg, resource, alt_requests, wait_on);
+      inst, memory, *ilg, resource, alt_requests, wait_on);
+  delete ilg;
   return profiler.record_instance_ready(inst, result, wait_on);
 }
 
@@ -675,7 +699,9 @@ template <int N, typename T>
   InstanceLayoutGeneric *layout =
       InstanceLayoutGeneric::choose_instance_layout<N, T>(space, ilc,
                                                           dim_order);
-  return create_instance(inst, memory, layout, reqs, wait_on);
+  Event result = create_instance(inst, memory, *layout, reqs, wait_on);
+  delete layout;
+  return result;
 }
 
 template <int N, typename T>
@@ -694,7 +720,9 @@ template <int N, typename T>
   InstanceLayoutGeneric *layout =
       InstanceLayoutGeneric::choose_instance_layout<N, T>(space, ilc,
                                                           dim_order);
-  return create_instance(inst, memory, layout, reqs, wait_on);
+  Event result = create_instance(inst, memory, *layout, reqs, wait_on);
+  delete layout;
+  return result;
 }
 
 template <int N, typename T>

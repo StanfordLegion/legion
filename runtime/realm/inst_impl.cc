@@ -447,6 +447,15 @@ namespace Realm {
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
     }
 
+    /*static*/ Event RegionInstance::create_instance(RegionInstance &inst, Memory memory,
+                                                     const InstanceLayoutGeneric &ilg,
+                                                     const ProfilingRequestSet &prs,
+                                                     Event wait_on)
+    {
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), 0, prs,
+                                                 wait_on);
+    }
+
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 						     Memory memory,
 						     InstanceLayoutGeneric *ilg,
@@ -455,6 +464,15 @@ namespace Realm {
     {
       return RegionInstanceImpl::create_instance(inst, memory, ilg, 0,
 						 prs, wait_on);
+    }
+
+    /*static*/ Event RegionInstance::create_external_instance(
+        RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
+        const ExternalInstanceResource &res, const ProfilingRequestSet &prs,
+        Event wait_on)
+    {
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), &res, prs,
+                                                 wait_on);
     }
 
     /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
@@ -800,6 +818,7 @@ namespace Realm {
       // we can fail to get a valid pointer if we are out of instance slots
       if(!impl) {
         inst = RegionInstance::NO_INST;
+        delete ilg;
         // generate a poisoned event for completion
         GenEventImpl *ev = GenEventImpl::create_genevent();
         Event ready_event = ev->current_event();
@@ -811,6 +830,7 @@ namespace Realm {
       //  profiling callback containing this instance handle
       inst = impl->me;
 
+      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
       impl->metadata.layout = ilg;
       if(res)
 	impl->metadata.ext_resource = res->clone();
@@ -829,8 +849,6 @@ namespace Realm {
 
       impl->metadata.need_alloc_result = need_alloc_result;
       impl->metadata.need_notify_dealloc = false;
-
-      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
 
       // request allocation of storage - note that due to the asynchronous
       //  nature of any profiling responses, it is not safe to refer to the

@@ -232,7 +232,7 @@ void top_level_task(const void *args, size_t arglen, const void *userdata, size_
     assert(extres);
     RegionInstance inst_ext;
     RegionInstance::create_external_instance(inst_ext, extres->suggested_memory(),
-                                             inst2.get_layout()->clone(), *extres, prs)
+                                             *inst2.get_layout(), *extres, prs)
         .wait();
     inst2 = inst_ext;
   } else {

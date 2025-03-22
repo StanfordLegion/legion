@@ -153,9 +153,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
     RegionInstance src_inst;
     {
       InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is_pad, ilc, perms[i].dim_order);
-      wait_for = RegionInstance::create_instance(src_inst, src_mem, ilg,
-                                                 ProfilingRequestSet(),
-                                                 wait_for);
+      wait_for = RegionInstance::create_instance(src_inst, src_mem, *ilg,
+                                                 ProfilingRequestSet(), wait_for);
+      delete ilg;
       std::vector<CopySrcDstField> tgt(1);
       tgt[0].inst = src_inst;
       tgt[0].field_id = 0;
@@ -169,9 +169,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
       RegionInstance dst_inst;
       {
         InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N,FT>(is_pad, ilc, perms[j].dim_order);
-        wait_for = RegionInstance::create_instance(dst_inst, dst_mem, ilg,
-                                                   ProfilingRequestSet(),
-                                                   wait_for);
+        wait_for = RegionInstance::create_instance(dst_inst, dst_mem, *ilg,
+                                                   ProfilingRequestSet(), wait_for);
+        delete ilg;
         std::vector<CopySrcDstField> tgt(1);
         tgt[0].inst = dst_inst;
         tgt[0].field_id = 0;
