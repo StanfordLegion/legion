@@ -107,6 +107,7 @@ pub struct Fields {
     backtrace: FieldID,
     critical: FieldID,
     trigger_time: FieldID,
+    previous_instance: FieldID,
     previous_executing: FieldID,
     scheduling_overhead: FieldID,
     message_latency: FieldID,
@@ -160,6 +161,7 @@ impl StateDataSource {
             backtrace: field_schema.insert("Backtrace".to_owned(), false),
             critical: field_schema.insert("Critical Path".to_owned(), true),
             trigger_time: field_schema.insert("Triggering Latency".to_owned(), false),
+            previous_instance: field_schema.insert("Previous Instance".to_owned(), false),
             previous_executing: field_schema.insert("Previous Executing".to_owned(), true),
             scheduling_overhead: field_schema.insert("Scheduling Overhead".to_owned(), false),
             message_latency: field_schema.insert("Message Latency".to_owned(), false),
@@ -1387,25 +1389,94 @@ impl StateDataSource {
             EventEntryKind::InstanceReady => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(mem_id) = self.state.insts.get(&prof_uid) {
-                    // This means the critical path was the allocation of the instance and not
-                    // the triggering of the precondition event
+                    // Compare the creation time with the performed time
                     let mem = self.state.mems.get(&mem_id).unwrap();
                     let inst = mem.entry(prof_uid);
-                    let ready_time: ts::Timestamp = inst.time_range.ready.unwrap().into();
                     let inst_name = inst.name(&self.state);
                     let mem_name = mem.name(&self.state);
-                    Field::ItemLink(ItemLink {
-                        item_uid: inst.base.prof_uid.into(),
-                        title: format!(
-                            "Allocation of {} at {} in {}",
-                            &inst_name, ready_time, mem_name
-                        ),
-                        interval: inst.time_range.into(),
-                        entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
-                    })
+                    let ready = inst.time_range.ready.unwrap();
+                    if ready < event_entry.trigger_time.unwrap() {
+                        // The instance was ready immediately meaning that the caller
+                        // that created the physical instance was on the critical path
+                        let creator_uid = inst.creator().unwrap();
+                        if let Some(proc_id) = self.state.prof_uid_proc.get(&creator_uid) {
+                            let proc = self.state.procs.get(&proc_id).unwrap();
+                            let entry = proc.find_entry(creator_uid).unwrap();
+                            let op_name = entry.name(&self.state);
+                            let proc_name = proc.name(&self.state);
+                            let creation_time: ts::Timestamp = inst.creation_time().into();
+                            Field::ItemLink(ItemLink {
+                                item_uid: creator_uid.into(),
+                                title: format!(
+                                    "Creation of {} in {} at {} by {} on {}",
+                                    &inst_name, mem_name, creation_time, &op_name, &proc_name,
+                                ),
+                                interval: entry.time_range.into(),
+                                entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                            })
+                        } else {
+                            Field::String(format!(
+                                "Critical path from a (meta-) task on node {}. Please load the logfile from that node to see it.",
+                                node.0
+                            ))
+                        }
+                    } else {
+                        // The instance was not ready immediately meaning that this was
+                        // a deferred allocation that waited for other instances to be
+                        // deallocated before it was ready
+                        let ready_time: ts::Timestamp = ready.into();
+                        Field::ItemLink(ItemLink {
+                            item_uid: inst.base.prof_uid.into(),
+                            title: format!(
+                                "Deferred allocation of {} at {} in {}",
+                                &inst_name, ready_time, mem_name
+                            ),
+                            interval: inst.time_range.into(),
+                            entry_id: self.mem_entries.get(mem_id).unwrap().clone(),
+                        })
+                    }
                 } else {
                     Field::String(format!(
                             "Critical path from an instance creation on node {}. Please load the logfile from that node to see it.", node.0
+                    ))
+                }
+            }
+            EventEntryKind::InstanceRedistrict => {
+                let prof_uid = event_entry.creator.unwrap();
+                if let Some(mem_id) = self.state.insts.get(&prof_uid) {
+                    // If we're here that means that the instance redistricting by the caller
+                    // is the thing on the critica path and not the event triggering for the
+                    // redistricting to be done
+                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let inst = mem.entry(prof_uid);
+                    let creator_uid = inst.creator().unwrap();
+                    if let Some(proc_id) = self.state.prof_uid_proc.get(&creator_uid) {
+                        let inst_name = inst.name(&self.state);
+                        let mem_name = mem.name(&self.state);
+                        let proc = self.state.procs.get(&proc_id).unwrap();
+                        let entry = proc.find_entry(creator_uid).unwrap();
+                        let op_name = entry.name(&self.state);
+                        let proc_name = proc.name(&self.state);
+                        let redistrict_time: ts::Timestamp =
+                            event_entry.trigger_time.unwrap().into();
+                        Field::ItemLink(ItemLink {
+                            item_uid: creator_uid.into(),
+                            title: format!(
+                                "Redistrict of {} in {} at {} by {} on {}",
+                                &inst_name, mem_name, redistrict_time, &op_name, &proc_name,
+                            ),
+                            interval: entry.time_range.into(),
+                            entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                        })
+                    } else {
+                        Field::String(format!(
+                            "Critical path from a (meta-) task on node {}. Please load the logfile from that node to see it.",
+                            node.0
+                        ))
+                    }
+                } else {
+                    Field::String(format!(
+                            "Critical path from an instance redistrict on node {}. Please load the logfile from that node to see it.", node.0
                     ))
                 }
             }
@@ -1934,6 +2005,22 @@ impl StateDataSource {
                 fields.push((
                     self.fields.provenance,
                     Self::parse_provenance(provenance),
+                    None,
+                ));
+            }
+            // If this instance was a result of a redistrict operation then it will
+            // have a previous link that we can point to for where it was reallocated
+            if let Some(previous) = entry.previous() {
+                let prev_inst = self.state.find_inst(previous).unwrap();
+                let prev_name = prev_inst.name(&self.state);
+                fields.push((
+                    self.fields.previous_instance,
+                    Field::ItemLink(ItemLink {
+                        item_uid: previous.into(),
+                        title: prev_name,
+                        interval: prev_inst.time_range().into(),
+                        entry_id: self.mem_entries.get(&mem_id).unwrap().clone(),
+                    }),
                     None,
                 ));
             }

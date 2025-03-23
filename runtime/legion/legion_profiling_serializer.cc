@@ -556,6 +556,17 @@ namespace Legion {
          << "result:unsigned long long:" << sizeof(LgEvent)       << delim
          << "precondition:unsigned long long:" << sizeof(LgEvent) << delim
          << "inst_uid:unsigned long long:" << sizeof(LgEvent)     << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)       << delim
+         << "performed:timestamp_t:" << sizeof(timestamp_t)
+         << "}" << std::endl;
+
+      ss << "InstanceRedistrictInfo {"
+         << "id:" << INSTANCE_REDISTRICT_INFO_ID                  << delim
+         << "result:unsigned long long:" << sizeof(LgEvent)       << delim
+         << "precondition:unsigned long long:" << sizeof(LgEvent) << delim
+         << "previous:unsigned long long:" << sizeof(LgEvent)     << delim
+         << "next:unsigned long long:" << sizeof(LgEvent)         << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)       << delim
          << "performed:timestamp_t:" << sizeof(timestamp_t)
          << "}" << std::endl;
 
@@ -1520,6 +1531,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+                         const LegionProfInstance::InstanceRedistrictInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = INSTANCE_REDISTRICT_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&info.result.id, sizeof(info.result.id));
+      lp_fwrite(f, (char*)&info.precondition.id, sizeof(info.precondition.id));
+      lp_fwrite(f, (char*)&info.previous.id, sizeof(info.previous.id));
+      lp_fwrite(f, (char*)&info.next.id, sizeof(info.next.id));
+      lp_fwrite(f, (char*)&info.performed, sizeof(info.performed));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                             const LegionProfInstance::CompletionQueueInfo &info)
     //--------------------------------------------------------------------------
     {
@@ -2455,8 +2480,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Instance Ready Info " IDFMT " " IDFMT " " IDFMT
-          " %lld", info.result.id, info.precondition.id, info.unique.id,
-          info.performed);
+          " %lld", info.result.id, info.precondition.id,
+          info.unique.id, info.performed);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                         const LegionProfInstance::InstanceRedistrictInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Instance Redistrict Info " IDFMT " " IDFMT " " IDFMT
+          " " IDFMT " %lld", info.result.id, info.precondition.id,
+          info.previous.id, info.next.id, info.performed);
     }
 
     //--------------------------------------------------------------------------
