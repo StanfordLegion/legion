@@ -862,6 +862,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmake_cmd.append('-DLegion_PRIVILEGE_CHECKS=%s' % ('ON' if env['PRIVILEGE_CHECKS'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_REDOP_COMPLEX=%s' % ('ON' if env['USE_COMPLEX'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_BACKTRACE_USE_CPPTRACE=%s' % ('ON' if env['REALM_BACKTRACE_USE_CPPTRACE'] == '1' else 'OFF'))
+    cmake_cmd.append('-DCPPTRACE_GET_SYMBOLS_WITH_NOTHING=ON')
     if 'LEGION_WARNINGS_FATAL' in env:
         cmake_cmd.append('-DLegion_WARNINGS_FATAL=%s' % ('ON' if env['LEGION_WARNINGS_FATAL'] == '1' else 'OFF'))
     if test_ctest:
