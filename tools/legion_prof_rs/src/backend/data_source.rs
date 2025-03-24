@@ -1395,7 +1395,7 @@ impl StateDataSource {
                     let inst_name = inst.name(&self.state);
                     let mem_name = mem.name(&self.state);
                     let ready = inst.time_range.ready.unwrap();
-                    if ready < event_entry.trigger_time.unwrap() {
+                    if inst.allocated_immediately() {
                         // The instance was ready immediately meaning that the caller
                         // that created the physical instance was on the critical path
                         let creator_uid = inst.creator().unwrap();
@@ -1445,7 +1445,7 @@ impl StateDataSource {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(mem_id) = self.state.insts.get(&prof_uid) {
                     // If we're here that means that the instance redistricting by the caller
-                    // is the thing on the critica path and not the event triggering for the
+                    // is the thing on the critical path and not the event triggering for the
                     // redistricting to be done
                     let mem = self.state.mems.get(&mem_id).unwrap();
                     let inst = mem.entry(prof_uid);
