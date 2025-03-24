@@ -5979,7 +5979,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        if (launcher.src_requirements[idx].privilege_fields.empty())
+        if (launcher.dst_requirements[idx].privilege_fields.empty())
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_DESTINATION_REGION_REQUIREMENT,
                            "DESTINATION REGION REQUIREMENT %d OF"
