@@ -629,11 +629,9 @@ macro(edit_target_property tgtname propname pattern replacement)
   get_property(has_prop TARGET ${tgtname} PROPERTY ${propname} SET)
   if(has_prop)
     get_property(prop_list TARGET ${tgtname} PROPERTY ${propname})
-    if(NOT "${replacement}" STREQUAL "")
-      list(TRANSFORM prop_list REPLACE ${pattern} ${replacement})
-    else()
-      list(FILTER prop_list EXCLUDE REGEX ${pattern})
-    endif()
+    list(TRANSFORM prop_list REPLACE ${pattern} "${replacement}")
+    list(FILTER prop_list EXCLUDE REGEX "^$")
+    string(REGEX REPLACE ";>$" ">" prop_list "${prop_list}")
     set_property(TARGET ${tgtname} PROPERTY ${propname} "${prop_list}")
   endif()
 endmacro()
@@ -723,6 +721,16 @@ if(Legion_USE_Kokkos)
   # and add kokkos libraries to our exported library requirements
   set_property(TARGET RealmRuntime APPEND
     PROPERTY INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:Kokkos::kokkoscore>")
+
+  # Perform various edits on Kokkos' inherited link flags.
+
+  # In CMake 3.22+ due to policy CMP0099, we must remove invalid or
+  # undesired link flags being included by Kokkos (particularly on HIP).
+  edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS ".*march[^>]*" "")
+  edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS ".*mtune[^>]*" "")
+  if(Kokkos_ENABLE_HIP)
+    edit_target_property(Kokkos::kokkoscore INTERFACE_LINK_OPTIONS ".*gpu-rdc[^>]*" "")
+  endif()
 
   # if Kokkos' CUDA target is enabled, and we're performing runtime hijack,
   #  rewrite Kokkos' cudart dependency to be on Realm instead
