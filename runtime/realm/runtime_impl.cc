@@ -822,6 +822,7 @@ namespace Realm {
     config_map.insert({"regmem", &reg_mem_size});
     config_map.insert({"report_sparsity_leaks", &report_sparsity_leaks});
     config_map.insert({"barrier_broadcast_radix", &barrier_broadcast_radix});
+    config_map.insert({"diskmem", &disk_mem_size});
 
     resource_map.insert({"cpu", &res_num_cpus});
     resource_map.insert({"sysmem", &res_sysmem_size});
