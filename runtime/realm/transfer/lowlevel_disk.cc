@@ -78,7 +78,7 @@ namespace Realm {
       // Allow overwriting of an existing file in case Realm crashed
       // before and we are running again and need to overwrite the
       // file instead of crashing again because we can't open the file
-      fd = open((const char*)_file.c_str(), O_CREAT | O_RDWR, 00666);
+      fd = open((const char *)_file.c_str(), O_CREAT | O_RDWR, 00666);
       assert(fd != -1);
       // resize the file to what we want
       int ret =	ftruncate(fd, _size);
@@ -93,7 +93,7 @@ namespace Realm {
     {
       close(fd);
       // attempt to delete the file
-      unlink((const char*)file.c_str());
+      unlink((const char *)file.c_str());
     }
 
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
