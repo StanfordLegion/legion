@@ -71,7 +71,7 @@ namespace Realm {
     extern Logger log_inst;
     Logger log_disk("disk");
 
-    DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
+    DiskMemory::DiskMemory(Memory _me, size_t _size, const std::filesystem::path& _file)
       : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT,
 			   Memory::DISK_MEM, 0)
       , file(_file)
