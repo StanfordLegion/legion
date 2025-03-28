@@ -397,7 +397,7 @@ namespace Realm {
     public:
       static const size_t ALIGNMENT = 256;
 
-      DiskMemory(Memory _me, size_t _size, const std::filesystem::path& _file);
+      DiskMemory(Memory _me, size_t _size, const std::filesystem::path &_file);
 
       virtual ~DiskMemory(void);
 
@@ -409,7 +409,7 @@ namespace Realm {
 
     public:
       int fd; // file descriptor
-      std::filesystem::path file;  // file name
+      std::filesystem::path file; // file name
     };
 
     class FileMemory : public MemoryImpl {
