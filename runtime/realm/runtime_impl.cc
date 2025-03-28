@@ -2100,7 +2100,7 @@ namespace Realm {
       DiskMemory *diskmem;
       if(config->disk_mem_size > 0) {
         char file_name[30];
-        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "/tmp/realm_disk_file%d.data", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
                                  config->disk_mem_size,

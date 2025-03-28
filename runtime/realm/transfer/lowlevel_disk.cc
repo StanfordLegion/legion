@@ -76,9 +76,10 @@ namespace Realm {
 			   Memory::DISK_MEM, 0)
       , file(_file)
     {
-      printf("file = %s\n", _file.c_str());
-      // do not overwrite an existing file
-      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00666);
+      // Allow overwriting of an existing file in case Realm crashed
+      // before and we are running again and need to overwrite the
+      // file instead of crashing again because we can't open the file
+      fd = open(_file.c_str(), O_CREAT | O_RDWR, 00666);
       assert(fd != -1);
       // resize the file to what we want
       int ret =	ftruncate(fd, _size);
