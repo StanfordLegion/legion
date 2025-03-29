@@ -53,6 +53,7 @@
 #include <sstream>
 #include <fstream>
 #include <csignal>
+#include <filesystem>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
@@ -2101,11 +2102,12 @@ namespace Realm {
       DiskMemory *diskmem;
       if(config->disk_mem_size > 0) {
         char file_name[30];
-        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "realm_disk_file%d.data",
+                 Network::my_node_id);
+        std::filesystem::path disk_file = std::filesystem::temp_directory_path();
+        disk_file += file_name;
         Memory m = get_runtime()->next_local_memory_id();
-        diskmem = new DiskMemory(m,
-                                 config->disk_mem_size,
-                                 std::string(file_name));
+        diskmem = new DiskMemory(m, config->disk_mem_size, disk_file);
         get_runtime()->add_memory(diskmem);
       } else
         diskmem = 0;
