@@ -1004,6 +1004,7 @@ namespace Realm {
       //  instance metadata (whether the allocation succeeded or not) after
       //  this point)
       Event ready_event;
+      RegionInstanceImpl *last = insts.back();
       switch(m_impl->reuse_storage_deferrable(this, insts, wait_on)) {
       case MemoryImpl::ALLOC_INSTANT_SUCCESS:
       {
@@ -1035,7 +1036,6 @@ namespace Realm {
           // Whatever the ready event is for the last new instance
           // will be the point where the deferred redistrict is done
           // since we always notify instances in order
-          RegionInstanceImpl *last = insts.back();
           AutoLock<> al(last->mutex);
           switch(last->metadata.inst_offset) {
           case RegionInstanceImpl::INSTOFFSET_UNALLOCATED:

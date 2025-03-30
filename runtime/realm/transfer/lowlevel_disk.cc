@@ -261,6 +261,5 @@ namespace Realm {
       // shouldn't get here - no allocation
       assert(0);
     }
-
 }
 
