@@ -1327,7 +1327,7 @@ namespace Realm {
     // Handle the external instance case
     if(old_inst->metadata.ext_resource)
       return MemoryImpl::reuse_storage_immediate(old_inst, new_insts, poisoned,
-                                                 work_until);      
+                                                 work_until);
 
     size_t allocated = 0;
     std::vector<size_t> offsets(new_insts.size(), RegionInstanceImpl::INSTOFFSET_FAILED);
