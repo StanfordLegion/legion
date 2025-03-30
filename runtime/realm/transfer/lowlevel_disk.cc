@@ -72,8 +72,7 @@ namespace Realm {
     Logger log_disk("disk");
 
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
-      : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT,
-			   Memory::DISK_MEM, 0)
+      : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM, 0)
       , file(_file)
     {
       printf("file = %s\n", _file.c_str());
@@ -262,6 +261,12 @@ namespace Realm {
       assert(0);
     }
 
-
+    MemoryImpl::AllocationResult
+    FileMemory::reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                                        std::vector<RegionInstanceImpl *> &new_insts,
+                                        bool poisoned, TimeLimit work_until)
+    {
+      abort();
+    }
 }
 

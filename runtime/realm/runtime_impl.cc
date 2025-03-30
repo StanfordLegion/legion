@@ -2102,9 +2102,7 @@ namespace Realm {
         char file_name[30];
         snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
-        diskmem = new DiskMemory(m,
-                                 config->disk_mem_size,
-                                 std::string(file_name));
+        diskmem = new DiskMemory(m, config->disk_mem_size, std::string(file_name));
         get_runtime()->add_memory(diskmem);
       } else
         diskmem = 0;

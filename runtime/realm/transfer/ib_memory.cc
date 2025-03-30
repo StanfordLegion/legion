@@ -389,6 +389,14 @@ namespace Realm {
     abort();
   }
 
+  MemoryImpl::AllocationResult
+  IBMemory::reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                                    std::vector<RegionInstanceImpl *> &new_insts,
+                                    bool poisoned, TimeLimit work_until)
+  {
+    abort();
+  }
+
   void IBMemory::get_bytes(off_t offset, void *dst, size_t size)
   {
     abort();
