@@ -355,7 +355,7 @@ TEST_P(RangeAllocatorSplitParamTest, Base)
   for(RangeAllocTestCase::SplitOp op : test_case.split_ops) {
     std::vector<size_t> offsets(op.new_tags.size());
     EXPECT_EQ(
-        range_alloc.split_range(op.old_tag, op.new_tags, op.sizes, op.aligns, offsets),
+        range_alloc.split_range(op.old_tag, op.new_tags, op.sizes, op.aligns, offsets, true),
         op.good_allocs);
     for(size_t j = 0; j < offsets.size(); j++) {
       EXPECT_EQ(offsets[j], op.exp_offsets[j]);
