@@ -1,10 +1,11 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 25.03.0 (March ??, 2025)
+Version 25.03.0 (March 28, 2025)
   * Build
     - Minimum required CMake version is now 3.22
     - Minimum required CUDA version is now 11.7
+    - Experimental CMake build system under `/realm` for Realm standalone builds
   * Legion
     - Legion now uses a "one pool" memory allocation strategy that removes the
        need to split memory into two pools via the `-lg:eager_alloc_percentage`
@@ -25,7 +26,6 @@ Version 25.03.0 (March ??, 2025)
   * Realm
     - The hwloc support for topology discovery in Realm, which had bitrotted, has been revived and substantially improved
     - Support for NVIDIA Blackwell GPU architecture
-    - Realm now features an experimental CMake build system in the /realm directory for standalone builds.
     - Expanded unit test coverage
 
 Version 24.12.0 (December 20, 2024)
