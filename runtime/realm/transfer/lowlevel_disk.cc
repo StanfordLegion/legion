@@ -261,12 +261,5 @@ namespace Realm {
       assert(0);
     }
 
-    MemoryImpl::AllocationResult
-    FileMemory::reuse_storage_immediate(RegionInstanceImpl *old_inst,
-                                        std::vector<RegionInstanceImpl *> &new_insts,
-                                        bool poisoned, TimeLimit work_until)
-    {
-      abort();
-    }
 }
 

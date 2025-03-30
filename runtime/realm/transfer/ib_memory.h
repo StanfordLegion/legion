@@ -49,11 +49,6 @@ namespace Realm {
 					   bool poisoned,
 					   TimeLimit work_until);
 
-    virtual AllocationResult
-    reuse_storage_immediate(RegionInstanceImpl *old_inst,
-                            std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
-                            TimeLimit work_until);
-
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
 

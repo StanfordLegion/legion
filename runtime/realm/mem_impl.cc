@@ -227,6 +227,80 @@ namespace Realm {
       }
     }
 
+    MemoryImpl::AllocationResult
+    MemoryImpl::reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                                         std::vector<RegionInstanceImpl *> &new_insts,
+                                         bool poisoned, TimeLimit work_until)
+    {
+      // Should only be here for external instances
+      assert(old_inst->metadata.ext_resource);
+      // Swap the new instances into a local container because once we start notifying
+      // the instances of their results, the DeferredDeletion object that invoked this
+      // method could be reused right away
+      std::vector<RegionInstanceImpl *> local_insts;
+      local_insts.swap(new_insts);
+      if(poisoned) {
+        for(unsigned idx = 0; idx < local_insts.size(); idx++)
+          local_insts[idx]->notify_allocation(
+              ALLOC_CANCELLED, RegionInstanceImpl::INSTOFFSET_FAILED, work_until);
+        return ALLOC_CANCELLED;
+      } else {
+        // this is an external allocation - it had better be a memory resource
+        const ExternalMemoryResource *res =
+            dynamic_cast<ExternalMemoryResource *>(old_inst->metadata.ext_resource);
+        if(res) {
+          // automatic success - make the "offset" be the difference between the
+          //  base address we were given and our own allocation's base
+          const uintptr_t mem_base = reinterpret_cast<uintptr_t>(get_direct_ptr(0, 0));
+          assert(mem_base != 0);
+          // Figure out how many of the new instances we can allocate
+          size_t bytes_used = 0;
+          uintptr_t offset = res->base;
+          for(unsigned idx = 0; idx < local_insts.size(); idx++) {
+            const InstanceLayoutGeneric *layout = local_insts[idx]->metadata.layout;
+            // Align the offset for the next instance
+            if(layout->alignment_reqd) {
+              const size_t remainder = offset % layout->alignment_reqd;
+              if(remainder) {
+                const size_t diff = layout->alignment_reqd - remainder;
+                offset += diff;
+                bytes_used += diff;
+              }
+            }
+            // Check that it fits in the remaining space
+            const size_t bytes_needed = layout->bytes_used;
+            if(res->size_in_bytes < (bytes_used + bytes_needed)) {
+              // Won't be able to allocate anymore instances at this point
+              while(idx < local_insts.size()) {
+                local_insts[idx++]->notify_allocation(
+                    ALLOC_INSTANT_FAILURE, RegionInstanceImpl::INSTOFFSET_FAILED,
+                    work_until);
+              }
+              return ALLOC_INSTANT_FAILURE;
+            }
+            // Make sure all these instances are treated as external too
+            assert(!local_insts[idx]->metadata.ext_resource);
+            local_insts[idx]->metadata.ext_resource = res->clone();
+            // notify the successful allocation, adjust for mem_base
+            // underflow is ok here - it'll work itself out when we add the mem_base
+            //  back in on accesses
+            local_insts[idx]->notify_allocation(ALLOC_INSTANT_SUCCESS, offset - mem_base,
+                                                work_until);
+            offset += bytes_needed;
+            bytes_used += bytes_needed;
+          }
+          return ALLOC_INSTANT_SUCCESS;
+        } else {
+          log_inst.warning() << "attempt to redistict non-memory resource: mem=" << me
+                             << " resource=" << *(old_inst->metadata.ext_resource);
+          for(unsigned idx = 0; idx < local_insts.size(); idx++)
+            local_insts[idx]->notify_allocation(
+                ALLOC_INSTANT_FAILURE, RegionInstanceImpl::INSTOFFSET_FAILED, work_until);
+          return ALLOC_INSTANT_FAILURE;
+        }
+      }
+    }
+
     bool MemoryImpl::attempt_register_external_resource(RegionInstanceImpl *inst,
                                                         size_t& inst_offset)
     {
@@ -1251,73 +1325,8 @@ namespace Realm {
       bool poisoned, TimeLimit work_until)
   {
     // Handle the external instance case
-    if(old_inst->metadata.ext_resource) {
-      // Swap the new instances into a local container because once we start notifying
-      // the instances of their results, the DeferredDeletion object that invoked this
-      // method could be reused right away
-      std::vector<RegionInstanceImpl *> local_insts;
-      local_insts.swap(new_insts);
-      if(poisoned) {
-        for(unsigned idx = 0; idx < local_insts.size(); idx++)
-          local_insts[idx]->notify_allocation(
-              ALLOC_CANCELLED, RegionInstanceImpl::INSTOFFSET_FAILED, work_until);
-        return ALLOC_CANCELLED;
-      } else {
-        // this is an external allocation - it had better be a memory resource
-        const ExternalMemoryResource *res =
-            dynamic_cast<ExternalMemoryResource *>(old_inst->metadata.ext_resource);
-        if(res) {
-          // automatic success - make the "offset" be the difference between the
-          //  base address we were given and our own allocation's base
-          const uintptr_t mem_base = reinterpret_cast<uintptr_t>(get_direct_ptr(0, 0));
-          assert(mem_base != 0);
-          // Figure out how many of the new instances we can allocate
-          size_t bytes_used = 0;
-          uintptr_t offset = res->base;
-          for(unsigned idx = 0; idx < local_insts.size(); idx++) {
-            const InstanceLayoutGeneric *layout = local_insts[idx]->metadata.layout;
-            // Align the offset for the next instance
-            if(layout->alignment_reqd) {
-              const size_t remainder = offset % layout->alignment_reqd;
-              if(remainder) {
-                const size_t diff = layout->alignment_reqd - remainder;
-                offset += diff;
-                bytes_used += diff;
-              }
-            }
-            // Check that it fits in the remaining space
-            const size_t bytes_needed = layout->bytes_used;
-            if(res->size_in_bytes < (bytes_used + bytes_needed)) {
-              // Won't be able to allocate anymore instances at this point
-              while(idx < local_insts.size()) {
-                local_insts[idx++]->notify_allocation(
-                    ALLOC_INSTANT_FAILURE, RegionInstanceImpl::INSTOFFSET_FAILED,
-                    work_until);
-              }
-              return ALLOC_INSTANT_FAILURE;
-            }
-            // Make sure all these instances are treated as external too
-            assert(!local_insts[idx]->metadata.ext_resource);
-            local_insts[idx]->metadata.ext_resource = res->clone();
-            // notify the successful allocation, adjust for mem_base
-            // underflow is ok here - it'll work itself out when we add the mem_base
-            //  back in on accesses
-            local_insts[idx]->notify_allocation(ALLOC_INSTANT_SUCCESS, offset - mem_base,
-                                                work_until);
-            offset += bytes_needed;
-            bytes_used += bytes_needed;
-          }
-          return ALLOC_INSTANT_SUCCESS;
-        } else {
-          log_inst.warning() << "attempt to redistict non-memory resource: mem=" << me
-                             << " resource=" << *(old_inst->metadata.ext_resource);
-          for(unsigned idx = 0; idx < local_insts.size(); idx++)
-            local_insts[idx]->notify_allocation(
-                ALLOC_INSTANT_FAILURE, RegionInstanceImpl::INSTOFFSET_FAILED, work_until);
-          return ALLOC_INSTANT_FAILURE;
-        }
-      }
-    }
+    if(old_inst->metadata.ext_resource)
+      return MemoryImpl::reuse_storage_immediate(old_inst, new_insts, poisoned, work_until);      
 
     size_t allocated = 0;
     std::vector<size_t> offsets(new_insts.size(), RegionInstanceImpl::INSTOFFSET_FAILED);

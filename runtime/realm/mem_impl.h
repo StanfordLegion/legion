@@ -130,7 +130,7 @@ namespace Realm {
     virtual AllocationResult
     reuse_storage_immediate(RegionInstanceImpl *old_inst,
                             std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
-                            TimeLimit work_until) = 0;
+                            TimeLimit work_until);
 
     // helpers used by the above when an instance being allocated or released
     //  is using an external resource
@@ -446,11 +446,6 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
-
-      virtual AllocationResult
-      reuse_storage_immediate(RegionInstanceImpl *old_inst,
-                              std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
-                              TimeLimit work_until);
 
       // FileMemory supports ExternalFileResource
       virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
