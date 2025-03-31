@@ -166,11 +166,13 @@ namespace Realm {
   template <typename RT, typename TT>
   inline size_t BasicRangeAllocator<RT, TT>::split_range(
       TT old_tag, const std::vector<TT> &new_tags, const std::vector<RT> &sizes,
-      const std::vector<RT> &alignments, std::vector<RT> &allocs_first)
+      const std::vector<RT> &alignments, std::vector<RT> &allocs_first, bool missing_ok)
   {
     typename std::map<TT, unsigned>::iterator it = allocated.find(old_tag);
-    if(it == allocated.end())
+    if(it == allocated.end()) {
+      assert(missing_ok);
       return 0;
+    }
 
     const size_t n = new_tags.size();
     assert(n == sizes.size() && n == alignments.size());

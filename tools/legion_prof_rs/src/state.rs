@@ -1263,7 +1263,6 @@ impl Mem {
 
     fn sort_time_range(&mut self) {
         let mut time_points = Vec::new();
-        let mut time_points_level = Vec::new();
 
         for (key, inst) in &self.insts {
             time_points.push(MemPoint::new(
@@ -1278,26 +1277,12 @@ impl Mem {
                 false,
                 Timestamp::ZERO,
             ));
-
-            time_points_level.push(MemPoint::new(
-                inst.time_range.create.unwrap(),
-                *key,
-                true,
-                Timestamp::MAX - inst.time_range.stop.unwrap(),
-            ));
-            time_points_level.push(MemPoint::new(
-                inst.time_range.stop.unwrap(),
-                *key,
-                false,
-                Timestamp::ZERO,
-            ));
         }
         time_points.sort_by_key(|a| a.time_key());
-        time_points_level.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &time_points_level {
+        for point in &time_points {
             if point.first {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
