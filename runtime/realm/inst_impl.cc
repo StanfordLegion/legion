@@ -819,9 +819,9 @@ namespace Realm {
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
       // we can also fail if there is not enough space for the instance
-      // or if the alignment is insufficient
-      if(!impl || (res->memory_capacity() < ilg->bytes_used) ||
-         (res->maximum_alignment() < ilg->alignment_reqd)) {
+      // or if the alignment is insufficient for external instance creation
+      if(!impl || ((res != nullptr) && ((res->memory_capacity() < ilg->bytes_used) ||
+         (res->maximum_alignment() < ilg->alignment_reqd)))) {
         inst = RegionInstance::NO_INST;
         delete ilg;
         // generate a poisoned event for completion
