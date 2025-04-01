@@ -128,7 +128,7 @@ namespace Realm {
     , read_only(true)
   {}
 
-  bool ExternalCudaMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
+  bool ExternalHipMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
     if (size_in_bytes < layout.bytes_used)
       return false;
