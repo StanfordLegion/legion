@@ -45,6 +45,18 @@ namespace Realm {
     , read_only(_read_only)
   {}
 
+  size_t ExternalHDF5Resource::memory_capacity(void) const
+  {
+    // Files don't have any memory capacity
+    return 0;
+  }
+
+  size_t ExternalHDF5Resource::maximum_alignment(void) const
+  {
+    // Files can't be aligned in memory
+    return 0;
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalHDF5Resource::suggested_memory() const
   {

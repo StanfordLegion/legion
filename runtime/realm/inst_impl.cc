@@ -21,6 +21,8 @@
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
 
+#include <filesystem>
+
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
 namespace Realm {
@@ -816,7 +818,10 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
-      if(!impl) {
+      // we can also fail if there is not enough space for the instance
+      // or if the alignment is insufficient
+      if(!impl || (res->memory_capacity() < ilg->bytes_used) ||
+         (res->maximum_alignment() < ilg->alignment_reqd)) {
         inst = RegionInstance::NO_INST;
         delete ilg;
         // generate a poisoned event for completion
@@ -1555,6 +1560,13 @@ namespace Realm {
       , read_only(true)
     {}
 
+    size_t ExternalMemoryResource::memory_capacity(void) const { return size_in_bytes; }
+
+    size_t ExternalMemoryResource::maximum_alignment(void) const
+    {
+      return (base & -base);
+    }
+
     // returns the suggested memory in which this resource should be created
     Memory ExternalMemoryResource::suggested_memory() const
     {
@@ -1597,6 +1609,18 @@ namespace Realm {
     , offset(_offset)
     , mode(_mode)
   {}
+
+  size_t ExternalFileResource::memory_capacity(void) const
+  {
+    // Files don't have any memory capacity
+    return 0;
+  }
+
+  size_t ExternalFileResource::maximum_alignment(void) const
+  {
+    // Files can't be aligned in memory
+    return 0;
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalFileResource::suggested_memory() const

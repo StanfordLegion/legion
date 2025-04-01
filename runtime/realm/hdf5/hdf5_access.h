@@ -108,6 +108,10 @@ namespace Realm {
   public:
     ExternalHDF5Resource(const std::string& _filename, bool _read_only);
 
+    virtual size_t memory_capacity(void) const;
+
+    virtual size_t maximum_alignment(void) const;
+
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;
 

@@ -128,6 +128,13 @@ namespace Realm {
     , read_only(true)
   {}
 
+  size_t ExternalHipMemoryResource::memory_capacity(void) const { return size_in_bytes; }
+
+  size_t ExternalHipMemoryResource::maximum_alignment(void) const
+  {
+    return (base & -base);
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalHipMemoryResource::suggested_memory() const
   {

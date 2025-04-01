@@ -98,6 +98,10 @@ namespace Realm {
     ExternalCudaMemoryResource(int _cuda_device_id, const void *_base,
                                size_t _size_in_bytes);
 
+    virtual size_t memory_capacity(void) const;
+
+    virtual size_t maximum_alignment(void) const;
+
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;
 
@@ -127,6 +131,10 @@ namespace Realm {
   public:
     ExternalCudaArrayResource(int _cuda_device_id, CUarray_st *_array);
     ExternalCudaArrayResource(int _cuda_device_id, cudaArray *_array);
+
+    virtual size_t memory_capacity(void) const;
+
+    virtual size_t maximum_alignment(void) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;

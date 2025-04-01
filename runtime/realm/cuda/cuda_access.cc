@@ -128,6 +128,13 @@ namespace Realm {
     , read_only(true)
   {}
 
+  size_t ExternalCudaMemoryResource::memory_capacity(void) const { return size_in_bytes; }
+
+  size_t ExternalCudaMemoryResource::maximum_alignment(void) const
+  {
+    return (base & -base);
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalCudaMemoryResource::suggested_memory() const
   {
@@ -177,6 +184,24 @@ namespace Realm {
     , cuda_device_id(_cuda_device_id)
     , array(reinterpret_cast<CUarray_st *>(_array))
   {}
+
+  size_t ExternalCudaArrayResource::memory_capacity(void) const
+  {
+    // Fish out the properties of the CUDA array
+    CUDA_ARRAY_MEMORY_REQUIREMENTS requirements;
+    CHECK_CU(CUDA_DRIVER_FNPTR(Realm::Cuda::cuArrayGetMemoryRequirements)(
+        &requirements, array, cuda_device_id));
+    return requirements.size;
+  }
+
+  size_t ExternalCudaArrayResource::maximum_alignment(void) const
+  {
+    // Fish out the properties of the CUDA array
+    CUDA_ARRAY_MEMORY_REQUIREMENTS requirements;
+    CHECK_CU(CUDA_DRIVER_FNPTR(Realm::Cuda::cuArrayGetMemoryRequirements)(
+        &requirements, array, cuda_device_id));
+    return requirements.alignment;
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalCudaArrayResource::suggested_memory() const
