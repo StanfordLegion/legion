@@ -128,11 +128,12 @@ namespace Realm {
     , read_only(true)
   {}
 
-  size_t ExternalHipMemoryResource::memory_capacity(void) const { return size_in_bytes; }
-
-  size_t ExternalHipMemoryResource::maximum_alignment(void) const
+  bool ExternalCudaMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    return (base & -base);
+    if (size_in_bytes < layout.bytes_used)
+      return false;
+    const size_t max_alignment = (base & -base);
+    return (layout.alignment_reqd <= max_alignment);
   }
 
   // returns the suggested memory in which this resource should be created

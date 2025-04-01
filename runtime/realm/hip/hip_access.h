@@ -31,9 +31,7 @@ namespace Realm {
     ExternalHipMemoryResource(int _cuda_device_id, const void *_base,
                                size_t _size_in_bytes);
 
-    virtual size_t memory_capacity(void) const;
-
-    virtual size_t maximum_alignment(void) const;
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;

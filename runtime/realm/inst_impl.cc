@@ -820,8 +820,7 @@ namespace Realm {
       // we can fail to get a valid pointer if we are out of instance slots
       // we can also fail if there is not enough space for the instance
       // or if the alignment is insufficient for external instance creation
-      if(!impl || ((res != nullptr) && ((res->memory_capacity() < ilg->bytes_used) ||
-         (res->maximum_alignment() < ilg->alignment_reqd)))) {
+      if(!impl || ((res != nullptr) && !res->satisfies(*ilg))) {
         inst = RegionInstance::NO_INST;
         delete ilg;
         // generate a poisoned event for completion
@@ -1560,11 +1559,12 @@ namespace Realm {
       , read_only(true)
     {}
 
-    size_t ExternalMemoryResource::memory_capacity(void) const { return size_in_bytes; }
-
-    size_t ExternalMemoryResource::maximum_alignment(void) const
+    bool ExternalMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
     {
-      return (base & -base);
+      if (size_in_bytes < layout.bytes_used)
+        return false;
+      const size_t max_alignment = (base & -base);
+      return (layout.alignment_reqd <= max_alignment);
     }
 
     // returns the suggested memory in which this resource should be created
@@ -1610,16 +1610,10 @@ namespace Realm {
     , mode(_mode)
   {}
 
-  size_t ExternalFileResource::memory_capacity(void) const
+  bool ExternalFileResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    // Files don't have any memory capacity
-    return 0;
-  }
-
-  size_t ExternalFileResource::maximum_alignment(void) const
-  {
-    // Files can't be aligned in memory
-    return 0;
+    // Good as long as the file is big enough
+    return ((offset + layout.bytes_used) <= std::filesystem::file_size(filename));
   }
 
   // returns the suggested memory in which this resource should be created

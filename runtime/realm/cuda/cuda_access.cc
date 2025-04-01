@@ -128,11 +128,12 @@ namespace Realm {
     , read_only(true)
   {}
 
-  size_t ExternalCudaMemoryResource::memory_capacity(void) const { return size_in_bytes; }
-
-  size_t ExternalCudaMemoryResource::maximum_alignment(void) const
+  bool ExternalCudaMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    return (base & -base);
+    if (size_in_bytes < layout.bytes_used)
+      return false;
+    const size_t max_alignment = (base & -base);
+    return (layout.alignment_reqd <= max_alignment);
   }
 
   // returns the suggested memory in which this resource should be created
@@ -185,22 +186,14 @@ namespace Realm {
     , array(reinterpret_cast<CUarray_st *>(_array))
   {}
 
-  size_t ExternalCudaArrayResource::memory_capacity(void) const
+  bool ExternalCudaArrayResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    // Fish out the properties of the CUDA array
     CUDA_ARRAY_MEMORY_REQUIREMENTS requirements;
     CHECK_CU(CUDA_DRIVER_FNPTR(Realm::Cuda::cuArrayGetMemoryRequirements)(
         &requirements, array, cuda_device_id));
-    return requirements.size;
-  }
-
-  size_t ExternalCudaArrayResource::maximum_alignment(void) const
-  {
-    // Fish out the properties of the CUDA array
-    CUDA_ARRAY_MEMORY_REQUIREMENTS requirements;
-    CHECK_CU(CUDA_DRIVER_FNPTR(Realm::Cuda::cuArrayGetMemoryRequirements)(
-        &requirements, array, cuda_device_id));
-    return requirements.alignment;
+    if (requirements.size < layout.bytes_used)
+      return false;
+    return (layout.alignment_reqd <= requirements.alignment);
   }
 
   // returns the suggested memory in which this resource should be created
