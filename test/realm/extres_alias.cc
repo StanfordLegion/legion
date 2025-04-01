@@ -95,6 +95,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     abs_layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(abs_extent,
                                                                     ilc,
                                                                     dim_order);
+    abs_layout->alignment_reqd = alignof(FT);
   }
   {
     // for the matching rel_layout, we need an extent with the same size
@@ -102,6 +103,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     std::map<FieldID, size_t> fields;
     fields[FID_ALIAS] = sizeof(FT);
     InstanceLayoutConstraints ilc(fields, 0 /*block size*/);
+#if 0
     Rect<N,T> full_rel = Rect<N,T>(Point<N,T>(0),
                                    abs_extent.hi - abs_extent.lo);
     int dim_order[N];
@@ -109,6 +111,14 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     rel_layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(full_rel,
                                                                     ilc,
                                                                     dim_order);
+#else
+    int dim_order[N];
+    for(int i = 0; i < N; i++) dim_order[i] = i;
+    rel_layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(rel_extent,
+                                                                    ilc,
+                                                                    dim_order);
+#endif
+    rel_layout->alignment_reqd = alignof(FT);
   }
   RegionInstance::create_instance(start_inst, src_mem, *abs_layout, ProfilingRequestSet())
       .wait();
@@ -141,6 +151,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     flat_layout = InstanceLayoutGeneric::choose_instance_layout<1,T>(flat_extent,
                                                                      ilc,
                                                                      dim_order);
+    flat_layout->alignment_reqd = alignof(FT);
 
     ExternalInstanceResource *extres = start_inst.generate_resource_info(true /*read_only*/);
     if(!extres) {
@@ -193,6 +204,7 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
                                     ProfilingRequestSet())
         .wait();
 
+#if 0
     // create a relatively-indexed alias for the target instance
     RegionInstance tgt_inst_rel;
     {
@@ -271,6 +283,9 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
       tgt_inst_dummy.destroy();
       break;
     }
+#else
+    Event e;
+#endif
 
     // now same routine with the flattened alias
     RegionInstance tgt_inst_flat;
