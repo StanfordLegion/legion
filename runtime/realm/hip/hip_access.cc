@@ -130,7 +130,7 @@ namespace Realm {
 
   bool ExternalHipMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    if (size_in_bytes < layout.bytes_used)
+    if(size_in_bytes < layout.bytes_used)
       return false;
     const size_t max_alignment = (base & -base);
     return (layout.alignment_reqd <= max_alignment);

@@ -130,7 +130,7 @@ namespace Realm {
 
   bool ExternalCudaMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    if (size_in_bytes < layout.bytes_used)
+    if(size_in_bytes < layout.bytes_used)
       return false;
     const size_t max_alignment = (base & -base);
     return (layout.alignment_reqd <= max_alignment);
@@ -191,7 +191,7 @@ namespace Realm {
     CUDA_ARRAY_MEMORY_REQUIREMENTS requirements;
     CHECK_CU(CUDA_DRIVER_FNPTR(Realm::Cuda::cuArrayGetMemoryRequirements)(
         &requirements, array, cuda_device_id));
-    if (requirements.size < layout.bytes_used)
+    if(requirements.size < layout.bytes_used)
       return false;
     return (layout.alignment_reqd <= requirements.alignment);
   }
