@@ -188,6 +188,10 @@ namespace Realm {
   bool ExternalCudaArrayResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
     // TODO: check that all the pieces are CUDA array pieces, just assume it for now
+    log_gpu.warning() << "Checking that layouts can be satisfied by an "
+      << "ExternalCudaArrayResource is currently unimplemented. Assuming that "
+      << "cudaArray " << array << " on device " << cuda_device_id
+      << "satisfies the corresponding layout."
     return true;
   }
 
