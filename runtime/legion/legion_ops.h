@@ -3931,6 +3931,10 @@ namespace Legion {
                                               const FieldMask &external_mask);
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
+      ApEvent create_external(RegionNode *node, 
+          const std::vector<FieldID>& field_set,
+          const std::vector<size_t>& sizes, PhysicalInstance& instance,
+          LgEvent& unique_event, size_t& footprint);
       void check_privilege(void);
       void compute_parent_index(void);
       void log_requirement(void);
