@@ -85,9 +85,13 @@ typedef enum realm_memory_kind_t {
 
 // file modes - to be removed soon
 typedef enum realm_file_mode_t {
-  LEGION_FILE_READ_ONLY,
-  LEGION_FILE_READ_WRITE,
-  LEGION_FILE_CREATE
+  REALM_FILE_READ_ONLY,
+  REALM_FILE_READ_WRITE,
+  REALM_FILE_CREATE,
+  // These are deprecated but maintained for backwards compatibility
+  LEGION_FILE_READ_ONLY = REALM_FILE_READ_ONLY,
+  LEGION_FILE_READ_WRITE = REALM_FILE_READ_WRITE,
+  LEGION_FILE_CREATE = REALM_FILE_CREATE,
 } realm_file_mode_t;
 
 // Prototype for a Realm task

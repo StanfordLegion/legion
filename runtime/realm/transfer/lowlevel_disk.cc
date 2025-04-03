@@ -167,17 +167,17 @@ namespace Realm {
           // try to open the file
           int fd;
           switch(res->mode) {
-          case LEGION_FILE_READ_ONLY:
+          case REALM_FILE_READ_ONLY:
             {
               fd = open(res->filename.c_str(), O_RDONLY);
               break;
             }
-          case LEGION_FILE_READ_WRITE:
+          case REALM_FILE_READ_WRITE:
             {
               fd = open(res->filename.c_str(), O_RDWR);
               break;
             }
-          case LEGION_FILE_CREATE:
+          case REALM_FILE_CREATE:
             {
               fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
               if(fd == -1) {
