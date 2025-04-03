@@ -84,7 +84,8 @@ typedef enum realm_memory_kind_t {
 } realm_memory_kind_t;
 
 // file modes - to be removed soon
-typedef enum realm_file_mode_t {
+typedef enum realm_file_mode_t
+{
   REALM_FILE_READ_ONLY,
   REALM_FILE_READ_WRITE,
   REALM_FILE_CREATE,

@@ -47,15 +47,15 @@ namespace TestConfig {
 };
 
 template <int N, typename T>
-AffineLayoutPiece<N,T>* extract_piece(InstanceLayoutGeneric *layout)
+AffineLayoutPiece<N, T> *extract_piece(InstanceLayoutGeneric *layout)
 {
-  InstanceLayout<N,T>* typed = dynamic_cast<InstanceLayout<N,T>*>(layout);
+  InstanceLayout<N, T> *typed = dynamic_cast<InstanceLayout<N, T> *>(layout);
   assert(typed != nullptr);
   // Should only be one piece for this instance
   assert(typed->piece_lists.size() == 1);
   assert(typed->piece_lists.back().pieces.size() == 1);
-  AffineLayoutPiece<N,T>* piece = 
-    dynamic_cast<AffineLayoutPiece<N,T>*>(typed->piece_lists.back().pieces.back());
+  AffineLayoutPiece<N, T> *piece =
+      dynamic_cast<AffineLayoutPiece<N, T> *>(typed->piece_lists.back().pieces.back());
   assert(piece != nullptr);
   return piece;
 }
@@ -121,11 +121,11 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     for(int i = 0; i < N; i++)
       dim_order[i] = i;
     rel_layout =
-      InstanceLayoutGeneric::choose_instance_layout<N,T>(rel_extent, ilc, dim_order);
-    // This is tricky, for all the non-contiguous dimensions we go through and 
+        InstanceLayoutGeneric::choose_instance_layout<N, T>(rel_extent, ilc, dim_order);
+    // This is tricky, for all the non-contiguous dimensions we go through and
     // update the piece offsets with paddings between the non-contiugous dimensions
-    AffineLayoutPiece<N,T>* abs_piece = extract_piece<N,T>(abs_layout);
-    AffineLayoutPiece<N,T>* rel_piece = extract_piece<N,T>(rel_layout);
+    AffineLayoutPiece<N, T> *abs_piece = extract_piece<N, T>(abs_layout);
+    AffineLayoutPiece<N, T> *rel_piece = extract_piece<N, T>(rel_layout);
     // Strides are the same as on the abs_layout
     for(int i = 0; i < N; i++)
       rel_piece->strides[i] = abs_piece->strides[i];

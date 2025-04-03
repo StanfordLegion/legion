@@ -168,30 +168,32 @@ namespace Realm {
           int fd;
           switch(res->mode) {
           case REALM_FILE_READ_ONLY:
-            {
-              fd = open(res->filename.c_str(), O_RDONLY);
-              break;
-            }
+          {
+            fd = open(res->filename.c_str(), O_RDONLY);
+            break;
+          }
           case REALM_FILE_READ_WRITE:
-            {
-              fd = open(res->filename.c_str(), O_RDWR);
-              break;
-            }
+          {
+            fd = open(res->filename.c_str(), O_RDWR);
+            break;
+          }
           case REALM_FILE_CREATE:
-            {
-              fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
-              if(fd == -1) {
-                log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
-                abort();
-              }
-              // resize the file to what we want
-              int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
-              if(ret == -1) {
-                log_disk.fatal() << "failed to truncate file '" << res->filename << "': " << strerror(errno);
-                abort();
-              }
-              break;
+          {
+            fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
+            if(fd == -1) {
+              log_disk.fatal() << "unable to open file '" << res->filename
+                               << "': " << strerror(errno);
+              abort();
             }
+            // resize the file to what we want
+            int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
+            if(ret == -1) {
+              log_disk.fatal() << "failed to truncate file '" << res->filename
+                               << "': " << strerror(errno);
+              abort();
+            }
+            break;
+          }
           default:
             assert(0);
           }

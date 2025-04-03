@@ -18,7 +18,6 @@
 #include "realm/cuda/cuda_access.h"
 
 #include "realm/cuda/cuda_module.h"
-#include "realm/cuda/cuda_internal.h"
 
 namespace Realm {
 
@@ -188,12 +187,8 @@ namespace Realm {
 
   bool ExternalCudaArrayResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
-    CUDA_ARRAY_MEMORY_REQUIREMENTS requirements;
-    CHECK_CU(CUDA_DRIVER_FNPTR(Realm::Cuda::cuArrayGetMemoryRequirements)(
-        &requirements, array, cuda_device_id));
-    if(requirements.size < layout.bytes_used)
-      return false;
-    return (layout.alignment_reqd <= requirements.alignment);
+    // TODO: check that all the pieces are CUDA array pieces, just assume it for now
+    return true;
   }
 
   // returns the suggested memory in which this resource should be created

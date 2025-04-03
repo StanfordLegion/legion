@@ -1613,7 +1613,7 @@ namespace Realm {
   bool ExternalFileResource::satisfies(const InstanceLayoutGeneric &layout) const
   {
     // Good as long as the file is big enough
-    if (mode == REALM_FILE_CREATE)
+    if(mode == REALM_FILE_CREATE)
       return true;
     else
       return ((offset + layout.bytes_used) <= std::filesystem::file_size(filename));
