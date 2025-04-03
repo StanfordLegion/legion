@@ -1769,9 +1769,6 @@ namespace Realm {
 								   span<const FieldID> fields,
 								   bool read_only)
   {
-    // TODO: handle subspaces
-    //assert(subspace == 0);
-
     // compute the bounds of the instance relative to our base
     assert(inst->metadata.is_valid() &&
 	   "instance metadata must be valid before accesses are performed");
@@ -1784,6 +1781,14 @@ namespace Realm {
       extent = ilg->bytes_used;
     } else {
       assert(!fields.empty());
+      // TODO: right now if the subspace is not dense in the underlying instance we
+      // just return an ExternalMemoryResource that describes the upper bound of how
+      // much size this external resource should be allowed to use. If we really wanted
+      // to be precise we would return a new kind ExternalMemoryResource that described
+      // the extents and strides of this particular layout (potentially event with 
+      // multiple pieces of extents and strides). Furthermore we would then update the
+      // ExternalInstanceResource::satisfies method to check that a corresponding 
+      // layout only accessed elements in the white-listed extents.
       uintptr_t limit;
       for(size_t i = 0; i < fields.size(); i++) {
         uintptr_t f_base, f_limit;
