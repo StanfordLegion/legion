@@ -192,7 +192,7 @@ namespace Realm {
     log_gpu.warning() << "Checking that layouts can be satisfied by an "
       << "ExternalCudaArrayResource is currently unimplemented. Assuming that "
       << "cudaArray " << array << " on device " << cuda_device_id
-      << "satisfies the corresponding layout."
+      << "satisfies the corresponding layout.";
     return true;
   }
 
