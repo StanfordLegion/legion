@@ -46,6 +46,20 @@ namespace TestConfig {
   bool continue_on_error = false;
 };
 
+template <int N, typename T>
+AffineLayoutPiece<N,T>* extract_piece(InstanceLayoutGeneric *layout)
+{
+  InstanceLayout<N,T>* typed = dynamic_cast<InstanceLayout<N,T>*>(layout);
+  assert(typed != nullptr);
+  // Should only be one piece for this instance
+  assert(typed->piece_lists.size() == 1);
+  assert(typed->piece_lists.back().pieces.size() == 1);
+  AffineLayoutPiece<N,T>* piece = 
+    dynamic_cast<AffineLayoutPiece<N,T>*>(typed->piece_lists.back().pieces.back());
+  assert(piece != nullptr);
+  return piece;
+}
+
 template <int N, typename T, typename FT>
 size_t do_single_dim(Memory src_mem, unsigned seq_no)
 {
@@ -103,21 +117,25 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
     std::map<FieldID, size_t> fields;
     fields[FID_ALIAS] = sizeof(FT);
     InstanceLayoutConstraints ilc(fields, 0 /*block size*/);
-#if 0
-    Rect<N,T> full_rel = Rect<N,T>(Point<N,T>(0),
-                                   abs_extent.hi - abs_extent.lo);
     int dim_order[N];
-    for(int i = 0; i < N; i++) dim_order[i] = i;
-    rel_layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(full_rel,
-                                                                    ilc,
-                                                                    dim_order);
-#else
-    int dim_order[N];
-    for(int i = 0; i < N; i++) dim_order[i] = i;
-    rel_layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(rel_extent,
-                                                                    ilc,
-                                                                    dim_order);
-#endif
+    for(int i = 0; i < N; i++)
+      dim_order[i] = i;
+    rel_layout =
+      InstanceLayoutGeneric::choose_instance_layout<N,T>(rel_extent, ilc, dim_order);
+    // This is tricky, for all the non-contiguous dimensions we go through and 
+    // update the piece offsets with paddings between the non-contiugous dimensions
+    AffineLayoutPiece<N,T>* abs_piece = extract_piece<N,T>(abs_layout);
+    AffineLayoutPiece<N,T>* rel_piece = extract_piece<N,T>(rel_layout);
+    // Strides are the same as on the abs_layout
+    for(int i = 0; i < N; i++)
+      rel_piece->strides[i] = abs_piece->strides[i];
+    // Technically we don't have to do this, but to be precise let's update the
+    // size correctly so that we know the external bounds check is accurate
+    // Find the size used by computing the offset of the last element and then
+    // adding the size of the element
+    rel_layout->bytes_used = rel_piece->offset + sizeof(FT);
+    for(int i = 0; i < N; i++)
+      rel_layout->bytes_used += rel_extent.hi[i] * rel_piece->strides[i];
     rel_layout->alignment_reqd = alignof(FT);
   }
   RegionInstance::create_instance(start_inst, src_mem, *abs_layout, ProfilingRequestSet())
@@ -204,7 +222,6 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
                                     ProfilingRequestSet())
         .wait();
 
-#if 0
     // create a relatively-indexed alias for the target instance
     RegionInstance tgt_inst_rel;
     {
@@ -283,9 +300,6 @@ size_t do_single_dim(Memory src_mem, unsigned seq_no)
       tgt_inst_dummy.destroy();
       break;
     }
-#else
-    Event e;
-#endif
 
     // now same routine with the flattened alias
     RegionInstance tgt_inst_flat;
