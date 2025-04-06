@@ -20399,42 +20399,11 @@ namespace Legion {
                                               const FieldMask &external_mask)
     //--------------------------------------------------------------------------
     {
-      ApEvent ready_event;
-      PhysicalInstance result = PhysicalInstance::NO_INST;
+      size_t footprint = 0;
       LgEvent unique_event;
-      Realm::ProfilingRequestSet requests;
-      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
-      {
-        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
-        unique.trigger();
-        unique_event = LgEvent(unique);
-        if (runtime->profiler != NULL)
-          runtime->profiler->add_inst_request(requests, this, unique_event);
-      }
-      // If we're doing an HDF5 instance creation we have to make a special
-      // instance layout using HDF5 pieces. It's a bit unforuntate that we
-      // have to have this special path but it is what it is
-      Realm::InstanceLayoutGeneric *ilg = hdf5_field_files.empty() ?
-        // Normal path
-        node->row_source->create_layout(layout_constraint_set, field_set, sizes,
-            false/*compact*/) :
-        // Special path for HDF5
-        node->row_source->create_hdf5_layout(field_set, sizes, hdf5_field_files,
-            layout_constraint_set.ordering_constraint);
-      const size_t footprint = ilg->bytes_used;
-      ready_event = ApEvent(PhysicalInstance::create_external_instance(
-            result, external_resource->suggested_memory(), *ilg, 
-            *external_resource, requests));
-      delete ilg;
-      if (implicit_profiler != NULL)
-      {
-        implicit_profiler->register_physical_instance_region(unique_event,
-                                                           requirement.region);
-        implicit_profiler->register_physical_instance_layout(unique_event,
-            requirement.region.field_space, layout_constraint_set);
-        if (ready_event.exists())
-          implicit_profiler->record_instance_ready(ready_event, unique_event);
-      }
+      PhysicalInstance result = PhysicalInstance::NO_INST;
+      const ApEvent ready_event = create_external(node, field_set, sizes,
+          result, unique_event, footprint);  
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make it
       // Only external instances can be non-local, file instances
@@ -20483,6 +20452,57 @@ namespace Legion {
             footprint, layout_constraint_set, field_set, sizes, external_mask, 
             mask_index_map, unique_event, node, serdez,
             runtime->get_available_distributed_id());
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent AttachOp::create_external(RegionNode *node,
+        const std::vector<FieldID>& field_set,
+        const std::vector<size_t>& sizes, PhysicalInstance& result,
+        LgEvent& unique_event, size_t& footprint)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ProfilingRequestSet requests;
+      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
+      {
+        const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
+        unique.trigger();
+        unique_event = LgEvent(unique); if (runtime->profiler != NULL)
+          runtime->profiler->add_inst_request(requests, this, unique_event);
+      }
+      // If we're doing an HDF5 instance creation we have to make a special
+      // instance layout using HDF5 pieces. It's a bit unforuntate that we
+      // have to have this special path but it is what it is
+      Realm::InstanceLayoutGeneric *ilg = hdf5_field_files.empty() ?
+        // Normal path
+        // Make the base alignment be one since we want to establish the minimal
+        // alignment that we require for this layout to see if it can be 
+        // supported by the particular external resource
+        node->row_source->create_layout(layout_constraint_set, field_set, sizes,
+            false/*compact*/, nullptr, nullptr, nullptr, 1/*base alignment*/) :
+        // Special path for HDF5
+        node->row_source->create_hdf5_layout(field_set, sizes, hdf5_field_files,
+            layout_constraint_set.ordering_constraint);
+      if (!external_resource->satisfies(*ilg))
+        REPORT_LEGION_ERROR(ERROR_INSUFFICIENT_EXTERNAL_RESOURCE,
+            "External resources provided to attach operation (UID %lld) in "
+            "parent task %s (UID %lld) are insufficient to support the "
+            "specified layout constraint.", get_unique_op_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      footprint = ilg->bytes_used;
+      const ApEvent ready_event(PhysicalInstance::create_external_instance(
+            result, external_resource->suggested_memory(), *ilg, 
+            *external_resource, requests));
+      delete ilg;
+      if (implicit_profiler != NULL)
+      {
+        implicit_profiler->register_physical_instance_region(unique_event,
+                                                           requirement.region);
+        implicit_profiler->register_physical_instance_layout(unique_event,
+            requirement.region.field_space, layout_constraint_set);
+        if (ready_event.exists())
+          implicit_profiler->record_instance_ready(ready_event, unique_event);
+      }
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------

@@ -65,7 +65,7 @@ void top_level_task(const Task *task,
     AttachLauncher alr(EXTERNAL_POSIX_FILE, lr_A, lr_A);
     alr.initialize_constraints(false/*column major*/, true/*soa*/, field_vec);
     alr.privilege_fields.insert(FID_X);
-    Realm::ExternalFileResource resource(std::string(input_file), LEGION_FILE_CREATE);
+    Realm::ExternalFileResource resource(std::string(input_file), REALM_FILE_CREATE);
     alr.external_resource = &resource;
     pr_A = runtime->attach_external_resource(ctx, alr);
     

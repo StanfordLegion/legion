@@ -69,8 +69,8 @@
 #define REPORT_CU_ERROR(level, cmd, ret)                                                 \
   do {                                                                                   \
     const char *name, *str;                                                              \
-    CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &name);                                       \
-    CUDA_DRIVER_FNPTR(cuGetErrorString)(ret, &str);                                      \
+    CUDA_DRIVER_FNPTR(Realm::Cuda::cuGetErrorName)(ret, &name);                          \
+    CUDA_DRIVER_FNPTR(Realm::Cuda::cuGetErrorString)(ret, &str);                         \
     log_gpu.newmsg(level) << __FILE__ << '(' << __LINE__ << "):" << cmd << " = " << ret  \
                           << '(' << name << "): " << str;                                \
   } while(0)
@@ -1398,7 +1398,8 @@ namespace Realm {
   __op__(cuSurfObjectDestroy, CUDA_VERSION);                                             \
   __op__(cuLaunchCooperativeKernel, CUDA_VERSION);                                       \
   __op__(cuModuleGetGlobal, CUDA_VERSION);                                               \
-  __op__(cuLaunchHostFunc, CUDA_VERSION);
+  __op__(cuLaunchHostFunc, CUDA_VERSION);                                                \
+  __op__(cuArrayGetMemoryRequirements, CUDA_VERSION);
 
 // We specify the exact version for this api so we can pass it to cuGetProcAddress later.
 // This allows us to use the API even if it doesn't exist in our toolkit

@@ -45,6 +45,16 @@ namespace Realm {
     , read_only(_read_only)
   {}
 
+  bool ExternalHDF5Resource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    // TODO check that all the pieces are HDF5 pieces, just assume it for now
+    log_hdf5.warning()
+        << "Checking that layouts can be satisfied by an "
+        << "ExternalHDF5Resource is currently unimplemented. Assuming that " << filename
+        << " satisfies the corresponding layout.";
+    return true;
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalHDF5Resource::suggested_memory() const
   {

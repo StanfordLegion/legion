@@ -414,6 +414,9 @@ namespace Realm {
   public:
     virtual ~ExternalInstanceResource() {}
 
+    // check if this external resource can satisfy the instance layout
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const = 0;
+
     // returns the suggested memory in which this resource should be created
     virtual Memory suggested_memory() const = 0;
 
@@ -444,6 +447,8 @@ namespace Realm {
     ExternalMemoryResource(uintptr_t _base, size_t _size_in_bytes, bool _read_only);
     ExternalMemoryResource(void *_base, size_t _size_in_bytes);
     ExternalMemoryResource(const void *_base, size_t _size_in_bytes);
+
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;
@@ -476,6 +481,8 @@ namespace Realm {
   public:
     ExternalFileResource(const std::string& _filename, realm_file_mode_t _mode,
 			 size_t _offset = 0);
+
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;

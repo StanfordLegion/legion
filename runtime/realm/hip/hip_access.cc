@@ -128,6 +128,14 @@ namespace Realm {
     , read_only(true)
   {}
 
+  bool ExternalHipMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    if(size_in_bytes < layout.bytes_used)
+      return false;
+    const size_t max_alignment = (base & -base);
+    return (layout.alignment_reqd <= max_alignment);
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalHipMemoryResource::suggested_memory() const
   {
