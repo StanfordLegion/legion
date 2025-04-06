@@ -2684,6 +2684,9 @@ namespace Legion {
                                       IndexSpaceNode *range,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
+      void prepare_broadcast_results(IndexPartNode *partition,
+          std::vector<DomainT<DIM,T> >&subspaces,
+          std::vector<DeppartResult>& results, ApEvent& result);
       virtual size_t get_coordinate_size(bool range) const;
     public:
       virtual Realm::InstanceLayoutGeneric* create_hdf5_layout(
