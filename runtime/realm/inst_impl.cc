@@ -83,16 +83,18 @@ namespace Realm {
 							    TimeLimit work_until)
   {
     if(inst->deferred_redistrict.empty()) {
-      if(poisoned)
+      if(poisoned) {
         log_poison.info()
             << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst="
             << inst;
+      }
       mem->release_storage_immediate(inst, poisoned, work_until);
     } else {
-      if(poisoned)
+      if(poisoned) {
         log_poison.info()
             << "poisoned deferred instance redistrict skipped - POSSIBLE LEAK - inst="
             << inst;
+      }
       mem->reuse_storage_immediate(inst, inst->deferred_redistrict, poisoned, work_until);
     }
   }

@@ -240,9 +240,10 @@ namespace Realm {
       std::vector<RegionInstanceImpl *> local_insts;
       local_insts.swap(new_insts);
       if(poisoned) {
-        for(unsigned idx = 0; idx < local_insts.size(); idx++)
+        for(unsigned idx = 0; idx < local_insts.size(); idx++) {
           local_insts[idx]->notify_allocation(
               ALLOC_CANCELLED, RegionInstanceImpl::INSTOFFSET_FAILED, work_until);
+        }
         return ALLOC_CANCELLED;
       } else {
         // this is an external allocation - it had better be a memory resource
@@ -943,8 +944,9 @@ namespace Realm {
       NodeID target = ID(me).memory_owner_node();
       assert(target == Network::my_node_id);
 
-      if(old_inst->metadata.ext_resource)
+      if(old_inst->metadata.ext_resource) {
         return MemoryImpl::reuse_storage_deferrable(old_inst, new_insts, precondition);
+      }
 
       bool poisoned = false;
       bool triggered = precondition.has_triggered_faultaware(poisoned);
@@ -1325,9 +1327,10 @@ namespace Realm {
       bool poisoned, TimeLimit work_until)
   {
     // Handle the external instance case
-    if(old_inst->metadata.ext_resource)
+    if(old_inst->metadata.ext_resource) {
       return MemoryImpl::reuse_storage_immediate(old_inst, new_insts, poisoned,
                                                  work_until);
+    }
 
     size_t allocated = 0;
     std::vector<size_t> offsets(new_insts.size(), RegionInstanceImpl::INSTOFFSET_FAILED);
@@ -1498,15 +1501,20 @@ namespace Realm {
     std::vector<RegionInstanceImpl *> local_insts;
     local_insts.swap(new_insts);
     if(poisoned) {
-      for(unsigned idx = 0; idx < local_insts.size(); idx++)
+      for(unsigned idx = 0; idx < local_insts.size(); idx++) {
+        assert(offsets[idx] == RegionInstanceImpl::INSTOFFSET_FAILED);
         local_insts[idx]->notify_allocation(ALLOC_CANCELLED, offsets[idx], work_until);
+      }
       return ALLOC_CANCELLED;
     } else {
       old_inst->notify_deallocation();
-      for(unsigned idx = 0; idx < local_insts.size(); idx++)
+      for(unsigned idx = 0; idx < local_insts.size(); idx++) {
+        assert((offsets[idx] != RegionInstanceImpl::INSTOFFSET_FAILED) ==
+               (idx < allocated));
         local_insts[idx]->notify_allocation((idx < allocated) ? ALLOC_EVENTUAL_SUCCESS
                                                               : ALLOC_EVENTUAL_FAILURE,
                                             offsets[idx], work_until);
+      }
       return ALLOC_INSTANT_SUCCESS;
     }
   }
