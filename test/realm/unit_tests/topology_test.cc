@@ -194,4 +194,16 @@ INSTANTIATE_TEST_SUITE_P(
                                                             {6, 1, {6}, {4}, {4}, {4}},
                                                             {7, 1, {7}, {5}, {5}, {5}}},
                         std::vector<HardwareTopology::MemoryInfo>{{4096, 1}, {2048, 1}},
-                        6144, 4, 2, true)));
+                        6144, 4, 2, true),
+        // 1 numa, the first 4 cores have hyperthread, the last 4 cores do not have
+        // hyperthread
+        std::make_tuple(std::vector<HardwareTopology::Proc>{{0, 0, {0}, {2}, {2}, {2}},
+                                                            {1, 0, {1}, {3}, {3}, {3}},
+                                                            {2, 0, {2}, {0}, {0}, {0}},
+                                                            {3, 0, {3}, {1}, {1}, {1}},
+                                                            {4, 0, {4}, {}, {}, {}},
+                                                            {5, 0, {5}, {}, {}, {}},
+                                                            {6, 0, {6}, {}, {}, {}},
+                                                            {7, 0, {7}, {}, {}, {}}},
+                        std::vector<HardwareTopology::MemoryInfo>{{1024, 0}}, 1024, 6, 1,
+                        true)));
