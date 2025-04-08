@@ -21,6 +21,8 @@
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
 
+#include <filesystem>
+
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
 namespace Realm {
@@ -825,7 +827,9 @@ namespace Realm {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
-      if(!impl) {
+      // we can also fail if there is not enough space for the instance
+      // or if the alignment is insufficient for external instance creation
+      if(!impl || ((res != nullptr) && !res->satisfies(*ilg))) {
         inst = RegionInstance::NO_INST;
         delete ilg;
         // generate a poisoned event for completion
@@ -1605,6 +1609,14 @@ namespace Realm {
       , read_only(true)
     {}
 
+    bool ExternalMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
+    {
+      if(size_in_bytes < layout.bytes_used)
+        return false;
+      const size_t max_alignment = (base & -base);
+      return (layout.alignment_reqd <= max_alignment);
+    }
+
     // returns the suggested memory in which this resource should be created
     Memory ExternalMemoryResource::suggested_memory() const
     {
@@ -1647,6 +1659,15 @@ namespace Realm {
     , offset(_offset)
     , mode(_mode)
   {}
+
+  bool ExternalFileResource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    // Good as long as the file is big enough
+    if(mode == REALM_FILE_CREATE)
+      return true;
+    else
+      return ((offset + layout.bytes_used) <= std::filesystem::file_size(filename));
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalFileResource::suggested_memory() const

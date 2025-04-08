@@ -6860,42 +6860,10 @@ namespace Legion {
       PhysicalInstance instance = PhysicalInstance::NO_INST;
       if (making_instance)
       {
-        Realm::ProfilingRequestSet requests;
-        if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
-            making_instance)
-        {
-          const Realm::UserEvent unique = Realm::UserEvent::create_user_event();
-          unique.trigger();
-          unique_event = LgEvent(unique);
-          if (runtime->profiler != NULL)
-            runtime->profiler->add_inst_request(requests, this, unique_event);
-        }
-        // If we're doing an HDF5 instance creation we have to make a special
-        // instance layout using HDF5 pieces. It's a bit unforuntate that we
-        // have to have this special path but it is what it is
-        Realm::InstanceLayoutGeneric *ilg = hdf5_field_files.empty() ?
-          // Normal path
-          node->row_source->create_layout(layout_constraint_set, field_set,
-              field_sizes, false/*compact*/) :
-          // Special path for HDF5
-          node->row_source->create_hdf5_layout(field_set, field_sizes, 
-              hdf5_field_files, layout_constraint_set.ordering_constraint);
-        footprint = ilg->bytes_used;
-        ready_event = ApEvent(PhysicalInstance::create_external_instance(
-              instance, external_resource->suggested_memory(), *ilg, 
-              *external_resource, requests));
-        delete ilg;
+        ready_event = create_external(node, field_set, field_sizes,
+            instance, unique_event, footprint);
         if (single_broadcast != NULL)
           single_broadcast->broadcast({instance, ready_event, unique_event});
-        if (implicit_profiler != NULL)
-        {
-          implicit_profiler->register_physical_instance_region(unique_event,
-                                                      requirement.region);
-          implicit_profiler->register_physical_instance_layout(unique_event,
-              requirement.region.field_space, layout_constraint_set);
-          if (ready_event.exists())
-            implicit_profiler->record_instance_ready(ready_event, unique_event);
-        }
       }
       // Do the arrival on the attach barrier for any collective instances
       else if ((single_broadcast != NULL) && !single_broadcast->is_origin())

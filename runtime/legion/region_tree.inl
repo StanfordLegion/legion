@@ -4768,16 +4768,69 @@ namespace Legion {
           delete child;
       }
       if (results != NULL)
-      {
-        // Save the results to be broadcast if necessary
-        for (unsigned idx = 0; idx < subspaces.size(); idx++)
-          results->at(idx).domain = subspaces[idx];
-      }
+        prepare_broadcast_results(partition, subspaces, *results, result);
       return result;
     }
 #endif // defined(DEFINE_NTNT_TEMPLATES)
 
 #ifdef DEFINE_NT_TEMPLATES
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::prepare_broadcast_results(
+        IndexPartNode *partition, std::vector<DomainT<DIM,T> >& subspaces,
+        std::vector<DeppartResult>& results, ApEvent& result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(subspaces.size() == results.size());
+      // If we're broadcasting the resuls there should be a collective mapping
+      assert(partition->collective_mapping != nullptr);
+#endif
+      // Save the results to be broadcast if necessary
+      const size_t total_spaces = partition->collective_mapping->size();
+      if (total_spaces <= subspaces.size())
+      {
+        // This case is easy, there will be one owner of each subregion
+        // so that subregion gets the reference added by Realm
+        for (unsigned idx = 0; idx < subspaces.size(); idx++)
+          results[idx].domain = subspaces[idx];
+      }
+      else
+      {
+        // This case is more tricky, there will be multiple owners of
+        // at least some of the subspaces so we need to add extra
+        // references to these subspaces if they have sparsity maps
+        // because multiple subregions will be owners of the sparsity map
+        const unsigned needed_references = total_spaces / subspaces.size();
+        const unsigned remainder = total_spaces % subspaces.size();
+        std::vector<ApEvent> reference_events;
+        for (unsigned idx = 0; idx < subspaces.size(); idx++)
+        {
+          results[idx].domain = subspaces[idx];
+          if (!subspaces[idx].dense())
+          {
+            const unsigned extra_references = needed_references +
+              ((idx < remainder) ? 1 : 0) - 1/*already have one from Realm*/;
+            if (extra_references > 0)
+            {
+              const ApEvent added(
+                  subspaces[idx].sparsity.add_reference(extra_references));
+              // These events should almost always be NO_EVENTs since we're
+              // done this on the node where the sparsity maps were created
+              if (added.exists())
+                reference_events.push_back(added);
+            }
+          }
+        }
+        if (!reference_events.empty())
+        {
+          if (result.exists())
+            reference_events.push_back(result);
+          result = Runtime::merge_events(NULL, reference_events);
+        }
+      }
+    }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_image(Operation *op,
@@ -5212,11 +5265,7 @@ namespace Legion {
           delete child;
       }
       if (results != NULL)
-      {
-        // Save the results to be broadcast if necessary
-        for (unsigned idx = 0; idx < subspaces.size(); idx++)
-          results->at(idx).domain = subspaces[idx];
-      }
+        prepare_broadcast_results(partition, subspaces, *results, result);
       return result;
     }
 #endif // defined(DEFINE_NTNT_TEMPLATES)
@@ -5411,11 +5460,7 @@ namespace Legion {
           delete child;
       }
       if (results != NULL)
-      {
-        // Save the results to be broadcast if necessary
-        for (unsigned idx = 0; idx < subspaces.size(); idx++)
-          results->at(idx).domain = subspaces[idx];
-      }
+        prepare_broadcast_results(partition, subspaces, *results, result);
       return result;
     }
 #endif // defined(DEFINE_NTNT_TEMPLATES)
