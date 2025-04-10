@@ -412,6 +412,7 @@ pub trait ContainerEntry {
     fn critical(&self) -> Option<EventID>;
     fn creation_time(&self) -> Timestamp;
     fn is_meta(&self) -> bool;
+    fn previous(&self) -> Option<ProfUID>;
 
     // Methods that require State access
     fn name(&self, state: &State) -> String;
@@ -510,6 +511,10 @@ impl ContainerEntry for ProcEntry {
             ProcEntryKind::MetaTask(_) | ProcEntryKind::ProfTask => true,
             _ => false,
         }
+    }
+
+    fn previous(&self) -> Option<ProfUID> {
+        None
     }
 
     fn name(&self, state: &State) -> String {
@@ -1485,6 +1490,10 @@ impl ContainerEntry for ChanEntry {
         false
     }
 
+    fn previous(&self) -> Option<ProfUID> {
+        None
+    }
+
     fn name(&self, state: &State) -> String {
         match self {
             ChanEntry::Copy(copy) => {
@@ -1996,6 +2005,7 @@ pub struct Inst {
     pub dim_order: BTreeMap<Dim, DimKind>,
     pub creator: Option<ProfUID>,
     pub critical: Option<EventID>,
+    pub previous: Option<ProfUID>, // previous in the case of redistricting
 }
 
 impl Inst {
@@ -2015,6 +2025,7 @@ impl Inst {
             dim_order: BTreeMap::new(),
             creator: None,
             critical: None,
+            previous: None,
         }
     }
     fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
@@ -2056,6 +2067,11 @@ impl Inst {
     fn set_critical(&mut self, critical: EventID) -> &mut Self {
         assert!(self.critical.is_none());
         self.critical = Some(critical);
+        self
+    }
+    fn set_previous(&mut self, previous: ProfUID) -> &mut Self {
+        assert!(self.previous.is_none());
+        self.previous = Some(previous);
         self
     }
     fn add_ispace(&mut self, ispace_id: ISpaceID) -> &mut Self {
@@ -2177,6 +2193,10 @@ impl ContainerEntry for Inst {
 
     fn is_meta(&self) -> bool {
         false
+    }
+
+    fn previous(&self) -> Option<ProfUID> {
+        self.previous
     }
 
     fn name(&self, state: &State) -> String {
@@ -3149,6 +3169,7 @@ pub enum EventEntryKind {
     ExternalHandshake,
     ReservationAcquire,
     InstanceReady,
+    InstanceRedistrict,
     InstanceDeletion,
     CompletionQueueEvent,
 }
@@ -5236,10 +5257,10 @@ fn process_record(
         Record::InstanceReadyInfo {
             result,
             precondition,
-            fevent,
+            unique,
             performed,
         } => {
-            let creator_uid = state.create_fevent_reference(*fevent);
+            let creator_uid = state.create_fevent_reference(*unique);
             let dst = state.record_event_node(
                 *result,
                 EventEntryKind::InstanceReady,
@@ -5248,7 +5269,30 @@ fn process_record(
                 false,
             );
             if let Some(precondition) = *precondition {
-                state.create_inst(*fevent, insts).set_critical(precondition);
+                state.create_inst(*unique, insts).set_critical(precondition);
+                let src = state.find_event_node(precondition);
+                state.event_graph.add_edge(src, dst, ());
+            }
+        }
+        Record::InstanceRedistrictInfo {
+            result,
+            precondition,
+            previous,
+            next,
+            performed,
+        } => {
+            let creator_uid = state.create_fevent_reference(*previous);
+            let dst = state.record_event_node(
+                *result,
+                EventEntryKind::InstanceRedistrict,
+                creator_uid,
+                *performed,
+                true, /*deduplicate*/
+            );
+            let next_inst = state.create_inst(*next, insts);
+            next_inst.set_previous(creator_uid);
+            if let Some(precondition) = *precondition {
+                next_inst.set_critical(precondition);
                 let src = state.find_event_node(precondition);
                 state.event_graph.add_edge(src, dst, ());
             }

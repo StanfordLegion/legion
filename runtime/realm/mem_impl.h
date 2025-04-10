@@ -129,6 +129,11 @@ namespace Realm {
 					   bool poisoned,
 					   TimeLimit work_until) = 0;
 
+    virtual AllocationResult
+    reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                            std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
+                            TimeLimit work_until);
+
     // helpers used by the above when an instance being allocated or released
     //  is using an external resource
     virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
@@ -264,7 +269,7 @@ namespace Realm {
     bool lookup(TT tag, RT& first, RT& size);
     size_t split_range(TT old_tag, const std::vector<TT> &new_tags,
                        const std::vector<RT> &sizes, const std::vector<RT> &alignment,
-                       std::vector<RT> &allocs_first);
+                       std::vector<RT> &allocs_first, bool missing_ok = false);
 
     // TODO(apryakhin@): consider ifdefing for debug builds only
     void dump_allocator_status();
@@ -308,6 +313,11 @@ namespace Realm {
 					     bool poisoned,
 					     TimeLimit work_until);
 
+      virtual AllocationResult
+      reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                              std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
+                              TimeLimit work_until);
+
     protected:
       // for internal use by allocation routines - must be called with
       //  allocator_mutex held!
@@ -320,6 +330,9 @@ namespace Realm {
       //  move the ready ones first - assumes 'release_allocator' has been
       //  properly maintained
       bool attempt_release_reordering(std::vector<std::pair<RegionInstanceImpl *, size_t> >& successful_allocs);
+
+      void remove_pending_release(RegionInstanceImpl *inst,
+                                  std::vector<RegionInstanceImpl *> &failed_allocs);
 
     public:
       size_t alignment;
@@ -353,6 +366,8 @@ namespace Realm {
         PendingRelease(RegionInstanceImpl *_inst, bool _ready, unsigned _seqid);
         void record_redistrict(const std::vector<RegionInstanceImpl *> &insts);
         void release(RangeAllocator &allocator, bool missing_ok = false);
+        size_t release(RangeAllocator &allocator, std::vector<size_t> &offsets,
+                       bool missing_ok = false);
       };
       std::deque<PendingAlloc> pending_allocs;
       std::deque<PendingRelease> pending_releases;
@@ -473,6 +488,11 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+
+      virtual AllocationResult
+      reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                              std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
+                              TimeLimit work_until);
 
       // these are disallowed on a remote memory
       virtual off_t alloc_bytes_local(size_t size);

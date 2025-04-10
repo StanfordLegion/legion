@@ -151,7 +151,8 @@ pub enum Record {
     BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
     ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp, reservation: u64 },
     CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
-    InstanceReadyInfo { result: EventID, precondition: Option<EventID>, fevent: EventID, performed: Timestamp },
+    InstanceReadyInfo { result: EventID, precondition: Option<EventID>, unique: EventID, performed: Timestamp },
+    InstanceRedistrictInfo { result: EventID, precondition: Option<EventID>, previous: EventID, next: EventID, performed: Timestamp },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
@@ -1276,14 +1277,31 @@ fn parse_reservation_acquire_info(input: &[u8], _max_dim: i32) -> IResult<&[u8],
 fn parse_instance_ready_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, result) = parse_event_id(input)?;
     let (input, precondition) = parse_option_event_id(input)?;
-    let (input, fevent) = parse_event_id(input)?;
+    let (input, unique) = parse_event_id(input)?;
     let (input, performed) = parse_timestamp(input)?;
     Ok((
         input,
         Record::InstanceReadyInfo {
             result,
             precondition,
-            fevent,
+            unique,
+            performed,
+        },
+    ))
+}
+fn parse_instance_redistrict_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, precondition) = parse_option_event_id(input)?;
+    let (input, previous) = parse_event_id(input)?;
+    let (input, next) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    Ok((
+        input,
+        Record::InstanceRedistrictInfo {
+            result,
+            precondition,
+            previous,
+            next,
             performed,
         },
     ))
@@ -1468,6 +1486,7 @@ fn parse<'a>(
     insert("BarrierArrivalInfo", parse_barrier_arrival_info);
     insert("ReservationAcquireInfo", parse_reservation_acquire_info);
     insert("InstanceReadyInfo", parse_instance_ready_info);
+    insert("InstanceRedistrictInfo", parse_instance_redistrict_info);
     insert("CompletionQueueInfo", parse_completion_queue_info);
 
     let mut input = input;
