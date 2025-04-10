@@ -556,7 +556,6 @@ namespace Legion {
          << "result:unsigned long long:" << sizeof(LgEvent)       << delim
          << "precondition:unsigned long long:" << sizeof(LgEvent) << delim
          << "inst_uid:unsigned long long:" << sizeof(LgEvent)     << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent)       << delim
          << "performed:timestamp_t:" << sizeof(timestamp_t)
          << "}" << std::endl;
 
@@ -566,7 +565,6 @@ namespace Legion {
          << "precondition:unsigned long long:" << sizeof(LgEvent) << delim
          << "previous:unsigned long long:" << sizeof(LgEvent)     << delim
          << "next:unsigned long long:" << sizeof(LgEvent)         << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent)       << delim
          << "performed:timestamp_t:" << sizeof(timestamp_t)
          << "}" << std::endl;
 
