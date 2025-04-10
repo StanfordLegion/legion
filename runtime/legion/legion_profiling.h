@@ -558,6 +558,14 @@ namespace Legion {
         LgEvent unique;
         timestamp_t performed;
       };
+      struct InstanceRedistrictInfo {
+      public:
+        LgEvent result;
+        LgEvent precondition;
+        LgEvent previous;
+        LgEvent next;
+        timestamp_t performed;
+      };
       struct CompletionQueueInfo {
       public:
         LgEvent result;
@@ -644,6 +652,8 @@ namespace Legion {
           LgEvent precondition);
       void record_instance_ready(LgEvent result, LgEvent unique_event,
                                  LgEvent precondition = LgEvent::NO_LG_EVENT);
+      void record_instance_redistrict(LgEvent &result,LgEvent prev_unique_event,
+        LgEvent next_unique_event, LgEvent precondition = LgEvent::NO_LG_EVENT);
       void record_completion_queue_event(LgEvent result, LgEvent fevent,
           timestamp_t timestamp, const LgEvent *preconditions, size_t count);
     public:
@@ -733,6 +743,7 @@ namespace Legion {
       std::deque<BarrierArrivalInfo> barrier_arrival_infos;
       std::deque<ReservationAcquireInfo> reservation_acquire_infos;
       std::deque<InstanceReadyInfo> instance_ready_infos;
+      std::deque<InstanceRedistrictInfo> instance_redistrict_infos;
       std::deque<CompletionQueueInfo> completion_queue_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;

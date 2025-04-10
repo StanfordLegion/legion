@@ -788,6 +788,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::record_instance_redistrict(LgEvent &result,
+        LgEvent previous_unique, LgEvent next_unique, LgEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (owner->no_critical_paths)
+        return;
+      // If the result is the same as the precondition make a new event
+      if (result == precondition)
+      {
+        const Realm::UserEvent rename = Realm::UserEvent::create_user_event();
+        rename.trigger(precondition);
+        result = LgEvent(rename);
+      }
+      InstanceRedistrictInfo &info = instance_redistrict_infos.emplace_back(
+          InstanceRedistrictInfo());
+      info.performed = Realm::Clock::current_time_in_nanoseconds();
+      info.result = result;
+      info.previous = previous_unique;
+      info.next = next_unique;
+      info.precondition = precondition;
+      if (precondition.is_barrier())
+        record_barrier_use(precondition, implicit_provenance);
+      owner->update_footprint(sizeof(info), this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::record_completion_queue_event(LgEvent result,
         LgEvent fevent, timestamp_t performed, 
         const LgEvent *preconditions, size_t count)
@@ -1775,6 +1801,10 @@ namespace Legion {
             instance_ready_infos.begin(); it !=
             instance_ready_infos.end(); it++)
         serializer->serialize(*it);
+      for (std::deque<InstanceRedistrictInfo>::const_iterator it =
+            instance_redistrict_infos.begin(); it !=
+            instance_redistrict_infos.end(); it++)
+        serializer->serialize(*it);
       for (std::deque<CompletionQueueInfo>::const_iterator it =
             completion_queue_infos.begin(); it !=
             completion_queue_infos.end(); it++)
@@ -2202,6 +2232,16 @@ namespace Legion {
         serializer->serialize(info);
         diff += sizeof(info);
         instance_ready_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!instance_redistrict_infos.empty())
+      {
+        InstanceRedistrictInfo &info = instance_redistrict_infos.front();
+        serializer->serialize(info);
+        diff += sizeof(info);
+        instance_redistrict_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;

@@ -3824,7 +3824,7 @@ namespace Legion {
     PhysicalManager* InstanceBuilder::create_physical_instance(
         RegionTreeForest *forest, LayoutConstraintKind *unsat_kind,
         unsigned *unsat_index, size_t *footprint, RtEvent precondition,
-        PhysicalInstance hole)
+        PhysicalInstance hole, LgEvent hole_unique)
     //--------------------------------------------------------------------------
     {
       if (!valid)
@@ -3954,7 +3954,14 @@ namespace Legion {
       }
       // Only record this if we succeeded in allocation
       if (ready.exists() && (implicit_profiler != NULL))
-        implicit_profiler->record_instance_ready(ready, unique_event);
+      {
+        if (hole.exists())
+          implicit_profiler->record_instance_redistrict(
+              ready, hole_unique, unique_event, precondition);
+        else
+          implicit_profiler->record_instance_ready(
+              ready, unique_event, precondition);
+      }
 #ifdef LEGION_DEBUG
       assert(!constraints.pointer_constraint.is_valid);
 #endif

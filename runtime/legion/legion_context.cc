@@ -965,6 +965,12 @@ namespace Legion {
         ready = RtEvent(instance.redistrict(results, layouts,
             num_results, &requests.front()));
       }
+      if (ready.exists() && (runtime->profiler != NULL))
+      {
+        for (unsigned idx = 0; idx < num_results; idx++)
+          implicit_profiler->record_instance_redistrict(
+              ready, finder->second, unique_events[idx]);
+      }
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < allocators.size(); idx++)
       {
@@ -26038,7 +26044,8 @@ namespace Legion {
         manager->free_task_local_instance(instance, precondition);
       }
       else
-        pool_finder->second->free_instance(instance, precondition);
+        pool_finder->second->free_instance(instance, precondition,
+            finder->second);
     }
 
     //--------------------------------------------------------------------------
