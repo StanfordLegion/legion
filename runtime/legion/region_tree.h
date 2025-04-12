@@ -2325,7 +2325,7 @@ namespace Legion {
       bool dominates(IndexSpaceNode *rhs);
     public:
       virtual void pack_index_space(Serializer &rez,
-                                    bool pack_reference) const = 0; 
+                                    unsigned pack_references) const = 0;
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source) = 0;
     public:
@@ -2559,7 +2559,7 @@ namespace Legion {
       virtual size_t compute_color_offset(LegionColor color);
     public:
       virtual void pack_index_space(Serializer &rez,
-                                    bool pack_refrence) const;
+                                    unsigned pack_refrences) const;
       virtual bool unpack_index_space(Deserializer &derez,
                                       AddressSpaceID source);
     public:

@@ -8172,7 +8172,7 @@ namespace Legion {
             !collective_mapping->contains(target)))
       {
         rez.serialize<bool>(true);
-        pack_index_space(rez, true/*pack reference*/);
+        pack_index_space(rez, 1/*reference count*/);
       }
       else
         rez.serialize<bool>(false);
