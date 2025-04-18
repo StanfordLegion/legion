@@ -65,9 +65,7 @@ set(REALM_SOURCES
 )
 
 if(TARGET CUDA::cuda_driver)
-  list(APPEND REALM_SOURCES cuda/cuda_module.cc cuda/cuda_internal.cc cuda/cuda_access.cc
-       cuda/cuda_memcpy.cu
-  )
+  list(APPEND REALM_SOURCES cuda/cuda_module.cc cuda/cuda_internal.cc cuda/cuda_access.cc)
   if(REALM_USE_NVTX)
     list(APPEND REALM_SOURCES nvtx.cc)
   endif()
@@ -88,7 +86,7 @@ endif()
 
 if(REALM_USE_OPENMP)
   list(APPEND REALM_SOURCES openmp/openmp_module.cc)
-  if(NOT TARGET OpenMP::OpenMP_CXX)
+  if(REALM_OPENMP_KMP_SUPPORT OR REALM_OPENMP_GOMP_SUPPORT)
     list(APPEND REALM_SOURCES openmp/openmp_threadpool.cc openmp/openmp_api.cc)
   endif()
 endif()
@@ -133,7 +131,7 @@ list(TRANSFORM REALM_CUDA_SOURCES PREPEND "${REALM_SOURCE_DIR}/")
 # TODO(cperry): fix path
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/realm_defines.h.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/../include/realm_defines.h" @ONLY
+  "${CMAKE_CURRENT_BINARY_DIR}/../include/realm/realm_defines.h" @ONLY
 )
 
 # generate per-dimension object files for deppart stuff

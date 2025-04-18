@@ -28,7 +28,10 @@ install(
 )
 
 # Install the realm_gex_wrapper as well if we have to link directly to it
-if (REALM_USE_GASNETEX AND NOT REALM_USE_GASNETEX_WRAPPER AND NOT BUILD_SHARED_LIBS)
+if(REALM_USE_GASNETEX
+   AND NOT REALM_USE_GASNETEX_WRAPPER
+   AND NOT BUILD_SHARED_LIBS
+)
   install(
     TARGETS realm_gex_wrapper realm_gex_wrapper_objs
     EXPORT Realm_targets
@@ -48,14 +51,14 @@ install(
   COMPONENT Realm_devel
 )
 install(
-  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/"
+  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/realm/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
   COMPONENT Realm_devel
   FILES_MATCHING
   PATTERN "*.h"
 )
 install(
-  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/"
+  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/realm/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
   COMPONENT Realm_devel
   FILES_MATCHING
@@ -82,12 +85,14 @@ write_basic_package_version_file(
 )
 
 # Get a list of pkgconf dependencies
-list(
-  TRANSFORM REALM_STATIC_DEPENDS
-  TOLOWER
-  OUTPUT_VARIABLE REALM_PKGCONF_REQUIRES
-)
-string(REPLACE ";" " " REALM_PKGCONF_REQUIRES "${REALM_PKGCONF_REQUIRES}")
+if(NOT BUILD_SHARED_LIBS)
+  list(
+    TRANSFORM REALM_STATIC_DEPENDS
+    TOLOWER
+    OUTPUT_VARIABLE REALM_PKGCONF_REQUIRES
+  )
+  string(REPLACE ";" " " REALM_PKGCONF_REQUIRES "${REALM_PKGCONF_REQUIRES}")
+endif()
 
 # Setup pkgconfig module
 configure_package_config_file(
@@ -116,8 +121,10 @@ install(
 
 # Make sure to install all the find modules as a last resort for RealmConfig to find them
 install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindGASNet.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindHWLOC.cmake"
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLLVM.cmake" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindPapi.cmake"
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindGASNet.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindHWLOC.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLLVM.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindPapi.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
   COMPONENT Realm_devel
 )

@@ -18,14 +18,18 @@ set(TEST_ARGS
     CACHE STRING "Default arguments for tests"
 )
 
-if(REALM_USE_MPI
-   OR REALM_USE_UCX
-   OR REALM_USE_GASNETEX
-)
-  list(PREPEND TEST_LAUNCHER "${MPIEXEC_EXECUTABLE}" ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS})
-  set(TEST_PROCESSORS 2)
-elseif(NOT TEST_PROCESSORS)
-  set(TEST_PROCESSORS 1)
+if(NOT TEST_PROCESSORS)
+  if(MPIEXEC_EXECUTABLE)
+    set(TEST_PROCESSORS 2)
+  else()
+    set(TEST_PROCESSORS 1)
+  endif()
+endif()
+
+if(MPIEXEC_EXECUTABLE)
+  list(PREPEND TEST_LAUNCHER "${MPIEXEC_EXECUTABLE}" ${MPIEXEC_NUMPROC_FLAG} ${TEST_PROCESSORS}
+       ${MPIEXEC_PREFLAGS}
+  )
 endif()
 
 if(REALM_USE_CUDA OR REALM_USE_HIP)
@@ -61,12 +65,15 @@ cpmfindpackage(
   https://github.com/google/googletest.git
   GIT_TAG
   v1.15.2
-  EXCLUDE_FROM_ALL YES
-  SYSTEM YES
+  EXCLUDE_FROM_ALL
+  YES
+  SYSTEM
+  YES
   OPTIONS
-  "INSTALL_GTEST OFF" "BUILD_SHARED_LIBS OFF"
+  "INSTALL_GTEST OFF"
+  "BUILD_SHARED_LIBS OFF"
 )
-if (googletest_ADDED)
+if(googletest_ADDED)
   set_property(GLOBAL APPEND PROPERTY PACKAGES_FOUND googletest)
   get_property(_NOT_FOUND GLOBAL PROPERTY PACKAGES_NOT_FOUND)
   list(REMOVE_ITEM _NOT_FOUND googletest)
@@ -104,7 +111,11 @@ add_executable(realm_unit_tests ${REALM_UNIT_TESTS})
 target_link_libraries(realm_unit_tests PRIVATE realm_obj GTest::gmock_main)
 
 include(GoogleTest)
-gtest_discover_tests(realm_unit_tests NO_PRETTY_TYPES NO_PRETTY_VALUES PROPERTIES LABELS "unit")
+if(NOT REALM_SANITIZER OR REALM_SANITIZER STREQUAL "NONE")
+  gtest_discover_tests(realm_unit_tests NO_PRETTY_TYPES NO_PRETTY_VALUES PROPERTIES LABELS "unit")
+else()
+  add_test(NAME realm_unit_tests COMMAND $<TARGET_FILE:realm_unit_tests>)
+endif()
 
 if(REALM_ENABLE_COVERAGE)
   if(OPENCPPCOV_PATH)
@@ -355,14 +366,14 @@ target_link_libraries(
 # These executables use global registration and require -rdynamic to be set in order to retrieve the symbol name and offset
 set_target_properties(taskreg PROPERTIES ENABLE_EXPORTS TRUE)
 set_target_properties(scatter PROPERTIES ENABLE_EXPORTS TRUE)
-if (REALM_USE_CUDA)
+if(REALM_USE_CUDA)
   set_target_properties(cuda_scatter_test PROPERTIES ENABLE_EXPORTS TRUE)
 endif()
 
 set_tests_properties(
   ${_integ_list}
   PROPERTIES TEST_LAUNCHER
-             ${TEST_LAUNCHER}
+             "${TEST_LAUNCHER}"
              PROCESSORS
              ${TEST_PROCESSORS}
              ENVIRONMENT

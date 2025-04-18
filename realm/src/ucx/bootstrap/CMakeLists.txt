@@ -26,7 +26,7 @@ project(
   DESCRIPTION "UCX Bootloader for Realm"
 )
 
-option(BOOTSTRAP_ENABLE_MPI "Compile with MPI support" OFF)
+option(UCX_BOOTSTRAP_ENABLE_MPI "Compile with MPI support" OFF)
 option(REALM_INSTALL "Enable installation support" OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -57,7 +57,7 @@ macro(add_backend_plugin backend)
   list(APPEND UCX_BACKENDS ${backend})
 endmacro()
 
-if(BOOTSTRAP_ENABLE_MPI)
+if(UCX_BOOTSTRAP_ENABLE_MPI)
   find_package(MPI)
   add_backend_plugin(mpi MPI::MPI_C)
 endif()
