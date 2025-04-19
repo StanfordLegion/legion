@@ -156,7 +156,7 @@ namespace Realm {
       }
 
       return new ExternalFileResource(
-          file, read_only ? REALM_FILE_READ_ONLY : REALM_FILE_READ_WRITE,
+          file.string(), read_only ? REALM_FILE_READ_ONLY : REALM_FILE_READ_WRITE,
           inst->metadata.inst_offset + rel_base);
     }
 
