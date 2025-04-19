@@ -780,9 +780,9 @@ namespace Realm {
       return ((RuntimeImpl *)impl)->create_configs(argc, argv);
     }
 
-    ModuleConfig* Runtime::get_module_config(const std::string name)
+    ModuleConfig *Runtime::get_module_config(const std::string &name) const
     {
-      return ((RuntimeImpl *)impl)->get_module_config(name);
+      return (static_cast<const RuntimeImpl *>(impl))->get_module_config(name);
     }
 
     Module *Runtime::get_module_untyped(const char *name)
@@ -2929,9 +2929,9 @@ namespace Realm {
       return true;
     }
 
-    ModuleConfig* RuntimeImpl::get_module_config(const std::string name)
+    ModuleConfig *RuntimeImpl::get_module_config(const std::string &name) const
     {
-      std::map<std::string, ModuleConfig*>::iterator it;
+      std::map<std::string, ModuleConfig *>::const_iterator it;
       it = module_configs.find(name);
       if (it == module_configs.end()) {
         return NULL;
