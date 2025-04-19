@@ -1942,7 +1942,7 @@ namespace Realm {
       // just return an ExternalMemoryResource that describes the upper bound of how
       // much size this external resource should be allowed to use. If we really wanted
       // to be precise we would return a new kind ExternalMemoryResource that described
-      // the extents and strides of this particular layout (potentially event with
+      // the extents and strides of this particular layout (potentially even with
       // multiple pieces of extents and strides). Furthermore we would then update the
       // ExternalInstanceResource::satisfies method to check that a corresponding
       // layout only accessed elements in the white-listed extents.
