@@ -18,6 +18,7 @@
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
 #include "realm/mem_impl.h"
+#include "realm/idx_impl.h"
 #include "realm/inst_impl.h"
 
 #include <sys/types.h>
@@ -123,6 +124,58 @@ namespace Realm {
       return 0; // cannot provide a pointer for it.
     }
 
+    ExternalInstanceResource *
+    DiskMemory::generate_resource_info(RegionInstanceImpl *inst,
+                                       const IndexSpaceGeneric *subspace,
+                                       span<const FieldID> fields, bool read_only)
+    {
+      // compute the bounds of the instance relative to our base
+      assert(inst->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(inst->metadata.layout);
+      InstanceLayoutGeneric *ilg = inst->metadata.layout;
+      uintptr_t rel_base;
+      if(subspace == 0) {
+        // want full instance
+        rel_base = 0;
+      } else {
+        assert(!fields.empty());
+        uintptr_t limit;
+        for(size_t i = 0; i < fields.size(); i++) {
+          uintptr_t f_base, f_limit;
+          if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+            return 0;
+          if(i == 0) {
+            rel_base = f_base;
+            limit = f_limit;
+          } else {
+            rel_base = std::min(rel_base, f_base);
+            limit = std::max(limit, f_limit);
+          }
+        }
+      }
+
+      return new ExternalFileResource(
+          file, read_only ? REALM_FILE_READ_ONLY : REALM_FILE_READ_WRITE,
+          inst->metadata.inst_offset + rel_base);
+    }
+
+    bool DiskMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t &inst_offset)
+    {
+      ExternalFileResource *res =
+          dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
+      if((res == nullptr) || (res->filename != file))
+        return false;
+      inst_offset = res->offset;
+      return true;
+    }
+
+    void DiskMemory::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // Nothing to do here since we're just an offset of the disk memory
+    }
+
     FileMemory::FileMemory(Memory _me)
       : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, Memory::FILE_MEM, 0)
     {
@@ -155,6 +208,47 @@ namespace Realm {
     void *FileMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return 0; // cannot provide a pointer for it;
+    }
+
+    ExternalInstanceResource *
+    FileMemory::generate_resource_info(RegionInstanceImpl *inst,
+                                       const IndexSpaceGeneric *subspace,
+                                       span<const FieldID> fields, bool read_only)
+    {
+      // compute the bounds of the instance relative to our base
+      assert(inst->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(inst->metadata.layout);
+      InstanceLayoutGeneric *ilg = inst->metadata.layout;
+      uintptr_t rel_base;
+      if(subspace == 0) {
+        // want full instance
+        rel_base = 0;
+      } else {
+        assert(!fields.empty());
+        uintptr_t limit;
+        for(size_t i = 0; i < fields.size(); i++) {
+          uintptr_t f_base, f_limit;
+          if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+            return 0;
+          if(i == 0) {
+            rel_base = f_base;
+            limit = f_limit;
+          } else {
+            rel_base = std::min(rel_base, f_base);
+            limit = std::max(limit, f_limit);
+          }
+        }
+      }
+
+      ExternalFileResource *res =
+          dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
+      assert(res != nullptr);
+      OpenFileInfo *info = inst->metadata.find_mem_specific<OpenFileInfo>();
+      assert(info != nullptr);
+      return new ExternalFileResource(
+          res->filename, read_only ? REALM_FILE_READ_ONLY : REALM_FILE_READ_WRITE,
+          info->offset + rel_base);
     }
 
     // FileMemory supports ExternalFileResource

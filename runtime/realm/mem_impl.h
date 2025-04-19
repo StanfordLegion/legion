@@ -422,6 +422,14 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      virtual ExternalInstanceResource *
+      generate_resource_info(RegionInstanceImpl *inst, const IndexSpaceGeneric *subspace,
+                             span<const FieldID> fields, bool read_only);
+
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t &inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
     public:
       int fd; // file descriptor
       std::filesystem::path file; // file name
@@ -439,6 +447,10 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       void put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
+
+      virtual ExternalInstanceResource *
+      generate_resource_info(RegionInstanceImpl *inst, const IndexSpaceGeneric *subspace,
+                             span<const FieldID> fields, bool read_only);
 
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
 							  bool need_alloc_result,
