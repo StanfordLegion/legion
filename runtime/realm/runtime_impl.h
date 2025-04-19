@@ -297,7 +297,7 @@ namespace Realm {
       bool create_configs(int argc, char **argv);
 
       // return the configuration of a specific module
-      ModuleConfig* get_module_config(const std::string name);
+      ModuleConfig *get_module_config(const std::string &name) const;
 
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things

@@ -34,7 +34,7 @@ namespace Realm {
   //
 
   template <typename T>
-  bool ModuleConfig::set_property(const std::string name, T value)
+  bool ModuleConfig::set_property(const std::string &name, T value)
   {
     std::unordered_map<std::string, void* const>::iterator it = config_map.find(name);
     if (it == config_map.end()) {
@@ -47,7 +47,7 @@ namespace Realm {
   }
 
   template <typename T>
-  bool ModuleConfig::get_property(const std::string name, T &value) const
+  bool ModuleConfig::get_property(const std::string &name, T &value) const
   {
     std::unordered_map<std::string, void* const>::const_iterator it = config_map.find(name);
     if (it == config_map.cend()) {
@@ -61,7 +61,7 @@ namespace Realm {
   }
 
   template <typename T>
-  bool ModuleConfig::get_resource(const std::string name, T &value) const
+  bool ModuleConfig::get_resource(const std::string &name, T &value) const
   {
     if (!resource_discover_finished) {
       log_moduleconfig.error("Module %s can not detect resources.",
