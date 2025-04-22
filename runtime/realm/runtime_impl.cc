@@ -2105,7 +2105,7 @@ namespace Realm {
         snprintf(file_name, sizeof file_name, "realm_disk_file%d.data",
                  Network::my_node_id);
         std::filesystem::path disk_file = std::filesystem::temp_directory_path();
-        disk_file += file_name;
+        disk_file /= file_name;
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m, config->disk_mem_size, disk_file);
         get_runtime()->add_memory(diskmem);
