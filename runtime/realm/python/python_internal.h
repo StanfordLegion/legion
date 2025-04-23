@@ -216,6 +216,15 @@ namespace Realm {
   // based on KernelThreadTaskScheduler, deals with the python GIL and thread
   //  state changes as well
 
+  // Note! If you ever go to change the PythonThreadTaskScheduler to use the
+  // UserLevelTaskScheduler, you will need to update the implementation of
+  // how Python tasks are run. The CPython interpreter now has thread-local
+  // variables that track the PyThreadState object. It's not safe to use
+  // the same PyThreadState object across multiple live tasks running on
+  // the same kernel thread. Instead you'll need to modify the tasks running
+  // on the Python processor to each create their own PyThreadState object
+  // and then check that whenever they have been preempted (wait on an event)
+  // that this has been saved onto the stack and restored after the wait ends.
   class PythonThreadTaskScheduler : public KernelThreadTaskScheduler {
   public:
     PythonThreadTaskScheduler(LocalPythonProcessor *_pyproc,
