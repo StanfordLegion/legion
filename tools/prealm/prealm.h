@@ -134,6 +134,8 @@ public:
                bool ignore_faults = false) const;
   void cancel(void) const;
 
+  static UserEvent create_user_event(void);
+
   static const UserEvent NO_USER_EVENT;
 };
 static_assert(sizeof(UserEvent) == sizeof(Realm::UserEvent));
@@ -239,9 +241,11 @@ static_assert(sizeof(Reservation) == sizeof(Realm::Reservation));
 class FastReservation : public Realm::FastReservation {
 public:
   // TODO: do we need to profile these, right now Legion Prof won't use them
+#if 0
   Event lock(WaitMode mode = SPIN); // synonym for wrlock()
   Event wrlock(WaitMode mode = SPIN);
   Event rdlock(WaitMode mode = SPIN);
+#endif
 };
 static_assert(sizeof(FastReservation) == sizeof(Realm::FastReservation));
 
@@ -309,6 +313,12 @@ public:
   }
   ProcessorGroup &operator=(const ProcessorGroup &g) = default;
   ProcessorGroup &operator=(ProcessorGroup &&g) = default;
+
+  static ProcessorGroup create_group(const Processor *members,
+                                     size_t num_members);
+  static ProcessorGroup create_group(const span<const Processor> &members);
+
+  void destroy(Event wait_on = Event::NO_EVENT) const;
 
   static const ProcessorGroup NO_PROC_GROUP;
 };
