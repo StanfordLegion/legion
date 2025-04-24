@@ -141,21 +141,26 @@ namespace Realm {
     T *pointer(size_t offset) const;
 
     /**
-     * Reuse an underlying memory of the instance to create the next
-     * set of instances.
+     * Reuse the underlying memory of an instance to create a new
+     * instance with a different layout. The new layout must fit
+     * within the footprint of the old instance or the new allocation
+     * will fail. The old instance is always destroyed in the process.
      * \param instance resulting instance
      * \param layout of a new instance to be created
      * \param prs profiling information
      * \param wait_on precondition to wait on
      * \return The event to wait on before using the new instance.
      */
-    // TODO(apryakhin@): Add deferred execution
     Event redistrict(RegionInstance &instance, const InstanceLayoutGeneric *layout,
                      const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
 
     /**
-     * Reuse an underlying memory of the instance to create the next
-     * set of instances.
+     * Reuse the underlying memory of an instance to create a new
+     * set of instances with different layouts. Only as many of the
+     * new layouts as can fit in the footprint will be allocated. The 
+     * ordering of the new layouts is important as they will be allocated
+     * in this order (pay attention to alignments). The old instance will
+     * always be destroyed in the process.
      * \param instances instances to be redistricted
      * \param layouts layouts for new instances
      * \param num_layouts number of instances and instance layouts
@@ -163,7 +168,6 @@ namespace Realm {
      * \param wait_on precondition to wait on
      * \return The event to wait on before using the new instance.
      */
-    // TODO(apryakhin@): Add deferred execution
     Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
                      size_t num_layouts, const ProfilingRequestSet *prs,
                      Event wait_on = Event::NO_EVENT);
