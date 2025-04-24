@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include <limits>
-#include <algorithm>
 #include "prealm.h"
+#include <algorithm>
+#include <limits>
 #include <zlib.h>
 // Need this to know which version of Legion Prof we're using
 static constexpr unsigned LEGION_PROF_VERSION =
