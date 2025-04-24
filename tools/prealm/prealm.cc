@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include <limits>
+#include <algorithm>
 #include "prealm.h"
 #include <zlib.h>
 // Need this to know which version of Legion Prof we're using
