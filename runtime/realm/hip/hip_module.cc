@@ -2527,10 +2527,6 @@ namespace Realm {
           hipDeviceProp_t dev_prop;
           CHECK_HIP( hipGetDeviceProperties(&dev_prop, i) );
           res_fbmem_sizes[i] = dev_prop.totalGlobalMem;
-          if (i > 0) {
-            // currently, we assume all gpus are identical
-            assert(res_fbmem_sizes[i] == res_fbmem_sizes[i-1]);
-          }
         }
         res_min_fbmem_size =
             *std::min_element(res_fbmem_sizes.begin(), res_fbmem_sizes.end());
