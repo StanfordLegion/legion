@@ -155,7 +155,8 @@ namespace Realm {
   Logger log_collective("collective");
   extern Logger log_task; // defined in proc_impl.cc
   extern Logger log_taskreg; // defined in proc_impl.cc
-  
+  extern Logger log_machine; // defined in machine_impl.cc
+
   ////////////////////////////////////////////////////////////////////////
   //
   // hacks to force linkage of things
@@ -2317,6 +2318,16 @@ namespace Realm {
       // and the mem_mem affinities
       machine->enumerate_mem_mem_affinities();
 
+      if(log_machine.want_debug()) {
+        // Print the machine model
+        if(Network::my_node_id == 0) {
+          for(int i = 0; i < Network::max_node_id + 1; i++) {
+            const Node &node = nodes[i];
+            log_machine.debug() << "Node " << i << ":\n" << node;
+          }
+        }
+      }
+
       // Then update the path caches
       if (Config::path_cache_lru_size) {
         assert(Config::path_cache_lru_size > 0);
@@ -3383,6 +3394,28 @@ namespace Realm {
           proc_groups) {
         delete atomic_proc_group.load();
       }
+    }
+
+    std::ostream &operator<<(std::ostream &os, const Node &node)
+    {
+      for(const ProcessorImpl *processor : node.processors) {
+        os << "Processor:" << processor->me << ", " << processor->kind << std::endl;
+      }
+      for(const MemoryImpl *memory : node.memories) {
+        os << "Memory:" << memory->me << ", " << memory->me.kind()
+           << ", capacity: " << memory->size << std::endl;
+      }
+      for(const MemoryImpl *memory : node.ib_memories) {
+        os << "IB Memory:" << memory->me << ", " << memory->me.kind()
+           << ", capacity: " << memory->size << std::endl;
+      }
+      for(const Channel *channel : node.dma_channels) {
+        os << "Channel: " << channel->kind << std::endl;
+        for(const Channel::SupportedPath &path : channel->get_paths()) {
+          os << "-Supported Path: " << path << std::endl;
+        }
+      }
+      return os;
     }
 
   ////////////////////////////////////////////////////////////////////////
