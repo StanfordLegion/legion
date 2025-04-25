@@ -44,11 +44,12 @@ public:
 
   struct ProfilingArgs {
   public:
-    inline ProfilingArgs(ProfKind k) : kind(k) {}
-
+    inline ProfilingArgs(ProfKind k, timestamp_t create = 0)
+      : create_time(create), kind(k) { }
   public:
     Event critical;
     Event provenance;
+    timestamp_t create_time;
     union {
       Realm::Event inst;
       Processor::TaskFuncID task;
@@ -221,13 +222,14 @@ public:
                         const std::vector<CopySrcDstField> &dsts,
                         Event critical);
   void add_task_request(ProfilingRequestSet &requests,
-                        Processor::TaskFuncID task_id, Event critical);
+                        Processor::TaskFuncID task_id,
+                        Event critical, Event fevent,
+                        timestamp_t spawn_time = 0);
   Event add_inst_request(ProfilingRequestSet &requests, Event critical);
 
 public:
   inline bool is_implicit(void) const { return implicit_fevent.exists(); }
-  inline Event get_fevent(void) const { return (is_implicit() ?
-    implicit_fevent : Processor::get_current_finish_event()); }
+  Event get_fevent(void) const;
   void process_proc_desc(const Processor &p);
   void process_mem_desc(const Memory &m);
   void record_event_wait(Event wait_on, Backtrace &bt, 
@@ -244,16 +246,17 @@ public:
                               Event precondition);
   void record_instance_usage(RegionInstance inst, FieldID field_id);
   void process_response(ProfilingResponse &response);
-  void process_remote(const void *args, size_t arglen);
+  void process_trigger(const void *args, size_t arglen);
   size_t dump_inter(long long target_latency);
   void finalize(void);
 
   static ThreadProfiler &get_thread_profiler(void);
 
-private:
+public:
   const Processor local_proc;
   const Realm::Event implicit_fevent;
   const long long start_time;
+private:
   std::deque<EventWaitInfo> event_wait_infos;
   std::deque<EventMergerInfo> event_merger_infos;
   std::deque<EventTriggerInfo> event_trigger_infos;
@@ -622,22 +625,8 @@ inline Event Reservation::try_acquire(bool retry, unsigned mode, bool exclusive,
 inline Event Processor::spawn(TaskFuncID func_id, const void *args,
                               size_t arglen, Event wait_on,
                               int priority) const {
-  ProfilingRequestSet requests;
-  ThreadProfiler::get_thread_profiler().add_task_request(requests, func_id,
-                                                         wait_on);
-  return Realm::Processor::spawn(func_id, args, arglen, requests, wait_on,
-                                 priority);
-}
-
-inline Event Processor::spawn(TaskFuncID func_id, const void *args,
-                              size_t arglen,
-                              const ProfilingRequestSet &requests,
-                              Event wait_on, int priority) const {
-  ProfilingRequestSet alt_requests = requests;
-  ThreadProfiler::get_thread_profiler().add_task_request(alt_requests, func_id,
-                                                         wait_on);
-  return Realm::Processor::spawn(func_id, args, arglen, alt_requests, wait_on,
-                                 priority);
+  ProfilingRequestSet no_requests;
+  return spawn(func_id, args, arglen, no_requests, wait_on, priority);
 }
 
 /*static*/ inline ProcessorGroup ProcessorGroup::create_group(

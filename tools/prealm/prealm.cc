@@ -50,10 +50,14 @@ class Profiler {
 public:
   struct WrapperArgs {
     Event wait_on;
-    void *args;
     size_t arglen;
     Processor::TaskFuncID task_id;
     int priority;
+    Realm::Event fevent;
+    ThreadProfiler::timestamp_t spawn_time;
+    // Option for continuation wrapper
+    Realm::UserEvent after;
+    Realm::Processor origin;
   };
   struct ShutdownArgs {
     Event precondition;
@@ -84,15 +88,15 @@ public:
                        size_t user_arglen, Realm::Processor p);
   static void wrapper(const void *args, size_t arglen, const void *user_args,
                       size_t user_arglen, Realm::Processor p);
-  static void remote(const void *args, size_t arglen, const void *user_args,
-                     size_t user_arglen, Realm::Processor p);
+  static void trigger(const void *args, size_t arglen, const void *user_args,
+                      size_t user_arglen, Realm::Processor p);
   static void shutdown(const void *args, size_t arglen, const void *user_args,
                        size_t user_arglen, Realm::Processor p);
   static constexpr Realm::Processor::TaskFuncID CALLBACK_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE;
   static constexpr Realm::Processor::TaskFuncID WRAPPER_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 1;
-  static constexpr Realm::Processor::TaskFuncID REMOTE_TASK_ID =
+  static constexpr Realm::Processor::TaskFuncID TRIGGER_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 2;
   static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 3;
@@ -238,6 +242,24 @@ ThreadProfiler::ThreadProfiler(Processor local, Realm::Event implicit)
     : local_proc(local), implicit_fevent(implicit),
       start_time(Realm::Clock::current_time_in_nanoseconds()) {
   assert(local_proc.exists());
+  if (is_implicit())
+  {
+    // fevent should always be on the same node as the local processor
+    // to keep Legion Prof happy
+    const Realm::ID id(implicit.id);
+    assert(local_proc.address_space() == id.event_creator_node());
+  }
+}
+
+Event ThreadProfiler::get_fevent(void) const {
+  if (is_implicit())
+    return implicit_fevent;
+  const Event result = Processor::get_current_finish_event(); 
+  // fevent should always be on the same node as the local processor
+  // to keep Legion Prof happy
+  const Realm::ID id(result.id);
+  assert(local_proc.address_space() == id.event_creator_node());
+  return result;
 }
 
 void ThreadProfiler::NameClosure::add_instance(const RegionInstance &inst) {
@@ -341,7 +363,8 @@ void ThreadProfiler::add_copy_request(ProfilingRequestSet &requests,
 
 void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
                                       Processor::TaskFuncID task_id,
-                                      Event critical) {
+                                      Event critical, Event fevent,
+                                      timestamp_t spawn_time) {
   Profiler &profiler = Profiler::get_profiler();
   if (!profiler.enabled)
     return;
@@ -350,10 +373,10 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
 #else
   profiler.increment_total_outstanding_requests();
 #endif
-  ProfilingArgs args(TASK_PROF);
+  ProfilingArgs args(TASK_PROF, spawn_time);
   args.id.task = task_id;
   args.critical = critical;
-  args.provenance = get_fevent();
+  args.provenance = fevent;
   Processor current =
       is_implicit() ? profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
@@ -433,7 +456,7 @@ void ThreadProfiler::record_event_trigger(Event result, Event pre) {
   if (creator_node != local_proc.address_space()) {
     Realm::Processor remote = profiler.get_remote_processor(creator_node);
     const Realm::Event notified =
-        remote.spawn(Profiler::REMOTE_TASK_ID, &info, sizeof(info));
+        remote.spawn(Profiler::TRIGGER_TASK_ID, &info, sizeof(info));
     profiler.record_remote_notification(notified);
   }
   profiler.update_footprint(sizeof(info), this);
@@ -460,7 +483,7 @@ void ThreadProfiler::record_event_poison(Event result) {
     const EventTriggerInfo tinfo{Event::NO_EVENT, info.provenance, info.result,
                                  info.performed};
     const Realm::Event notified =
-        remote.spawn(Profiler::REMOTE_TASK_ID, &tinfo, sizeof(tinfo));
+        remote.spawn(Profiler::TRIGGER_TASK_ID, &tinfo, sizeof(tinfo));
     profiler.record_remote_notification(notified);
   }
   profiler.update_footprint(sizeof(info), this);
@@ -792,7 +815,11 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
       GPUTaskInfo &info = gpu_task_infos.emplace_back(GPUTaskInfo());
       info.task_id = args->id.task;
       info.proc = usage.proc;
-      info.create = timeline.create_time;
+      // This happens if we had a wrapper task
+      if (args->create_time != 0)
+        info.create = args->create_time;
+      else
+        info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.start = timeline.start_time;
       info.stop = timeline.end_time;
@@ -821,7 +848,11 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
       TaskInfo &info = task_infos.emplace_back(TaskInfo());
       info.task_id = args->id.task;
       info.proc = usage.proc;
-      info.create = timeline.create_time;
+      // This happens if we had a wrapper task
+      if (args->create_time != 0)
+        info.create = args->create_time;
+      else
+        info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.start = timeline.start_time;
       // use complete_time instead of end_time to include async work
@@ -893,7 +924,7 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
 #endif
 }
 
-void ThreadProfiler::process_remote(const void *args, size_t arglen) {
+void ThreadProfiler::process_trigger(const void *args, size_t arglen) {
   assert(arglen == sizeof(EventTriggerInfo));
   EventTriggerInfo info;
   std::memcpy(&info, args, sizeof(EventTriggerInfo));
@@ -2321,21 +2352,40 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
 /*static*/ void Profiler::wrapper(const void *args, size_t arglen,
                                   const void *user_args, size_t user_arglen,
                                   Realm::Processor p) {
-  assert(arglen == sizeof(WrapperArgs));
   const WrapperArgs *wargs = static_cast<const WrapperArgs *>(args);
+  assert(arglen == (sizeof(WrapperArgs) + wargs->arglen));
+  assert(wargs->fevent.exists());
+  assert(wargs->spawn_time != 0);
   ProfilingRequestSet requests;
   ThreadProfiler::get_thread_profiler().add_task_request(
-      requests, wargs->task_id, wargs->wait_on);
-  p.spawn(wargs->task_id, wargs->args, wargs->arglen, requests, wargs->wait_on,
-          wargs->priority)
-      .wait();
+      requests, wargs->task_id, wargs->wait_on, wargs->fevent,
+      // Use the spawn time if we don't have an after which means that 
+      // this wrapper was also deferred and will mess up the create time
+      // for the profiling unless we do this
+      wargs->after.exists() ? 0 : wargs->spawn_time);
+  const Realm::Event done = p.spawn(wargs->task_id,
+      (wargs->arglen > 0) ? (void*)(wargs+1) : nullptr, wargs->arglen,
+      requests, wargs->wait_on, wargs->priority);
+  if (wargs->after.exists())
+  {
+    wargs->after.trigger(done);
+    assert(wargs->origin.exists());
+    // Send a trigger message back to the origin
+    const ThreadProfiler::EventTriggerInfo info{wargs->after,
+      wargs->fevent, done, wargs->spawn_time};
+    const Realm::Event notified =
+        wargs->origin.spawn(Profiler::TRIGGER_TASK_ID, &info, sizeof(info));
+    Profiler::get_profiler().record_remote_notification(notified);
+  }
+  else
+    done.wait();
 }
 
-/*static*/ void Profiler::remote(const void *args, size_t arglen,
-                                 const void *user_args, size_t user_arglen,
-                                 Realm::Processor p) {
+/*static*/ void Profiler::trigger(const void *args, size_t arglen,
+                                  const void *user_args, size_t user_arglen,
+                                  Realm::Processor p) {
   ThreadProfiler &thread_profiler = ThreadProfiler::get_thread_profiler();
-  thread_profiler.process_remote(args, arglen);
+  thread_profiler.process_trigger(args, arglen);
 }
 
 /*static*/ void Profiler::shutdown(const void *args, size_t arglen,
@@ -2384,7 +2434,7 @@ void Runtime::start(void) {
   const Realm::ProfilingRequestSet no_requests;
   const CodeDescriptor callback(Profiler::callback);
   const CodeDescriptor wrapper(Profiler::wrapper);
-  const CodeDescriptor remote(Profiler::remote);
+  const CodeDescriptor trigger(Profiler::trigger);
   const CodeDescriptor shutdown(Profiler::shutdown);
   for (Realm::Machine::ProcessorQuery::iterator it = local_procs.begin();
        it != local_procs.end(); it++) {
@@ -2395,7 +2445,7 @@ void Runtime::start(void) {
     done = it->register_task(Profiler::WRAPPER_TASK_ID, wrapper, no_requests);
     if (done.exists())
       registered.push_back(done);
-    done = it->register_task(Profiler::REMOTE_TASK_ID, remote, no_requests);
+    done = it->register_task(Profiler::TRIGGER_TASK_ID, trigger, no_requests);
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::SHUTDOWN_TASK_ID, shutdown, no_requests);
@@ -2465,6 +2515,57 @@ Processor::register_task_by_kind(Kind kind, bool global, TaskFuncID task_id,
       kind, global, task_id, codedesc, prs, user_data, user_data_len);
 }
 
+Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
+    const ProfilingRequestSet &requests, Event wait_on, int priority) const {
+  ThreadProfiler& profiler = ThreadProfiler::get_thread_profiler();
+  if (profiler.local_proc.address_space() != address_space()) {
+    assert(!profiler.is_implicit());
+    // If this processor is not local we need a wrapper task so that it
+    // looks like the fevent is local to the current node
+    if (requests.empty()) {
+      // Make a user event that will be triggered by the wrapper task
+      const Realm::UserEvent after = Realm::UserEvent::create_user_event();
+      // Lie aobut the trigger time so that it looks like it is always
+      // before the spawn so it never appears like it is on the critical path
+      const ThreadProfiler::timestamp_t spawn_time =
+        Realm::Clock::current_time_in_nanoseconds();
+      if (arglen > 0) {
+        const size_t buffer_size = sizeof(Profiler::WrapperArgs) + arglen;
+        Profiler::WrapperArgs *wrapper_args =
+          (Profiler::WrapperArgs*)malloc(buffer_size);
+        wrapper_args->wait_on = wait_on;
+        wrapper_args->arglen = arglen;
+        wrapper_args->task_id = func_id;
+        wrapper_args->priority = priority;
+        wrapper_args->fevent = profiler.get_fevent();
+        wrapper_args->spawn_time = spawn_time;
+        wrapper_args->after = after;
+        wrapper_args->origin = profiler.local_proc;
+        std::memcpy(wrapper_args+1, args, arglen);
+        Realm::Processor::spawn(Profiler::WRAPPER_TASK_ID, wrapper_args,
+            buffer_size, Event::NO_EVENT, priority);
+      } else {
+        Profiler::WrapperArgs wrapper_args{wait_on, 0/*arglen*/, func_id,
+          priority, profiler.get_fevent(), spawn_time, after,
+          profiler.local_proc};
+        Realm::Processor::spawn(Profiler::WRAPPER_TASK_ID, &wrapper_args,
+            sizeof(wrapper_args), Event::NO_EVENT, priority);
+      }
+      return after;
+    } else {
+      // TODO: need to serialize up requests and move them remotely
+      std::abort();
+    }
+  } else {
+    // Can spawn this directly locally
+    ProfilingRequestSet alt_requests(requests);
+    profiler.add_task_request(alt_requests, func_id, wait_on,
+        profiler.get_fevent());
+    return Realm::Processor::spawn(func_id, args, arglen, alt_requests,
+                                   wait_on, priority);
+  }
+}
+
 bool Runtime::register_task(Processor::TaskFuncID task_id,
                             Processor::TaskFuncPtr taskptr) {
   // since processors are the same size we can just cast the function pointer
@@ -2495,24 +2596,34 @@ Event Runtime::collective_spawn(Processor target_proc,
                                 size_t arglen, Event wait_on, int priority) {
   // Launch a wrapper task that will actually spawn the task on the processor
   // with extra profiling
-  Profiler::WrapperArgs wrapper_args;
-  wrapper_args.task_id = task_id;
-  wrapper_args.wait_on = wait_on;
-  wrapper_args.priority = priority;
-  if ((arglen > 0) &&
-      (target_proc.address_space() ==
-       Profiler::get_profiler().get_local_processor().address_space())) {
-    wrapper_args.arglen = arglen;
-    // TODO: don't leak this
-    wrapper_args.args = malloc(arglen);
-    memcpy(wrapper_args.args, args, arglen);
+  const Event fevent = ThreadProfiler::get_thread_profiler().get_fevent();
+  const ThreadProfiler::timestamp_t spawn_time = 
+    Realm::Clock::current_time_in_nanoseconds();
+  if (arglen > 0) {
+    const size_t buffer_size = sizeof(Profiler::WrapperArgs) + arglen;
+    Profiler::WrapperArgs *wrapper_args = 
+      (Profiler::WrapperArgs*)malloc(buffer_size);
+    wrapper_args->wait_on = wait_on;
+    wrapper_args->arglen = arglen;
+    wrapper_args->task_id = task_id;
+    wrapper_args->priority = priority;
+    wrapper_args->fevent = fevent;
+    wrapper_args->spawn_time = spawn_time;
+    wrapper_args->after = Realm::UserEvent::NO_USER_EVENT;
+    wrapper_args->origin = Realm::Processor::NO_PROC;
+    std::memcpy(wrapper_args+1, args, arglen);
+    const Event result = Realm::Runtime::collective_spawn(target_proc,
+      Profiler::WRAPPER_TASK_ID, wrapper_args, buffer_size, wait_on, priority);
+    free(wrapper_args);
+    return result;
   } else {
-    wrapper_args.arglen = 0;
-    wrapper_args.args = nullptr;
-  }
-  return Realm::Runtime::collective_spawn(
+    const Profiler::WrapperArgs wrapper_args{wait_on, 0/*arglen*/,
+      task_id, priority, fevent, spawn_time,
+      Realm::UserEvent::NO_USER_EVENT, Realm::Processor::NO_PROC};
+    return Realm::Runtime::collective_spawn(
       target_proc, Profiler::WRAPPER_TASK_ID, &wrapper_args,
       sizeof(wrapper_args), wait_on, priority);
+  }
 }
 
 Event Runtime::collective_spawn_by_kind(Processor::Kind target_kind,
@@ -2522,22 +2633,35 @@ Event Runtime::collective_spawn_by_kind(Processor::Kind target_kind,
                                         int priority) {
   // Launch a wrapper task that will actually spawn the tasks on the processor
   // with extra profiling
-  Profiler::WrapperArgs wrapper_args;
-  wrapper_args.task_id = task_id;
-  wrapper_args.wait_on = wait_on;
-  wrapper_args.priority = priority;
+  const Event fevent = ThreadProfiler::get_thread_profiler().get_fevent();
+  const ThreadProfiler::timestamp_t spawn_time = 
+    Realm::Clock::current_time_in_nanoseconds();
   if (arglen > 0) {
-    wrapper_args.arglen = arglen;
-    // TODO: don't leak this
-    wrapper_args.args = malloc(arglen);
-    memcpy(wrapper_args.args, args, arglen);
+    const size_t buffer_size = sizeof(Profiler::WrapperArgs) + arglen;
+    Profiler::WrapperArgs *wrapper_args = 
+      (Profiler::WrapperArgs*)malloc(buffer_size);
+    wrapper_args->wait_on = wait_on;
+    wrapper_args->arglen = arglen;
+    wrapper_args->task_id = task_id;
+    wrapper_args->priority = priority;
+    wrapper_args->fevent = fevent;
+    wrapper_args->spawn_time = spawn_time;
+    wrapper_args->after = Realm::UserEvent::NO_USER_EVENT;
+    wrapper_args->origin = Realm::Processor::NO_PROC;
+    std::memcpy(wrapper_args+1, args, arglen);
+    const Event result = Realm::Runtime::collective_spawn_by_kind(
+        target_kind, Profiler::WRAPPER_TASK_ID, wrapper_args,
+        buffer_size, one_per_node, wait_on, priority);
+    free(wrapper_args);
+    return result;
   } else {
-    wrapper_args.arglen = 0;
-    wrapper_args.args = nullptr;
-  }
-  return Realm::Runtime::collective_spawn_by_kind(
+    const Profiler::WrapperArgs wrapper_args{wait_on, 0/*arglen*/,
+      task_id, priority, fevent, spawn_time, 
+      Realm::UserEvent::NO_USER_EVENT, Realm::Processor::NO_PROC};
+    return Realm::Runtime::collective_spawn_by_kind(
       target_kind, Profiler::WRAPPER_TASK_ID, &wrapper_args,
       sizeof(wrapper_args), one_per_node, wait_on, priority);
+  }
 }
 
 void Runtime::shutdown(Event wait_on, int result_code) {
