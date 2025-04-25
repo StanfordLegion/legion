@@ -15,6 +15,7 @@
 
 #include "prealm.h"
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <zlib.h>
 // Need this to know which version of Legion Prof we're using
