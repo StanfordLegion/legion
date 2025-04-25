@@ -431,7 +431,7 @@ void ThreadProfiler::record_event_trigger(Event result, Event pre) {
   const Realm::ID id(result.id);
   const AddressSpace creator_node = id.event_creator_node();
   if (creator_node != local_proc.address_space()) {
-    Processor remote = profiler.get_remote_processor(creator_node);
+    Realm::Processor remote = profiler.get_remote_processor(creator_node);
     const Realm::Event notified =
         remote.spawn(Profiler::REMOTE_TASK_ID, &info, sizeof(info));
     profiler.record_remote_notification(notified);
@@ -456,7 +456,7 @@ void ThreadProfiler::record_event_poison(Event result) {
     // Encode this in an event trigger struct but put the actual
     // poisoned event in the precondition so the receiver knows
     // that was a poison and not a trigger
-    Processor remote = profiler.get_remote_processor(creator_node);
+    Realm::Processor remote = profiler.get_remote_processor(creator_node);
     const EventTriggerInfo tinfo{Event::NO_EVENT, info.provenance, info.result,
                                  info.performed};
     const Realm::Event notified =
