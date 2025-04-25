@@ -208,7 +208,7 @@ public:
   };
 
 public:
-  ThreadProfiler(Processor p, Realm::Event fevent, bool external);
+  ThreadProfiler(Processor p, Realm::Event implicit);
   ThreadProfiler(const ThreadProfiler &rhs) = delete;
   ThreadProfiler &operator=(const ThreadProfiler &rhs) = delete;
 
@@ -225,6 +225,9 @@ public:
   Event add_inst_request(ProfilingRequestSet &requests, Event critical);
 
 public:
+  inline bool is_implicit(void) const { return implicit_fevent.exists(); }
+  inline Event get_fevent(void) const { return (is_implicit() ?
+    implicit_fevent : Processor::get_current_finish_event()); }
   void process_proc_desc(const Processor &p);
   void process_mem_desc(const Memory &m);
   void record_event_wait(Event wait_on, Backtrace &bt, 
@@ -248,9 +251,8 @@ public:
 
 private:
   const Processor local_proc;
-  const Realm::Event fevent;
+  const Realm::Event implicit_fevent;
   const long long start_time;
-  const bool external;
   std::deque<EventWaitInfo> event_wait_infos;
   std::deque<EventMergerInfo> event_merger_infos;
   std::deque<EventTriggerInfo> event_trigger_infos;

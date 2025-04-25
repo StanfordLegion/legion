@@ -224,9 +224,9 @@ enum DepPartOpKind {
   DEP_PART_WEIGHTS = 15,               // create partition by weights
 };
 
-ThreadProfiler::ThreadProfiler(Processor local, Realm::Event f, bool ext)
-    : local_proc(local), fevent(f),
-      start_time(Realm::Clock::current_time_in_nanoseconds()), external(ext) {
+ThreadProfiler::ThreadProfiler(Processor local, Realm::Event implicit)
+    : local_proc(local), implicit_fevent(implicit),
+      start_time(Realm::Clock::current_time_in_nanoseconds()) {
   assert(local_proc.exists());
 }
 
@@ -283,8 +283,9 @@ void ThreadProfiler::add_fill_request(ProfilingRequestSet &requests,
        it != dsts.end(); it++)
     closure->add_instance(it->inst);
   args.id.closure = closure;
-  args.provenance = fevent;
-  Processor current = external ? profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent(); 
+  Processor current = is_implicit() ? 
+    profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -316,8 +317,9 @@ void ThreadProfiler::add_copy_request(ProfilingRequestSet &requests,
        it != dsts.end(); it++)
     closure->add_instance(it->inst);
   args.id.closure = closure;
-  args.provenance = fevent;
-  Processor current = external ? profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent(); 
+  Processor current = is_implicit() ?
+    profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -341,8 +343,9 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
   ProfilingArgs args(TASK_PROF);
   args.id.task = task_id;
   args.critical = critical;
-  args.provenance = fevent;
-  Processor current = external ? profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent(); 
+  Processor current = is_implicit() ?
+    profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -350,7 +353,7 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
   req.add_measurement<ProfilingMeasurements::OperationProcessorUsage>();
   req.add_measurement<ProfilingMeasurements::OperationEventWaits>();
   req.add_measurement<ProfilingMeasurements::OperationFinishEvent>();
-  if (!external && (local_proc.kind() == Processor::TOC_PROC))
+  if (!is_implicit() && (local_proc.kind() == Processor::TOC_PROC))
     req.add_measurement<ProfilingMeasurements::OperationTimelineGPU>();
 }
 
@@ -370,8 +373,9 @@ Event ThreadProfiler::add_inst_request(ProfilingRequestSet &requests,
   ProfilingArgs args(INST_PROF);
   args.id.inst = unique_name;
   args.critical = critical;
-  args.provenance = fevent;
-  Processor current = external ? profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent(); 
+  Processor current = is_implicit() ?
+    profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -386,12 +390,12 @@ void ThreadProfiler::record_event_wait(Event wait_on, Backtrace &bt,
   if (!profiler.enabled)
     return;
   unsigned long long backtrace_id = profiler.find_backtrace_id(bt);
-  event_wait_infos.emplace_back(
-      EventWaitInfo{local_proc.id, fevent, wait_on, backtrace_id});
+  event_wait_infos.emplace_back(EventWaitInfo{local_proc.id, 
+      get_fevent(), wait_on, backtrace_id});
   if (wait_on.is_barrier())
     record_barrier_use(wait_on);
   profiler.update_footprint(sizeof(EventWaitInfo), this);
-  if (external) {
+  if (is_implicit()) {
     WaitInfo &info = implicit_waits.emplace_back(WaitInfo());
     info.wait_start = start;
     info.wait_ready = stop; // assume it's ready immediately
@@ -410,7 +414,7 @@ void ThreadProfiler::record_event_trigger(Event result, Event pre) {
   info.precondition = pre;
   if (pre.is_barrier())
     record_barrier_use(pre);
-  info.provenance = fevent;
+  info.provenance = get_fevent(); 
   // See if we're triggering this event on the same node where it was made
   // If not we need to eventually notify the node where it was made that
   // it was triggered here and what the fevent was for it
@@ -429,7 +433,7 @@ void ThreadProfiler::record_event_poison(Event result) {
   EventPoisonInfo &info = event_poison_infos.emplace_back(EventPoisonInfo());
   info.performed = Realm::Clock::current_time_in_nanoseconds();
   info.result = result;
-  info.provenance = fevent;
+  info.provenance = get_fevent(); 
   // See if we're poisoning this event on the same node where it was made
   // If not we need to eventually notify the node where it was made that
   // it was triggered here and what the fevent was for it
@@ -465,7 +469,7 @@ void ThreadProfiler::record_barrier_arrival(Event result, Event precondition) {
   info.precondition = precondition;
   if (precondition.is_barrier())
     record_barrier_use(precondition);
-  info.provenance = fevent;
+  info.provenance = get_fevent(); 
   profiler.update_footprint(sizeof(info), this);
 }
 
@@ -494,7 +498,7 @@ void ThreadProfiler::record_event_merger(Event result,
     if (preconditions[idx].is_barrier())
       record_barrier_use(preconditions[idx]);
   }
-  info.provenance = fevent;
+  info.provenance = get_fevent(); 
   profiler.update_footprint(sizeof(info) + num_events * sizeof(Event), this);
 }
 
@@ -511,7 +515,7 @@ void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
   if (precondition.is_barrier())
     record_barrier_use(precondition);
   info.reservation = r;
-  info.provenance = fevent;
+  info.provenance = get_fevent(); 
   profiler.update_footprint(sizeof(info), this);
 }
 
@@ -544,7 +548,7 @@ void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field) {
   InstanceUsageInfo &info =
       instance_usage_infos.emplace_back(InstanceUsageInfo());
   info.inst_event = inst.unique_event;
-  info.op_id = fevent.id;
+  info.op_id = get_fevent().id;
   info.field = field;
   profiler.update_footprint(sizeof(info), this);
 }
@@ -1034,8 +1038,8 @@ void ThreadProfiler::finalize(void) {
     profiler.serialize(inst_timeline_infos[idx]);
   for (unsigned idx = 0; idx < prof_task_infos.size(); idx++)
     profiler.serialize(prof_task_infos[idx]);
-  if (external)
-    profiler.record_implicit(start_time, fevent, implicit_waits);
+  if (is_implicit())
+    profiler.record_implicit(start_time, implicit_fevent, implicit_waits);
 }
 
 /*static*/ ThreadProfiler &ThreadProfiler::get_thread_profiler(void) {
@@ -1046,10 +1050,9 @@ void ThreadProfiler::finalize(void) {
       proc = profiler.get_implicit_processor();
       const Realm::UserEvent fevent = Realm::UserEvent::create_user_event();
       fevent.trigger();
-      thread_profiler = new ThreadProfiler(proc, fevent, true /*exteranl*/);
+      thread_profiler = new ThreadProfiler(proc, fevent);
     } else {
-      thread_profiler = new ThreadProfiler(
-          proc, Processor::get_current_finish_event(), false /*external*/);
+      thread_profiler = new ThreadProfiler(proc, Realm::Event::NO_EVENT);
     }
     profiler.record_thread_profiler(thread_profiler);
   }
