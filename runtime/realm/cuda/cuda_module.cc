@@ -4672,9 +4672,13 @@ namespace Realm {
       CUmemAllocationProp mem_prop{};
       CUmemAllocationHandleType handle_type = CU_MEM_HANDLE_TYPE_FABRIC;
 
-      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(
+      CUresult res = CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(
           &cuda_hdl, const_cast<void *>(reinterpret_cast<const void *>(&hdl)),
-          handle_type));
+          handle_type);
+      if(res != CUDA_SUCCESS) {
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemImportFromShareableHandle", res);
+        return nullptr;
+      }
 
       CHECK_CU(
           CUDA_DRIVER_FNPTR(cuMemGetAllocationPropertiesFromHandle)(&mem_prop, cuda_hdl));
