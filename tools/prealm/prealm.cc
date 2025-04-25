@@ -262,6 +262,13 @@ Event ThreadProfiler::get_fevent(void) const {
   return result;
 }
 
+Processor ThreadProfiler::get_callback_processor(void) const {
+  if (is_implicit())
+    return Profiler::get_profiler().get_local_processor();
+  else
+    return local_proc;
+}
+
 void ThreadProfiler::NameClosure::add_instance(const RegionInstance &inst) {
   for (std::vector<RegionInstance>::const_iterator it = instances.begin();
        it != instances.end(); it++)
@@ -316,8 +323,7 @@ void ThreadProfiler::add_fill_request(ProfilingRequestSet &requests,
     closure->add_instance(it->inst);
   args.id.closure = closure;
   args.provenance = get_fevent();
-  Processor current =
-      is_implicit() ? profiler.get_local_processor() : local_proc;
+  Processor current = get_callback_processor();
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -350,8 +356,7 @@ void ThreadProfiler::add_copy_request(ProfilingRequestSet &requests,
     closure->add_instance(it->inst);
   args.id.closure = closure;
   args.provenance = get_fevent();
-  Processor current =
-      is_implicit() ? profiler.get_local_processor() : local_proc;
+  Processor current = get_callback_processor();
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -377,8 +382,7 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
   args.id.task = task_id;
   args.critical = critical;
   args.provenance = fevent;
-  Processor current =
-      is_implicit() ? profiler.get_local_processor() : local_proc;
+  Processor current = get_callback_processor();
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -407,8 +411,7 @@ Event ThreadProfiler::add_inst_request(ProfilingRequestSet &requests,
   args.id.inst = unique_name;
   args.critical = critical;
   args.provenance = get_fevent();
-  Processor current =
-      is_implicit() ? profiler.get_local_processor() : local_proc;
+  Processor current = get_callback_processor();
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -2519,7 +2522,6 @@ Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
     const ProfilingRequestSet &requests, Event wait_on, int priority) const {
   ThreadProfiler& profiler = ThreadProfiler::get_thread_profiler();
   if (profiler.local_proc.address_space() != address_space()) {
-    assert(!profiler.is_implicit());
     // If this processor is not local we need a wrapper task so that it
     // looks like the fevent is local to the current node
     if (requests.empty()) {
@@ -2540,7 +2542,7 @@ Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
         wrapper_args->fevent = profiler.get_fevent();
         wrapper_args->spawn_time = spawn_time;
         wrapper_args->after = after;
-        wrapper_args->origin = profiler.local_proc;
+        wrapper_args->origin = profiler.get_callback_processor();
         std::memcpy(wrapper_args+1, args, arglen);
         Realm::Processor::spawn(Profiler::WRAPPER_TASK_ID, wrapper_args,
             buffer_size, Event::NO_EVENT, priority);

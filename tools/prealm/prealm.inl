@@ -230,6 +230,7 @@ public:
 public:
   inline bool is_implicit(void) const { return implicit_fevent.exists(); }
   Event get_fevent(void) const;
+  Processor get_callback_processor(void) const;
   void process_proc_desc(const Processor &p);
   void process_mem_desc(const Memory &m);
   void record_event_wait(Event wait_on, Backtrace &bt, 
