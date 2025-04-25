@@ -294,7 +294,7 @@ public:
     TASK_ID_PROCESSOR_INIT = Realm::Processor::TASK_ID_PROCESSOR_INIT,
     TASK_ID_PROCESSOR_SHUTDOWN = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
     // Increment this by 3 to reserve some task IDs for our profiling work
-    TASK_ID_FIRST_AVAILABLE = Realm::Processor::TASK_ID_FIRST_AVAILABLE + 3,
+    TASK_ID_FIRST_AVAILABLE = Realm::Processor::TASK_ID_FIRST_AVAILABLE + 4,
   };
 
   static const Processor NO_PROC;

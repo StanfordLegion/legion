@@ -66,6 +66,8 @@ public:
 
 public:
   inline Processor get_local_processor(void) const { return local_proc; }
+  Processor get_remote_processor(AddressSpace target);
+  Processor get_implicit_processor(void);
   void parse_command_line(int argc, char **argv);
   void parse_command_line(std::vector<std::string> &cmdline, bool remove_args);
   void initialize(void);
@@ -73,7 +75,7 @@ public:
   void wait_for_shutdown(void);
   void perform_shutdown(void);
   void finalize(void);
-  Processor get_implicit_processor(void);
+  Realm::Event get_remote_done(void);
   void record_thread_profiler(ThreadProfiler *profiler);
   unsigned long long find_backtrace_id(Backtrace &bt);
   static Profiler &get_profiler(void);
@@ -81,15 +83,19 @@ public:
                        size_t user_arglen, Realm::Processor p);
   static void wrapper(const void *args, size_t arglen, const void *user_args,
                       size_t user_arglen, Realm::Processor p);
+  static void remote(const void *args, size_t arglen, const void *user_args,
+                     size_t user_arglen, Realm::Processor p);
   static void shutdown(const void *args, size_t arglen, const void *user_args,
                        size_t user_arglen, Realm::Processor p);
   static constexpr Realm::Processor::TaskFuncID CALLBACK_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE;
   static constexpr Realm::Processor::TaskFuncID WRAPPER_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 1;
-  static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+  static constexpr Realm::Processor::TaskFuncID REMOTE_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 2;
-  static_assert((CALLBACK_TASK_ID + 3) == Processor::TASK_ID_FIRST_AVAILABLE);
+  static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+      Realm::Processor::TASK_ID_FIRST_AVAILABLE + 3;
+  static_assert((CALLBACK_TASK_ID + 4) == Processor::TASK_ID_FIRST_AVAILABLE);
   static constexpr int CALLBACK_TASK_PRIORITY = std::numeric_limits<int>::min();
 
 public:
@@ -105,6 +111,7 @@ public:
   void record_memory(const Memory &m);
   void record_processor(const Processor &p);
   void record_affinities(std::vector<Memory> &memories_to_log);
+  void record_remote_notification(Realm::Event notified);
   void
   record_implicit(long long start_time, Realm::Event fevent,
                   const std::vector<ThreadProfiler::WaitInfo> &wait_intervals);
@@ -137,6 +144,8 @@ private:
 private:
   Realm::FastReservation profiler_lock;
   std::vector<ThreadProfiler *> thread_profilers;
+  std::deque<Realm::Event> remote_notifications;
+  std::map<AddressSpace, Processor> remote_processors;
 
 private:
 #ifdef DEBUG_REALM
@@ -283,9 +292,9 @@ void ThreadProfiler::add_fill_request(ProfilingRequestSet &requests,
        it != dsts.end(); it++)
     closure->add_instance(it->inst);
   args.id.closure = closure;
-  args.provenance = get_fevent(); 
-  Processor current = is_implicit() ? 
-    profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent();
+  Processor current =
+      is_implicit() ? profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -317,9 +326,9 @@ void ThreadProfiler::add_copy_request(ProfilingRequestSet &requests,
        it != dsts.end(); it++)
     closure->add_instance(it->inst);
   args.id.closure = closure;
-  args.provenance = get_fevent(); 
-  Processor current = is_implicit() ?
-    profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent();
+  Processor current =
+      is_implicit() ? profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -343,9 +352,9 @@ void ThreadProfiler::add_task_request(ProfilingRequestSet &requests,
   ProfilingArgs args(TASK_PROF);
   args.id.task = task_id;
   args.critical = critical;
-  args.provenance = get_fevent(); 
-  Processor current = is_implicit() ?
-    profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent();
+  Processor current =
+      is_implicit() ? profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -373,9 +382,9 @@ Event ThreadProfiler::add_inst_request(ProfilingRequestSet &requests,
   ProfilingArgs args(INST_PROF);
   args.id.inst = unique_name;
   args.critical = critical;
-  args.provenance = get_fevent(); 
-  Processor current = is_implicit() ?
-    profiler.get_local_processor() : local_proc;
+  args.provenance = get_fevent();
+  Processor current =
+      is_implicit() ? profiler.get_local_processor() : local_proc;
   Realm::ProfilingRequest &req =
       requests.add_request(current, Profiler::CALLBACK_TASK_ID, &args,
                            sizeof(args), Profiler::CALLBACK_TASK_PRIORITY);
@@ -390,8 +399,8 @@ void ThreadProfiler::record_event_wait(Event wait_on, Backtrace &bt,
   if (!profiler.enabled)
     return;
   unsigned long long backtrace_id = profiler.find_backtrace_id(bt);
-  event_wait_infos.emplace_back(EventWaitInfo{local_proc.id, 
-      get_fevent(), wait_on, backtrace_id});
+  event_wait_infos.emplace_back(
+      EventWaitInfo{local_proc.id, get_fevent(), wait_on, backtrace_id});
   if (wait_on.is_barrier())
     record_barrier_use(wait_on);
   profiler.update_footprint(sizeof(EventWaitInfo), this);
@@ -414,15 +423,18 @@ void ThreadProfiler::record_event_trigger(Event result, Event pre) {
   info.precondition = pre;
   if (pre.is_barrier())
     record_barrier_use(pre);
-  info.provenance = get_fevent(); 
+  info.provenance = get_fevent();
   // See if we're triggering this event on the same node where it was made
   // If not we need to eventually notify the node where it was made that
   // it was triggered here and what the fevent was for it
   const Realm::ID id(result.id);
   const AddressSpace creator_node = id.event_creator_node();
-  // TODO: handle sending the message to the creator node to let it know the
-  // provenance
-  assert(creator_node == profiler.get_local_processor().address_space());
+  if (creator_node != local_proc.address_space()) {
+    Processor remote = profiler.get_remote_processor(creator_node);
+    const Realm::Event notified =
+        remote.spawn(Profiler::REMOTE_TASK_ID, &info, sizeof(info));
+    profiler.record_remote_notification(notified);
+  }
   profiler.update_footprint(sizeof(info), this);
 }
 
@@ -433,15 +445,23 @@ void ThreadProfiler::record_event_poison(Event result) {
   EventPoisonInfo &info = event_poison_infos.emplace_back(EventPoisonInfo());
   info.performed = Realm::Clock::current_time_in_nanoseconds();
   info.result = result;
-  info.provenance = get_fevent(); 
+  info.provenance = get_fevent();
   // See if we're poisoning this event on the same node where it was made
   // If not we need to eventually notify the node where it was made that
   // it was triggered here and what the fevent was for it
   const Realm::ID id(result.id);
   const AddressSpace creator_node = id.event_creator_node();
-  // TODO: handle sending the message to the creator node to let it know the
-  // provenance
-  assert(creator_node == profiler.get_local_processor().address_space());
+  if (creator_node != local_proc.address_space()) {
+    // Encode this in an event trigger struct but put the actual
+    // poisoned event in the precondition so the receiver knows
+    // that was a poison and not a trigger
+    Processor remote = profiler.get_remote_processor(creator_node);
+    const EventTriggerInfo tinfo{Event::NO_EVENT, info.provenance, info.result,
+                                 info.performed};
+    const Realm::Event notified =
+        remote.spawn(Profiler::REMOTE_TASK_ID, &tinfo, sizeof(tinfo));
+    profiler.record_remote_notification(notified);
+  }
   profiler.update_footprint(sizeof(info), this);
 }
 
@@ -469,7 +489,7 @@ void ThreadProfiler::record_barrier_arrival(Event result, Event precondition) {
   info.precondition = precondition;
   if (precondition.is_barrier())
     record_barrier_use(precondition);
-  info.provenance = get_fevent(); 
+  info.provenance = get_fevent();
   profiler.update_footprint(sizeof(info), this);
 }
 
@@ -498,7 +518,7 @@ void ThreadProfiler::record_event_merger(Event result,
     if (preconditions[idx].is_barrier())
       record_barrier_use(preconditions[idx]);
   }
-  info.provenance = get_fevent(); 
+  info.provenance = get_fevent();
   profiler.update_footprint(sizeof(info) + num_events * sizeof(Event), this);
 }
 
@@ -515,7 +535,7 @@ void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
   if (precondition.is_barrier())
     record_barrier_use(precondition);
   info.reservation = r;
-  info.provenance = get_fevent(); 
+  info.provenance = get_fevent();
   profiler.update_footprint(sizeof(info), this);
 }
 
@@ -870,6 +890,27 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
 #else
   profiler.decrement_total_outstanding_requests();
 #endif
+}
+
+void ThreadProfiler::process_remote(const void *args, size_t arglen) {
+  assert(arglen == sizeof(EventTriggerInfo));
+  EventTriggerInfo info;
+  std::memcpy(&info, args, sizeof(EventTriggerInfo));
+  Profiler &profiler = Profiler::get_profiler();
+  // Check to see if this was poisoned or not
+  if (info.result.exists()) {
+    // Normal event trigger
+    event_trigger_infos.push_back(info);
+    profiler.update_footprint(sizeof(info), this);
+  } else {
+    // This was poisoned
+    EventPoisonInfo &pinfo = event_poison_infos.emplace_back(EventPoisonInfo());
+    pinfo.result = info.precondition;
+    assert(pinfo.result.exists());
+    pinfo.provenance = info.provenance;
+    pinfo.performed = info.performed;
+    profiler.update_footprint(sizeof(pinfo), this);
+  }
 }
 
 size_t ThreadProfiler::dump_inter(long long target_latency) {
@@ -1951,6 +1992,32 @@ void Profiler::decrement_total_outstanding_requests(void) {
 }
 #endif
 
+Processor Profiler::get_remote_processor(AddressSpace target) {
+  profiler_lock.rdlock().wait();
+  std::map<AddressSpace, Processor>::const_iterator finder =
+      remote_processors.find(target);
+  if (finder != remote_processors.end()) {
+    const Processor result = finder->second;
+    profiler_lock.unlock();
+    return result;
+  } else {
+    profiler_lock.unlock();
+  }
+  Realm::Machine::ProcessorQuery remote_procs(Machine::get_machine());
+  remote_procs.only_kind(Processor::LOC_PROC);
+  for (Realm::Machine::ProcessorQuery::iterator it = remote_procs.begin();
+       it != remote_procs.end(); it++) {
+    if (it->address_space() != target)
+      continue;
+    profiler_lock.wrlock().wait();
+    remote_processors.emplace(std::make_pair(target, *it));
+    profiler_lock.unlock();
+    return *it;
+  }
+  // should never get here
+  std::abort();
+}
+
 Processor Profiler::get_implicit_processor(void) {
   profiler_lock.wrlock().wait();
   if (!implicit_proc.exists()) {
@@ -2192,6 +2259,27 @@ void Profiler::record_implicit(
   }
 }
 
+void Profiler::record_remote_notification(Realm::Event notified) {
+  profiler_lock.wrlock().wait();
+  while (!remote_notifications.empty() &&
+         remote_notifications.front().has_triggered())
+    remote_notifications.pop_front();
+  remote_notifications.push_back(notified);
+  profiler_lock.unlock();
+}
+
+Realm::Event Profiler::get_remote_done(void) {
+  // No need for a lock, shouldn't be racing with anything
+  while (!remote_notifications.empty() &&
+         remote_notifications.front().has_triggered())
+    remote_notifications.pop_front();
+  if (remote_notifications.empty())
+    return Realm::Event::NO_EVENT;
+  std::vector<Realm::Event> done(remote_notifications.begin(),
+                                 remote_notifications.end());
+  return Realm::Event::merge_events(done);
+}
+
 void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
   size_t footprint = total_memory_footprint.fetch_add(diff) + diff;
   if (footprint > output_footprint_threshold) {
@@ -2242,6 +2330,13 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
       .wait();
 }
 
+/*static*/ void Profiler::remote(const void *args, size_t arglen,
+                                 const void *user_args, size_t user_arglen,
+                                 Realm::Processor p) {
+  ThreadProfiler &thread_profiler = ThreadProfiler::get_thread_profiler();
+  thread_profiler.process_remote(args, arglen);
+}
+
 /*static*/ void Profiler::shutdown(const void *args, size_t arglen,
                                    const void *user_args, size_t user_arglen,
                                    Realm::Processor p) {
@@ -2288,6 +2383,7 @@ void Runtime::start(void) {
   const Realm::ProfilingRequestSet no_requests;
   const CodeDescriptor callback(Profiler::callback);
   const CodeDescriptor wrapper(Profiler::wrapper);
+  const CodeDescriptor remote(Profiler::remote);
   const CodeDescriptor shutdown(Profiler::shutdown);
   for (Realm::Machine::ProcessorQuery::iterator it = local_procs.begin();
        it != local_procs.end(); it++) {
@@ -2296,6 +2392,9 @@ void Runtime::start(void) {
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::WRAPPER_TASK_ID, wrapper, no_requests);
+    if (done.exists())
+      registered.push_back(done);
+    done = it->register_task(Profiler::REMOTE_TASK_ID, remote, no_requests);
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::SHUTDOWN_TASK_ID, shutdown, no_requests);
@@ -2458,6 +2557,14 @@ int Runtime::wait_for_shutdown(void) {
   Realm::Runtime::collective_spawn_by_kind(Processor::Kind::NO_KIND,
                                            Processor::TASK_ID_PROCESSOR_NOP,
                                            nullptr, 0, true /*one per process*/)
+      .wait();
+  // Now we need to do another barrier across all the nodes to make sure that
+  // all of our asynchronous updates are done. Note it's not safe to do this
+  // until we know that all Realm operations are issues which we only get after
+  // the previous barrier.
+  Realm::Runtime::collective_spawn_by_kind(
+      Processor::Kind::NO_KIND, Processor::TASK_ID_PROCESSOR_NOP, nullptr, 0,
+      true /*one per process*/, profiler.get_remote_done())
       .wait();
   // Now we can finalize the profiler
   profiler.finalize();

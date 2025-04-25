@@ -244,6 +244,7 @@ public:
                               Event precondition);
   void record_instance_usage(RegionInstance inst, FieldID field_id);
   void process_response(ProfilingResponse &response);
+  void process_remote(const void *args, size_t arglen);
   size_t dump_inter(long long target_latency);
   void finalize(void);
 
