@@ -44,11 +44,12 @@ public:
 
   struct ProfilingArgs {
   public:
-    inline ProfilingArgs(ProfKind k) : kind(k) {}
-
+    inline ProfilingArgs(ProfKind k, timestamp_t create = 0)
+      : create_time(create), kind(k) { }
   public:
     Event critical;
     Event provenance;
+    timestamp_t create_time;
     union {
       Realm::Event inst;
       Processor::TaskFuncID task;
@@ -208,7 +209,7 @@ public:
   };
 
 public:
-  ThreadProfiler(Processor p);
+  ThreadProfiler(Processor p, Realm::Event implicit);
   ThreadProfiler(const ThreadProfiler &rhs) = delete;
   ThreadProfiler &operator=(const ThreadProfiler &rhs) = delete;
 
@@ -221,13 +222,19 @@ public:
                         const std::vector<CopySrcDstField> &dsts,
                         Event critical);
   void add_task_request(ProfilingRequestSet &requests,
-                        Processor::TaskFuncID task_id, Event critical);
+                        Processor::TaskFuncID task_id,
+                        Event critical, Event fevent,
+                        timestamp_t spawn_time = 0);
   Event add_inst_request(ProfilingRequestSet &requests, Event critical);
 
 public:
+  inline bool is_implicit(void) const { return implicit_fevent.exists(); }
+  Event get_fevent(void) const;
+  Processor get_callback_processor(void) const;
   void process_proc_desc(const Processor &p);
   void process_mem_desc(const Memory &m);
-  void record_event_wait(Event wait_on, Backtrace &bt);
+  void record_event_wait(Event wait_on, Backtrace &bt, 
+      long long start, long long stop);
   void record_event_trigger(Event result, Event precondition);
   void record_event_poison(Event result);
   void record_barrier_use(Event barrier);
@@ -240,13 +247,17 @@ public:
                               Event precondition);
   void record_instance_usage(RegionInstance inst, FieldID field_id);
   void process_response(ProfilingResponse &response);
+  void process_trigger(const void *args, size_t arglen);
   size_t dump_inter(long long target_latency);
   void finalize(void);
 
   static ThreadProfiler &get_thread_profiler(void);
 
-private:
+public:
   const Processor local_proc;
+  const Realm::Event implicit_fevent;
+  const long long start_time;
+private:
   std::deque<EventWaitInfo> event_wait_infos;
   std::deque<EventMergerInfo> event_merger_infos;
   std::deque<EventTriggerInfo> event_trigger_infos;
@@ -263,6 +274,7 @@ private:
   std::deque<ProfTaskInfo> prof_task_infos;
   std::vector<ProcID> proc_ids;
   std::vector<MemID> mem_ids;
+  std::vector<WaitInfo> implicit_waits;
 };
 
 inline CopySrcDstField::CopySrcDstField(void)
@@ -414,8 +426,10 @@ inline void Event::wait(void) const {
     return;
   Backtrace bt;
   bt.capture_backtrace();
-  ThreadProfiler::get_thread_profiler().record_event_wait(*this, bt);
+  const long long start = Realm::Clock::current_time_in_nanoseconds();
   Realm::Event::wait();
+  const long long stop = Realm::Clock::current_time_in_nanoseconds();
+  ThreadProfiler::get_thread_profiler().record_event_wait(*this, bt, start, stop);
 }
 
 inline void Event::wait_faultaware(bool &poisoned) const {
@@ -423,8 +437,10 @@ inline void Event::wait_faultaware(bool &poisoned) const {
     return;
   Backtrace bt;
   bt.capture_backtrace();
-  ThreadProfiler::get_thread_profiler().record_event_wait(*this, bt);
+  const long long start = Realm::Clock::current_time_in_nanoseconds();
   Realm::Event::wait_faultaware(poisoned);
+  const long long stop = Realm::Clock::current_time_in_nanoseconds();
+  ThreadProfiler::get_thread_profiler().record_event_wait(*this, bt, start, stop);
 }
 
 /*static*/ inline Event Event::merge_events(const Event *wait_for,
@@ -521,6 +537,10 @@ inline void UserEvent::cancel(void) const {
   copy.cancel();
 }
 
+/*static*/ inline UserEvent UserEvent::create_user_event(void) {
+  return UserEvent(Realm::UserEvent::create_user_event());
+}
+
 inline Barrier::operator Realm::Barrier(void) const {
   Realm::Barrier result;
   result.id = id;
@@ -606,22 +626,24 @@ inline Event Reservation::try_acquire(bool retry, unsigned mode, bool exclusive,
 inline Event Processor::spawn(TaskFuncID func_id, const void *args,
                               size_t arglen, Event wait_on,
                               int priority) const {
-  ProfilingRequestSet requests;
-  ThreadProfiler::get_thread_profiler().add_task_request(requests, func_id,
-                                                         wait_on);
-  return Realm::Processor::spawn(func_id, args, arglen, requests, wait_on,
-                                 priority);
+  ProfilingRequestSet no_requests;
+  return spawn(func_id, args, arglen, no_requests, wait_on, priority);
 }
 
-inline Event Processor::spawn(TaskFuncID func_id, const void *args,
-                              size_t arglen,
-                              const ProfilingRequestSet &requests,
-                              Event wait_on, int priority) const {
-  ProfilingRequestSet alt_requests = requests;
-  ThreadProfiler::get_thread_profiler().add_task_request(alt_requests, func_id,
-                                                         wait_on);
-  return Realm::Processor::spawn(func_id, args, arglen, alt_requests, wait_on,
-                                 priority);
+/*static*/ inline ProcessorGroup ProcessorGroup::create_group(
+    const Processor* members, size_t num_members) {
+  return ProcessorGroup(Realm::ProcessorGroup::create_group(members, num_members));
+}
+
+/*static*/ inline ProcessorGroup ProcessorGroup::create_group(
+    const span<const Processor>& members) {
+  return create_group(members.data(), members.size());
+}
+
+inline void ProcessorGroup::destroy(Event wait_on) const {
+  Realm::ProcessorGroup copy;
+  copy.id = id;
+  copy.destroy(wait_on);
 }
 
 /*static*/ inline Event RegionInstance::create_instance(
