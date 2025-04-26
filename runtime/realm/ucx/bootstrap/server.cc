@@ -49,6 +49,8 @@ namespace mesh {
   int Server::listen_()
   {
     int server_socket = socket(ai_family_, SOCK_STREAM, 0);
+    int optval = 1;
+    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
     sockaddr_in serverAddr;
     set_sock_addr_(self_.ipaddress.data(), &serverAddr);
 
