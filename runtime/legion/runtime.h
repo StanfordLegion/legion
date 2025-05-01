@@ -672,8 +672,7 @@ namespace Legion {
       FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t blocking_index,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    Provenance *provenance, 
-                    const std::optional<uint64_t> &index);
+                    Provenance *provenance); 
       FutureMapImpl(const FutureMapImpl &rhs) = delete;
       virtual ~FutureMapImpl(void);
     public:
@@ -684,6 +683,7 @@ namespace Legion {
       virtual void notify_local(void);
     public:
       Domain get_domain(void) const;
+      std::optional<uint64_t> get_context_index(void) const;
       virtual Future get_future(const DomainPoint &point, 
                                 bool internal_only,
                                 RtEvent *wait_on = NULL); 
@@ -728,7 +728,11 @@ namespace Legion {
       const uint64_t blocking_index;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
-      const std::optional<uint64_t> context_index;
+    private:
+      // This field is only set on remote nodes that are not the owner
+      // of the future map, invoke get_context_index to get the 
+      // right context index for the operation that produced this
+      const std::optional<uint64_t> remote_context_index;
     protected:
       mutable LocalLock future_map_lock;
       std::map<DomainPoint,FutureImpl*> futures;
