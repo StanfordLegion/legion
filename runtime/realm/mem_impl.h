@@ -180,7 +180,7 @@ namespace Realm {
     struct InstanceList {
       std::vector<RegionInstanceImpl *> instances;
       std::vector<size_t> free_list;
-      Mutex mutex;
+      RWLock mutex;
     };
 
   public:

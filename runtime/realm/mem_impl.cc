@@ -495,10 +495,10 @@ namespace Realm {
       if(cnode == Network::my_node_id) {
 	// if it was locally created, we can directly access the local_instances list
 	//  and it's a fatal error if it doesn't exist
-	AutoLock<> al(local_instances.mutex);
-	assert(idx < local_instances.instances.size());
-	assert(local_instances.instances[idx] != 0);
-	return local_instances.instances[idx];
+        RWLock::AutoReaderLock al(local_instances.mutex);
+        assert(idx < local_instances.instances.size());
+        assert(local_instances.instances[idx] != 0);
+        return local_instances.instances[idx];
       } else {
 	// figure out which instance list to look in - non-local creators require a 
 	//  protected lookup
@@ -514,18 +514,18 @@ namespace Realm {
 
 	// now look up (and possibly create) the instance in the right list
 	{
-	  AutoLock<> al(ilist->mutex);
+          RWLock::AutoWriterLock al(ilist->mutex);
 
-	  if(idx >= ilist->instances.size())
-	    ilist->instances.resize(idx + 1, 0);
+          if(idx >= ilist->instances.size())
+            ilist->instances.resize(idx + 1, 0);
 
-	  if(ilist->instances[idx] == 0) {
-	    log_inst.info() << "creating proxy for remotely-created instance: " << i;
-	    ilist->instances[idx] = new RegionInstanceImpl(i, me);
-	  }
+          if(ilist->instances[idx] == 0) {
+            log_inst.info() << "creating proxy for remotely-created instance: " << i;
+            ilist->instances[idx] = new RegionInstanceImpl(i, me);
+          }
 
-	  return ilist->instances[idx];
-	}
+          return ilist->instances[idx];
+        }
       }
     }
 
@@ -536,16 +536,16 @@ namespace Realm {
       unsigned inst_idx;
       RegionInstanceImpl *inst_impl;
       {
-	AutoLock<> al(local_instances.mutex);
-	  
-	if(local_instances.free_list.empty()) {
-	  // need to grow the list - do it in chunks
-	  const size_t chunk_size = 8;
-	  size_t old_size = local_instances.instances.size();
-	  size_t new_size = old_size + chunk_size;
-	  if(new_size > (1 << ID::INSTANCE_INDEX_WIDTH)) {
-	    new_size = (1 << ID::INSTANCE_INDEX_WIDTH);
-	    if(old_size == new_size) {
+        RWLock::AutoWriterLock al(local_instances.mutex);
+
+        if(local_instances.free_list.empty()) {
+          // need to grow the list - do it in chunks
+          const size_t chunk_size = 8;
+          size_t old_size = local_instances.instances.size();
+          size_t new_size = old_size + chunk_size;
+          if(new_size > (1 << ID::INSTANCE_INDEX_WIDTH)) {
+            new_size = (1 << ID::INSTANCE_INDEX_WIDTH);
+            if(old_size == new_size) {
               // completely out of slots - nothing we can do
               // Release the lock and check to see if anyone is listening
               al.release();
@@ -607,9 +607,9 @@ namespace Realm {
 	log_inst.info() << "creating new local instance: " << i;
 	inst_impl = new RegionInstanceImpl(i, me);
 	{
-	  AutoLock<> al(local_instances.mutex);
-	  local_instances.instances[inst_idx] = inst_impl;
-	}
+          RWLock::AutoWriterLock al(local_instances.mutex);
+          local_instances.instances[inst_idx] = inst_impl;
+        }
       } else
 	log_inst.info() << "reusing local instance: " << inst_impl->me;
 
@@ -623,8 +623,8 @@ namespace Realm {
 
       log_inst.info() << "releasing local instance: " << inst;
       {
-	AutoLock<> al(local_instances.mutex);
-	local_instances.free_list.push_back(inst_idx);
+        RWLock::AutoWriterLock al(local_instances.mutex);
+        local_instances.free_list.push_back(inst_idx);
       }
     }
 
