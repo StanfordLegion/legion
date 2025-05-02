@@ -495,7 +495,7 @@ namespace Realm {
       if(cnode == Network::my_node_id) {
 	// if it was locally created, we can directly access the local_instances list
 	//  and it's a fatal error if it doesn't exist
-	AutoLock<> al(local_instances.mutex);
+	RWLock::AutoReaderLock al(local_instances.mutex);
 	assert(idx < local_instances.instances.size());
 	assert(local_instances.instances[idx] != 0);
 	return local_instances.instances[idx];
@@ -514,7 +514,7 @@ namespace Realm {
 
 	// now look up (and possibly create) the instance in the right list
 	{
-	  AutoLock<> al(ilist->mutex);
+	  RWLock::AutoWriterLock al(ilist->mutex);
 
 	  if(idx >= ilist->instances.size())
 	    ilist->instances.resize(idx + 1, 0);
@@ -536,7 +536,7 @@ namespace Realm {
       unsigned inst_idx;
       RegionInstanceImpl *inst_impl;
       {
-	AutoLock<> al(local_instances.mutex);
+	RWLock::AutoWriterLock al(local_instances.mutex);
 	  
 	if(local_instances.free_list.empty()) {
 	  // need to grow the list - do it in chunks
@@ -607,7 +607,7 @@ namespace Realm {
 	log_inst.info() << "creating new local instance: " << i;
 	inst_impl = new RegionInstanceImpl(i, me);
 	{
-	  AutoLock<> al(local_instances.mutex);
+	  RWLock::AutoWriterLock al(local_instances.mutex);
 	  local_instances.instances[inst_idx] = inst_impl;
 	}
       } else
@@ -623,7 +623,7 @@ namespace Realm {
 
       log_inst.info() << "releasing local instance: " << inst;
       {
-	AutoLock<> al(local_instances.mutex);
+	RWLock::AutoWriterLock al(local_instances.mutex);
 	local_instances.free_list.push_back(inst_idx);
       }
     }
