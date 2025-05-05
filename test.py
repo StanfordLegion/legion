@@ -883,7 +883,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
                         '-DLegion_BUILD_TESTS=ON',
                         ])
     if test_prof:
-        cmake_cmd.extent(['-DLegion_USE_PREALM=ON'])
+        cmake_cmd.append('-DLegion_USE_PREALM=ON')
     # several different conditions force the use of shared libraries
     if test_regent or test_external1 or test_external2 or (env['USE_PYTHON'] == '1') or (env['SHARED_OBJECTS'] == '1'):
         cmake_cmd.append('-DBUILD_SHARED_LIBS=ON')
