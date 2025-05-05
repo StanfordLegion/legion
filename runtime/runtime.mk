@@ -1307,6 +1307,15 @@ ifeq ($(strip $(REALM_NETWORKS)),gasnetex)
 INSTALL_HEADERS += realm/gasnetex/gasnetex_wrapper/gasnetex_wrapper.h
 endif
 
+USE_PREALM ?= 0
+ifeq ($(strip $(USE_PREALM)),1)
+REALM_SRC	+= $(LG_RT_DIR)/realm/prealm/prealm.cc
+INSTALL_HEADERS	+= $(LG_RT_DIR)/realm/prealm/prealm.h \
+		   $(LG_RT_DIR)/realm/prealm/prealm.inl
+CC_FLAGS	+= -DUSE_PREALM
+INC_FLAGS	+= -I$(LG_RT_DIR)/realm/prealm
+endif
+
 # General shell commands
 SHELL	:= /bin/sh
 SH	:= sh

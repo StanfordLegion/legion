@@ -214,6 +214,14 @@ if(REALM_USE_NVTX)
   )
 endif()
 
+if(REALM_USE_PREALM)
+  list(APPEND REALM_SRC
+    realm/prealm/prealm.h
+    realm/prealm/prealm.inl
+    realm/prealm/prealm.cc
+  )
+endif()
+
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h

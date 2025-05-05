@@ -762,6 +762,11 @@ set(Legion_MAX_NUM_NODES 1024 CACHE STRING
 set(Legion_MAX_NUM_PROCS 64 CACHE STRING
     "Maximum number of processors (per node) supported by the runtime -- MUST be a power of two.")
 
+option(Legion_USE_PREALM "Build Realm with support for PRealm")
+if(Legion_USE_PREALM)
+  set(REALM_USE_PREALM ON)
+endif()
+
 # check that they're all powers of two
 
 function(is_power_of_two x ret)

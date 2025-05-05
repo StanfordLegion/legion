@@ -37,7 +37,10 @@ add_subdirectory(disjoint_complete)
 add_subdirectory(trie)
 add_subdirectory(nested_replication)
 add_subdirectory(mapper)
-add_subdirectory(prealm)
+
+if(Legion_USE_PREALM)
+  add_subdirectory(prealm)
+endif()
 
 if(Legion_USE_HDF5)
   add_subdirectory(hdf_attach_subregion_parallel)

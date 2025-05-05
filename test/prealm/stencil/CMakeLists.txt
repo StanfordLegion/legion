@@ -22,7 +22,12 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(prealm_stencil realm_stencil.cc cpu_kernels.cc prealm.cc)
+if(NOT Legion_USE_PREALM)
+  message(FATAL_ERROR
+    "PRealm stencil test requires PRealm support")
+endif()
+
+add_executable(prealm_stencil realm_stencil.cc cpu_kernels.cc)
 target_compile_definitions(prealm_stencil PRIVATE DTYPE=double)
 target_compile_definitions(prealm_stencil PRIVATE RESTRICT=__restrict__)
 target_compile_definitions(prealm_stencil PRIVATE RADIUS=2)

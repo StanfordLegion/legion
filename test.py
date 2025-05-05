@@ -821,7 +821,7 @@ def check_test_legion_cxx(root_dir):
         raise Exception('There are tests that are NOT in the test suite')
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
-                test_regent, test_legion_cxx,
+                test_prof, test_regent, test_legion_cxx,
                 test_external1, test_external2, test_perf, test_ctest, test_realm_unit_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
@@ -882,6 +882,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
                         '-DLegion_BUILD_TUTORIAL=ON',
                         '-DLegion_BUILD_TESTS=ON',
                         ])
+    if test_prof:
+        cmake_cmd.extent(['-DLegion_USE_PREALM=ON'])
     # several different conditions force the use of shared libraries
     if test_regent or test_external1 or test_external2 or (env['USE_PYTHON'] == '1') or (env['SHARED_OBJECTS'] == '1'):
         cmake_cmd.append('-DBUILD_SHARED_LIBS=ON')
@@ -1237,6 +1239,7 @@ def run_tests(test_modules=None,
         ('TEST_SPY', '1' if use_spy else '0'),
         ('USE_PROF', '1' if use_prof else '0'),
         ('TEST_PROF', '1' if use_prof else '0'),
+        ('USE_PREALM', '1' if use_prof else '0'),
         ('BOUNDS_CHECKS', '1' if use_bounds_checks else '0'),
         ('PRIVILEGE_CHECKS', '1' if use_privilege_checks else '0'),
         ('USE_COMPLEX', '1' if use_complex else '0'),
@@ -1271,7 +1274,7 @@ def run_tests(test_modules=None,
                 # (ask @eslaught for details about Regent cases)
                 assert test_ctest or test_regent
                 bin_dir, python_dir = build_cmake(
-                    root_dir, tmp_dir, env, thread_count,
+                    root_dir, tmp_dir, env, thread_count, use_prof,
                     test_regent, test_legion_cxx, test_external1,
                     test_external2,
                     test_perf, test_ctest, test_realm_unit_ctest)
