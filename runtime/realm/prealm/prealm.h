@@ -75,7 +75,7 @@ using SimpleSerdez = Realm::SimpleSerdez<T, MAX_SER_SIZE>;
 using Realm::CustomSerdezUntyped;
 
 // from event.h
-class Event : public Realm::Event {
+class REALM_PUBLIC_API Event : public Realm::Event {
 public:
   Event(void) { id = 0; }
   Event(const Realm::Event &e) : Realm::Event(e) {}
@@ -116,7 +116,7 @@ public:
 };
 static_assert(sizeof(Event) == sizeof(Realm::Event));
 
-class UserEvent : public Event {
+class REALM_PUBLIC_API UserEvent : public Event {
 public:
   UserEvent(void) { id = 0; }
   UserEvent(const Realm::UserEvent &e) { id = e.id; }
@@ -140,7 +140,7 @@ public:
 };
 static_assert(sizeof(UserEvent) == sizeof(Realm::UserEvent));
 
-class Barrier : public Event {
+class REALM_PUBLIC_API Barrier : public Event {
 public:
   Barrier(void) {
     id = 0;
@@ -192,7 +192,7 @@ public:
 };
 static_assert(sizeof(Barrier) == sizeof(Realm::Barrier));
 
-class CompletionQueue : public Realm::CompletionQueue {
+class REALM_PUBLIC_API CompletionQueue : public Realm::CompletionQueue {
 public:
   CompletionQueue(void) { id = 0; }
   CompletionQueue(Realm::CompletionQueue q) : Realm::CompletionQueue(q) {}
@@ -216,7 +216,7 @@ public:
 static_assert(sizeof(CompletionQueue) == sizeof(Realm::CompletionQueue));
 
 // from reservation.h
-class Reservation : public Realm::Reservation {
+class REALM_PUBLIC_API Reservation : public Realm::Reservation {
 public:
   Reservation(void) { id = 0; }
   Reservation(Realm::Reservation r) : Realm::Reservation(r) {}
@@ -238,7 +238,7 @@ public:
 };
 static_assert(sizeof(Reservation) == sizeof(Realm::Reservation));
 
-class FastReservation : public Realm::FastReservation {
+class REALM_PUBLIC_API FastReservation : public Realm::FastReservation {
 public:
   // TODO: do we need to profile these, right now Legion Prof won't use them
 #if 0
@@ -255,7 +255,7 @@ using Realm::Memory;
 // from processor.h
 using Realm::AddressSpace;
 
-class Processor : public Realm::Processor {
+class REALM_PUBLIC_API Processor : public Realm::Processor {
 public:
   Processor(void) { id = 0; }
   Processor(Realm::Processor p) : Realm::Processor(p) {}
@@ -301,7 +301,7 @@ public:
 };
 static_assert(sizeof(Processor) == sizeof(Realm::Processor));
 
-class ProcessorGroup : public Processor {
+class REALM_PUBLIC_API ProcessorGroup : public Processor {
 public:
   ProcessorGroup(void) { id = 0; }
   ProcessorGroup(Realm::ProcessorGroup g) : Processor(g) {}
@@ -349,7 +349,7 @@ using Realm::ExternalFileResource;
 using Realm::ExternalInstanceResource;
 using Realm::ExternalMemoryResource;
 using Realm::FieldID;
-class RegionInstance : public Realm::RegionInstance {
+class REALM_PUBLIC_API RegionInstance : public Realm::RegionInstance {
 public:
   RegionInstance(void) {
     id = 0;
@@ -442,7 +442,7 @@ using Realm::ExternalMemoryResource;
 
 // Need a special copy src dst field that records RegionInstances with unique
 // names
-struct CopySrcDstField {
+struct REALM_PUBLIC_API CopySrcDstField {
 public:
   CopySrcDstField(void);
   CopySrcDstField(const CopySrcDstField &copy_from);
@@ -480,7 +480,7 @@ public:
 
 // from point.h
 template <int N, typename T = int> using Point = Realm::Point<N, T>;
-template <int N, typename T = int> struct Rect : public Realm::Rect<N, T> {
+template <int N, typename T = int> struct REALM_PUBLIC_API Rect : public Realm::Rect<N, T> {
   using Realm::Rect<N, T>::Rect;
   REALM_CUDA_HD
   Rect(void) {}
@@ -528,7 +528,7 @@ using Realm::ProfilingRequest;
 using Realm::ProfilingResponse;
 
 // from machine.h
-class Machine : public Realm::Machine {
+class REALM_PUBLIC_API Machine : public Realm::Machine {
 public:
   using Realm::Machine::Machine;
   Machine(const Realm::Machine &m) : Realm::Machine(m) {}
@@ -556,7 +556,7 @@ template <typename QT, typename RT>
 using MachineQueryIterator = Realm::MachineQueryIterator<QT, RT>;
 
 // from runtime.h
-class Runtime : public Realm::Runtime {
+class REALM_PUBLIC_API Runtime : public Realm::Runtime {
 public:
   using Realm::Runtime::Runtime;
   Runtime(const Realm::Runtime &r) : Realm::Runtime(r) {}
@@ -595,7 +595,7 @@ public:
 static_assert(sizeof(Runtime) == sizeof(Realm::Runtime));
 
 template <typename FT, int N, typename T = int>
-class GenericAccessor : public Realm::GenericAccessor<FT, N, T> {
+class REALM_PUBLIC_API GenericAccessor : public Realm::GenericAccessor<FT, N, T> {
 public:
   GenericAccessor(void) {}
   GenericAccessor(RegionInstance inst, FieldID field_id,
@@ -604,7 +604,7 @@ public:
                   const Rect<N, T> &subrect, size_t subfield_offset = 0);
 };
 template <typename FT, int N, typename T = int>
-class AffineAccessor : public Realm::AffineAccessor<FT, N, T> {
+class REALM_PUBLIC_API AffineAccessor : public Realm::AffineAccessor<FT, N, T> {
 public:
   REALM_CUDA_HD
   AffineAccessor(void) {}
@@ -629,7 +629,7 @@ public:
   AffineAccessor &operator=(AffineAccessor &&) noexcept = default;
 };
 template <typename FT, int N, typename T>
-class MultiAffineAccessor : public Realm::MultiAffineAccessor<FT, N, T> {
+class REALM_PUBLIC_API MultiAffineAccessor : public Realm::MultiAffineAccessor<FT, N, T> {
 public:
   REALM_CUDA_HD
   MultiAffineAccessor(void) {}
@@ -659,7 +659,7 @@ template <int N, typename T, int N2, typename T2>
 using DomainTransform = Realm::DomainTransform<N, T, N2, T2>;
 template <int N, typename T = int>
 using CopyIndirection = Realm::CopyIndirection<N, T>;
-template <int N, typename T> class IndexSpace : public Realm::IndexSpace<N, T> {
+template <int N, typename T> class REALM_PUBLIC_API IndexSpace : public Realm::IndexSpace<N, T> {
 public:
   using Realm::IndexSpace<N, T>::IndexSpace;
   IndexSpace(void) {}
@@ -903,7 +903,7 @@ public:
       const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT);
 };
 
-class IndexSpaceGeneric : public Realm::IndexSpaceGeneric {
+class REALM_PUBLIC_API IndexSpaceGeneric : public Realm::IndexSpaceGeneric {
 public:
   using Realm::IndexSpaceGeneric::IndexSpaceGeneric;
   IndexSpaceGeneric(void) {}

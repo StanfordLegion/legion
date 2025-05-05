@@ -17,7 +17,7 @@
 
 namespace PRealm {
 
-class ThreadProfiler {
+class REALM_INTERNAL_API_EXTERNAL_LINKAGE ThreadProfiler {
 public:
   typedef long long timestamp_t;
   typedef ::realm_id_t ProcID;
