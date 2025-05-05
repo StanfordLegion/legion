@@ -1314,6 +1314,7 @@ INSTALL_HEADERS	+= $(LG_RT_DIR)/realm/prealm/prealm.h \
 		   $(LG_RT_DIR)/realm/prealm/prealm.inl
 CC_FLAGS	+= -DUSE_PREALM
 INC_FLAGS	+= -I$(LG_RT_DIR)/realm/prealm
+SLIB_REALM_DEPS	+= -l$(ZLIB_LIBNAME)
 endif
 
 # General shell commands

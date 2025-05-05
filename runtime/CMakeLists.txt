@@ -422,6 +422,10 @@ if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
+if(REALM_USE_PREALM)
+  target_link_libraries(RealmRuntime PRIVATE ZLIB::ZLIB)
+endif()
+
 if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   if (REALM_USE_GASNET1 OR NOT REALM_USE_GASNETEX_WRAPPER)
     find_package(GASNet)
