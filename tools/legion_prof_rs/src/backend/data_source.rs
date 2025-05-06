@@ -1521,7 +1521,8 @@ impl StateDataSource {
             | EventEntryKind::PoisonEvent
             | EventEntryKind::ArriveBarrier
             | EventEntryKind::ReservationAcquire
-            | EventEntryKind::CompletionQueueEvent => {
+            | EventEntryKind::CompletionQueueEvent
+            | EventEntryKind::ExternalEvent(_) => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
                     let trigger_time = event_entry.trigger_time.unwrap();
@@ -1532,12 +1533,18 @@ impl StateDataSource {
                     let op_name = entry.name(&self.state);
                     let proc_name = proc.name(&self.state);
                     let kind = match event_entry.kind {
-                        EventEntryKind::MergeEvent => "Event Merger",
-                        EventEntryKind::TriggerEvent => "User Event Trigger",
-                        EventEntryKind::PoisonEvent => "User Event Poisoned",
-                        EventEntryKind::ArriveBarrier => "Barrier Arrival",
-                        EventEntryKind::ReservationAcquire => "Reservation Acquire",
-                        EventEntryKind::CompletionQueueEvent => "Completion Queue Non-Empty",
+                        EventEntryKind::MergeEvent => String::from("Event Merger"),
+                        EventEntryKind::TriggerEvent => String::from("User Event Trigger"),
+                        EventEntryKind::PoisonEvent => String::from("User Event Poisoned"),
+                        EventEntryKind::ArriveBarrier => String::from("Barrier Arrival"),
+                        EventEntryKind::ReservationAcquire => String::from("Reservation Acquire"),
+                        EventEntryKind::CompletionQueueEvent => {
+                            String::from("Completion Queue Non-Empty")
+                        }
+                        EventEntryKind::ExternalEvent(pid) => {
+                            let provenance = self.state.find_provenance(pid).unwrap();
+                            format!("External Event (derived from {})", provenance)
+                        }
                         _ => unreachable!(),
                     };
                     Field::ItemLink(ItemLink {
@@ -1556,12 +1563,18 @@ impl StateDataSource {
                     let fevent = self.state.find_fevent(prof_uid);
                     let fevent_node = fevent.node_id();
                     let kind = match event_entry.kind {
-                        EventEntryKind::MergeEvent => "n event merger",
-                        EventEntryKind::TriggerEvent => " user event trigger",
-                        EventEntryKind::PoisonEvent => " user event poison",
-                        EventEntryKind::ArriveBarrier => " barrier arrival",
-                        EventEntryKind::ReservationAcquire => " reservation acquire",
-                        EventEntryKind::CompletionQueueEvent => " completion queue non-empty",
+                        EventEntryKind::MergeEvent => String::from("n event merger"),
+                        EventEntryKind::TriggerEvent => String::from(" user event trigger"),
+                        EventEntryKind::PoisonEvent => String::from(" user event poison"),
+                        EventEntryKind::ArriveBarrier => String::from(" barrier arrival"),
+                        EventEntryKind::ReservationAcquire => String::from(" reservation acquire"),
+                        EventEntryKind::CompletionQueueEvent => {
+                            String::from(" completion queue non-empty")
+                        }
+                        EventEntryKind::ExternalEvent(pid) => {
+                            let provenance = self.state.find_provenance(pid).unwrap();
+                            format!("n external event (derived from {})", provenance)
+                        }
                         _ => unreachable!(),
                     };
                     if fevent_node == node {

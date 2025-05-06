@@ -105,6 +105,13 @@ public:
     Event provenance;
     timestamp_t performed;
   };
+  struct ExternalEventInfo {
+  public:
+    Event result;
+    Event fevent;
+    timestamp_t performed;
+    unsigned long long provenance; 
+  };
   struct BarrierArrivalInfo {
   public:
     Event result;
@@ -241,6 +248,7 @@ public:
   void record_barrier_arrival(Event result, Event precondition);
   void record_event_merger(Event result, const Event *preconditions,
                            size_t num_events);
+  void record_external_event(Event result, const char* provenance);
   void record_reservation_acquire(Reservation r, Event result,
                                   Event precondition);
   Event record_instance_ready(RegionInstance inst, Event result,
@@ -262,6 +270,7 @@ private:
   std::deque<EventMergerInfo> event_merger_infos;
   std::deque<EventTriggerInfo> event_trigger_infos;
   std::deque<EventPoisonInfo> event_poison_infos;
+  std::deque<ExternalEventInfo> external_event_infos;
   std::deque<BarrierArrivalInfo> barrier_arrival_infos;
   std::deque<ReservationAcquireInfo> reservation_acquire_infos;
   std::deque<InstanceReadyInfo> instance_ready_infos;

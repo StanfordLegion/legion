@@ -148,6 +148,7 @@ pub enum Record {
     EventMergerInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
     EventTriggerInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
     EventPoisonInfo { result: EventID, fevent: EventID, performed: Timestamp },
+    ExternalEventInfo { result: EventID, fevent: EventID, performed: Timestamp, provenance: ProvenanceID },
     BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
     ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp, reservation: u64 },
     CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
@@ -1242,6 +1243,21 @@ fn parse_event_poison_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
         },
     ))
 }
+fn parse_external_event_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, result) = parse_event_id(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
+    let (input, provenance) = parse_provenance_id(input)?;
+    Ok((
+        input,
+        Record::ExternalEventInfo {
+            result,
+            fevent,
+            performed,
+            provenance,
+        },
+    ))
+}
 fn parse_barrier_arrival_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, result) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
@@ -1483,6 +1499,7 @@ fn parse<'a>(
     insert("EventMergerInfo", parse_event_merger_info);
     insert("EventTriggerInfo", parse_event_trigger_info);
     insert("EventPoisonInfo", parse_event_poison_info);
+    insert("ExternalEventInfo", parse_external_event_info);
     insert("BarrierArrivalInfo", parse_barrier_arrival_info);
     insert("ReservationAcquireInfo", parse_reservation_acquire_info);
     insert("InstanceReadyInfo", parse_instance_ready_info);

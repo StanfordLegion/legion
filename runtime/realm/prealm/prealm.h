@@ -480,7 +480,8 @@ public:
 
 // from point.h
 template <int N, typename T = int> using Point = Realm::Point<N, T>;
-template <int N, typename T = int> struct REALM_PUBLIC_API Rect : public Realm::Rect<N, T> {
+template <int N, typename T = int>
+struct REALM_PUBLIC_API Rect : public Realm::Rect<N, T> {
   using Realm::Rect<N, T>::Rect;
   REALM_CUDA_HD
   Rect(void) {}
@@ -659,7 +660,8 @@ template <int N, typename T, int N2, typename T2>
 using DomainTransform = Realm::DomainTransform<N, T, N2, T2>;
 template <int N, typename T = int>
 using CopyIndirection = Realm::CopyIndirection<N, T>;
-template <int N, typename T> class REALM_PUBLIC_API IndexSpace : public Realm::IndexSpace<N, T> {
+template <int N, typename T>
+class REALM_PUBLIC_API IndexSpace : public Realm::IndexSpace<N, T> {
 public:
   using Realm::IndexSpace<N, T>::IndexSpace;
   IndexSpace(void) {}
@@ -957,6 +959,29 @@ using Realm::SubgraphDefinition;
 
 // from module_config.h
 using Realm::ModuleConfig;
+
+#ifdef REALM_USE_CUDA
+namespace Cuda {
+  using Realm::Cuda::CudaModuleConfig;
+  using Realm::Cuda::get_cuda_device_id;
+  using Realm::Cuda::get_cuda_device_uuid;
+  using Realm::Cuda::get_task_cuda_stream;
+  using Realm::Cuda::set_task_ctxsync_required;
+  using Realm::Cuda::StreamAwareTaskFuncPtr;
+  using Realm::Cuda::Uuid;
+  using Realm::Cuda::UUID_SIZE;
+
+  class CudaModule : public Realm::Cuda::CudaModule {
+  public:
+    CudaModule(RuntimeImpl *_runtime);
+    virtual ~CudaModule(void);
+
+  public:
+    Event make_realm_event(CUevent_st *cuda_event);
+    Event make_realm_event(CUstream_st *cuda_stream);
+  };
+} // namespace Cuda
+#endif
 
 } // namespace PRealm
 

@@ -3172,6 +3172,7 @@ pub enum EventEntryKind {
     InstanceRedistrict,
     InstanceDeletion,
     CompletionQueueEvent,
+    ExternalEvent(ProvenanceID), // Events made from Realm modules
 }
 
 type CriticalPathVertex = NodeIndex<usize>;
@@ -5106,6 +5107,21 @@ fn process_record(
                 creator_uid,
                 *performed,
                 deduplicate,
+            );
+        }
+        Record::ExternalEventInfo {
+            result,
+            fevent,
+            performed,
+            provenance,
+        } => {
+            let creator_uid = state.create_fevent_reference(*fevent);
+            state.record_event_node(
+                *result,
+                EventEntryKind::ExternalEvent(*provenance),
+                creator_uid,
+                *performed,
+                false,
             );
         }
         Record::BarrierArrivalInfo {

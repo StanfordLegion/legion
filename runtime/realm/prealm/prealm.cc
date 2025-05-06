@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <unordered_set>
 #include <zlib.h>
 // Need this to know which version of Legion Prof we're using
 static constexpr unsigned LEGION_PROF_VERSION =
@@ -83,6 +84,7 @@ public:
   Realm::Event get_remote_done(void);
   void record_thread_profiler(ThreadProfiler *profiler);
   unsigned long long find_backtrace_id(Backtrace &bt);
+  unsigned long long find_provenance_id(const std::string_view &provenance);
   static Profiler &get_profiler(void);
   static void callback(const void *args, size_t arglen, const void *user_args,
                        size_t user_arglen, Realm::Processor p);
@@ -117,9 +119,8 @@ public:
   void record_processor(const Processor &p);
   void record_affinities(std::vector<Memory> &memories_to_log);
   void record_remote_notification(Realm::Event notified);
-  void
-  record_implicit(long long start_time, Realm::Event fevent,
-                  const std::vector<ThreadProfiler::WaitInfo> &wait_intervals);
+  void record_implicit(long long start_time, Realm::Event fevent,
+                       const std::vector<ThreadProfiler::WaitInfo> &wait_intervals);
   void update_footprint(size_t footprint, ThreadProfiler *profiler);
 
 public:
@@ -130,6 +131,7 @@ public:
   void serialize(const ThreadProfiler::EventMergerInfo &info) const;
   void serialize(const ThreadProfiler::EventTriggerInfo &info) const;
   void serialize(const ThreadProfiler::EventPoisonInfo &info) const;
+  void serialize(const ThreadProfiler::ExternalEventInfo &info) const;
   void serialize(const ThreadProfiler::BarrierArrivalInfo &info) const;
   void serialize(const ThreadProfiler::ReservationAcquireInfo &info) const;
   void serialize(const ThreadProfiler::InstanceReadyInfo &info) const;
@@ -169,6 +171,7 @@ private:
   std::vector<Memory> recorded_memories;
   std::vector<Processor> recorded_processors;
   std::map<uintptr_t, unsigned long long> backtrace_ids;
+  std::unordered_set<unsigned long long> provenance_ids;
   unsigned long long next_backtrace_id;
   std::atomic<size_t> total_memory_footprint;
   unsigned total_address_spaces;
@@ -183,7 +186,8 @@ public:
   bool no_critical_paths;
 };
 
-enum {
+enum
+{
   PROC_DESC_ID,
   MAX_DIM_DESC_ID,
   MACHINE_DESC_ID,
@@ -212,11 +216,13 @@ enum {
   EVENT_MERGER_INFO_ID,
   EVENT_TRIGGER_INFO_ID,
   EVENT_POISON_INFO_ID,
+  EXTERNAL_EVENT_INFO_ID,
   BARRIER_ARRIVAL_INFO_ID,
   RESERVATION_ACQUIRE_INFO_ID,
   INSTANCE_READY_INFO_ID,
   COMPLETION_QUEUE_INFO_ID,
   PROFTASK_INFO_ID,
+  PROVENANCE_ID,
 };
 
 enum DepPartOpKind {
@@ -546,6 +552,20 @@ void ThreadProfiler::record_event_merger(Event result,
   }
   info.provenance = get_fevent();
   profiler.update_footprint(sizeof(info) + num_events * sizeof(Event), this);
+}
+
+void ThreadProfiler::record_external_event(Event result, const char *provenance)
+{
+  Profiler &profiler = Profiler::get_profiler();
+  if(!profiler.enabled || profiler.no_critical_paths)
+    return;
+  // Take the timing measurement of when this happened first
+  ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
+  info.performed = Realm::Clock::current_time_in_nanoseconds();
+  info.result = result;
+  info.fevent = get_fevent();
+  info.provenance = profiler.find_provenance_id(std::string_view(provenance));
+  profiler.update_footprint(sizeof(info), this);
 }
 
 void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
@@ -990,6 +1010,15 @@ size_t ThreadProfiler::dump_inter(long long target_latency) {
     if (t_curr >= t_stop)
       return diff;
   }
+  while(!external_event_infos.empty()) {
+    ExternalEventInfo &info = external_event_infos.front();
+    profiler.serialize(info);
+    diff += sizeof(info);
+    external_event_infos.pop_front();
+    const long long t_curr = Realm::Clock::current_time_in_microseconds();
+    if(t_curr >= t_stop)
+      return diff;
+  }
   while (!barrier_arrival_infos.empty()) {
     BarrierArrivalInfo &info = barrier_arrival_infos.front();
     profiler.serialize(info);
@@ -1093,6 +1122,8 @@ void ThreadProfiler::finalize(void) {
     profiler.serialize(event_trigger_infos[idx]);
   for (unsigned idx = 0; idx < event_poison_infos.size(); idx++)
     profiler.serialize(event_poison_infos[idx]);
+  for(unsigned idx = 0; idx < external_event_infos.size(); idx++)
+    profiler.serialize(external_event_infos[idx]);
   for (unsigned idx = 0; idx < barrier_arrival_infos.size(); idx++)
     profiler.serialize(barrier_arrival_infos[idx]);
   for (unsigned idx = 0; idx < reservation_acquire_infos.size(); idx++)
@@ -1474,6 +1505,13 @@ void Profiler::log_preamble(void) const {
      << "fevent:unsigned long long:" << sizeof(Event) << delim
      << "performed:timestamp_t:" << sizeof(timestamp_t) << "}" << std::endl;
 
+  ss << "ExternalEventInfo {"
+     << "id:" << EXTERNAL_EVENT_INFO_ID << delim
+     << "result:unsigned long long:" << sizeof(Event) << delim
+     << "fevent:unsigned long long:" << sizeof(Event) << delim
+     << "performed:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "prov:unsigned long long:" << sizeof(unsigned long long) << "}" << std::endl;
+
   ss << "BarrierArrivalInfo {"
      << "id:" << BARRIER_ARRIVAL_INFO_ID << delim
      << "result:unsigned long long:" << sizeof(Event) << delim
@@ -1516,6 +1554,11 @@ void Profiler::log_preamble(void) const {
      << "creator:unsigned long long:" << sizeof(Event) << delim
      << "fevent:unsigned long long:" << sizeof(Event) << delim
      << "completion:bool:" << sizeof(bool) << "}" << std::endl;
+
+  ss << "Provenance {"
+     << "id:" << PROVENANCE_ID << delim
+     << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
+     << "prov:string:" << "-1" << "}" << std::endl;
 
   // An empty line indicates the end of the preamble.
   ss << std::endl;
@@ -1678,6 +1721,16 @@ void Profiler::serialize(const ThreadProfiler::EventPoisonInfo &info) const {
   pr_fwrite(f, (char *)&info.result.id, sizeof(info.result.id));
   pr_fwrite(f, (char *)&info.provenance.id, sizeof(info.provenance.id));
   pr_fwrite(f, (char *)&info.performed, sizeof(info.performed));
+}
+
+void Profiler::serialize(const ThreadProfiler::ExternalEventInfo &info) const
+{
+  int ID = EXTERNAL_EVENT_INFO_ID;
+  pr_fwrite(f, (char *)&ID, sizeof(ID));
+  pr_fwrite(f, (char *)&info.result.id, sizeof(info.result.id));
+  pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
+  pr_fwrite(f, (char *)&info.performed, sizeof(info.performed));
+  pr_fwrite(f, (char *)&info.provenance, sizeof(info.provenance));
 }
 
 void Profiler::serialize(const ThreadProfiler::BarrierArrivalInfo &info) const {
@@ -2117,6 +2170,31 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   backtrace_ids[hash] = result;
   profiler_lock.unlock();
   return result;
+}
+
+unsigned long long Profiler::find_provenance_id(const std::string_view &provenance)
+{
+  const unsigned long long hash = std::hash<std::string_view>{}(provenance);
+  profiler_lock.rdlock().wait();
+  std::unordered_set<unsigned long long>::const_iterator finder =
+      provenance_ids.find(hash);
+  if(finder != provenance_ids.end()) {
+    profiler_lock.unlock();
+    return hash;
+  }
+  profiler_lock.unlock();
+  profiler_lock.wrlock().wait();
+  if(provenance_ids.insert(hash).second) {
+    // Need to save the provenance string now
+    int ID = PROVENANCE_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&hash, sizeof(hash));
+    pr_fwrite(f, provenance.data(), provenance.size());
+    char null = '\0';
+    pr_fwrite(f, &null, sizeof(null));
+  }
+  profiler_lock.unlock();
+  return hash;
 }
 
 void Profiler::record_task(Processor::TaskFuncID task_id) {
@@ -2720,4 +2798,29 @@ int Runtime::wait_for_shutdown(void) {
 /*static*/ Runtime Runtime::get_runtime(void) {
   return Realm::Runtime::get_runtime();
 }
+
+#ifdef REALM_USE_CUDA
+namespace Cuda {
+  CudaModule::CudaModule(RuntimeImpl *_runtime)
+    : Realm::Cuda::CudaModule(_runtime)
+  {}
+
+  CudaModule::~CudaModule(void) {}
+
+  Event CudaModule::make_realm_event(CUevent_st *cuda_event)
+  {
+    const Event result(Realm::Cuda::CudaModule::make_realm_event(cuda_event));
+    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA event");
+    return result;
+  }
+
+  Event CudaModule::make_realm_event(CUstream_st *cuda_stream)
+  {
+    const Event result(Realm::Cuda::CudaModule::make_realm_event(cuda_stream));
+    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA stream");
+    return result;
+  }
+} // namespace Cuda
+#endif
+
 } // namespace PRealm
