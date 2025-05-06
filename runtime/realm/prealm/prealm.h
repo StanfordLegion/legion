@@ -969,11 +969,11 @@ using Realm::SubgraphDefinition;
 using Realm::ModuleConfig;
 
 #ifdef REALM_USE_CUDA
-using CudaArrayLayoutPiece;
-using CudaArrayPieceInfo;
-using ExternalCudaArrayResource;
-using ExternalCudaMemoryResource;
-using ExternalCudaPinnedHostResource;
+using Realm::CudaArrayLayoutPiece;
+using Realm::CudaArrayPieceInfo;
+using Realm::ExternalCudaArrayResource;
+using Realm::ExternalCudaMemoryResource;
+using Realm::ExternalCudaPinnedHostResource;
 namespace Cuda {
   using Realm::Cuda::CudaModuleConfig;
   using Realm::Cuda::get_cuda_device_id;
