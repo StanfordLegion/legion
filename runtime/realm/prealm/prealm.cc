@@ -142,6 +142,7 @@ public:
   void serialize(const ThreadProfiler::GPUTaskInfo &info) const;
   void serialize(const ThreadProfiler::InstTimelineInfo &info) const;
   void serialize(const ThreadProfiler::ProfTaskInfo &info) const;
+  void serialize(const ThreadProfiler::ApplicationInfo &info) const;
 
 private:
   void log_preamble(void) const;
@@ -222,6 +223,7 @@ enum
   INSTANCE_READY_INFO_ID,
   COMPLETION_QUEUE_INFO_ID,
   PROFTASK_INFO_ID,
+  APPLICATION_INFO_ID,
   PROVENANCE_ID,
 };
 
@@ -967,6 +969,18 @@ void ThreadProfiler::process_trigger(const void *args, size_t arglen) {
   }
 }
 
+void ThreadProfiler::record_time_range(long long start, const std::string_view &name)
+{
+  ApplicationInfo &info = application_infos.emplace_back(ApplicationInfo());
+  info.stop = Realm::Clock::current_time_in_nanoseconds();
+  info.start = start;
+  info.fevent = get_fevent();
+  info.proc_id = local_proc.id;
+  Profiler &profiler = Profiler::get_profiler();
+  info.provenance = profiler.find_provenance_id(name);
+  profiler.update_footprint(sizeof(info), this);
+}
+
 size_t ThreadProfiler::dump_inter(long long target_latency) {
   Profiler &profiler = Profiler::get_profiler();
   // Start the timing so we know how long we are taking
@@ -1109,6 +1123,15 @@ size_t ThreadProfiler::dump_inter(long long target_latency) {
     if (t_curr >= t_stop)
       return diff;
   }
+  while(!application_infos.empty()) {
+    ApplicationInfo &info = application_infos.front();
+    profiler.serialize(info);
+    diff += sizeof(info);
+    application_infos.pop_front();
+    const long long t_curr = Realm::Clock::current_time_in_microseconds();
+    if(t_curr >= t_stop)
+      return diff;
+  }
   return diff;
 }
 
@@ -1144,6 +1167,8 @@ void ThreadProfiler::finalize(void) {
     profiler.serialize(inst_timeline_infos[idx]);
   for (unsigned idx = 0; idx < prof_task_infos.size(); idx++)
     profiler.serialize(prof_task_infos[idx]);
+  for(unsigned idx = 0; idx < application_infos.size(); idx++)
+    profiler.serialize(application_infos[idx]);
   if (is_implicit())
     profiler.record_implicit(start_time, implicit_fevent, implicit_waits);
 }
@@ -1555,6 +1580,14 @@ void Profiler::log_preamble(void) const {
      << "fevent:unsigned long long:" << sizeof(Event) << delim
      << "completion:bool:" << sizeof(bool) << "}" << std::endl;
 
+  ss << "ApplicationCallInfo {"
+     << "id:" << APPLICATION_INFO_ID << delim
+     << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
+     << "start:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "stop:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "proc_id:ProcID:" << sizeof(ProcID) << delim
+     << "fevent:unsigned long long:" << sizeof(Event) << "}" << std::endl;
+
   ss << "Provenance {"
      << "id:" << PROVENANCE_ID << delim
      << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
@@ -1942,6 +1975,17 @@ void Profiler::serialize(
             sizeof(proftask_info.finish_event));
   bool completion = true; // always a true completion here
   pr_fwrite(f, (char *)&(completion), sizeof(completion));
+}
+
+void Profiler::serialize(const ThreadProfiler::ApplicationInfo &info) const
+{
+  int ID = APPLICATION_INFO_ID;
+  pr_fwrite(f, (char *)&ID, sizeof(ID));
+  pr_fwrite(f, (char *)&info.provenance, sizeof(info.provenance));
+  pr_fwrite(f, (char *)&(info.start), sizeof(info.start));
+  pr_fwrite(f, (char *)&(info.stop), sizeof(info.stop));
+  pr_fwrite(f, (char *)&(info.proc_id), sizeof(info.proc_id));
+  pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
 }
 
 void Profiler::finalize(void) {

@@ -214,6 +214,13 @@ public:
     Event creator;
     Event finish_event;
   };
+  struct ApplicationInfo {
+  public:
+    timestamp_t start, stop;
+    ProcID proc_id;
+    Event fevent;
+    unsigned long long provenance;
+  };
 
 public:
   ThreadProfiler(Processor p, Realm::Event implicit);
@@ -256,6 +263,7 @@ public:
   void record_instance_usage(RegionInstance inst, FieldID field_id);
   void process_response(ProfilingResponse &response);
   void process_trigger(const void *args, size_t arglen);
+  void record_time_range(long long start, const std::string_view& name);
   size_t dump_inter(long long target_latency);
   void finalize(void);
 
@@ -281,6 +289,7 @@ private:
   std::deque<GPUTaskInfo> gpu_task_infos;
   std::deque<InstTimelineInfo> inst_timeline_infos;
   std::deque<ProfTaskInfo> prof_task_infos;
+  std::deque<ApplicationInfo> application_infos;
   std::vector<ProcID> proc_ids;
   std::vector<MemID> mem_ids;
   std::vector<WaitInfo> implicit_waits;
@@ -1055,4 +1064,9 @@ inline void Machine::get_shared_processors(Memory m, std::set<Processor> &pset,
 /*static*/ inline Machine Machine::get_machine(void) {
   return Realm::Machine::get_machine();
 }
+
+inline void prealm_time_range(long long start_time_in_ns, const std::string_view& name) {
+  ThreadProfiler::get_thread_profiler().record_time_range(start_time_in_ns, name);
+}
+
 } // namespace PRealm

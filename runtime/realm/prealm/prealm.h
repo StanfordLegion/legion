@@ -24,28 +24,35 @@
 #endif
 
 namespace PRealm {
-// Import a bunch of types directly from the realm public interface
-// but overload ones that we need to profile
 
-// forward declarations
-using Realm::Clock;
-using Realm::CodeDescriptor;
-using Realm::Logger;
-// TODO: add profiling to client-level profiling requests
-using Realm::CommandLineParser;
-using Realm::ProfilingRequestSet;
-template <int N, typename T> struct Rect;
-template <int N, typename T> class IndexSpace;
+  // You can use this call to record your own time ranges in a PRealm profile
+  // It will implicitly capture the stop time when the function is invoked
+  inline void prealm_time_range(long long start_time_in_ns, const std::string_view &name);
 
-// from utils.h
-using Realm::dynamic_extent;
-template <typename T, size_t Extent = dynamic_extent>
-using span = Realm::span<T, Extent>;
+  // Import a bunch of types directly from the realm public interface
+  // but overload ones that we need to profile
 
-// from faults.h
-namespace Faults {
-using namespace Realm::Faults;
-}
+  // forward declarations
+  using Realm::Clock;
+  using Realm::CodeDescriptor;
+  using Realm::Logger;
+  // TODO: add profiling to client-level profiling requests
+  using Realm::CommandLineParser;
+  using Realm::ProfilingRequestSet;
+  template <int N, typename T>
+  struct Rect;
+  template <int N, typename T>
+  class IndexSpace;
+
+  // from utils.h
+  using Realm::dynamic_extent;
+  template <typename T, size_t Extent = dynamic_extent>
+  using span = Realm::span<T, Extent>;
+
+  // from faults.h
+  namespace Faults {
+    using namespace Realm::Faults;
+  }
 using Realm::ApplicationException;
 using Realm::Backtrace;
 using Realm::CancellationException;
