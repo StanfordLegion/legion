@@ -1591,7 +1591,7 @@ void Profiler::log_preamble(void) const {
   ss << "Provenance {"
      << "id:" << PROVENANCE_ID << delim
      << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
-     << "prov:string:" << "-1" << "}" << std::endl;
+     << "prov:string:-1}" << std::endl;
 
   // An empty line indicates the end of the preamble.
   ss << std::endl;
@@ -2845,7 +2845,7 @@ int Runtime::wait_for_shutdown(void) {
 
 #ifdef REALM_USE_CUDA
 namespace Cuda {
-  CudaModule::CudaModule(RuntimeImpl *_runtime)
+  CudaModule::CudaModule(Realm::RuntimeImpl *_runtime)
     : Realm::Cuda::CudaModule(_runtime)
   {}
 

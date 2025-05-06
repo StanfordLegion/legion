@@ -20,6 +20,7 @@
 #include "realm/cmdline.h"
 #include "realm/id.h"
 #ifdef REALM_USE_CUDA
+#include "realm/cuda/cuda_access.h"
 #include "realm/cuda/cuda_module.h"
 #endif
 
@@ -968,6 +969,11 @@ using Realm::SubgraphDefinition;
 using Realm::ModuleConfig;
 
 #ifdef REALM_USE_CUDA
+using CudaArrayLayoutPiece;
+using CudaArrayPieceInfo;
+using ExternalCudaArrayResource;
+using ExternalCudaMemoryResource;
+using ExternalCudaPinnedHostResource;
 namespace Cuda {
   using Realm::Cuda::CudaModuleConfig;
   using Realm::Cuda::get_cuda_device_id;
@@ -980,7 +986,7 @@ namespace Cuda {
 
   class CudaModule : public Realm::Cuda::CudaModule {
   public:
-    CudaModule(RuntimeImpl *_runtime);
+    CudaModule(Realm::RuntimeImpl *_runtime);
     virtual ~CudaModule(void);
 
   public:
