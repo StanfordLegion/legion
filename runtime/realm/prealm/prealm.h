@@ -28,7 +28,8 @@ namespace PRealm {
 
   // You can use this call to record your own time ranges in a PRealm profile
   // It will implicitly capture the stop time when the function is invoked
-  inline void prealm_time_range(long long start_time_in_ns, const std::string_view &name);
+  REALM_PUBLIC_API inline void prealm_time_range(long long start_time_in_ns,
+                                                 const std::string_view &name);
 
   // Import a bunch of types directly from the realm public interface
   // but overload ones that we need to profile
@@ -86,6 +87,7 @@ using Realm::CustomSerdezUntyped;
 class REALM_PUBLIC_API Event : public Realm::Event {
 public:
   Event(void) { id = 0; }
+  Event(::realm_id_t i) { id = i; }
   Event(const Realm::Event &e) : Realm::Event(e) {}
   Event(const Event &rhs) = default;
   Event(Event &&rhs) = default;
@@ -127,6 +129,9 @@ static_assert(sizeof(Event) == sizeof(Realm::Event));
 class REALM_PUBLIC_API UserEvent : public Event {
 public:
   UserEvent(void) { id = 0; }
+  UserEvent(::realm_id_t i)
+    : Event(i)
+  {}
   UserEvent(const Realm::UserEvent &e) { id = e.id; }
   UserEvent(const UserEvent &rhs) = default;
   UserEvent(UserEvent &&rhs) = default;
@@ -154,6 +159,10 @@ public:
     id = 0;
     timestamp = 0;
   }
+  Barrier(::realm_id_t i, ::realm_barrier_timestamp_t t)
+    : Event(i)
+    , timestamp(t)
+  {}
   Barrier(const Realm::Barrier &b) {
     id = b.id;
     timestamp = b.timestamp;
