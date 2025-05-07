@@ -87,7 +87,11 @@ using Realm::CustomSerdezUntyped;
 class REALM_PUBLIC_API Event : public Realm::Event {
 public:
   Event(void) { id = 0; }
-  Event(::realm_id_t i) { id = i; }
+  Event(::realm_id_t i)
+  {
+    assert(Realm::ID{i}.is_event());
+    id = i;
+  }
   Event(const Realm::Event &e) : Realm::Event(e) {}
   Event(const Event &rhs) = default;
   Event(Event &&rhs) = default;
@@ -131,7 +135,9 @@ public:
   UserEvent(void) { id = 0; }
   UserEvent(::realm_id_t i)
     : Event(i)
-  {}
+  {
+    assert(Realm::ID{i}.is_event());
+  }
   UserEvent(const Realm::UserEvent &e) { id = e.id; }
   UserEvent(const UserEvent &rhs) = default;
   UserEvent(UserEvent &&rhs) = default;
@@ -162,7 +168,9 @@ public:
   Barrier(::realm_id_t i, ::realm_barrier_timestamp_t t)
     : Event(i)
     , timestamp(t)
-  {}
+  {
+    assert(Realm::ID{i}.is_barrier());
+  }
   Barrier(const Realm::Barrier &b) {
     id = b.id;
     timestamp = b.timestamp;
@@ -275,6 +283,11 @@ using Realm::AddressSpace;
 class REALM_PUBLIC_API Processor : public Realm::Processor {
 public:
   Processor(void) { id = 0; }
+  Processor(::realm_id_t i)
+  {
+    assert(Realm::ID{i}.is_processor());
+    id = i;
+  }
   Processor(Realm::Processor p) : Realm::Processor(p) {}
   Processor(const Processor &p) = default;
   Processor(Processor &&p) = default;
