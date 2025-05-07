@@ -47,6 +47,73 @@ const RegionInstance RegionInstance::NO_INST = RegionInstance();
 Realm::Logger log_pr("PRealm");
 thread_local ThreadProfiler *thread_profiler = nullptr;
 
+class AutoLock {
+public:
+  inline AutoLock(Realm::FastReservation &r, bool excl = true)
+    : local_lock(r)
+    , exclusive(excl)
+    , held(true)
+  {
+    if(exclusive) {
+      Event ready = local_lock.wrlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.wrlock();
+      }
+    } else {
+      Event ready = local_lock.rdlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.rdlock();
+      }
+    }
+  }
+
+public:
+  AutoLock(AutoLock &&rhs) = delete;
+  AutoLock(const AutoLock &rhs) = delete;
+  inline ~AutoLock(void)
+  {
+    if(held)
+      local_lock.unlock();
+  }
+
+public:
+  AutoLock &operator=(AutoLock &&rhs) = delete;
+  AutoLock &operator=(const AutoLock &rhs) = delete;
+
+public:
+  inline void release(void)
+  {
+    assert(held);
+    local_lock.unlock();
+    held = false;
+  }
+  inline void reacquire(void)
+  {
+    assert(!held);
+    if(exclusive) {
+      Event ready = local_lock.wrlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.wrlock();
+      }
+    } else {
+      Event ready = local_lock.rdlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.rdlock();
+      }
+    }
+    held = true;
+  }
+
+protected:
+  Realm::FastReservation &local_lock;
+  const bool exclusive;
+  bool held;
+};
+
 class Profiler {
 public:
   struct WrapperArgs {
@@ -144,6 +211,11 @@ public:
   void serialize(const ThreadProfiler::ProfTaskInfo &info) const;
   void serialize(const ThreadProfiler::ApplicationInfo &info) const;
 
+#ifdef REALM_USE_CUDA
+public:
+  Cuda::CudaModule *find_or_create_cuda_module(Realm::Cuda::CudaModule *mod);
+#endif
+
 private:
   void log_preamble(void) const;
   void log_configuration(Machine &machine, Processor local) const;
@@ -180,6 +252,9 @@ private:
   Realm::UserEvent shutdown_wait;
   int return_code;
   bool has_shutdown;
+#ifdef REALM_USE_CUDA
+  Cuda::CudaModule *cuda_module;
+#endif
 
 public:
   bool enabled;
@@ -1201,6 +1276,9 @@ Profiler::Profiler(void)
   for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++)
     total_outstanding_requests[idx] = 0;
 #endif
+#ifdef REALM_USE_CUDA
+  cuda_module = nullptr;
+#endif
 }
 
 void Profiler::parse_command_line(int argc, char **argv) {
@@ -1989,22 +2067,23 @@ void Profiler::serialize(const ThreadProfiler::ApplicationInfo &info) const
 }
 
 void Profiler::finalize(void) {
-  profiler_lock.wrlock().wait();
+  {
+    AutoLock p_lock(profiler_lock);
 #ifdef DEBUG_REALM
-  bool done = true;
-  for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
-    if (total_outstanding_requests[idx] == 0)
-      continue;
-    done = false;
-    break;
-  }
-  if (!done)
-    done_event = Realm::UserEvent::create_user_event();
+    bool done = true;
+    for(unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
+      if(total_outstanding_requests[idx] == 0)
+        continue;
+      done = false;
+      break;
+    }
+    if(!done)
+      done_event = Realm::UserEvent::create_user_event();
 #else
-  if (total_outstanding_requests.load() > 0)
-    done_event = Realm::UserEvent::create_user_event();
+    if(total_outstanding_requests.load() > 0)
+      done_event = Realm::UserEvent::create_user_event();
 #endif
-  profiler_lock.unlock();
+  }
   if (done_event.exists())
     done_event.wait();
   // Finalize all the instances
@@ -2027,14 +2106,13 @@ void Profiler::finalize(void) {
 void Profiler::defer_shutdown(Event precondition, int code) {
   // If we're on node 0 then we can do the work
   if (local_proc.address_space() == 0) {
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     shutdown_precondition = precondition;
     return_code = code;
     has_shutdown = true;
     if (shutdown_wait.exists())
       // Protect from application level poison
       shutdown_wait.trigger(precondition);
-    profiler_lock.unlock();
   } else {
     // Send a message to node 0 informing it that we received the shutdown
     ShutdownArgs args{precondition, code};
@@ -2054,14 +2132,14 @@ void Profiler::defer_shutdown(Event precondition, int code) {
 
 void Profiler::wait_for_shutdown(void) {
   assert(local_proc.address_space() == 0);
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   if (!has_shutdown) {
     shutdown_wait = Realm::UserEvent::create_user_event();
-    profiler_lock.unlock();
+    p_lock.release();
     bool ignore; // ignore poison from the application
     shutdown_wait.wait_faultaware(ignore);
   } else {
-    profiler_lock.unlock();
+    p_lock.release();
     bool ignore; // ignore poison from the application
     shutdown_precondition.wait_faultaware(ignore);
   }
@@ -2076,29 +2154,24 @@ void Profiler::perform_shutdown(void) {
 #ifdef DEBUG_REALM
 void Profiler::increment_total_outstanding_requests(
     ThreadProfiler::ProfKind kind) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   total_outstanding_requests[kind]++;
-  profiler_lock.unlock();
 }
 
 void Profiler::decrement_total_outstanding_requests(
     ThreadProfiler::ProfKind kind) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   assert(total_outstanding_requests[kind] > 0);
-  if (--total_outstanding_requests[kind] > 0) {
-    profiler_lock.unlock();
+  if(--total_outstanding_requests[kind] > 0)
     return;
-  }
   for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
     if (idx == kind)
       continue;
     if (total_outstanding_requests[idx] == 0)
       continue;
-    profiler_lock.unlock();
     return;
   }
   Realm::UserEvent to_trigger = done_event;
-  profiler_lock.unlock();
   if (to_trigger.exists())
     to_trigger.trigger(shutdown_precondition);
 }
@@ -2112,11 +2185,10 @@ void Profiler::decrement_total_outstanding_requests(void) {
   assert(previous > 0);
   if (previous == 1) {
     Realm::UserEvent to_trigger;
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     if ((total_outstanding_requests.load() == 0) && done_event.exists()) {
       to_trigger = done_event;
     }
-    profiler_lock.unlock();
     if (to_trigger.exists())
       to_trigger.trigger(shutdown_precondition);
   }
@@ -2124,15 +2196,12 @@ void Profiler::decrement_total_outstanding_requests(void) {
 #endif
 
 Processor Profiler::get_remote_processor(AddressSpace target) {
-  profiler_lock.rdlock().wait();
-  std::map<AddressSpace, Processor>::const_iterator finder =
-      remote_processors.find(target);
-  if (finder != remote_processors.end()) {
-    const Processor result = finder->second;
-    profiler_lock.unlock();
-    return result;
-  } else {
-    profiler_lock.unlock();
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    std::map<AddressSpace, Processor>::const_iterator finder =
+        remote_processors.find(target);
+    if(finder != remote_processors.end())
+      return finder->second;
   }
   Realm::Machine::ProcessorQuery remote_procs(Machine::get_machine());
   remote_procs.only_kind(Processor::LOC_PROC);
@@ -2140,9 +2209,8 @@ Processor Profiler::get_remote_processor(AddressSpace target) {
        it != remote_procs.end(); it++) {
     if (it->address_space() != target)
       continue;
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     remote_processors.emplace(std::make_pair(target, *it));
-    profiler_lock.unlock();
     return *it;
   }
   // should never get here
@@ -2150,7 +2218,7 @@ Processor Profiler::get_remote_processor(AddressSpace target) {
 }
 
 Processor Profiler::get_implicit_processor(void) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   if (!implicit_proc.exists()) {
     // Synthesize an implicit processor name
     // Count how many local processors are on this node
@@ -2170,37 +2238,33 @@ Processor Profiler::get_implicit_processor(void) {
     std::sort(recorded_processors.begin(), recorded_processors.end());
   }
   const Processor result = implicit_proc;
-  profiler_lock.unlock();
   return result;
 }
 
 void Profiler::record_thread_profiler(ThreadProfiler *profiler) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   thread_profilers.push_back(profiler);
-  profiler_lock.unlock();
 }
 
 unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   const uintptr_t hash = bt.hash();
-  profiler_lock.rdlock().wait();
-  std::map<uintptr_t, unsigned long long>::const_iterator finder =
-      backtrace_ids.find(hash);
-  if (finder != backtrace_ids.end()) {
-    unsigned long long result = finder->second;
-    profiler_lock.unlock();
-    return result;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    std::map<uintptr_t, unsigned long long>::const_iterator finder =
+        backtrace_ids.find(hash);
+    if(finder != backtrace_ids.end())
+      return finder->second;
   }
-  profiler_lock.unlock();
   // First time seeing this backtrace so capture the symbols
   std::stringstream ss;
   ss << bt;
   const std::string str = ss.str();
   // Now retake the lock and see if we lost the race
-  profiler_lock.wrlock().wait();
-  finder = backtrace_ids.find(hash);
+  AutoLock p_lock(profiler_lock);
+  std::map<uintptr_t, unsigned long long>::const_iterator finder =
+      backtrace_ids.find(hash);
   if (finder != backtrace_ids.end()) {
     unsigned long long result = finder->second;
-    profiler_lock.unlock();
     return result;
   }
   // Didn't lose the race so generate a new ID for this backtrace
@@ -2212,22 +2276,20 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   pr_fwrite(f, (char *)&result, sizeof(result));
   pr_fwrite(f, str.c_str(), str.size() + 1);
   backtrace_ids[hash] = result;
-  profiler_lock.unlock();
   return result;
 }
 
 unsigned long long Profiler::find_provenance_id(const std::string_view &provenance)
 {
   const unsigned long long hash = std::hash<std::string_view>{}(provenance);
-  profiler_lock.rdlock().wait();
-  std::unordered_set<unsigned long long>::const_iterator finder =
-      provenance_ids.find(hash);
-  if(finder != provenance_ids.end()) {
-    profiler_lock.unlock();
-    return hash;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    std::unordered_set<unsigned long long>::const_iterator finder =
+        provenance_ids.find(hash);
+    if(finder != provenance_ids.end())
+      return hash;
   }
-  profiler_lock.unlock();
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   if(provenance_ids.insert(hash).second) {
     // Need to save the provenance string now
     int ID = PROVENANCE_ID;
@@ -2237,21 +2299,19 @@ unsigned long long Profiler::find_provenance_id(const std::string_view &provenan
     char null = '\0';
     pr_fwrite(f, &null, sizeof(null));
   }
-  profiler_lock.unlock();
   return hash;
 }
 
 void Profiler::record_task(Processor::TaskFuncID task_id) {
   char name[128];
   snprintf(name, sizeof(name), "Task %d", task_id);
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   int ID = TASK_KIND_ID;
   pr_fwrite(f, (char *)&ID, sizeof(ID));
   pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
   pr_fwrite(f, name, strlen(name) + 1);
   bool overwrite = true; // always overwrite
   pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
-  profiler_lock.unlock();
 }
 
 void Profiler::record_variant(Processor::TaskFuncID task_id,
@@ -2264,50 +2324,38 @@ void Profiler::record_variant(Processor::TaskFuncID task_id,
   char name[128];
   snprintf(name, sizeof(name), "%s Variant of Task %d", proc_names[kind],
            task_id);
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   int ID = TASK_VARIANT_ID;
   pr_fwrite(f, (char *)&ID, sizeof(ID));
   pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
   unsigned variant_id = kind;
   pr_fwrite(f, (char *)&(variant_id), sizeof(variant_id));
   pr_fwrite(f, name, strlen(name) + 1);
-  profiler_lock.unlock();
 }
 
 void Profiler::record_memory(const Memory &m) {
-  profiler_lock.rdlock().wait();
-  if (std::binary_search(recorded_memories.begin(), recorded_memories.end(),
-                         m)) {
-    profiler_lock.unlock();
-    return;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    if(std::binary_search(recorded_memories.begin(), recorded_memories.end(), m))
+      return;
   }
-  profiler_lock.unlock();
-  profiler_lock.wrlock().wait();
-  if (std::binary_search(recorded_memories.begin(), recorded_memories.end(),
-                         m)) {
-    profiler_lock.unlock();
+  AutoLock p_lock(profiler_lock);
+  if(std::binary_search(recorded_memories.begin(), recorded_memories.end(), m))
     return;
-  }
   // Also log all the affinities for this memory
   std::vector<Memory> memories_to_log(1, m);
   record_affinities(memories_to_log);
-  profiler_lock.unlock();
 }
 
 void Profiler::record_processor(const Processor &p) {
-  profiler_lock.rdlock().wait();
-  if (std::binary_search(recorded_processors.begin(), recorded_processors.end(),
-                         p)) {
-    profiler_lock.unlock();
-    return;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    if(std::binary_search(recorded_processors.begin(), recorded_processors.end(), p))
+      return;
   }
-  profiler_lock.unlock();
-  profiler_lock.wrlock().wait();
-  if (std::binary_search(recorded_processors.begin(), recorded_processors.end(),
-                         p)) {
-    profiler_lock.unlock();
+  AutoLock p_lock(profiler_lock);
+  if(std::binary_search(recorded_processors.begin(), recorded_processors.end(), p))
     return;
-  }
   // Record the processor descriptor
   ThreadProfiler::ProcDesc proc_desc;
   proc_desc.proc_id = p.id;
@@ -2329,7 +2377,6 @@ void Profiler::record_processor(const Processor &p) {
                             pit->m))
       memories_to_log.push_back(pit->m);
   record_affinities(memories_to_log);
-  profiler_lock.unlock();
 }
 
 void Profiler::record_affinities(std::vector<Memory> &memories_to_log) {
@@ -2416,12 +2463,11 @@ void Profiler::record_implicit(
 }
 
 void Profiler::record_remote_notification(Realm::Event notified) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   while (!remote_notifications.empty() &&
          remote_notifications.front().has_triggered())
     remote_notifications.pop_front();
   remote_notifications.push_back(notified);
-  profiler_lock.unlock();
 }
 
 Realm::Event Profiler::get_remote_done(void) {
@@ -2454,9 +2500,8 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
     if (output_footprint_threshold > 0)
       over_scale *= over_scale;
     // Need a lock to protect the file
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     diff = profiler->dump_inter(over_scale * target_latency);
-    profiler_lock.unlock();
 #ifndef NDEBUG
     footprint =
 #endif
@@ -2843,24 +2888,48 @@ int Runtime::wait_for_shutdown(void) {
   return Realm::Runtime::get_runtime();
 }
 
+Module *Runtime::get_module_untyped(const char *name)
+{
+  Module *result = Realm::Runtime::get_module_untyped(name);
 #ifdef REALM_USE_CUDA
+  if(strcmp(name, "cuda") == 0) {
+    Realm::Cuda::CudaModule *cuda_module =
+        dynamic_cast<Realm::Cuda::CudaModule *>(result);
+    assert(cuda_module != nullptr);
+    Profiler &profiler = Profiler::get_profiler();
+    return profiler->find_or_create_cuda_module(cuda_module);
+  }
+#endif
+  return result;
+}
+
+#ifdef REALM_USE_CUDA
+Cuda::CudaModule *Profiler::find_or_create_cuda_module(Realm::Cuda::CudaModule *mod)
+{
+  AutoLock p_lock(profiler_lock);
+  if(cuda_module == nullptr)
+    cuda_module = new Cuda::CudaModule(mod);
+  return cuda_module;
+}
+
 namespace Cuda {
-  CudaModule::CudaModule(Realm::RuntimeImpl *_runtime)
-    : Realm::Cuda::CudaModule(_runtime)
+  CudaModule::CudaModule(Realm::Cuda::CudeModule *intern)
+    : Realm::Module(intern->get_name())
+    , internal(intern)
   {}
 
   CudaModule::~CudaModule(void) {}
 
   Event CudaModule::make_realm_event(CUevent_st *cuda_event)
   {
-    const Event result(Realm::Cuda::CudaModule::make_realm_event(cuda_event));
+    const Event result(internal->make_realm_event(cuda_event));
     ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA event");
     return result;
   }
 
   Event CudaModule::make_realm_event(CUstream_st *cuda_stream)
   {
-    const Event result(Realm::Cuda::CudaModule::make_realm_event(cuda_stream));
+    const Event result(internal->make_realm_event(cuda_stream));
     ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA stream");
     return result;
   }

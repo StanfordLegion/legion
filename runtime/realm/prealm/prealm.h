@@ -586,6 +586,8 @@ static_assert(sizeof(Machine) == sizeof(Realm::Machine));
 template <typename QT, typename RT>
 using MachineQueryIterator = Realm::MachineQueryIterator<QT, RT>;
 
+using Realm::Module;
+
 // from runtime.h
 class REALM_PUBLIC_API Runtime : public Realm::Runtime {
 public:
@@ -622,6 +624,18 @@ public:
   void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
   int wait_for_shutdown(void);
   static Runtime get_runtime(void);
+  template <typename T>
+  inline T *get_module(const char *name)
+  {
+    Module *mod = get_module_untyped(name);
+    if(mod)
+      return dynamic_cast<T *>(mod);
+    else
+      return 0;
+  }
+
+protected:
+  Module *get_module_untyped(const char *name);
 };
 static_assert(sizeof(Runtime) == sizeof(Realm::Runtime));
 
@@ -998,6 +1012,7 @@ using Realm::ExternalCudaMemoryResource;
 using Realm::ExternalCudaPinnedHostResource;
 namespace Cuda {
   using Realm::Cuda::CudaModuleConfig;
+  using Realm::Cuda::CudaRedOpDesc;
   using Realm::Cuda::get_cuda_device_id;
   using Realm::Cuda::get_cuda_device_uuid;
   using Realm::Cuda::get_task_cuda_stream;
@@ -1006,14 +1021,36 @@ namespace Cuda {
   using Realm::Cuda::Uuid;
   using Realm::Cuda::UUID_SIZE;
 
-  class CudaModule : public Realm::Cuda::CudaModule {
+  class CudaModule : public Realm::Module {
   public:
-    CudaModule(Realm::RuntimeImpl *_runtime);
+    CudaModule(Realm::Cuda::CudaModule *internal);
     virtual ~CudaModule(void);
 
-  public:
     Event make_realm_event(CUevent_st *cuda_event);
     Event make_realm_event(CUstream_st *cuda_stream);
+
+    inline bool get_cuda_device_uuid(Processor p, Uuid *uuid) const
+    {
+      return internal->get_cuda_device_uuid(p, uuid);
+    }
+
+    inline bool get_cuda_device_id(Processor p, int *device) const
+    {
+      return internal->get_cuda_device_id(p, device);
+    }
+
+    inline bool get_cuda_context(Processor p, CUctx_st **context) const
+    {
+      return internal->get_cuda_context(p, context);
+    }
+
+    inline bool register_reduction(Event &event, const CudaRedOpDesc *descs, size_t num)
+    {
+      return internal->register_reduction(event, descs, num);
+    }
+
+  protected:
+    Realm::Cuda::CudaModule *const internal;
   };
 } // namespace Cuda
 #endif
