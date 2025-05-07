@@ -2681,7 +2681,7 @@ namespace Realm {
         return false;
       }
       // Use the symbol we get from the dynamically loaded library
-      cuGetProcAddress_fnptr = reinterpret_cast<decltype(cuGetProcAddress_fnptr)>(
+      cuGetProcAddress_fnptr = reinterpret_cast<PFN_cuGetProcAddress>(
           dlsym(libcuda, STRINGIFY(cuGetProcAddress)));
 #elif CUDA_VERSION >= 11030
       // Use the statically available symbol
@@ -2698,7 +2698,7 @@ namespace Realm {
       } else {
 #if defined(REALM_USE_LIBDL)
 #define DRIVER_GET_FNPTR(name, ver)                                                      \
-  if(CUDA_SUCCESS != (nullptr != (name##_fnptr = reinterpret_cast<decltype(&name)>(      \
+  if(CUDA_SUCCESS != (nullptr != (name##_fnptr = reinterpret_cast<PFN_##name>(           \
                                       dlsym(libcuda, STRINGIFY(name)))))) {              \
     log_gpu.info() << "Could not retrieve symbol " #name;                                \
   }
@@ -3762,9 +3762,24 @@ namespace Realm {
             // pageeable memory access that cuMemAdvise will work with pageeable memory.
             // It does on some systems, not on others.  Either way, make the attempt and
             // move on
+#if CUDA_VERSION < 12090
             (void)CUDA_DRIVER_FNPTR(cuMemAdvise)(
                 reinterpret_cast<CUdeviceptr>(ptr), mem->size,
                 CU_MEM_ADVISE_SET_PREFERRED_LOCATION, CU_DEVICE_CPU);
+#else
+            // In cuda 12.9, there's some confusion about what function type for the
+            // loader should be, which forces an early deprecation of the original
+            // cuMemAdvise.  Since we'll need to make this update for 13.0 anyway,
+            // implement a quick implementation for now.
+            // TODO(cperry): pick a numa node closest to the owning GPU instead of the
+            // calling numa node
+            CUmemLocation location;
+            location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA_CURRENT;
+            location.id = 0;
+            (void)CUDA_DRIVER_FNPTR(cuMemAdvise)(
+                reinterpret_cast<CUdeviceptr>(ptr), mem->size,
+                CU_MEM_ADVISE_SET_PREFERRED_LOCATION, location);
+#endif
           }
           break;
         }
