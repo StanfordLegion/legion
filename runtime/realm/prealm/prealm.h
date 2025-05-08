@@ -1024,7 +1024,7 @@ namespace Cuda {
   using Realm::Cuda::Uuid;
   using Realm::Cuda::UUID_SIZE;
 
-  class CudaModule : public Realm::Module {
+  class REALM_PUBLIC_API CudaModule : public Realm::Module {
   public:
     CudaModule(Realm::Cuda::CudaModule *internal);
     virtual ~CudaModule(void);
