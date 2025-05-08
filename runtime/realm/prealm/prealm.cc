@@ -55,13 +55,13 @@ public:
     , held(true)
   {
     if(exclusive) {
-      Event ready = local_lock.wrlock();
+      Realm::Event ready = local_lock.wrlock();
       while(ready.exists()) {
         ready.wait();
         ready = local_lock.wrlock();
       }
     } else {
-      Event ready = local_lock.rdlock();
+      Realm::Event ready = local_lock.rdlock();
       while(ready.exists()) {
         ready.wait();
         ready = local_lock.rdlock();
@@ -93,13 +93,13 @@ public:
   {
     assert(!held);
     if(exclusive) {
-      Event ready = local_lock.wrlock();
+      Realm::Event ready = local_lock.wrlock();
       while(ready.exists()) {
         ready.wait();
         ready = local_lock.wrlock();
       }
     } else {
-      Event ready = local_lock.rdlock();
+      Realm::Event ready = local_lock.rdlock();
       while(ready.exists()) {
         ready.wait();
         ready = local_lock.rdlock();
@@ -2179,6 +2179,7 @@ void Profiler::decrement_total_outstanding_requests(
     return;
   }
   Realm::UserEvent to_trigger = done_event;
+  p_lock.release();
   if (to_trigger.exists())
     to_trigger.trigger(shutdown_precondition);
 }
@@ -2191,11 +2192,12 @@ void Profiler::decrement_total_outstanding_requests(void) {
   unsigned previous = total_outstanding_requests.fetch_sub(1);
   assert(previous > 0);
   if (previous == 1) {
-    Realm::UserEvent to_trigger;
+    Realm::UserEvent to_trigger = Realm::UserEvent::NO_USER_EVENT;
     AutoLock p_lock(profiler_lock);
     if ((total_outstanding_requests.load() == 0) && done_event.exists()) {
       to_trigger = done_event;
     }
+    p_lock.release();
     if (to_trigger.exists())
       to_trigger.trigger(shutdown_precondition);
   }
