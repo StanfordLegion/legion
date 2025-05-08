@@ -4709,6 +4709,13 @@ extern "C" {
                                            bool column_major);
 
   /**
+   * @see Legion::AttachLauncher::footprint
+   */
+  void
+  legion_attach_launcher_set_footprint(legion_attach_launcher_t launcher,
+                                       size_t footprint);
+
+  /**
    * @return Caller takes ownership of return value
    *
    * @see Legion::Runtime::detach_external_resource()

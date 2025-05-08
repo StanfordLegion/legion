@@ -6149,6 +6149,15 @@ legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
     new Realm::ExternalMemoryResource(base_ptr, 0/*no idea how big it is*/);
 }
 
+void
+legion_attach_launcher_set_footprint(legion_attach_launcher_t launcher_,
+                                     size_t footprint)
+{
+  AttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->footprint = footprint;
+}
+
 legion_future_t
 legion_detach_external_resource(legion_runtime_t runtime_,
                                 legion_context_t ctx_,
