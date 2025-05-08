@@ -1029,6 +1029,11 @@ namespace Cuda {
     CudaModule(Realm::Cuda::CudaModule *internal);
     virtual ~CudaModule(void);
 
+    inline CUstream_st *get_task_cuda_stream()
+    { return internal->get_task_cuda_stream(); }
+    inline void set_task_ctxsync_required(bool is_required)
+    { internal->set_task_ctxsync_required(is_required); }
+
     Event make_realm_event(CUevent_st *cuda_event);
     Event make_realm_event(CUstream_st *cuda_stream);
 

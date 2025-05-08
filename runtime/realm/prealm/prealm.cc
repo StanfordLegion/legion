@@ -2922,7 +2922,7 @@ Module *Runtime::get_module_untyped(const char *name)
         dynamic_cast<Realm::Cuda::CudaModule *>(result);
     assert(cuda_module != nullptr);
     Profiler &profiler = Profiler::get_profiler();
-    return profiler->find_or_create_cuda_module(cuda_module);
+    return profiler.find_or_create_cuda_module(cuda_module);
   }
 #endif
   return result;
@@ -2938,7 +2938,7 @@ Cuda::CudaModule *Profiler::find_or_create_cuda_module(Realm::Cuda::CudaModule *
 }
 
 namespace Cuda {
-  CudaModule::CudaModule(Realm::Cuda::CudeModule *intern)
+  CudaModule::CudaModule(Realm::Cuda::CudaModule *intern)
     : Realm::Module(intern->get_name())
     , internal(intern)
   {}
