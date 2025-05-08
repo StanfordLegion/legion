@@ -1261,6 +1261,23 @@ impl Mem {
         self.insts.retain(|_, i| !i.trim_time_range(start, stop));
     }
 
+    fn calculate_dynamic_memory_size(&self, points: &Vec<MemPoint>) -> u64 {
+        let mut max_size = 0;
+        let mut size = 0;
+        for point in points {
+            let inst = self.insts.get(&point.entry).unwrap();
+            if point.first {
+                size += inst.size.unwrap();
+            } else {
+                size -= inst.size.unwrap();
+            }
+            if size > max_size {
+                max_size = size;
+            }
+        }
+        max(max_size, 1)
+    }
+
     fn sort_time_range(&mut self) {
         let mut time_points = Vec::new();
 
@@ -1305,6 +1322,11 @@ impl Mem {
         // throw those away now.
         self.time_points = time_points.iter().filter(|p| p.first).copied().collect();
         self.util_time_points = time_points;
+
+        // If this memory has no capacity or a dynamic capacity then compute it based on the time points
+        if self.capacity == 0 || self.kind == MemKind::GPUDynamic {
+            self.capacity = self.calculate_dynamic_memory_size(&self.time_points);
+        }
     }
 
     fn stack_time_points(&mut self) {
