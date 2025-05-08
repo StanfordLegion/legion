@@ -180,7 +180,7 @@ public:
   void increment_total_outstanding_requests(void);
   void decrement_total_outstanding_requests(void);
 #endif
-  void record_task(Processor::TaskFuncID task_id);
+  void record_task(Processor::TaskFuncID task_id, const std::string_view &task_name);
   void record_variant(Processor::TaskFuncID task_id, Processor::Kind kind);
   void record_memory(const Memory &m);
   void record_processor(const Processor &p);
@@ -243,6 +243,7 @@ private:
   Realm::UserEvent done_event;
   std::vector<Memory> recorded_memories;
   std::vector<Processor> recorded_processors;
+  std::unordered_set<Processor::TaskFuncID> registered_tasks;
   std::map<uintptr_t, unsigned long long> backtrace_ids;
   std::unordered_set<unsigned long long> provenance_ids;
   unsigned long long next_backtrace_id;
@@ -320,6 +321,12 @@ enum DepPartOpKind {
   DEP_PART_ASSOCIATION = 14,           // create an association
   DEP_PART_WEIGHTS = 15,               // create partition by weights
 };
+
+void prealm_task_name(Realm::Processor::TaskFuncID task_id,
+                      const std::string_view &task_name)
+{
+  Profiler::get_profiler().record_task(task_id, task_name);
+}
 
 ThreadProfiler::ThreadProfiler(Processor local, Realm::Event implicit)
     : local_proc(local), implicit_fevent(implicit),
@@ -2302,16 +2309,34 @@ unsigned long long Profiler::find_provenance_id(const std::string_view &provenan
   return hash;
 }
 
-void Profiler::record_task(Processor::TaskFuncID task_id) {
-  char name[128];
-  snprintf(name, sizeof(name), "Task %d", task_id);
+void Profiler::record_task(Processor::TaskFuncID task_id,
+                           const std::string_view &task_name)
+{
   AutoLock p_lock(profiler_lock);
-  int ID = TASK_KIND_ID;
-  pr_fwrite(f, (char *)&ID, sizeof(ID));
-  pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
-  pr_fwrite(f, name, strlen(name) + 1);
-  bool overwrite = true; // always overwrite
-  pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
+  // Check to see if we've registered this task ID before
+  if(!task_name.empty()) {
+    // Custom name from the user, always save it and overwrite
+    int ID = TASK_KIND_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
+    pr_fwrite(f, (char *)task_name.data(), task_name.size());
+    char null = '\0';
+    pr_fwrite(f, &null, sizeof(null));
+    bool overwrite = true; // always overwrite
+    pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
+    registered_tasks.insert(task_id);
+  } else if(registered_tasks.find(task_id) == registered_tasks.end()) {
+    std::string name;
+    name += "Task ";
+    name += task_id;
+    int ID = TASK_KIND_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&task_id, sizeof(task_id));
+    pr_fwrite(f, name.c_str(), name.size() + 1);
+    bool overwrite = false;
+    pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
+    registered_tasks.insert(task_id);
+  }
 }
 
 void Profiler::record_variant(Processor::TaskFuncID task_id,
@@ -2649,7 +2674,7 @@ Event Processor::register_task(TaskFuncID task_id,
                                const void *user_data,
                                size_t user_data_len) const {
   Profiler &profiler = Profiler::get_profiler();
-  profiler.record_task(task_id);
+  profiler.record_task(task_id, std::string_view());
   profiler.record_variant(task_id, kind());
   return Realm::Processor::register_task(task_id, codedesc, prs, user_data,
                                          user_data_len);
@@ -2661,7 +2686,7 @@ Processor::register_task_by_kind(Kind kind, bool global, TaskFuncID task_id,
                                  const ProfilingRequestSet &prs,
                                  const void *user_data, size_t user_data_len) {
   Profiler &profiler = Profiler::get_profiler();
-  profiler.record_task(task_id);
+  profiler.record_task(task_id, std::string_view());
   if (kind == Processor::NO_KIND) {
     Realm::Machine::ProcessorQuery local_procs(Machine::get_machine());
     local_procs.local_address_space();
@@ -2742,7 +2767,7 @@ bool Runtime::register_task(Processor::TaskFuncID task_id,
       reinterpret_cast<Realm::Processor::TaskFuncPtr>(taskptr);
   Profiler &profiler = Profiler::get_profiler();
   // Record that we have a task with this task ID
-  profiler.record_task(task_id);
+  profiler.record_task(task_id, std::string_view());
   // Get all the local processors and record that we have a variant for each
   // kind of local processor
   Realm::Machine::ProcessorQuery local_procs(Machine::get_machine());

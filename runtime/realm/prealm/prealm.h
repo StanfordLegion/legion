@@ -28,8 +28,11 @@ namespace PRealm {
 
   // You can use this call to record your own time ranges in a PRealm profile
   // It will implicitly capture the stop time when the function is invoked
-  REALM_PUBLIC_API inline void prealm_time_range(long long start_time_in_ns,
-                                                 const std::string_view &name);
+  REALM_PUBLIC_API void prealm_time_range(long long start_time_in_ns,
+                                          const std::string_view &name);
+
+  REALM_PUBLIC_API void prealm_task_name(Realm::Processor::TaskFuncID task_id,
+                                         const std::string_view &task_name);
 
   // Import a bunch of types directly from the realm public interface
   // but overload ones that we need to profile
