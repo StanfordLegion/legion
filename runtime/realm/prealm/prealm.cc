@@ -144,6 +144,7 @@ public:
   Profiler(void);
   Profiler(const Profiler &rhs) = delete;
   Profiler &operator=(const Profiler &rhs) = delete;
+  ~Profiler(void);
 
 public:
   inline Processor get_local_processor(void) const { return local_proc; }
@@ -1293,6 +1294,14 @@ Profiler::Profiler(void)
 #endif
 #ifdef REALM_USE_CUDA
   cuda_module = nullptr;
+#endif
+}
+
+Profiler::~Profiler(void)
+{
+#ifdef REALM_USE_CUDA
+  if(cuda_module != nullptr)
+    delete cuda_module;
 #endif
 }
 
