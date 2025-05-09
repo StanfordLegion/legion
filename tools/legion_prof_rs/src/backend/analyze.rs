@@ -1,4 +1,4 @@
-use std::cmp::{max, min, Reverse};
+use std::cmp::{Reverse, max, min};
 use std::collections::BTreeMap;
 
 use crate::state::{Proc, ProcEntry, ProcEntryKind, State, Timestamp};
