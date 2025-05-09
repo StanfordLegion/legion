@@ -21,7 +21,15 @@
 #include <zlib.h>
 // Need this to know which version of Legion Prof we're using
 static constexpr unsigned LEGION_PROF_VERSION =
+// We hard code this since (P)Realm is about to be split from
+// Legion and we won't be able to rely on this dependence anymore
+// which means we'll have to manually update PRealm when the
+// logging interface with Legion changes
+#if 0
 #include "legion/legion_profiling_version.h"
+#else
+1008 // the current Legion Prof version we work with
+#endif
     ;
 // pr_fopen expects filename to be a std::string
 #define pr_fopen(filename, mode) gzopen(filename.c_str(), mode)
