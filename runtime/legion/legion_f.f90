@@ -637,6 +637,9 @@ module legion_fortran
     ! @see Legion::AttachLauncher::attach_array_soa()
     procedure :: attach_array_soa => legion_attach_launcher_attach_array_soa
 
+    ! @see Legion::AttachLauncher::footprint
+    procedure :: set_footprint => legion_attach_launcher_set_footprint
+
     ! @see Legion::AttachLauncher::~AttachLauncher()
     procedure :: destroy => legion_attach_launcher_destructor
   end type FAttachLauncher
@@ -2620,6 +2623,14 @@ contains
     call legion_attach_launcher_add_cpu_soa_field_f(this%attach_launcher, fid, &
       base_ptr, tmp_column_major)
   end subroutine legion_attach_launcher_attach_array_soa
+
+  subroutine legion_attach_launcher_set_footprint(this, footprint)
+    implicit none
+    class(FAttachLauncher), intent(in)     :: this
+    integer(c_size_t), value, intent(in)   :: footprint
+
+    call legion_attach_launcher_set_footprint_f(this%attach_launcher, footprint)
+  end subroutine legion_attach_launcher_set_footprint
 
   ! ===============================================================================
   ! Task
