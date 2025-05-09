@@ -28,7 +28,7 @@ static constexpr unsigned LEGION_PROF_VERSION =
 #if 0
 #include "legion/legion_profiling_version.h"
 #else
-1008 // the current Legion Prof version we work with
+    1008 // the current Legion Prof version we work with
 #endif
     ;
 // pr_fopen expects filename to be a std::string
