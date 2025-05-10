@@ -168,6 +168,8 @@ public:
                       size_t user_arglen, Realm::Processor p);
   static void trigger(const void *args, size_t arglen, const void *user_args,
                       size_t user_arglen, Realm::Processor p);
+  static void external(const void *args, size_t arglen, const void *user_args,
+                       size_t user_arglen, Realm::Processor p);
   static void shutdown(const void *args, size_t arglen, const void *user_args,
                        size_t user_arglen, Realm::Processor p);
   static constexpr Realm::Processor::TaskFuncID CALLBACK_TASK_ID =
@@ -176,9 +178,11 @@ public:
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 1;
   static constexpr Realm::Processor::TaskFuncID TRIGGER_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 2;
-  static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+  static constexpr Realm::Processor::TaskFuncID EXTERNAL_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 3;
-  static_assert((CALLBACK_TASK_ID + 4) == Processor::TASK_ID_FIRST_AVAILABLE);
+  static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+      Realm::Processor::TASK_ID_FIRST_AVAILABLE + 4;
+  static_assert((CALLBACK_TASK_ID + 5) == Processor::TASK_ID_FIRST_AVAILABLE);
   static constexpr int CALLBACK_TASK_PRIORITY = std::numeric_limits<int>::min();
 
 public:
@@ -647,113 +651,142 @@ void ThreadProfiler::record_event_merger(Event result,
   profiler.update_footprint(sizeof(info) + num_events * sizeof(Event), this);
 }
 
-void ThreadProfiler::record_external_event(Event result, const char *provenance)
+void ThreadProfiler::record_external_event(Realm::Event event,
+                                           const std::string_view &prov)
 {
   Profiler &profiler = Profiler::get_profiler();
   if(!profiler.enabled || profiler.no_critical_paths)
     return;
-  // Take the timing measurement of when this happened first
-  ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
-  info.performed = Realm::Clock::current_time_in_nanoseconds();
-  info.result = result;
-  info.fevent = get_fevent();
-  info.provenance = profiler.find_provenance_id(std::string_view(provenance));
-  profiler.update_footprint(sizeof(info), this);
-}
-
-void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
-                                                Event precondition) {
-  Profiler &profiler = Profiler::get_profiler();
-  if (!profiler.enabled || profiler.no_critical_paths)
-    return;
-  ReservationAcquireInfo &info =
-      reservation_acquire_infos.emplace_back(ReservationAcquireInfo());
-  info.performed = Realm::Clock::current_time_in_nanoseconds();
-  info.result = result;
-  info.precondition = precondition;
-  if (precondition.is_barrier())
-    record_barrier_use(precondition);
-  info.reservation = r;
-  info.provenance = get_fevent();
-  profiler.update_footprint(sizeof(info), this);
-}
-
-Event ThreadProfiler::record_instance_ready(RegionInstance inst, Event result,
-                                            Event precondition) {
-  Profiler &profiler = Profiler::get_profiler();
-  if (!profiler.enabled || profiler.no_critical_paths)
-    return result;
-  if (!result.exists()) {
-    Realm::UserEvent rename = Realm::UserEvent::create_user_event();
-    rename.trigger();
-    result = rename;
+  // Check to see if this has already triggered or not
+  if(event.has_triggered()) {
+    // Take the timing measurement of when this happened first
+    ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
+    info.triggered = Realm::Clock::current_time_in_nanoseconds();
+    info.external = event;
+    info.fevent = get_fevent();
+    info.provenance = profiler.find_provenance_id(prov);
+    profiler.update_footprint(sizeof(info), this);
+  } else {
+    // Spawn a no-op task with a profiling request that will measure when
+    // the external event has triggered, we'll use that to determine
+    // the trigger time for the event
+    const ExternalTriggerArgs args{event, get_fevent(),
+                                   profiler.find_provenance_id(prov)};
+    // Need to dispatch this on a base realm processor to avoid
+    // profiling ourselves when we do this
+    const Realm::Processor local = get_callback_processor();
+// Increment the number of pending callbacks we expect to see
+#ifdef DEBUG_REALM
+      profiler.increment_total_outstanding_requests(EXTERNAL_PROF);
+#else
+      profiler.increment_total_outstanding_requests();
+#endif
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingRequest &request =
+          requests.add_request(local, Profiler::EXTERNAL_TASK_ID, &args, sizeof(args),
+                               Profiler::CALLBACK_TASK_PRIORITY);
+      request.add_measurement<ProfilingMeasurements::OperationTimeline>();
+      // Make sure to protect the event in case it is poisoned
+      local.spawn(Processor::TASK_ID_PROCESSOR_NOP, nullptr, 0, requests,
+                  Realm::Event::ignorefaults(event), Profiler::CALLBACK_TASK_PRIORITY);
+    }
   }
-  InstanceReadyInfo &info =
-      instance_ready_infos.emplace_back(InstanceReadyInfo());
-  info.performed = Realm::Clock::current_time_in_nanoseconds();
-  info.result = result;
-  info.unique = inst.unique_event;
-  info.precondition = precondition;
-  if (precondition.is_barrier())
-    record_barrier_use(precondition);
-  profiler.update_footprint(sizeof(info), this);
-  return result;
-}
 
-void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field) {
-  Profiler &profiler = Profiler::get_profiler();
-  if (!profiler.enabled)
-    return;
-  InstanceUsageInfo &info =
-      instance_usage_infos.emplace_back(InstanceUsageInfo());
-  info.inst_event = inst.unique_event;
-  info.op_id = get_fevent().id;
-  info.field = field;
-  profiler.update_footprint(sizeof(info), this);
-}
+  void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
+                                                  Event precondition)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    if(!profiler.enabled || profiler.no_critical_paths)
+      return;
+    ReservationAcquireInfo &info =
+        reservation_acquire_infos.emplace_back(ReservationAcquireInfo());
+    info.performed = Realm::Clock::current_time_in_nanoseconds();
+    info.result = result;
+    info.precondition = precondition;
+    if(precondition.is_barrier())
+      record_barrier_use(precondition);
+    info.reservation = r;
+    info.provenance = get_fevent();
+    profiler.update_footprint(sizeof(info), this);
+  }
 
-void ThreadProfiler::process_response(ProfilingResponse &response) {
-  Profiler &profiler = Profiler::get_profiler();
-  long long start = 0;
-  if (profiler.self_profile)
-    start = Realm::Clock::current_time_in_nanoseconds();
-  assert(sizeof(ProfilingArgs) == response.user_data_size());
-  const ProfilingArgs *args =
-      static_cast<const ProfilingArgs *>(response.user_data());
-  Event finish_event;
-  typedef ProfilingMeasurements::OperationCopyInfo::InstInfo InstInfo;
-  switch (args->kind) {
-  case FILL_PROF: {
-    ProfilingMeasurements::OperationMemoryUsage usage;
-    if (!response.get_measurement(usage))
-      std::abort();
-    ProfilingMeasurements::OperationCopyInfo cpinfo;
-    if (!response.get_measurement(cpinfo))
-      std::abort();
-    ProfilingMeasurements::OperationTimeline timeline;
-    if (!response.get_measurement(timeline))
-      std::abort();
-    assert(timeline.is_valid());
-    ProfilingMeasurements::OperationFinishEvent fevent;
-    if (!response.get_measurement(fevent))
-      std::abort();
+  Event ThreadProfiler::record_instance_ready(RegionInstance inst, Event result,
+                                              Event precondition)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    if(!profiler.enabled || profiler.no_critical_paths)
+      return result;
+    if(!result.exists()) {
+      Realm::UserEvent rename = Realm::UserEvent::create_user_event();
+      rename.trigger();
+      result = rename;
+    }
+    InstanceReadyInfo &info = instance_ready_infos.emplace_back(InstanceReadyInfo());
+    info.performed = Realm::Clock::current_time_in_nanoseconds();
+    info.result = result;
+    info.unique = inst.unique_event;
+    info.precondition = precondition;
+    if(precondition.is_barrier())
+      record_barrier_use(precondition);
+    profiler.update_footprint(sizeof(info), this);
+    return result;
+  }
 
-    process_mem_desc(usage.target);
+  void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    if(!profiler.enabled)
+      return;
+    InstanceUsageInfo &info = instance_usage_infos.emplace_back(InstanceUsageInfo());
+    info.inst_event = inst.unique_event;
+    info.op_id = get_fevent().id;
+    info.field = field;
+    profiler.update_footprint(sizeof(info), this);
+  }
 
-    FillInfo &info = fill_infos.emplace_back(FillInfo());
-    info.size = usage.size;
-    info.create = timeline.create_time;
-    info.ready = timeline.ready_time;
-    info.start = timeline.start_time;
-    // use complete_time instead of end_time to include async work
-    info.stop = timeline.complete_time;
-    info.fevent = fevent.finish_event;
-    info.creator = args->provenance;
-    info.critical = args->critical;
-    if (args->critical.is_barrier())
-      record_barrier_use(args->critical);
-    for (std::vector<InstInfo>::const_iterator it = cpinfo.inst_info.begin();
-         it != cpinfo.inst_info.end(); it++) {
+  void ThreadProfiler::process_response(ProfilingResponse &response)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    long long start = 0;
+    if(profiler.self_profile)
+      start = Realm::Clock::current_time_in_nanoseconds();
+    assert(sizeof(ProfilingArgs) == response.user_data_size());
+    const ProfilingArgs *args = static_cast<const ProfilingArgs *>(response.user_data());
+    Event finish_event;
+    typedef ProfilingMeasurements::OperationCopyInfo::InstInfo InstInfo;
+    switch(args->kind) {
+    case FILL_PROF:
+    {
+      ProfilingMeasurements::OperationMemoryUsage usage;
+      if(!response.get_measurement(usage))
+        std::abort();
+      ProfilingMeasurements::OperationCopyInfo cpinfo;
+      if(!response.get_measurement(cpinfo))
+        std::abort();
+      ProfilingMeasurements::OperationTimeline timeline;
+      if(!response.get_measurement(timeline))
+        std::abort();
+      assert(timeline.is_valid());
+      ProfilingMeasurements::OperationFinishEvent fevent;
+      if(!response.get_measurement(fevent))
+        std::abort();
+
+      process_mem_desc(usage.target);
+
+      FillInfo &info = fill_infos.emplace_back(FillInfo());
+      info.size = usage.size;
+      info.create = timeline.create_time;
+      info.ready = timeline.ready_time;
+      info.start = timeline.start_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline.complete_time;
+      info.fevent = fevent.finish_event;
+      info.creator = args->provenance;
+      info.critical = args->critical;
+      if(args->critical.is_barrier())
+        record_barrier_use(args->critical);
+      for(std::vector<InstInfo>::const_iterator it = cpinfo.inst_info.begin();
+          it != cpinfo.inst_info.end(); it++) {
 #ifdef DEBUG_REALM
       assert(!it->dst_fields.empty());
       assert(it->dst_insts.size() == 1);
@@ -770,13 +803,13 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
         inst_info.fid = it->dst_fields[idx];
         inst_info.dst_inst_uid = name;
       }
-    }
+      }
     profiler.update_footprint(
         sizeof(FillInfo) + info.inst_infos.size() * sizeof(FillInstInfo), this);
     finish_event = fevent.finish_event;
     delete args->id.closure;
     break;
-  }
+    }
   case COPY_PROF: {
     ProfilingMeasurements::OperationMemoryUsage usage;
     if (!response.get_measurement(usage))
@@ -1037,7 +1070,7 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
 #else
   profiler.decrement_total_outstanding_requests();
 #endif
-}
+  }
 
 void ThreadProfiler::process_trigger(const void *args, size_t arglen) {
   assert(arglen == sizeof(EventTriggerInfo));
@@ -1058,6 +1091,43 @@ void ThreadProfiler::process_trigger(const void *args, size_t arglen) {
     pinfo.performed = info.performed;
     profiler.update_footprint(sizeof(pinfo), this);
   }
+}
+
+void ThreadProfiler::process_external(ProfilingResponse &response)
+{
+  Profiler &profiler = Profiler::get_profiler();
+  long long start = 0;
+  if(profiler.self_profile)
+    start = Realm::Clock::current_time_in_nanoseconds();
+  assert(sizeof(ExternalTriggerArgs) == response.user_data_size());
+  const ExternalTriggerArgs *args =
+      static_cast<const ExternalTriggerArgs *>(response.user_data());
+  ProfilingMeasurements::OperationTimeline timeline;
+  if(!response.get_measurement(timeline))
+    std::abort();
+
+  ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
+  info.triggered = timeline.ready_time;
+  info.external = args->external;
+  info.fevent = args->fevent;
+  info.provenance = args->provenance;
+  profiler.update_footprint(sizeof(info), this);
+
+  if(profiler.self_profile) {
+    const long long stop = Realm::Clock::current_time_in_nanoseconds();
+    ProfTaskInfo &info = prof_task_infos.emplace_back(ProfTaskInfo());
+    info.proc_id = local_proc.id;
+    info.start = start;
+    info.stop = stop;
+    info.creator = args->fevent;
+    info.finish_event = Processor::get_current_finish_event();
+    profiler.update_footprint(sizeof(info), this);
+  }
+#ifdef DEBUG_REALM
+  profiler.decrement_total_outstanding_requests(EXTERNAL_PROF);
+#else
+  profiler.decrement_total_outstanding_requests();
+#endif
 }
 
 void ThreadProfiler::record_time_range(long long start, const std::string_view &name)
@@ -1634,9 +1704,9 @@ void Profiler::log_preamble(void) const {
 
   ss << "ExternalEventInfo {"
      << "id:" << EXTERNAL_EVENT_INFO_ID << delim
-     << "result:unsigned long long:" << sizeof(Event) << delim
+     << "external:unsigned long long:" << sizeof(Event) << delim
      << "fevent:unsigned long long:" << sizeof(Event) << delim
-     << "performed:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "trigger:timestamp_t:" << sizeof(timestamp_t) << delim
      << "prov:unsigned long long:" << sizeof(unsigned long long) << "}" << std::endl;
 
   ss << "BarrierArrivalInfo {"
@@ -1862,9 +1932,9 @@ void Profiler::serialize(const ThreadProfiler::ExternalEventInfo &info) const
 {
   int ID = EXTERNAL_EVENT_INFO_ID;
   pr_fwrite(f, (char *)&ID, sizeof(ID));
-  pr_fwrite(f, (char *)&info.result.id, sizeof(info.result.id));
+  pr_fwrite(f, (char *)&info.external.id, sizeof(info.external.id));
   pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
-  pr_fwrite(f, (char *)&info.performed, sizeof(info.performed));
+  pr_fwrite(f, (char *)&info.triggered, sizeof(info.triggered));
   pr_fwrite(f, (char *)&info.provenance, sizeof(info.provenance));
 }
 
@@ -2599,6 +2669,14 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
   thread_profiler.process_trigger(args, arglen);
 }
 
+/*static*/ void Profiler::external(const void *args, size_t arglen, const void *user_args,
+                                   size_t user_arglen, Realm::Processor p)
+{
+  Realm::ProfilingResponse response(args, arglen);
+  ThreadProfiler &thread_profiler = ThreadProfiler::get_thread_profiler();
+  thread_profiler.process_external(response);
+}
+
 /*static*/ void Profiler::shutdown(const void *args, size_t arglen,
                                    const void *user_args, size_t user_arglen,
                                    Realm::Processor p) {
@@ -2646,6 +2724,7 @@ void Runtime::start(void) {
   const CodeDescriptor callback(Profiler::callback);
   const CodeDescriptor wrapper(Profiler::wrapper);
   const CodeDescriptor trigger(Profiler::trigger);
+  const CodeDescriptor external(Profiler::external);
   const CodeDescriptor shutdown(Profiler::shutdown);
   for (Realm::Machine::ProcessorQuery::iterator it = local_procs.begin();
        it != local_procs.end(); it++) {
@@ -2657,6 +2736,9 @@ void Runtime::start(void) {
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::TRIGGER_TASK_ID, trigger, no_requests);
+    if(done.exists())
+      registered.push_back(done);
+    done = it->register_task(Profiler::EXTERNAL_TASK_ID, external, no_requests);
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::SHUTDOWN_TASK_ID, shutdown, no_requests);
@@ -2966,15 +3048,15 @@ namespace Cuda {
 
   Event CudaModule::make_realm_event(CUevent_st *cuda_event)
   {
-    const Event result(internal->make_realm_event(cuda_event));
-    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA event");
+    const Realm::Event result = internal->make_realm_event(cuda_event);
+    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA Event");
     return result;
   }
 
   Event CudaModule::make_realm_event(CUstream_st *cuda_stream)
   {
-    const Event result(internal->make_realm_event(cuda_stream));
-    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA stream");
+    const Realm::Event result = internal->make_realm_event(cuda_stream);
+    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA Stream");
     return result;
   }
 } // namespace Cuda

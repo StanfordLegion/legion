@@ -30,6 +30,7 @@ public:
     TASK_PROF,
     INST_PROF,
     PART_PROF,
+    EXTERNAL_PROF,
     LAST_PROF, // must be last
   };
 
@@ -56,6 +57,11 @@ public:
       NameClosure *closure;
     } id;
     ProfKind kind;
+  };
+  struct ExternalTriggerArgs {
+    Event external;
+    Event fevent;
+    unsigned long long provenance;
   };
   struct ProcDesc {
   public:
@@ -107,9 +113,9 @@ public:
   };
   struct ExternalEventInfo {
   public:
-    Event result;
+    Event external;
     Event fevent;
-    timestamp_t performed;
+    timestamp_t triggered;
     unsigned long long provenance; 
   };
   struct BarrierArrivalInfo {
@@ -255,7 +261,7 @@ public:
   void record_barrier_arrival(Event result, Event precondition);
   void record_event_merger(Event result, const Event *preconditions,
                            size_t num_events);
-  void record_external_event(Event result, const char* provenance);
+  void record_external_event(Realm::Event result, const std::string_view &prov);
   void record_reservation_acquire(Reservation r, Event result,
                                   Event precondition);
   Event record_instance_ready(RegionInstance inst, Event result,
@@ -263,6 +269,7 @@ public:
   void record_instance_usage(RegionInstance inst, FieldID field_id);
   void process_response(ProfilingResponse &response);
   void process_trigger(const void *args, size_t arglen);
+  void process_external(ProfilingResponse &response);
   void record_time_range(long long start, const std::string_view& name);
   size_t dump_inter(long long target_latency);
   void finalize(void);

@@ -5132,17 +5132,17 @@ fn process_record(
             );
         }
         Record::ExternalEventInfo {
-            result,
+            external,
             fevent,
-            performed,
+            triggered,
             provenance,
         } => {
             let creator_uid = state.create_fevent_reference(*fevent);
             state.record_event_node(
-                *result,
+                *external,
                 EventEntryKind::ExternalEvent(*provenance),
                 creator_uid,
-                *performed,
+                *triggered,
                 false,
             );
         }
