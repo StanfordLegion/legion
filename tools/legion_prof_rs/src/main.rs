@@ -335,13 +335,21 @@ fn main() -> io::Result<()> {
     // if number of files
     let num_nodes: usize = state.num_nodes.try_into().unwrap();
     if num_nodes > args.filenames.len() {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", num_nodes, args.filenames.len());
+        println!(
+            "Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.",
+            num_nodes,
+            args.filenames.len()
+        );
         have_alllogs = false;
     }
 
     // check if subnodes is enabled and filter input is true
     if state.visible_nodes.len() < num_nodes && filter_input {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", num_nodes, state.visible_nodes.len());
+        println!(
+            "Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.",
+            num_nodes,
+            state.visible_nodes.len()
+        );
         have_alllogs = false;
     }
 

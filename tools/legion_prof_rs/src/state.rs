@@ -1,4 +1,4 @@
-use std::cmp::{max, Ordering, Reverse};
+use std::cmp::{Ordering, Reverse, max};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
@@ -3368,7 +3368,7 @@ impl State {
                         .get(&(task_id, variant_id))
                         .unwrap()
                         .color
-                        .unwrap()
+                        .unwrap();
                 }
                 _ => unreachable!(),
             }
@@ -4006,9 +4006,9 @@ impl State {
                 // Compute the average skew
                 println!(
                     "Node {} appears to be {:.3} us behind node {} for {} messages with standard deviation {:.3} us.",
-                    nodes.0 .0,
+                    nodes.0.0,
                     skew.1 / 1000.0, // convert to us
-                    nodes.1 .0,
+                    nodes.1.0,
                     skew.0,
                     (skew.2 / skew.0 as f64).sqrt() / 1000.0 // convert variance to standard deviation and then to us
                 );
@@ -4017,7 +4017,7 @@ impl State {
                 if skew_nodes.contains_key(&alt) {
                     println!(
                         "WARNING: detected bi-directional skew between nodes {} and {}",
-                        nodes.0 .0, nodes.1 .0
+                        nodes.0.0, nodes.1.0
                     );
                 }
             }
@@ -4234,7 +4234,9 @@ impl State {
 
     pub fn compute_critical_paths(&mut self) {
         if !self.has_critical_path_data() {
-            println!("Info: Realm event graph data was not present in these logs so critical paths will not be available in this profile.");
+            println!(
+                "Info: Realm event graph data was not present in these logs so critical paths will not be available in this profile."
+            );
             // clear the event lookup
             self.event_lookup.clear();
             return;
@@ -4307,7 +4309,9 @@ impl State {
             }
             Err(_) => {
                 // Detected a cycle in the graph
-                eprintln!("Warning: detected a cycle in the Realm event graph. Critical paths will not be available in this profile. Please create a bug for this and attach the log files that caused it.");
+                eprintln!(
+                    "Warning: detected a cycle in the Realm event graph. Critical paths will not be available in this profile. Please create a bug for this and attach the log files that caused it."
+                );
                 // clear the event lookup so we can't lookup critical paths
                 self.event_lookup.clear();
             }

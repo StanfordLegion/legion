@@ -3,7 +3,7 @@ use std::fmt;
 use nom::{
     bytes::complete::tag,
     character::complete::{
-        alphanumeric1, i16, i32, i64, i8, not_line_ending, space0, u16, u32, u64, u8,
+        alphanumeric1, i8, i16, i32, i64, not_line_ending, space0, u8, u16, u32, u64,
     },
     combinator::{eof, opt},
 };
@@ -12,7 +12,7 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess,
     Visitor,
 };
-use serde::{self, forward_to_deserialize_any, Deserialize, Serialize};
+use serde::{self, Deserialize, Serialize, forward_to_deserialize_any};
 
 use super::error::{Error, Result};
 

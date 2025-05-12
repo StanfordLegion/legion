@@ -1320,13 +1320,13 @@ impl StateDataSource {
                     // If you get here it means the user was running with
                     // -lg:prof_all_critical_arrivals
                     Field::String(format!(
-                            "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
-                            event.0, node.0
+                        "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
+                        event.0, node.0
                     ))
                 } else {
                     Field::String(format!(
-                            "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
-                            event.0, node.0
+                        "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
+                        event.0, node.0
                     ))
                 }
             }
@@ -1349,8 +1349,8 @@ impl StateDataSource {
                     })
                 } else {
                     Field::String(format!(
-                            "Critical path from a (meta-) task on node {}. Please load the logfile from that node to see it.",
-                            node.0
+                        "Critical path from a (meta-) task on node {}. Please load the logfile from that node to see it.",
+                        node.0
                     ))
                 }
             }
@@ -1381,8 +1381,8 @@ impl StateDataSource {
                         _ => unreachable!(),
                     };
                     Field::String(format!(
-                            "Critical path from a {} on node {}. Please load the logfile from that node to see it.",
-                            kind, node.0
+                        "Critical path from a {} on node {}. Please load the logfile from that node to see it.",
+                        kind, node.0
                     ))
                 }
             }
@@ -1437,7 +1437,8 @@ impl StateDataSource {
                     }
                 } else {
                     Field::String(format!(
-                            "Critical path from an instance creation on node {}. Please load the logfile from that node to see it.", node.0
+                        "Critical path from an instance creation on node {}. Please load the logfile from that node to see it.",
+                        node.0
                     ))
                 }
             }
@@ -1476,7 +1477,8 @@ impl StateDataSource {
                     }
                 } else {
                     Field::String(format!(
-                            "Critical path from an instance redistrict on node {}. Please load the logfile from that node to see it.", node.0
+                        "Critical path from an instance redistrict on node {}. Please load the logfile from that node to see it.",
+                        node.0
                     ))
                 }
             }
@@ -1500,7 +1502,8 @@ impl StateDataSource {
                     })
                 } else {
                     Field::String(format!(
-                            "Critical path from an instance deletion on node {}. Please load the logfile from that node to see it.", node.0
+                        "Critical path from an instance deletion on node {}. Please load the logfile from that node to see it.",
+                        node.0
                     ))
                 }
             }
@@ -1569,7 +1572,8 @@ impl StateDataSource {
                         // recorded something with an fevent that we don't recognize from the
                         // same node that should have produced this fevent
                         Field::String(format!(
-                                "Could not find fevent {:#x} for a{} of event {:#x} on node {}. This is probably a bug in the Legion runtime logging not recording all fevents on a node. You could try running with '-lg:prof_self' to see if the fevent corresponds to a profiling meta-task, but most likely this is just a bug.", fevent.0, kind, event.0, fevent_node.0
+                            "Could not find fevent {:#x} for a{} of event {:#x} on node {}. This is probably a bug in the Legion runtime logging not recording all fevents on a node. You could try running with '-lg:prof_self' to see if the fevent corresponds to a profiling meta-task, but most likely this is just a bug.",
+                            fevent.0, kind, event.0, fevent_node.0
                         ))
                     } else {
                         // This should only be a trigger/poison/arrive
@@ -1581,8 +1585,8 @@ impl StateDataSource {
                         );
                         // In these cases we should load the file for the node with the fevent
                         Field::String(format!(
-                                "Critical path from a{} on node {}. Please load the logfile from that node to see it.", 
-                                kind, fevent_node.0
+                            "Critical path from a{} on node {}. Please load the logfile from that node to see it.",
+                            kind, fevent_node.0
                         ))
                     }
                 }
