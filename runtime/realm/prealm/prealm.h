@@ -92,7 +92,7 @@ public:
   Event(void) { id = 0; }
   Event(::realm_id_t i)
   {
-    assert(Realm::ID{i}.is_event());
+    assert(Realm::ID{i}.is_event() || Realm::ID{i}.is_barrier());
     id = i;
   }
   Event(const Realm::Event &e) : Realm::Event(e) {}
