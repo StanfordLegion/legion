@@ -5,21 +5,21 @@ use std::io::Read;
 use std::path::Path;
 
 use nom::{
+    IResult,
     branch::alt,
     bytes::complete::tag,
     character::complete::{digit1, hex_digit1, line_ending, none_of, not_line_ending, space0, u64},
     combinator::{all_consuming, map, opt, peek, value},
     multi::many1,
     sequence::preceded,
-    IResult,
 };
 
 use serde::{
-    de::{Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
+    de::{Error, SeqAccess, Visitor},
 };
 
-use crate::serde::ascii::{from_str, HexU64};
+use crate::serde::ascii::{HexU64, from_str};
 
 #[derive(Debug, Clone)]
 pub struct Prefix {

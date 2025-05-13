@@ -10,12 +10,12 @@ use flate2::read::GzDecoder;
 use nonmax::NonMaxU64;
 
 use nom::{
+    IResult,
     bytes::complete::{tag, take_till, take_while1},
     character::{is_alphanumeric, is_digit},
     combinator::{map, map_opt, map_res, opt},
-    multi::{many1, many_m_n, separated_list1},
-    number::complete::{le_i32, le_i64, le_u32, le_u64, le_u8},
-    IResult,
+    multi::{many_m_n, many1, separated_list1},
+    number::complete::{le_i32, le_i64, le_u8, le_u32, le_u64},
 };
 
 use serde::Serialize;
@@ -1407,7 +1407,11 @@ fn check_version(version: u32) {
         .parse()
         .unwrap();
 
-    assert_eq!(version, expected_version, "Legion Prof was built against an incompatible Legion version. Please rebuild with the same version of Legion used by the application to generate the profile logs. (Expected version {}, got version {}.)", expected_version, version);
+    assert_eq!(
+        version, expected_version,
+        "Legion Prof was built against an incompatible Legion version. Please rebuild with the same version of Legion used by the application to generate the profile logs. (Expected version {}, got version {}.)",
+        expected_version, version
+    );
 }
 
 fn parse_record<'a>(

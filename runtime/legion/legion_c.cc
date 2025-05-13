@@ -6145,8 +6145,18 @@ legion_attach_launcher_add_cpu_soa_field(legion_attach_launcher_t launcher_,
 
   if (launcher->external_resource != NULL)
     delete const_cast<Realm::ExternalInstanceResource*>(launcher->external_resource);
+  // Hopefully the footprint has been set
   launcher->external_resource =
-    new Realm::ExternalMemoryResource(base_ptr, 0/*no idea how big it is*/);
+    new Realm::ExternalMemoryResource(base_ptr, launcher->footprint);
+}
+
+void
+legion_attach_launcher_set_footprint(legion_attach_launcher_t launcher_,
+                                     size_t footprint)
+{
+  AttachLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->footprint = footprint;
 }
 
 legion_future_t

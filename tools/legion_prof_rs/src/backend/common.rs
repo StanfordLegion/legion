@@ -704,7 +704,7 @@ impl fmt::Display for DimOrderPretty<'_> {
                 if *dim_order == DimKind::try_from(dim.0).unwrap() {
                     column_major += 1;
                 }
-                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap() {
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0.0 - dim.0 - 1).unwrap() {
                     row_major += 1;
                 }
             }
@@ -715,7 +715,7 @@ impl fmt::Display for DimOrderPretty<'_> {
                 if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
                     column_major += 1;
                 }
-                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0.0 - dim.0).unwrap() {
                     row_major += 1;
                 }
             }
@@ -740,11 +740,11 @@ impl fmt::Display for DimOrderPretty<'_> {
         let mut previous = false;
 
         if dim_last.map_or(false, |(d, _)| d.0 != 1) {
-            if column_major == dim_last.unwrap().0 .0 && !cmpx_order {
+            if column_major == dim_last.unwrap().0.0 && !cmpx_order {
                 open(f, &mut previous)?;
                 write!(f, "Column Major")?;
                 close(f, &mut previous)?;
-            } else if row_major == dim_last.unwrap().0 .0 && !cmpx_order {
+            } else if row_major == dim_last.unwrap().0.0 && !cmpx_order {
                 open(f, &mut previous)?;
                 write!(f, "Row Major")?;
                 close(f, &mut previous)?;
@@ -895,21 +895,21 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
                 write!(
                     f,
                     "Scatter: dst_indirect_inst=0x{:x}, fid={}",
-                    dst_inst_id, self.5 .0
+                    dst_inst_id, self.5.0
                 )
             }
             (_, None) => {
                 write!(
                     f,
                     "Gather: src_indirect_inst=0x{:x}, fid={}",
-                    src_inst_id, self.4 .0
+                    src_inst_id, self.4.0
                 )
             }
             (_, _) => {
                 write!(
                     f,
                     "src_inst=0x{:x}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
-                    src_inst_id, self.4 .0, dst_inst_id, self.5 .0, self.6
+                    src_inst_id, self.4.0, dst_inst_id, self.5.0, self.6
                 )
             }
         }
@@ -1012,7 +1012,7 @@ impl fmt::Display for FillInstInfoDisplay<'_> {
         if let Some(inst) = self.0 {
             inst_id = inst.inst_id.unwrap().0;
         }
-        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1 .0)
+        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1.0)
     }
 }
 
