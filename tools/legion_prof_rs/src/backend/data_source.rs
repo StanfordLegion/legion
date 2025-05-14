@@ -1546,10 +1546,13 @@ impl StateDataSource {
                         // recorded something with an fevent that we don't recognize from the
                         // same node that should have produced this fevent
                         Field::String(format!(
-                                "Could not find fevent {:#x} for external Realm event {:#x} from a {} on node {}. This is probably a bug in the Legion runtime logging not recording all fevents on a node. You could try running with '-lg:prof_self' to see if the fevent corresponds to a profiling meta-task, but most likely this is just a bug.", fevent.0, event.0, provenance, fevent_node.0
+                            "Could not find fevent {:#x} for external Realm event {:#x} from a {} on node {}. This is probably a bug in the Legion runtime logging not recording all fevents on a node. You could try running with '-lg:prof_self' to see if the fevent corresponds to a profiling meta-task, but most likely this is just a bug.",
+                            fevent.0, event.0, provenance, fevent_node.0
                         ))
                     } else {
-                        panic!("External events should always be made on the same node as their fevent");
+                        panic!(
+                            "External events should always be made on the same node as their fevent"
+                        );
                     }
                 }
             }
