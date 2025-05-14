@@ -158,6 +158,6 @@ However, it is generally recommended to use `collective_spawn` to launch a main 
 At the end of a Realm program, it is necessary to shut down the runtime using the `shutdown` and `wait_for_shutdown` methods.
 In this example, we instruct the runtime to initiate `shutdown` as soon as the `MAIN_TASK` or all `Hello_Task` are finished, respectively.
 While the `wait_for_shutdown` method must be called by all processes, it is not necessary for `shutdown`.
-However, if the `shutdown` methof is called from all processes, the pre-conditional event must be identical across all processes.
+However, if the `shutdown` method is called from all processes, the pre-conditional event must be identical across all processes.
 Therefore, in this program, the `shutdown` is called from all processes when using the `collective_spawn`, but only on rank 0 without
 `collective_spawn`.
