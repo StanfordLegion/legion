@@ -377,33 +377,6 @@ namespace Realm {
       return work_left;
     }
 
-    void GPU::create_dma_channels(Realm::RuntimeImpl *r)
-    {
-      // we used to skip gpu dma channels when there was no fbmem, but in
-      //  theory nvlink'd gpus can help move sysmem data even, so let's just
-      //  always create the channels
-
-      r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
-      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
-      r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
-      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
-
-      // treat managed mem like pinned sysmem on the assumption that most data
-      //  is usually in system memory
-      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
-        r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
-        r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
-      } else {
-        log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
-      }
-
-      // only create a p2p channel if we have peers (and an fb)
-      if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
-        r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
-        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
-      }
-    }
-
     ////////////////////////////////////////////////////////////////////////
     //
     // class GPUWorkFence
@@ -2270,7 +2243,7 @@ namespace Realm {
         Machine::ProcessorMemoryAffinity pma;
         pma.p = p;
         pma.m = *it;
-        pma.bandwidth = info->pci_bandwidth;
+        pma.bandwidth = std::max(info->c2c_bandwidth, info->pci_bandwidth);
         pma.latency = 200; // "bad"
         runtime->add_proc_mem_affinity(pma);
       }
@@ -2344,7 +2317,8 @@ namespace Realm {
         CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
         if(!cdm)
           continue;
-        if(cdm->gpu && (info->peers.count(cdm->gpu->info->index) > 0)) {
+        if(cdm->gpu && info->index != cdm->gpu->info->index &&
+           (info->peers.count(cdm->gpu->info->index) > 0)) {
           Machine::ProcessorMemoryAffinity pma;
           pma.p = p;
           pma.m = (*it)->me;
@@ -2456,6 +2430,53 @@ namespace Realm {
       // TODO(apryakhin@): Determine if we need to keep the pointer.
       fb_dmem = new GPUDynamicFBMemory(m, this, max_size);
       runtime->add_memory(fb_dmem);
+    }
+
+    void GPU::create_dma_channels(Realm::RuntimeImpl *r)
+    {
+      // we used to skip gpu dma channels when there was no fbmem, but in
+      //  theory nvlink'd gpus can help move sysmem data even, so let's just
+      //  always create the channels
+
+      r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
+      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
+      r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
+      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
+
+      // treat managed mem like pinned sysmem on the assumption that most data
+      //  is usually in system memory
+      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
+      } else {
+        log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
+      }
+
+      // only create a p2p channel if we have peers (and an fb)
+      if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
+      }
+
+      // add processor memory affinity for pageable access host memory.
+      // this is done here because this is a place where all the local memories
+      //  for the other modules are known to have been created such that when
+      //  we iterate them, we are sure to iterate over all of them.
+      if(info->pageable_access_supported && (module->config->cfg_pageable_access != 0)) {
+        Node &n = r->nodes[Network::my_node_id];
+        for(MemoryImpl *mem : n.memories) {
+          if(mem->get_kind() == Memory::SOCKET_MEM ||
+             mem->get_kind() == Memory::SYSTEM_MEM ||
+             mem->get_kind() == Memory::FILE_MEM || mem->get_kind() == Memory::HDF_MEM) {
+            Machine::ProcessorMemoryAffinity pma;
+            pma.p = proc->me;
+            pma.m = mem->me;
+            pma.bandwidth = info->c2c_bandwidth;
+            pma.latency = 1000;
+            r->add_proc_mem_affinity(pma);
+          }
+        }
+      }
     }
 
     ////////////////////////////////////////////////////////////////////////
