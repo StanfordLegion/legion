@@ -550,6 +550,14 @@ namespace Realm {
   // class ActiveMessageHandlerReg<T, T2>
   //
 
+  template <typename, typename = void>
+  struct has_frag_info : std::false_type {};
+  template <typename T>
+  struct has_frag_info<T, std::void_t<decltype(std::declval<T>().frag_info)>>
+    : std::true_type {};
+  template <typename T>
+  constexpr bool has_frag_info_v = has_frag_info<T>::value;
+
   template <typename T, typename T2>
   ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
   {
@@ -575,6 +583,14 @@ namespace Realm {
     {
       name = mangled_name;
       must_free = false;
+    }
+
+    if constexpr(has_frag_info_v<T>) {
+      extract_frag_info = [](const void *hdr) -> const FragmentInfo * {
+        return &reinterpret_cast<const T *>(hdr)->frag_info;
+      };
+    } else {
+      extract_frag_info = nullptr;
     }
 
     ActiveMessageHandlerTable::append_handler_reg(this);

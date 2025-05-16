@@ -51,6 +51,8 @@ list(APPEND REALM_TESTS
   ucx_mpool_test.cc
   topology_test.cc
   auto_actmsg_test.cc
+  fragmented_message_test.cc
+  incoming_message_manager_test.cc
  )
 
 list(APPEND UCX_SOURCES

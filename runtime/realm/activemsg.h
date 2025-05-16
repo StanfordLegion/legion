@@ -20,6 +20,7 @@
 #define ACTIVEMSG_H
 
 #include "realm/realm_config.h"
+#include "realm/fragmented_message.h"
 #include "realm/mutex.h"
 #include "realm/serialize.h"
 #include "realm/nodeset.h"
@@ -229,6 +230,12 @@ namespace Realm {
     void record(long long t_start, long long t_end);
   };
 
+  struct FragmentInfo {
+    uint32_t chunk_id{0};
+    uint32_t total_chunks{0};
+    uint64_t msg_id{0};
+  };
+
   // singleton class that can convert message type->ID and ID->handler
   class ActiveMessageHandlerTable {
   public:
@@ -266,6 +273,8 @@ namespace Realm {
       MessageHandlerNoTimeout handler_notimeout;
       MessageHandlerInline handler_inline;
       ActiveMessageHandlerStats stats;
+      using FragInfoExtractor = const FragmentInfo *(*)(const void *);
+      FragInfoExtractor extract_frag_info = nullptr;
     };
 
     HandlerEntry *lookup_message_handler(MessageID id);
@@ -289,6 +298,8 @@ namespace Realm {
     const char *name;
     bool must_free;
     ActiveMessageHandlerRegBase *next_handler;
+    using FragInfoExtractor = const FragmentInfo *(*)(const void *);
+    FragInfoExtractor extract_frag_info = nullptr;
   };
 
   template <typename T, typename T2 = T>
@@ -427,12 +438,16 @@ namespace Realm {
     MessageBlock *available_blocks;
     size_t num_available_blocks;
     size_t cfg_max_available_blocks, cfg_message_block_size;
-  };
 
-  struct FragmentInfo {
-    uint32_t chunk_id{0};
-    uint32_t total_chunks{0};
-    uint64_t msg_id{0};
+    struct PairHash {
+      std::size_t operator()(const std::pair<NodeID, uint64_t> &p) const
+      {
+        return std::hash<NodeID>()(p.first) ^ (std::hash<uint64_t>()(p.second) << 1);
+      }
+    };
+
+    std::unordered_map<std::pair<NodeID, uint64_t>, FragmentedMessage *, PairHash>
+        frag_message;
   };
 
   template <typename UserHdr>
