@@ -463,7 +463,7 @@ namespace Realm {
 
   private:
     using WireHdr = WrappedWithFragInfo<UserHdr>;
-    uint64_t generate_unique_msgid(NodeID node_id);
+    uint64_t next_message_id(NodeID node_id);
 
     NodeID target_;
     size_t max_payload_size_;

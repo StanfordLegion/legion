@@ -636,12 +636,12 @@ namespace Realm {
     };
 
     if(payload_.size() <= max_payload_size_) {
-      uint64_t msg_id = generate_unique_msgid(target_);
+      uint64_t msg_id = next_message_id(target_);
       send_single(0, 1, msg_id, payload_.data(), payload_.size());
       return;
     }
 
-    uint64_t msg_id = generate_unique_msgid(target_);
+    uint64_t msg_id = next_message_id(target_);
     size_t total_chunks = (payload_.size() + max_payload_size_ - 1) / max_payload_size_;
     size_t offset = 0;
     for(uint32_t chunk_id = 0; chunk_id < total_chunks; ++chunk_id) {
@@ -653,12 +653,11 @@ namespace Realm {
   }
 
   template <typename UserHdr, template <typename> class Builder>
-  uint64_t ActiveMessageAuto<UserHdr, Builder>::generate_unique_msgid(NodeID node_id)
+  uint64_t ActiveMessageAuto<UserHdr, Builder>::next_message_id(NodeID node_id)
   {
-    static std::atomic<uint16_t> counter{0};
-    uint64_t timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    uint16_t count = counter.fetch_add(1, std::memory_order_relaxed) & 0xFFFF;
-    return (timestamp << 32) | (static_cast<uint64_t>(node_id) << 16) | count;
+    static std::atomic<uint64_t> counter{0};
+    uint64_t local = counter.fetch_add(1, std::memory_order_relaxed);
+    return (static_cast<uint64_t>(node_id) << 48) | (local & ((1ULL << 48) - 1));
   }
 
 
