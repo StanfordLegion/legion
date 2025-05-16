@@ -429,6 +429,48 @@ namespace Realm {
     size_t cfg_max_available_blocks, cfg_message_block_size;
   };
 
+  struct FragmentInfo {
+    uint32_t chunk_id{0};
+    uint32_t total_chunks{0};
+    uint64_t msg_id{0};
+  };
+
+  template <typename UserHdr>
+  struct WrappedWithFragInfo {
+    FragmentInfo frag_info;
+    UserHdr user;
+
+    UserHdr *operator->() { return &user; }
+    const UserHdr *operator->() const { return &user; }
+    UserHdr &operator*() { return user; }
+    const UserHdr &operator*() const { return user; }
+  };
+
+  template <typename Hdr>
+  using DefaultActiveMessageBuilder = ActiveMessage<WrappedWithFragInfo<Hdr>>;
+
+  template <typename UserHdr,
+            template <typename> class Builder = DefaultActiveMessageBuilder>
+  class ActiveMessageAuto {
+  public:
+    ActiveMessageAuto(NodeID target, size_t max_payload_size);
+
+    UserHdr *operator->();
+    UserHdr &operator*();
+
+    void add_payload(const void *data, size_t size);
+    void commit();
+
+  private:
+    using WireHdr = WrappedWithFragInfo<UserHdr>;
+    uint64_t generate_unique_msgid(NodeID node_id);
+
+    NodeID target_;
+    size_t max_payload_size_;
+    std::vector<char> payload_;
+    UserHdr user_header_{};
+  };
+
 }; // namespace Realm
 
 #include "realm/activemsg.inl"

@@ -587,6 +587,81 @@ namespace Realm {
       free(const_cast<char *>(name));
   }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ActiveMessageAuto<UserHdr, Builder>
+  //
+
+  template <typename UserHdr, template <typename> class Builder>
+  ActiveMessageAuto<UserHdr, Builder>::ActiveMessageAuto(NodeID target,
+                                                         size_t max_payload_size)
+    : target_(target)
+    , max_payload_size_(max_payload_size)
+  {}
+
+  template <typename UserHdr, template <typename> class Builder>
+  UserHdr *ActiveMessageAuto<UserHdr, Builder>::operator->()
+  {
+    return &user_header_;
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  UserHdr &ActiveMessageAuto<UserHdr, Builder>::operator*()
+  {
+    return user_header_;
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  void ActiveMessageAuto<UserHdr, Builder>::add_payload(const void *data, size_t size)
+  {
+    payload_.insert(payload_.end(), static_cast<const char *>(data),
+                    static_cast<const char *>(data) + size);
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  void ActiveMessageAuto<UserHdr, Builder>::commit()
+  {
+    if(payload_.empty()) {
+      abort();
+    }
+
+    using WireHdr = WrappedWithFragInfo<UserHdr>;
+
+    auto send_single = [&](uint32_t chunk_id, uint32_t total_chunks, uint64_t msg_id,
+                           const void *data, size_t size) {
+      Builder<WireHdr> msg(target_, size);
+      msg->frag_info = {chunk_id, total_chunks, msg_id};
+      msg.add_payload(data, size);
+      msg.commit();
+    };
+
+    if(payload_.size() <= max_payload_size_) {
+      uint64_t msg_id = generate_unique_msgid(target_);
+      send_single(0, 1, msg_id, payload_.data(), payload_.size());
+      return;
+    }
+
+    uint64_t msg_id = generate_unique_msgid(target_);
+    size_t total_chunks = (payload_.size() + max_payload_size_ - 1) / max_payload_size_;
+    size_t offset = 0;
+    for(uint32_t chunk_id = 0; chunk_id < total_chunks; ++chunk_id) {
+      size_t chunk_size = std::min(max_payload_size_, payload_.size() - offset);
+      send_single(chunk_id, static_cast<uint32_t>(total_chunks), msg_id,
+                  payload_.data() + offset, chunk_size);
+      offset += chunk_size;
+    }
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  uint64_t ActiveMessageAuto<UserHdr, Builder>::generate_unique_msgid(NodeID node_id)
+  {
+    static std::atomic<uint16_t> counter{0};
+    uint64_t timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    uint16_t count = counter.fetch_add(1, std::memory_order_relaxed) & 0xFFFF;
+    return (timestamp << 32) | (static_cast<uint64_t>(node_id) << 16) | count;
+  }
+
+
   namespace HandlerWrappers {
     // this type only exists if you can supply a value of the right type
     template <typename T, T fnptr> struct HasRightType {};
