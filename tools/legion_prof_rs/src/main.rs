@@ -1,17 +1,21 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io;
+#[cfg(feature = "client")]
+use std::path::Path;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
 use rayon::prelude::*;
 
+#[cfg(feature = "client")]
 use url::Url;
 
 #[cfg(feature = "client")]
 use legion_prof_viewer::{
-    app, deferred_data::DeferredDataSource, http::client::HTTPClientDataSource,
+    app, deferred_data::DeferredDataSource, file_data::FileDataSource,
+    http::client::HTTPClientDataSource, parallel_data::ParallelDeferredDataSource,
 };
 
 #[cfg(feature = "archiver")]
@@ -109,10 +113,10 @@ enum Commands {
         )]
         zstd_compression: i32,
     },
-    #[command(about = "connect viewer to the specified HTTP profile server")]
+    #[command(about = "connect viewer to an HTTP server or (local/remote) archive")]
     Attach {
-        #[arg(required = true, help = "URL(s) to attach to")]
-        urls: Vec<Url>,
+        #[arg(required = true, help = "URL(s) or path(s) to attach to")]
+        args: Vec<OsString>,
     },
     #[command(about = "dump parsed log files in a JSON format")]
     Dump {
@@ -231,15 +235,26 @@ fn main() -> io::Result<()> {
     }
 
     match cli.command {
-        Commands::Attach { urls } => {
+        Commands::Attach { args } => {
             #[cfg(feature = "client")]
             {
-                let data_sources: Vec<_> = urls
+                fn http_ds(url: Url) -> Box<dyn DeferredDataSource> {
+                    Box::new(HTTPClientDataSource::new(url))
+                }
+
+                fn file_ds(path: impl AsRef<Path>) -> Box<dyn DeferredDataSource> {
+                    Box::new(ParallelDeferredDataSource::new(FileDataSource::new(path)))
+                }
+
+                let data_sources: Vec<_> = args
                     .into_iter()
-                    .map(|url| {
-                        let data_source: Box<dyn DeferredDataSource> =
-                            Box::new(HTTPClientDataSource::new(url));
-                        data_source
+                    .map(|arg| {
+                        arg.into_string()
+                            .map(|s| Url::parse(&s).map(http_ds).unwrap_or_else(|_| {
+                                println!("The argument '{}' does not appear to be a valid URL. Attempting to open it as a local file...", &s);
+                                file_ds(&s)
+                            }))
+                            .unwrap_or_else(file_ds)
                     })
                     .collect();
                 app::start(data_sources);
