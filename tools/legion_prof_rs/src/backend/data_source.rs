@@ -111,6 +111,7 @@ pub struct Fields {
     previous_executing: FieldID,
     scheduling_overhead: FieldID,
     message_latency: FieldID,
+    effective_bandwidth: FieldID,
 }
 
 #[derive(Debug)]
@@ -165,6 +166,7 @@ impl StateDataSource {
             previous_executing: field_schema.insert("Previous Executing".to_owned(), true),
             scheduling_overhead: field_schema.insert("Scheduling Overhead".to_owned(), false),
             message_latency: field_schema.insert("Message Latency".to_owned(), false),
+            effective_bandwidth: field_schema.insert("Effective Bandwidth".to_owned(), false),
         };
 
         let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
@@ -2357,6 +2359,27 @@ impl StateDataSource {
         result.push((self.fields.size, Field::String(size), None));
     }
 
+    fn generate_effective_bandwidth(
+        &self,
+        entry: &ChanEntry,
+        result: &mut Vec<(FieldID, Field, Option<Color32>)>,
+    ) {
+        let size = match entry {
+            ChanEntry::Copy(copy) => copy.size,
+            ChanEntry::Fill(fill) => fill.size,
+            ChanEntry::DepPart(_) => return,
+        };
+        let time_range = entry.time_range();
+        let exec_time = time_range.stop.unwrap() - time_range.start.unwrap();
+        let bandwidth = size * u64::pow(10, 9) / exec_time.to_ns();
+        let effective = format!("{}/s", SizePretty(bandwidth));
+        result.push((
+            self.fields.effective_bandwidth,
+            Field::String(effective),
+            None,
+        ));
+    }
+
     fn generate_chan_slot_meta_tile(
         &self,
         entry_id: &EntryID,
@@ -2382,6 +2405,7 @@ impl StateDataSource {
             fields.push((self.fields.interval, Field::Interval(point_interval), None));
             self.generate_chan_reqs(entry, &mut fields);
             self.generate_chan_size(entry, &mut fields);
+            self.generate_effective_bandwidth(entry, &mut fields);
             if let Some(initiation_op) = entry.initiation() {
                 // FIXME: You might think that initiation_op is None rather than
                 // needing this check with zero, but backwards compatibility is hard
