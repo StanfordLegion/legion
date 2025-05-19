@@ -214,6 +214,14 @@ if(REALM_USE_NVTX)
   )
 endif()
 
+if(REALM_USE_PREALM)
+  list(APPEND REALM_SRC
+    realm/prealm/prealm.h
+    realm/prealm/prealm.inl
+    realm/prealm/prealm.cc
+  )
+endif()
+
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h
@@ -412,6 +420,10 @@ endif()
 
 if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
+endif()
+
+if(REALM_USE_PREALM)
+  target_link_libraries(RealmRuntime PRIVATE ZLIB::ZLIB)
 endif()
 
 if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)

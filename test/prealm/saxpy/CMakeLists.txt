@@ -22,7 +22,12 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-set(CPU_SOURCES realm_saxpy.h realm_saxpy_cpu.cc prealm.cc)
+if(NOT Legion_USE_PREALM)
+  message(FATAL_ERROR
+    "PRealm saxpy test requires PRealm support")
+endif()
+
+set(CPU_SOURCES realm_saxpy.h realm_saxpy_cpu.cc)
 if(Legion_USE_CUDA)
   set(GPU_SOURCES realm_saxpy_gpu.cu)
   add_executable(prealm_saxpy ${CPU_SOURCES} ${GPU_SOURCES})

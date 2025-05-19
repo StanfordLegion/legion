@@ -17,7 +17,7 @@
 
 namespace PRealm {
 
-class ThreadProfiler {
+class REALM_INTERNAL_API_EXTERNAL_LINKAGE ThreadProfiler {
 public:
   typedef long long timestamp_t;
   typedef ::realm_id_t ProcID;
@@ -30,6 +30,7 @@ public:
     TASK_PROF,
     INST_PROF,
     PART_PROF,
+    EXTERNAL_PROF,
     LAST_PROF, // must be last
   };
 
@@ -56,6 +57,11 @@ public:
       NameClosure *closure;
     } id;
     ProfKind kind;
+  };
+  struct ExternalTriggerArgs {
+    Event external;
+    Event fevent;
+    unsigned long long provenance;
   };
   struct ProcDesc {
   public:
@@ -104,6 +110,13 @@ public:
     Event result;
     Event provenance;
     timestamp_t performed;
+  };
+  struct ExternalEventInfo {
+  public:
+    Event external;
+    Event fevent;
+    timestamp_t triggered;
+    unsigned long long provenance; 
   };
   struct BarrierArrivalInfo {
   public:
@@ -207,6 +220,13 @@ public:
     Event creator;
     Event finish_event;
   };
+  struct ApplicationInfo {
+  public:
+    timestamp_t start, stop;
+    ProcID proc_id;
+    Event fevent;
+    unsigned long long provenance;
+  };
 
 public:
   ThreadProfiler(Processor p, Realm::Event implicit);
@@ -241,6 +261,7 @@ public:
   void record_barrier_arrival(Event result, Event precondition);
   void record_event_merger(Event result, const Event *preconditions,
                            size_t num_events);
+  void record_external_event(Realm::Event result, const std::string_view &prov);
   void record_reservation_acquire(Reservation r, Event result,
                                   Event precondition);
   Event record_instance_ready(RegionInstance inst, Event result,
@@ -248,6 +269,8 @@ public:
   void record_instance_usage(RegionInstance inst, FieldID field_id);
   void process_response(ProfilingResponse &response);
   void process_trigger(const void *args, size_t arglen);
+  void process_external(ProfilingResponse &response);
+  void record_time_range(long long start, const std::string_view& name);
   size_t dump_inter(long long target_latency);
   void finalize(void);
 
@@ -262,6 +285,7 @@ private:
   std::deque<EventMergerInfo> event_merger_infos;
   std::deque<EventTriggerInfo> event_trigger_infos;
   std::deque<EventPoisonInfo> event_poison_infos;
+  std::deque<ExternalEventInfo> external_event_infos;
   std::deque<BarrierArrivalInfo> barrier_arrival_infos;
   std::deque<ReservationAcquireInfo> reservation_acquire_infos;
   std::deque<InstanceReadyInfo> instance_ready_infos;
@@ -272,6 +296,7 @@ private:
   std::deque<GPUTaskInfo> gpu_task_infos;
   std::deque<InstTimelineInfo> inst_timeline_infos;
   std::deque<ProfTaskInfo> prof_task_infos;
+  std::deque<ApplicationInfo> application_infos;
   std::vector<ProcID> proc_ids;
   std::vector<MemID> mem_ids;
   std::vector<WaitInfo> implicit_waits;
@@ -1046,4 +1071,9 @@ inline void Machine::get_shared_processors(Memory m, std::set<Processor> &pset,
 /*static*/ inline Machine Machine::get_machine(void) {
   return Realm::Machine::get_machine();
 }
+
+inline void prealm_time_range(long long start_time_in_ns, const std::string_view& name) {
+  ThreadProfiler::get_thread_profiler().record_time_range(start_time_in_ns, name);
+}
+
 } // namespace PRealm

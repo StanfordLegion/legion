@@ -20,32 +20,44 @@
 #include "realm/cmdline.h"
 #include "realm/id.h"
 #ifdef REALM_USE_CUDA
+#include "realm/cuda/cuda_access.h"
 #include "realm/cuda/cuda_module.h"
 #endif
 
 namespace PRealm {
-// Import a bunch of types directly from the realm public interface
-// but overload ones that we need to profile
 
-// forward declarations
-using Realm::Clock;
-using Realm::CodeDescriptor;
-using Realm::Logger;
-// TODO: add profiling to client-level profiling requests
-using Realm::CommandLineParser;
-using Realm::ProfilingRequestSet;
-template <int N, typename T> struct Rect;
-template <int N, typename T> class IndexSpace;
+  // You can use this call to record your own time ranges in a PRealm profile
+  // It will implicitly capture the stop time when the function is invoked
+  REALM_PUBLIC_API void prealm_time_range(long long start_time_in_ns,
+                                          const std::string_view &name);
 
-// from utils.h
-using Realm::dynamic_extent;
-template <typename T, size_t Extent = dynamic_extent>
-using span = Realm::span<T, Extent>;
+  REALM_PUBLIC_API void prealm_task_name(Realm::Processor::TaskFuncID task_id,
+                                         const std::string_view &task_name);
 
-// from faults.h
-namespace Faults {
-using namespace Realm::Faults;
-}
+  // Import a bunch of types directly from the realm public interface
+  // but overload ones that we need to profile
+
+  // forward declarations
+  using Realm::Clock;
+  using Realm::CodeDescriptor;
+  using Realm::Logger;
+  // TODO: add profiling to client-level profiling requests
+  using Realm::CommandLineParser;
+  using Realm::ProfilingRequestSet;
+  template <int N, typename T>
+  struct Rect;
+  template <int N, typename T>
+  class IndexSpace;
+
+  // from utils.h
+  using Realm::dynamic_extent;
+  template <typename T, size_t Extent = dynamic_extent>
+  using span = Realm::span<T, Extent>;
+
+  // from faults.h
+  namespace Faults {
+    using namespace Realm::Faults;
+  }
 using Realm::ApplicationException;
 using Realm::Backtrace;
 using Realm::CancellationException;
@@ -75,9 +87,14 @@ using SimpleSerdez = Realm::SimpleSerdez<T, MAX_SER_SIZE>;
 using Realm::CustomSerdezUntyped;
 
 // from event.h
-class Event : public Realm::Event {
+class REALM_PUBLIC_API Event : public Realm::Event {
 public:
   Event(void) { id = 0; }
+  Event(::realm_id_t i)
+  {
+    assert(Realm::ID{i}.is_event() || Realm::ID{i}.is_barrier());
+    id = i;
+  }
   Event(const Realm::Event &e) : Realm::Event(e) {}
   Event(const Event &rhs) = default;
   Event(Event &&rhs) = default;
@@ -116,9 +133,14 @@ public:
 };
 static_assert(sizeof(Event) == sizeof(Realm::Event));
 
-class UserEvent : public Event {
+class REALM_PUBLIC_API UserEvent : public Event {
 public:
   UserEvent(void) { id = 0; }
+  UserEvent(::realm_id_t i)
+    : Event(i)
+  {
+    assert(Realm::ID{i}.is_event());
+  }
   UserEvent(const Realm::UserEvent &e) { id = e.id; }
   UserEvent(const UserEvent &rhs) = default;
   UserEvent(UserEvent &&rhs) = default;
@@ -140,11 +162,17 @@ public:
 };
 static_assert(sizeof(UserEvent) == sizeof(Realm::UserEvent));
 
-class Barrier : public Event {
+class REALM_PUBLIC_API Barrier : public Event {
 public:
   Barrier(void) {
     id = 0;
     timestamp = 0;
+  }
+  Barrier(::realm_id_t i, ::realm_barrier_timestamp_t t)
+    : Event(i)
+    , timestamp(t)
+  {
+    assert(Realm::ID{i}.is_barrier());
   }
   Barrier(const Realm::Barrier &b) {
     id = b.id;
@@ -192,7 +220,7 @@ public:
 };
 static_assert(sizeof(Barrier) == sizeof(Realm::Barrier));
 
-class CompletionQueue : public Realm::CompletionQueue {
+class REALM_PUBLIC_API CompletionQueue : public Realm::CompletionQueue {
 public:
   CompletionQueue(void) { id = 0; }
   CompletionQueue(Realm::CompletionQueue q) : Realm::CompletionQueue(q) {}
@@ -216,7 +244,7 @@ public:
 static_assert(sizeof(CompletionQueue) == sizeof(Realm::CompletionQueue));
 
 // from reservation.h
-class Reservation : public Realm::Reservation {
+class REALM_PUBLIC_API Reservation : public Realm::Reservation {
 public:
   Reservation(void) { id = 0; }
   Reservation(Realm::Reservation r) : Realm::Reservation(r) {}
@@ -238,7 +266,7 @@ public:
 };
 static_assert(sizeof(Reservation) == sizeof(Realm::Reservation));
 
-class FastReservation : public Realm::FastReservation {
+class REALM_PUBLIC_API FastReservation : public Realm::FastReservation {
 public:
   // TODO: do we need to profile these, right now Legion Prof won't use them
 #if 0
@@ -255,9 +283,14 @@ using Realm::Memory;
 // from processor.h
 using Realm::AddressSpace;
 
-class Processor : public Realm::Processor {
+class REALM_PUBLIC_API Processor : public Realm::Processor {
 public:
   Processor(void) { id = 0; }
+  Processor(::realm_id_t i)
+  {
+    assert(Realm::ID{i}.is_processor());
+    id = i;
+  }
   Processor(Realm::Processor p) : Realm::Processor(p) {}
   Processor(const Processor &p) = default;
   Processor(Processor &&p) = default;
@@ -289,19 +322,20 @@ public:
                                      const void *user_data = 0,
                                      size_t user_data_len = 0);
   // special task IDs
-  enum {
+  enum
+  {
     TASK_ID_PROCESSOR_NOP = Realm::Processor::TASK_ID_PROCESSOR_NOP,
     TASK_ID_PROCESSOR_INIT = Realm::Processor::TASK_ID_PROCESSOR_INIT,
     TASK_ID_PROCESSOR_SHUTDOWN = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
     // Increment this by 3 to reserve some task IDs for our profiling work
-    TASK_ID_FIRST_AVAILABLE = Realm::Processor::TASK_ID_FIRST_AVAILABLE + 4,
+    TASK_ID_FIRST_AVAILABLE = Realm::Processor::TASK_ID_FIRST_AVAILABLE + 5,
   };
 
   static const Processor NO_PROC;
 };
 static_assert(sizeof(Processor) == sizeof(Realm::Processor));
 
-class ProcessorGroup : public Processor {
+class REALM_PUBLIC_API ProcessorGroup : public Processor {
 public:
   ProcessorGroup(void) { id = 0; }
   ProcessorGroup(Realm::ProcessorGroup g) : Processor(g) {}
@@ -349,7 +383,7 @@ using Realm::ExternalFileResource;
 using Realm::ExternalInstanceResource;
 using Realm::ExternalMemoryResource;
 using Realm::FieldID;
-class RegionInstance : public Realm::RegionInstance {
+class REALM_PUBLIC_API RegionInstance : public Realm::RegionInstance {
 public:
   RegionInstance(void) {
     id = 0;
@@ -442,7 +476,7 @@ using Realm::ExternalMemoryResource;
 
 // Need a special copy src dst field that records RegionInstances with unique
 // names
-struct CopySrcDstField {
+struct REALM_PUBLIC_API CopySrcDstField {
 public:
   CopySrcDstField(void);
   CopySrcDstField(const CopySrcDstField &copy_from);
@@ -480,7 +514,8 @@ public:
 
 // from point.h
 template <int N, typename T = int> using Point = Realm::Point<N, T>;
-template <int N, typename T = int> struct Rect : public Realm::Rect<N, T> {
+template <int N, typename T = int>
+struct REALM_PUBLIC_API Rect : public Realm::Rect<N, T> {
   using Realm::Rect<N, T>::Rect;
   REALM_CUDA_HD
   Rect(void) {}
@@ -528,7 +563,7 @@ using Realm::ProfilingRequest;
 using Realm::ProfilingResponse;
 
 // from machine.h
-class Machine : public Realm::Machine {
+class REALM_PUBLIC_API Machine : public Realm::Machine {
 public:
   using Realm::Machine::Machine;
   Machine(const Realm::Machine &m) : Realm::Machine(m) {}
@@ -555,8 +590,10 @@ static_assert(sizeof(Machine) == sizeof(Realm::Machine));
 template <typename QT, typename RT>
 using MachineQueryIterator = Realm::MachineQueryIterator<QT, RT>;
 
+using Realm::Module;
+
 // from runtime.h
-class Runtime : public Realm::Runtime {
+class REALM_PUBLIC_API Runtime : public Realm::Runtime {
 public:
   using Realm::Runtime::Runtime;
   Runtime(const Realm::Runtime &r) : Realm::Runtime(r) {}
@@ -591,11 +628,23 @@ public:
   void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
   int wait_for_shutdown(void);
   static Runtime get_runtime(void);
+  template <typename T>
+  inline T *get_module(const char *name)
+  {
+    Module *mod = get_module_untyped(name);
+    if(mod)
+      return dynamic_cast<T *>(mod);
+    else
+      return 0;
+  }
+
+protected:
+  Module *get_module_untyped(const char *name);
 };
 static_assert(sizeof(Runtime) == sizeof(Realm::Runtime));
 
 template <typename FT, int N, typename T = int>
-class GenericAccessor : public Realm::GenericAccessor<FT, N, T> {
+class REALM_PUBLIC_API GenericAccessor : public Realm::GenericAccessor<FT, N, T> {
 public:
   GenericAccessor(void) {}
   GenericAccessor(RegionInstance inst, FieldID field_id,
@@ -604,7 +653,7 @@ public:
                   const Rect<N, T> &subrect, size_t subfield_offset = 0);
 };
 template <typename FT, int N, typename T = int>
-class AffineAccessor : public Realm::AffineAccessor<FT, N, T> {
+class REALM_PUBLIC_API AffineAccessor : public Realm::AffineAccessor<FT, N, T> {
 public:
   REALM_CUDA_HD
   AffineAccessor(void) {}
@@ -629,7 +678,7 @@ public:
   AffineAccessor &operator=(AffineAccessor &&) noexcept = default;
 };
 template <typename FT, int N, typename T>
-class MultiAffineAccessor : public Realm::MultiAffineAccessor<FT, N, T> {
+class REALM_PUBLIC_API MultiAffineAccessor : public Realm::MultiAffineAccessor<FT, N, T> {
 public:
   REALM_CUDA_HD
   MultiAffineAccessor(void) {}
@@ -659,7 +708,8 @@ template <int N, typename T, int N2, typename T2>
 using DomainTransform = Realm::DomainTransform<N, T, N2, T2>;
 template <int N, typename T = int>
 using CopyIndirection = Realm::CopyIndirection<N, T>;
-template <int N, typename T> class IndexSpace : public Realm::IndexSpace<N, T> {
+template <int N, typename T>
+class REALM_PUBLIC_API IndexSpace : public Realm::IndexSpace<N, T> {
 public:
   using Realm::IndexSpace<N, T>::IndexSpace;
   IndexSpace(void) {}
@@ -903,7 +953,7 @@ public:
       const ProfilingRequestSet &reqs, Event wait_on = Event::NO_EVENT);
 };
 
-class IndexSpaceGeneric : public Realm::IndexSpaceGeneric {
+class REALM_PUBLIC_API IndexSpaceGeneric : public Realm::IndexSpaceGeneric {
 public:
   using Realm::IndexSpaceGeneric::IndexSpaceGeneric;
   IndexSpaceGeneric(void) {}
@@ -957,6 +1007,66 @@ using Realm::SubgraphDefinition;
 
 // from module_config.h
 using Realm::ModuleConfig;
+
+#ifdef REALM_USE_CUDA
+using Realm::CudaArrayLayoutPiece;
+using Realm::CudaArrayPieceInfo;
+using Realm::ExternalCudaArrayResource;
+using Realm::ExternalCudaMemoryResource;
+using Realm::ExternalCudaPinnedHostResource;
+namespace Cuda {
+  using Realm::Cuda::CudaModuleConfig;
+  using Realm::Cuda::CudaRedOpDesc;
+  using Realm::Cuda::get_cuda_device_id;
+  using Realm::Cuda::get_cuda_device_uuid;
+  using Realm::Cuda::get_task_cuda_stream;
+  using Realm::Cuda::set_task_ctxsync_required;
+  using Realm::Cuda::StreamAwareTaskFuncPtr;
+  using Realm::Cuda::Uuid;
+  using Realm::Cuda::UUID_SIZE;
+
+  class REALM_PUBLIC_API CudaModule : public Realm::Module {
+  public:
+    CudaModule(Realm::Cuda::CudaModule *internal);
+    virtual ~CudaModule(void);
+
+    inline CUstream_st *get_task_cuda_stream()
+    {
+      return internal->get_task_cuda_stream();
+    }
+    inline void set_task_ctxsync_required(bool is_required)
+    {
+      internal->set_task_ctxsync_required(is_required);
+    }
+
+    Event make_realm_event(CUevent_st *cuda_event);
+    Event make_realm_event(CUstream_st *cuda_stream);
+
+    inline bool get_cuda_device_uuid(Processor p, Uuid *uuid) const
+    {
+      return internal->get_cuda_device_uuid(p, uuid);
+    }
+
+    inline bool get_cuda_device_id(Processor p, int *device) const
+    {
+      return internal->get_cuda_device_id(p, device);
+    }
+
+    inline bool get_cuda_context(Processor p, CUctx_st **context) const
+    {
+      return internal->get_cuda_context(p, context);
+    }
+
+    inline bool register_reduction(Event &event, const CudaRedOpDesc *descs, size_t num)
+    {
+      return internal->register_reduction(event, descs, num);
+    }
+
+  protected:
+    Realm::Cuda::CudaModule *const internal;
+  };
+} // namespace Cuda
+#endif
 
 } // namespace PRealm
 

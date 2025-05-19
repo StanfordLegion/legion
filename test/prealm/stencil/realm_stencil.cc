@@ -18,7 +18,7 @@
 #include <algorithm>
 #include <climits>
 
-#include "prealm.h"
+#include "realm/prealm/prealm.h"
 
 #include "cpu_kernels.h"
 

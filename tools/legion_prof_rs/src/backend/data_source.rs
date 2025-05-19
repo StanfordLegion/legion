@@ -1516,6 +1516,46 @@ impl StateDataSource {
                     node.0, trigger_ts
                 ))
             }
+            EventEntryKind::ExternalEvent(pid) => {
+                let prof_uid = event_entry.creator.unwrap();
+                let provenance = self.state.find_provenance(pid).unwrap();
+                if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
+                    let trigger_time = event_entry.trigger_time.unwrap();
+                    let trigger_ts: ts::Timestamp = trigger_time.into();
+                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let entry = proc.find_entry(prof_uid).unwrap();
+                    let op_name = entry.name(&self.state);
+                    let proc_name = proc.name(&self.state);
+                    Field::ItemLink(ItemLink {
+                        item_uid: entry.base().prof_uid.into(),
+                        title: format!(
+                            "External Realm event from a {} created by {} on {} triggered at {}",
+                            provenance, &op_name, proc_name, trigger_ts
+                        ),
+                        interval: ts::Interval::new(
+                            entry.time_range.start.unwrap().into(),
+                            trigger_ts,
+                        ),
+                        entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
+                    })
+                } else {
+                    let fevent = self.state.find_fevent(prof_uid);
+                    let fevent_node = fevent.node_id();
+                    if fevent_node == node {
+                        // This is probably a bug if we get here because it means that we
+                        // recorded something with an fevent that we don't recognize from the
+                        // same node that should have produced this fevent
+                        Field::String(format!(
+                            "Could not find fevent {:#x} for external Realm event {:#x} from a {} on node {}. This is probably a bug in the Legion runtime logging not recording all fevents on a node. You could try running with '-lg:prof_self' to see if the fevent corresponds to a profiling meta-task, but most likely this is just a bug.",
+                            fevent.0, event.0, provenance, fevent_node.0
+                        ))
+                    } else {
+                        panic!(
+                            "External events should always be made on the same node as their fevent"
+                        );
+                    }
+                }
+            }
             // The rest of these only happen when the critical path is not along a chain
             // of events but when the (meta-) task producing the event is the last thing
             // to actually run to enable the execution

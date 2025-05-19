@@ -17,10 +17,19 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <unordered_set>
 #include <zlib.h>
 // Need this to know which version of Legion Prof we're using
 static constexpr unsigned LEGION_PROF_VERSION =
+// We hard code this since (P)Realm is about to be split from
+// Legion and we won't be able to rely on this dependence anymore
+// which means we'll have to manually update PRealm when the
+// logging interface with Legion changes
+#if 0
 #include "legion/legion_profiling_version.h"
+#else
+    1008 // the current Legion Prof version we work with
+#endif
     ;
 // pr_fopen expects filename to be a std::string
 #define pr_fopen(filename, mode) gzopen(filename.c_str(), mode)
@@ -46,6 +55,73 @@ const RegionInstance RegionInstance::NO_INST = RegionInstance();
 Realm::Logger log_pr("PRealm");
 thread_local ThreadProfiler *thread_profiler = nullptr;
 
+class AutoLock {
+public:
+  inline AutoLock(Realm::FastReservation &r, bool excl = true)
+    : local_lock(r)
+    , exclusive(excl)
+    , held(true)
+  {
+    if(exclusive) {
+      Realm::Event ready = local_lock.wrlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.wrlock();
+      }
+    } else {
+      Realm::Event ready = local_lock.rdlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.rdlock();
+      }
+    }
+  }
+
+public:
+  AutoLock(AutoLock &&rhs) = delete;
+  AutoLock(const AutoLock &rhs) = delete;
+  inline ~AutoLock(void)
+  {
+    if(held)
+      local_lock.unlock();
+  }
+
+public:
+  AutoLock &operator=(AutoLock &&rhs) = delete;
+  AutoLock &operator=(const AutoLock &rhs) = delete;
+
+public:
+  inline void release(void)
+  {
+    assert(held);
+    local_lock.unlock();
+    held = false;
+  }
+  inline void reacquire(void)
+  {
+    assert(!held);
+    if(exclusive) {
+      Realm::Event ready = local_lock.wrlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.wrlock();
+      }
+    } else {
+      Realm::Event ready = local_lock.rdlock();
+      while(ready.exists()) {
+        ready.wait();
+        ready = local_lock.rdlock();
+      }
+    }
+    held = true;
+  }
+
+protected:
+  Realm::FastReservation &local_lock;
+  const bool exclusive;
+  bool held;
+};
+
 class Profiler {
 public:
   struct WrapperArgs {
@@ -68,6 +144,7 @@ public:
   Profiler(void);
   Profiler(const Profiler &rhs) = delete;
   Profiler &operator=(const Profiler &rhs) = delete;
+  ~Profiler(void);
 
 public:
   inline Processor get_local_processor(void) const { return local_proc; }
@@ -83,6 +160,7 @@ public:
   Realm::Event get_remote_done(void);
   void record_thread_profiler(ThreadProfiler *profiler);
   unsigned long long find_backtrace_id(Backtrace &bt);
+  unsigned long long find_provenance_id(const std::string_view &provenance);
   static Profiler &get_profiler(void);
   static void callback(const void *args, size_t arglen, const void *user_args,
                        size_t user_arglen, Realm::Processor p);
@@ -90,6 +168,8 @@ public:
                       size_t user_arglen, Realm::Processor p);
   static void trigger(const void *args, size_t arglen, const void *user_args,
                       size_t user_arglen, Realm::Processor p);
+  static void external(const void *args, size_t arglen, const void *user_args,
+                       size_t user_arglen, Realm::Processor p);
   static void shutdown(const void *args, size_t arglen, const void *user_args,
                        size_t user_arglen, Realm::Processor p);
   static constexpr Realm::Processor::TaskFuncID CALLBACK_TASK_ID =
@@ -98,9 +178,11 @@ public:
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 1;
   static constexpr Realm::Processor::TaskFuncID TRIGGER_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 2;
-  static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+  static constexpr Realm::Processor::TaskFuncID EXTERNAL_TASK_ID =
       Realm::Processor::TASK_ID_FIRST_AVAILABLE + 3;
-  static_assert((CALLBACK_TASK_ID + 4) == Processor::TASK_ID_FIRST_AVAILABLE);
+  static constexpr Realm::Processor::TaskFuncID SHUTDOWN_TASK_ID =
+      Realm::Processor::TASK_ID_FIRST_AVAILABLE + 4;
+  static_assert((CALLBACK_TASK_ID + 5) == Processor::TASK_ID_FIRST_AVAILABLE);
   static constexpr int CALLBACK_TASK_PRIORITY = std::numeric_limits<int>::min();
 
 public:
@@ -111,15 +193,14 @@ public:
   void increment_total_outstanding_requests(void);
   void decrement_total_outstanding_requests(void);
 #endif
-  void record_task(Processor::TaskFuncID task_id);
+  void record_task(Processor::TaskFuncID task_id, const std::string_view &task_name);
   void record_variant(Processor::TaskFuncID task_id, Processor::Kind kind);
   void record_memory(const Memory &m);
   void record_processor(const Processor &p);
   void record_affinities(std::vector<Memory> &memories_to_log);
   void record_remote_notification(Realm::Event notified);
-  void
-  record_implicit(long long start_time, Realm::Event fevent,
-                  const std::vector<ThreadProfiler::WaitInfo> &wait_intervals);
+  void record_implicit(long long start_time, Realm::Event fevent,
+                       const std::vector<ThreadProfiler::WaitInfo> &wait_intervals);
   void update_footprint(size_t footprint, ThreadProfiler *profiler);
 
 public:
@@ -130,6 +211,7 @@ public:
   void serialize(const ThreadProfiler::EventMergerInfo &info) const;
   void serialize(const ThreadProfiler::EventTriggerInfo &info) const;
   void serialize(const ThreadProfiler::EventPoisonInfo &info) const;
+  void serialize(const ThreadProfiler::ExternalEventInfo &info) const;
   void serialize(const ThreadProfiler::BarrierArrivalInfo &info) const;
   void serialize(const ThreadProfiler::ReservationAcquireInfo &info) const;
   void serialize(const ThreadProfiler::InstanceReadyInfo &info) const;
@@ -140,6 +222,12 @@ public:
   void serialize(const ThreadProfiler::GPUTaskInfo &info) const;
   void serialize(const ThreadProfiler::InstTimelineInfo &info) const;
   void serialize(const ThreadProfiler::ProfTaskInfo &info) const;
+  void serialize(const ThreadProfiler::ApplicationInfo &info) const;
+
+#ifdef REALM_USE_CUDA
+public:
+  Cuda::CudaModule *find_or_create_cuda_module(Realm::Cuda::CudaModule *mod);
+#endif
 
 private:
   void log_preamble(void) const;
@@ -168,7 +256,9 @@ private:
   Realm::UserEvent done_event;
   std::vector<Memory> recorded_memories;
   std::vector<Processor> recorded_processors;
+  std::unordered_set<Processor::TaskFuncID> registered_tasks;
   std::map<uintptr_t, unsigned long long> backtrace_ids;
+  std::unordered_set<unsigned long long> provenance_ids;
   unsigned long long next_backtrace_id;
   std::atomic<size_t> total_memory_footprint;
   unsigned total_address_spaces;
@@ -176,6 +266,9 @@ private:
   Realm::UserEvent shutdown_wait;
   int return_code;
   bool has_shutdown;
+#ifdef REALM_USE_CUDA
+  Cuda::CudaModule *cuda_module;
+#endif
 
 public:
   bool enabled;
@@ -183,7 +276,8 @@ public:
   bool no_critical_paths;
 };
 
-enum {
+enum
+{
   PROC_DESC_ID,
   MAX_DIM_DESC_ID,
   MACHINE_DESC_ID,
@@ -212,11 +306,14 @@ enum {
   EVENT_MERGER_INFO_ID,
   EVENT_TRIGGER_INFO_ID,
   EVENT_POISON_INFO_ID,
+  EXTERNAL_EVENT_INFO_ID,
   BARRIER_ARRIVAL_INFO_ID,
   RESERVATION_ACQUIRE_INFO_ID,
   INSTANCE_READY_INFO_ID,
   COMPLETION_QUEUE_INFO_ID,
   PROFTASK_INFO_ID,
+  APPLICATION_INFO_ID,
+  PROVENANCE_ID,
 };
 
 enum DepPartOpKind {
@@ -237,6 +334,12 @@ enum DepPartOpKind {
   DEP_PART_ASSOCIATION = 14,           // create an association
   DEP_PART_WEIGHTS = 15,               // create partition by weights
 };
+
+void prealm_task_name(Realm::Processor::TaskFuncID task_id,
+                      const std::string_view &task_name)
+{
+  Profiler::get_profiler().record_task(task_id, task_name);
+}
 
 ThreadProfiler::ThreadProfiler(Processor local, Realm::Event implicit)
     : local_proc(local), implicit_fevent(implicit),
@@ -548,99 +651,142 @@ void ThreadProfiler::record_event_merger(Event result,
   profiler.update_footprint(sizeof(info) + num_events * sizeof(Event), this);
 }
 
-void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
-                                                Event precondition) {
+void ThreadProfiler::record_external_event(Realm::Event event,
+                                           const std::string_view &prov)
+{
   Profiler &profiler = Profiler::get_profiler();
-  if (!profiler.enabled || profiler.no_critical_paths)
+  if(!profiler.enabled || profiler.no_critical_paths)
     return;
-  ReservationAcquireInfo &info =
-      reservation_acquire_infos.emplace_back(ReservationAcquireInfo());
-  info.performed = Realm::Clock::current_time_in_nanoseconds();
-  info.result = result;
-  info.precondition = precondition;
-  if (precondition.is_barrier())
-    record_barrier_use(precondition);
-  info.reservation = r;
-  info.provenance = get_fevent();
-  profiler.update_footprint(sizeof(info), this);
-}
-
-Event ThreadProfiler::record_instance_ready(RegionInstance inst, Event result,
-                                            Event precondition) {
-  Profiler &profiler = Profiler::get_profiler();
-  if (!profiler.enabled || profiler.no_critical_paths)
-    return result;
-  if (!result.exists()) {
-    Realm::UserEvent rename = Realm::UserEvent::create_user_event();
-    rename.trigger();
-    result = rename;
+  // Check to see if this has already triggered or not
+  if(event.has_triggered()) {
+    // Take the timing measurement of when this happened first
+    ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
+    info.triggered = Realm::Clock::current_time_in_nanoseconds();
+    info.external = event;
+    info.fevent = get_fevent();
+    info.provenance = profiler.find_provenance_id(prov);
+    profiler.update_footprint(sizeof(info), this);
+  } else {
+    // Spawn a no-op task with a profiling request that will measure when
+    // the external event has triggered, we'll use that to determine
+    // the trigger time for the event
+    const ExternalTriggerArgs args{event, get_fevent(),
+                                   profiler.find_provenance_id(prov)};
+    // Need to dispatch this on a base realm processor to avoid
+    // profiling ourselves when we do this
+    const Realm::Processor local = get_callback_processor();
+// Increment the number of pending callbacks we expect to see
+#ifdef DEBUG_REALM
+      profiler.increment_total_outstanding_requests(EXTERNAL_PROF);
+#else
+      profiler.increment_total_outstanding_requests();
+#endif
+      Realm::ProfilingRequestSet requests;
+      Realm::ProfilingRequest &request =
+          requests.add_request(local, Profiler::EXTERNAL_TASK_ID, &args, sizeof(args),
+                               Profiler::CALLBACK_TASK_PRIORITY);
+      request.add_measurement<ProfilingMeasurements::OperationTimeline>();
+      // Make sure to protect the event in case it is poisoned
+      local.spawn(Processor::TASK_ID_PROCESSOR_NOP, nullptr, 0, requests,
+                  Realm::Event::ignorefaults(event), Profiler::CALLBACK_TASK_PRIORITY);
+    }
   }
-  InstanceReadyInfo &info =
-      instance_ready_infos.emplace_back(InstanceReadyInfo());
-  info.performed = Realm::Clock::current_time_in_nanoseconds();
-  info.result = result;
-  info.unique = inst.unique_event;
-  info.precondition = precondition;
-  if (precondition.is_barrier())
-    record_barrier_use(precondition);
-  profiler.update_footprint(sizeof(info), this);
-  return result;
-}
 
-void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field) {
-  Profiler &profiler = Profiler::get_profiler();
-  if (!profiler.enabled)
-    return;
-  InstanceUsageInfo &info =
-      instance_usage_infos.emplace_back(InstanceUsageInfo());
-  info.inst_event = inst.unique_event;
-  info.op_id = get_fevent().id;
-  info.field = field;
-  profiler.update_footprint(sizeof(info), this);
-}
+  void ThreadProfiler::record_reservation_acquire(Reservation r, Event result,
+                                                  Event precondition)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    if(!profiler.enabled || profiler.no_critical_paths)
+      return;
+    ReservationAcquireInfo &info =
+        reservation_acquire_infos.emplace_back(ReservationAcquireInfo());
+    info.performed = Realm::Clock::current_time_in_nanoseconds();
+    info.result = result;
+    info.precondition = precondition;
+    if(precondition.is_barrier())
+      record_barrier_use(precondition);
+    info.reservation = r;
+    info.provenance = get_fevent();
+    profiler.update_footprint(sizeof(info), this);
+  }
 
-void ThreadProfiler::process_response(ProfilingResponse &response) {
-  Profiler &profiler = Profiler::get_profiler();
-  long long start = 0;
-  if (profiler.self_profile)
-    start = Realm::Clock::current_time_in_nanoseconds();
-  assert(sizeof(ProfilingArgs) == response.user_data_size());
-  const ProfilingArgs *args =
-      static_cast<const ProfilingArgs *>(response.user_data());
-  Event finish_event;
-  typedef ProfilingMeasurements::OperationCopyInfo::InstInfo InstInfo;
-  switch (args->kind) {
-  case FILL_PROF: {
-    ProfilingMeasurements::OperationMemoryUsage usage;
-    if (!response.get_measurement(usage))
-      std::abort();
-    ProfilingMeasurements::OperationCopyInfo cpinfo;
-    if (!response.get_measurement(cpinfo))
-      std::abort();
-    ProfilingMeasurements::OperationTimeline timeline;
-    if (!response.get_measurement(timeline))
-      std::abort();
-    assert(timeline.is_valid());
-    ProfilingMeasurements::OperationFinishEvent fevent;
-    if (!response.get_measurement(fevent))
-      std::abort();
+  Event ThreadProfiler::record_instance_ready(RegionInstance inst, Event result,
+                                              Event precondition)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    if(!profiler.enabled || profiler.no_critical_paths)
+      return result;
+    if(!result.exists()) {
+      Realm::UserEvent rename = Realm::UserEvent::create_user_event();
+      rename.trigger();
+      result = rename;
+    }
+    InstanceReadyInfo &info = instance_ready_infos.emplace_back(InstanceReadyInfo());
+    info.performed = Realm::Clock::current_time_in_nanoseconds();
+    info.result = result;
+    info.unique = inst.unique_event;
+    info.precondition = precondition;
+    if(precondition.is_barrier())
+      record_barrier_use(precondition);
+    profiler.update_footprint(sizeof(info), this);
+    return result;
+  }
 
-    process_mem_desc(usage.target);
+  void ThreadProfiler::record_instance_usage(RegionInstance inst, FieldID field)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    if(!profiler.enabled)
+      return;
+    InstanceUsageInfo &info = instance_usage_infos.emplace_back(InstanceUsageInfo());
+    info.inst_event = inst.unique_event;
+    info.op_id = get_fevent().id;
+    info.field = field;
+    profiler.update_footprint(sizeof(info), this);
+  }
 
-    FillInfo &info = fill_infos.emplace_back(FillInfo());
-    info.size = usage.size;
-    info.create = timeline.create_time;
-    info.ready = timeline.ready_time;
-    info.start = timeline.start_time;
-    // use complete_time instead of end_time to include async work
-    info.stop = timeline.complete_time;
-    info.fevent = fevent.finish_event;
-    info.creator = args->provenance;
-    info.critical = args->critical;
-    if (args->critical.is_barrier())
-      record_barrier_use(args->critical);
-    for (std::vector<InstInfo>::const_iterator it = cpinfo.inst_info.begin();
-         it != cpinfo.inst_info.end(); it++) {
+  void ThreadProfiler::process_response(ProfilingResponse &response)
+  {
+    Profiler &profiler = Profiler::get_profiler();
+    long long start = 0;
+    if(profiler.self_profile)
+      start = Realm::Clock::current_time_in_nanoseconds();
+    assert(sizeof(ProfilingArgs) == response.user_data_size());
+    const ProfilingArgs *args = static_cast<const ProfilingArgs *>(response.user_data());
+    Event finish_event;
+    typedef ProfilingMeasurements::OperationCopyInfo::InstInfo InstInfo;
+    switch(args->kind) {
+    case FILL_PROF:
+    {
+      ProfilingMeasurements::OperationMemoryUsage usage;
+      if(!response.get_measurement(usage))
+        std::abort();
+      ProfilingMeasurements::OperationCopyInfo cpinfo;
+      if(!response.get_measurement(cpinfo))
+        std::abort();
+      ProfilingMeasurements::OperationTimeline timeline;
+      if(!response.get_measurement(timeline))
+        std::abort();
+      assert(timeline.is_valid());
+      ProfilingMeasurements::OperationFinishEvent fevent;
+      if(!response.get_measurement(fevent))
+        std::abort();
+
+      process_mem_desc(usage.target);
+
+      FillInfo &info = fill_infos.emplace_back(FillInfo());
+      info.size = usage.size;
+      info.create = timeline.create_time;
+      info.ready = timeline.ready_time;
+      info.start = timeline.start_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline.complete_time;
+      info.fevent = fevent.finish_event;
+      info.creator = args->provenance;
+      info.critical = args->critical;
+      if(args->critical.is_barrier())
+        record_barrier_use(args->critical);
+      for(std::vector<InstInfo>::const_iterator it = cpinfo.inst_info.begin();
+          it != cpinfo.inst_info.end(); it++) {
 #ifdef DEBUG_REALM
       assert(!it->dst_fields.empty());
       assert(it->dst_insts.size() == 1);
@@ -657,13 +803,13 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
         inst_info.fid = it->dst_fields[idx];
         inst_info.dst_inst_uid = name;
       }
-    }
+      }
     profiler.update_footprint(
         sizeof(FillInfo) + info.inst_infos.size() * sizeof(FillInstInfo), this);
     finish_event = fevent.finish_event;
     delete args->id.closure;
     break;
-  }
+    }
   case COPY_PROF: {
     ProfilingMeasurements::OperationMemoryUsage usage;
     if (!response.get_measurement(usage))
@@ -924,7 +1070,7 @@ void ThreadProfiler::process_response(ProfilingResponse &response) {
 #else
   profiler.decrement_total_outstanding_requests();
 #endif
-}
+  }
 
 void ThreadProfiler::process_trigger(const void *args, size_t arglen) {
   assert(arglen == sizeof(EventTriggerInfo));
@@ -945,6 +1091,55 @@ void ThreadProfiler::process_trigger(const void *args, size_t arglen) {
     pinfo.performed = info.performed;
     profiler.update_footprint(sizeof(pinfo), this);
   }
+}
+
+void ThreadProfiler::process_external(ProfilingResponse &response)
+{
+  Profiler &profiler = Profiler::get_profiler();
+  long long start = 0;
+  if(profiler.self_profile)
+    start = Realm::Clock::current_time_in_nanoseconds();
+  assert(sizeof(ExternalTriggerArgs) == response.user_data_size());
+  const ExternalTriggerArgs *args =
+      static_cast<const ExternalTriggerArgs *>(response.user_data());
+  ProfilingMeasurements::OperationTimeline timeline;
+  if(!response.get_measurement(timeline))
+    std::abort();
+
+  ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
+  info.triggered = timeline.ready_time;
+  info.external = args->external;
+  info.fevent = args->fevent;
+  info.provenance = args->provenance;
+  profiler.update_footprint(sizeof(info), this);
+
+  if(profiler.self_profile) {
+    const long long stop = Realm::Clock::current_time_in_nanoseconds();
+    ProfTaskInfo &info = prof_task_infos.emplace_back(ProfTaskInfo());
+    info.proc_id = local_proc.id;
+    info.start = start;
+    info.stop = stop;
+    info.creator = args->fevent;
+    info.finish_event = Processor::get_current_finish_event();
+    profiler.update_footprint(sizeof(info), this);
+  }
+#ifdef DEBUG_REALM
+  profiler.decrement_total_outstanding_requests(EXTERNAL_PROF);
+#else
+  profiler.decrement_total_outstanding_requests();
+#endif
+}
+
+void ThreadProfiler::record_time_range(long long start, const std::string_view &name)
+{
+  ApplicationInfo &info = application_infos.emplace_back(ApplicationInfo());
+  info.stop = Realm::Clock::current_time_in_nanoseconds();
+  info.start = start;
+  info.fevent = get_fevent();
+  info.proc_id = local_proc.id;
+  Profiler &profiler = Profiler::get_profiler();
+  info.provenance = profiler.find_provenance_id(name);
+  profiler.update_footprint(sizeof(info), this);
 }
 
 size_t ThreadProfiler::dump_inter(long long target_latency) {
@@ -988,6 +1183,15 @@ size_t ThreadProfiler::dump_inter(long long target_latency) {
     event_poison_infos.pop_front();
     const long long t_curr = Realm::Clock::current_time_in_microseconds();
     if (t_curr >= t_stop)
+      return diff;
+  }
+  while(!external_event_infos.empty()) {
+    ExternalEventInfo &info = external_event_infos.front();
+    profiler.serialize(info);
+    diff += sizeof(info);
+    external_event_infos.pop_front();
+    const long long t_curr = Realm::Clock::current_time_in_microseconds();
+    if(t_curr >= t_stop)
       return diff;
   }
   while (!barrier_arrival_infos.empty()) {
@@ -1080,6 +1284,15 @@ size_t ThreadProfiler::dump_inter(long long target_latency) {
     if (t_curr >= t_stop)
       return diff;
   }
+  while(!application_infos.empty()) {
+    ApplicationInfo &info = application_infos.front();
+    profiler.serialize(info);
+    diff += sizeof(info);
+    application_infos.pop_front();
+    const long long t_curr = Realm::Clock::current_time_in_microseconds();
+    if(t_curr >= t_stop)
+      return diff;
+  }
   return diff;
 }
 
@@ -1093,6 +1306,8 @@ void ThreadProfiler::finalize(void) {
     profiler.serialize(event_trigger_infos[idx]);
   for (unsigned idx = 0; idx < event_poison_infos.size(); idx++)
     profiler.serialize(event_poison_infos[idx]);
+  for(unsigned idx = 0; idx < external_event_infos.size(); idx++)
+    profiler.serialize(external_event_infos[idx]);
   for (unsigned idx = 0; idx < barrier_arrival_infos.size(); idx++)
     profiler.serialize(barrier_arrival_infos[idx]);
   for (unsigned idx = 0; idx < reservation_acquire_infos.size(); idx++)
@@ -1113,6 +1328,8 @@ void ThreadProfiler::finalize(void) {
     profiler.serialize(inst_timeline_infos[idx]);
   for (unsigned idx = 0; idx < prof_task_infos.size(); idx++)
     profiler.serialize(prof_task_infos[idx]);
+  for(unsigned idx = 0; idx < application_infos.size(); idx++)
+    profiler.serialize(application_infos[idx]);
   if (is_implicit())
     profiler.record_implicit(start_time, implicit_fevent, implicit_waits);
 }
@@ -1144,6 +1361,17 @@ Profiler::Profiler(void)
 #ifdef DEBUG_REALM
   for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++)
     total_outstanding_requests[idx] = 0;
+#endif
+#ifdef REALM_USE_CUDA
+  cuda_module = nullptr;
+#endif
+}
+
+Profiler::~Profiler(void)
+{
+#ifdef REALM_USE_CUDA
+  if(cuda_module != nullptr)
+    delete cuda_module;
 #endif
 }
 
@@ -1474,6 +1702,13 @@ void Profiler::log_preamble(void) const {
      << "fevent:unsigned long long:" << sizeof(Event) << delim
      << "performed:timestamp_t:" << sizeof(timestamp_t) << "}" << std::endl;
 
+  ss << "ExternalEventInfo {"
+     << "id:" << EXTERNAL_EVENT_INFO_ID << delim
+     << "external:unsigned long long:" << sizeof(Event) << delim
+     << "fevent:unsigned long long:" << sizeof(Event) << delim
+     << "trigger:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "prov:unsigned long long:" << sizeof(unsigned long long) << "}" << std::endl;
+
   ss << "BarrierArrivalInfo {"
      << "id:" << BARRIER_ARRIVAL_INFO_ID << delim
      << "result:unsigned long long:" << sizeof(Event) << delim
@@ -1516,6 +1751,19 @@ void Profiler::log_preamble(void) const {
      << "creator:unsigned long long:" << sizeof(Event) << delim
      << "fevent:unsigned long long:" << sizeof(Event) << delim
      << "completion:bool:" << sizeof(bool) << "}" << std::endl;
+
+  ss << "ApplicationCallInfo {"
+     << "id:" << APPLICATION_INFO_ID << delim
+     << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
+     << "start:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "stop:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "proc_id:ProcID:" << sizeof(ProcID) << delim
+     << "fevent:unsigned long long:" << sizeof(Event) << "}" << std::endl;
+
+  ss << "Provenance {"
+     << "id:" << PROVENANCE_ID << delim
+     << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
+     << "prov:string:-1}" << std::endl;
 
   // An empty line indicates the end of the preamble.
   ss << std::endl;
@@ -1678,6 +1926,16 @@ void Profiler::serialize(const ThreadProfiler::EventPoisonInfo &info) const {
   pr_fwrite(f, (char *)&info.result.id, sizeof(info.result.id));
   pr_fwrite(f, (char *)&info.provenance.id, sizeof(info.provenance.id));
   pr_fwrite(f, (char *)&info.performed, sizeof(info.performed));
+}
+
+void Profiler::serialize(const ThreadProfiler::ExternalEventInfo &info) const
+{
+  int ID = EXTERNAL_EVENT_INFO_ID;
+  pr_fwrite(f, (char *)&ID, sizeof(ID));
+  pr_fwrite(f, (char *)&info.external.id, sizeof(info.external.id));
+  pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
+  pr_fwrite(f, (char *)&info.triggered, sizeof(info.triggered));
+  pr_fwrite(f, (char *)&info.provenance, sizeof(info.provenance));
 }
 
 void Profiler::serialize(const ThreadProfiler::BarrierArrivalInfo &info) const {
@@ -1891,23 +2149,35 @@ void Profiler::serialize(
   pr_fwrite(f, (char *)&(completion), sizeof(completion));
 }
 
+void Profiler::serialize(const ThreadProfiler::ApplicationInfo &info) const
+{
+  int ID = APPLICATION_INFO_ID;
+  pr_fwrite(f, (char *)&ID, sizeof(ID));
+  pr_fwrite(f, (char *)&info.provenance, sizeof(info.provenance));
+  pr_fwrite(f, (char *)&(info.start), sizeof(info.start));
+  pr_fwrite(f, (char *)&(info.stop), sizeof(info.stop));
+  pr_fwrite(f, (char *)&(info.proc_id), sizeof(info.proc_id));
+  pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
+}
+
 void Profiler::finalize(void) {
-  profiler_lock.wrlock().wait();
+  {
+    AutoLock p_lock(profiler_lock);
 #ifdef DEBUG_REALM
-  bool done = true;
-  for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
-    if (total_outstanding_requests[idx] == 0)
-      continue;
-    done = false;
-    break;
-  }
-  if (!done)
-    done_event = Realm::UserEvent::create_user_event();
+    bool done = true;
+    for(unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
+      if(total_outstanding_requests[idx] == 0)
+        continue;
+      done = false;
+      break;
+    }
+    if(!done)
+      done_event = Realm::UserEvent::create_user_event();
 #else
-  if (total_outstanding_requests.load() > 0)
-    done_event = Realm::UserEvent::create_user_event();
+    if(total_outstanding_requests.load() > 0)
+      done_event = Realm::UserEvent::create_user_event();
 #endif
-  profiler_lock.unlock();
+  }
   if (done_event.exists())
     done_event.wait();
   // Finalize all the instances
@@ -1930,14 +2200,13 @@ void Profiler::finalize(void) {
 void Profiler::defer_shutdown(Event precondition, int code) {
   // If we're on node 0 then we can do the work
   if (local_proc.address_space() == 0) {
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     shutdown_precondition = precondition;
     return_code = code;
     has_shutdown = true;
     if (shutdown_wait.exists())
       // Protect from application level poison
       shutdown_wait.trigger(precondition);
-    profiler_lock.unlock();
   } else {
     // Send a message to node 0 informing it that we received the shutdown
     ShutdownArgs args{precondition, code};
@@ -1957,14 +2226,14 @@ void Profiler::defer_shutdown(Event precondition, int code) {
 
 void Profiler::wait_for_shutdown(void) {
   assert(local_proc.address_space() == 0);
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   if (!has_shutdown) {
     shutdown_wait = Realm::UserEvent::create_user_event();
-    profiler_lock.unlock();
+    p_lock.release();
     bool ignore; // ignore poison from the application
     shutdown_wait.wait_faultaware(ignore);
   } else {
-    profiler_lock.unlock();
+    p_lock.release();
     bool ignore; // ignore poison from the application
     shutdown_precondition.wait_faultaware(ignore);
   }
@@ -1979,29 +2248,25 @@ void Profiler::perform_shutdown(void) {
 #ifdef DEBUG_REALM
 void Profiler::increment_total_outstanding_requests(
     ThreadProfiler::ProfKind kind) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   total_outstanding_requests[kind]++;
-  profiler_lock.unlock();
 }
 
 void Profiler::decrement_total_outstanding_requests(
     ThreadProfiler::ProfKind kind) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   assert(total_outstanding_requests[kind] > 0);
-  if (--total_outstanding_requests[kind] > 0) {
-    profiler_lock.unlock();
+  if(--total_outstanding_requests[kind] > 0)
     return;
-  }
   for (unsigned idx = 0; idx < ThreadProfiler::LAST_PROF; idx++) {
     if (idx == kind)
       continue;
     if (total_outstanding_requests[idx] == 0)
       continue;
-    profiler_lock.unlock();
     return;
   }
   Realm::UserEvent to_trigger = done_event;
-  profiler_lock.unlock();
+  p_lock.release();
   if (to_trigger.exists())
     to_trigger.trigger(shutdown_precondition);
 }
@@ -2014,12 +2279,12 @@ void Profiler::decrement_total_outstanding_requests(void) {
   unsigned previous = total_outstanding_requests.fetch_sub(1);
   assert(previous > 0);
   if (previous == 1) {
-    Realm::UserEvent to_trigger;
-    profiler_lock.wrlock().wait();
+    Realm::UserEvent to_trigger = Realm::UserEvent::NO_USER_EVENT;
+    AutoLock p_lock(profiler_lock);
     if ((total_outstanding_requests.load() == 0) && done_event.exists()) {
       to_trigger = done_event;
     }
-    profiler_lock.unlock();
+    p_lock.release();
     if (to_trigger.exists())
       to_trigger.trigger(shutdown_precondition);
   }
@@ -2027,15 +2292,12 @@ void Profiler::decrement_total_outstanding_requests(void) {
 #endif
 
 Processor Profiler::get_remote_processor(AddressSpace target) {
-  profiler_lock.rdlock().wait();
-  std::map<AddressSpace, Processor>::const_iterator finder =
-      remote_processors.find(target);
-  if (finder != remote_processors.end()) {
-    const Processor result = finder->second;
-    profiler_lock.unlock();
-    return result;
-  } else {
-    profiler_lock.unlock();
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    std::map<AddressSpace, Processor>::const_iterator finder =
+        remote_processors.find(target);
+    if(finder != remote_processors.end())
+      return finder->second;
   }
   Realm::Machine::ProcessorQuery remote_procs(Machine::get_machine());
   remote_procs.only_kind(Processor::LOC_PROC);
@@ -2043,9 +2305,8 @@ Processor Profiler::get_remote_processor(AddressSpace target) {
        it != remote_procs.end(); it++) {
     if (it->address_space() != target)
       continue;
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     remote_processors.emplace(std::make_pair(target, *it));
-    profiler_lock.unlock();
     return *it;
   }
   // should never get here
@@ -2053,7 +2314,7 @@ Processor Profiler::get_remote_processor(AddressSpace target) {
 }
 
 Processor Profiler::get_implicit_processor(void) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   if (!implicit_proc.exists()) {
     // Synthesize an implicit processor name
     // Count how many local processors are on this node
@@ -2073,37 +2334,33 @@ Processor Profiler::get_implicit_processor(void) {
     std::sort(recorded_processors.begin(), recorded_processors.end());
   }
   const Processor result = implicit_proc;
-  profiler_lock.unlock();
   return result;
 }
 
 void Profiler::record_thread_profiler(ThreadProfiler *profiler) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   thread_profilers.push_back(profiler);
-  profiler_lock.unlock();
 }
 
 unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   const uintptr_t hash = bt.hash();
-  profiler_lock.rdlock().wait();
-  std::map<uintptr_t, unsigned long long>::const_iterator finder =
-      backtrace_ids.find(hash);
-  if (finder != backtrace_ids.end()) {
-    unsigned long long result = finder->second;
-    profiler_lock.unlock();
-    return result;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    std::map<uintptr_t, unsigned long long>::const_iterator finder =
+        backtrace_ids.find(hash);
+    if(finder != backtrace_ids.end())
+      return finder->second;
   }
-  profiler_lock.unlock();
   // First time seeing this backtrace so capture the symbols
   std::stringstream ss;
   ss << bt;
   const std::string str = ss.str();
   // Now retake the lock and see if we lost the race
-  profiler_lock.wrlock().wait();
-  finder = backtrace_ids.find(hash);
+  AutoLock p_lock(profiler_lock);
+  std::map<uintptr_t, unsigned long long>::const_iterator finder =
+      backtrace_ids.find(hash);
   if (finder != backtrace_ids.end()) {
     unsigned long long result = finder->second;
-    profiler_lock.unlock();
     return result;
   }
   // Didn't lose the race so generate a new ID for this backtrace
@@ -2115,21 +2372,60 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   pr_fwrite(f, (char *)&result, sizeof(result));
   pr_fwrite(f, str.c_str(), str.size() + 1);
   backtrace_ids[hash] = result;
-  profiler_lock.unlock();
   return result;
 }
 
-void Profiler::record_task(Processor::TaskFuncID task_id) {
-  char name[128];
-  snprintf(name, sizeof(name), "Task %d", task_id);
-  profiler_lock.wrlock().wait();
-  int ID = TASK_KIND_ID;
-  pr_fwrite(f, (char *)&ID, sizeof(ID));
-  pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
-  pr_fwrite(f, name, strlen(name) + 1);
-  bool overwrite = true; // always overwrite
-  pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
-  profiler_lock.unlock();
+unsigned long long Profiler::find_provenance_id(const std::string_view &provenance)
+{
+  const unsigned long long hash = std::hash<std::string_view>{}(provenance);
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    std::unordered_set<unsigned long long>::const_iterator finder =
+        provenance_ids.find(hash);
+    if(finder != provenance_ids.end())
+      return hash;
+  }
+  AutoLock p_lock(profiler_lock);
+  if(provenance_ids.insert(hash).second) {
+    // Need to save the provenance string now
+    int ID = PROVENANCE_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&hash, sizeof(hash));
+    pr_fwrite(f, provenance.data(), provenance.size());
+    char null = '\0';
+    pr_fwrite(f, &null, sizeof(null));
+  }
+  return hash;
+}
+
+void Profiler::record_task(Processor::TaskFuncID task_id,
+                           const std::string_view &task_name)
+{
+  AutoLock p_lock(profiler_lock);
+  // Check to see if we've registered this task ID before
+  if(!task_name.empty()) {
+    // Custom name from the user, always save it and overwrite
+    int ID = TASK_KIND_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
+    pr_fwrite(f, (char *)task_name.data(), task_name.size());
+    char null = '\0';
+    pr_fwrite(f, &null, sizeof(null));
+    bool overwrite = true; // always overwrite
+    pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
+    registered_tasks.insert(task_id);
+  } else if(registered_tasks.find(task_id) == registered_tasks.end()) {
+    std::string name;
+    name += "Task ";
+    name += task_id;
+    int ID = TASK_KIND_ID;
+    pr_fwrite(f, (char *)&ID, sizeof(ID));
+    pr_fwrite(f, (char *)&task_id, sizeof(task_id));
+    pr_fwrite(f, name.c_str(), name.size() + 1);
+    bool overwrite = false;
+    pr_fwrite(f, (char *)&(overwrite), sizeof(overwrite));
+    registered_tasks.insert(task_id);
+  }
 }
 
 void Profiler::record_variant(Processor::TaskFuncID task_id,
@@ -2142,50 +2438,38 @@ void Profiler::record_variant(Processor::TaskFuncID task_id,
   char name[128];
   snprintf(name, sizeof(name), "%s Variant of Task %d", proc_names[kind],
            task_id);
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   int ID = TASK_VARIANT_ID;
   pr_fwrite(f, (char *)&ID, sizeof(ID));
   pr_fwrite(f, (char *)&(task_id), sizeof(task_id));
   unsigned variant_id = kind;
   pr_fwrite(f, (char *)&(variant_id), sizeof(variant_id));
   pr_fwrite(f, name, strlen(name) + 1);
-  profiler_lock.unlock();
 }
 
 void Profiler::record_memory(const Memory &m) {
-  profiler_lock.rdlock().wait();
-  if (std::binary_search(recorded_memories.begin(), recorded_memories.end(),
-                         m)) {
-    profiler_lock.unlock();
-    return;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    if(std::binary_search(recorded_memories.begin(), recorded_memories.end(), m))
+      return;
   }
-  profiler_lock.unlock();
-  profiler_lock.wrlock().wait();
-  if (std::binary_search(recorded_memories.begin(), recorded_memories.end(),
-                         m)) {
-    profiler_lock.unlock();
+  AutoLock p_lock(profiler_lock);
+  if(std::binary_search(recorded_memories.begin(), recorded_memories.end(), m))
     return;
-  }
   // Also log all the affinities for this memory
   std::vector<Memory> memories_to_log(1, m);
   record_affinities(memories_to_log);
-  profiler_lock.unlock();
 }
 
 void Profiler::record_processor(const Processor &p) {
-  profiler_lock.rdlock().wait();
-  if (std::binary_search(recorded_processors.begin(), recorded_processors.end(),
-                         p)) {
-    profiler_lock.unlock();
-    return;
+  {
+    AutoLock p_lock(profiler_lock, false /*exclusive*/);
+    if(std::binary_search(recorded_processors.begin(), recorded_processors.end(), p))
+      return;
   }
-  profiler_lock.unlock();
-  profiler_lock.wrlock().wait();
-  if (std::binary_search(recorded_processors.begin(), recorded_processors.end(),
-                         p)) {
-    profiler_lock.unlock();
+  AutoLock p_lock(profiler_lock);
+  if(std::binary_search(recorded_processors.begin(), recorded_processors.end(), p))
     return;
-  }
   // Record the processor descriptor
   ThreadProfiler::ProcDesc proc_desc;
   proc_desc.proc_id = p.id;
@@ -2207,7 +2491,6 @@ void Profiler::record_processor(const Processor &p) {
                             pit->m))
       memories_to_log.push_back(pit->m);
   record_affinities(memories_to_log);
-  profiler_lock.unlock();
 }
 
 void Profiler::record_affinities(std::vector<Memory> &memories_to_log) {
@@ -2294,12 +2577,11 @@ void Profiler::record_implicit(
 }
 
 void Profiler::record_remote_notification(Realm::Event notified) {
-  profiler_lock.wrlock().wait();
+  AutoLock p_lock(profiler_lock);
   while (!remote_notifications.empty() &&
          remote_notifications.front().has_triggered())
     remote_notifications.pop_front();
   remote_notifications.push_back(notified);
-  profiler_lock.unlock();
 }
 
 Realm::Event Profiler::get_remote_done(void) {
@@ -2332,9 +2614,8 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
     if (output_footprint_threshold > 0)
       over_scale *= over_scale;
     // Need a lock to protect the file
-    profiler_lock.wrlock().wait();
+    AutoLock p_lock(profiler_lock);
     diff = profiler->dump_inter(over_scale * target_latency);
-    profiler_lock.unlock();
 #ifndef NDEBUG
     footprint =
 #endif
@@ -2388,6 +2669,14 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
   thread_profiler.process_trigger(args, arglen);
 }
 
+/*static*/ void Profiler::external(const void *args, size_t arglen, const void *user_args,
+                                   size_t user_arglen, Realm::Processor p)
+{
+  Realm::ProfilingResponse response(args, arglen);
+  ThreadProfiler &thread_profiler = ThreadProfiler::get_thread_profiler();
+  thread_profiler.process_external(response);
+}
+
 /*static*/ void Profiler::shutdown(const void *args, size_t arglen,
                                    const void *user_args, size_t user_arglen,
                                    Realm::Processor p) {
@@ -2435,6 +2724,7 @@ void Runtime::start(void) {
   const CodeDescriptor callback(Profiler::callback);
   const CodeDescriptor wrapper(Profiler::wrapper);
   const CodeDescriptor trigger(Profiler::trigger);
+  const CodeDescriptor external(Profiler::external);
   const CodeDescriptor shutdown(Profiler::shutdown);
   for (Realm::Machine::ProcessorQuery::iterator it = local_procs.begin();
        it != local_procs.end(); it++) {
@@ -2446,6 +2736,9 @@ void Runtime::start(void) {
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::TRIGGER_TASK_ID, trigger, no_requests);
+    if(done.exists())
+      registered.push_back(done);
+    done = it->register_task(Profiler::EXTERNAL_TASK_ID, external, no_requests);
     if (done.exists())
       registered.push_back(done);
     done = it->register_task(Profiler::SHUTDOWN_TASK_ID, shutdown, no_requests);
@@ -2482,7 +2775,7 @@ Event Processor::register_task(TaskFuncID task_id,
                                const void *user_data,
                                size_t user_data_len) const {
   Profiler &profiler = Profiler::get_profiler();
-  profiler.record_task(task_id);
+  profiler.record_task(task_id, std::string_view());
   profiler.record_variant(task_id, kind());
   return Realm::Processor::register_task(task_id, codedesc, prs, user_data,
                                          user_data_len);
@@ -2494,7 +2787,7 @@ Processor::register_task_by_kind(Kind kind, bool global, TaskFuncID task_id,
                                  const ProfilingRequestSet &prs,
                                  const void *user_data, size_t user_data_len) {
   Profiler &profiler = Profiler::get_profiler();
-  profiler.record_task(task_id);
+  profiler.record_task(task_id, std::string_view());
   if (kind == Processor::NO_KIND) {
     Realm::Machine::ProcessorQuery local_procs(Machine::get_machine());
     local_procs.local_address_space();
@@ -2575,7 +2868,7 @@ bool Runtime::register_task(Processor::TaskFuncID task_id,
       reinterpret_cast<Realm::Processor::TaskFuncPtr>(taskptr);
   Profiler &profiler = Profiler::get_profiler();
   // Record that we have a task with this task ID
-  profiler.record_task(task_id);
+  profiler.record_task(task_id, std::string_view());
   // Get all the local processors and record that we have a variant for each
   // kind of local processor
   Realm::Machine::ProcessorQuery local_procs(Machine::get_machine());
@@ -2720,4 +3013,53 @@ int Runtime::wait_for_shutdown(void) {
 /*static*/ Runtime Runtime::get_runtime(void) {
   return Realm::Runtime::get_runtime();
 }
+
+Module *Runtime::get_module_untyped(const char *name)
+{
+  Module *result = Realm::Runtime::get_module_untyped(name);
+#ifdef REALM_USE_CUDA
+  if(strcmp(name, "cuda") == 0) {
+    Realm::Cuda::CudaModule *cuda_module =
+        dynamic_cast<Realm::Cuda::CudaModule *>(result);
+    assert(cuda_module != nullptr);
+    Profiler &profiler = Profiler::get_profiler();
+    return profiler.find_or_create_cuda_module(cuda_module);
+  }
+#endif
+  return result;
+}
+
+#ifdef REALM_USE_CUDA
+Cuda::CudaModule *Profiler::find_or_create_cuda_module(Realm::Cuda::CudaModule *mod)
+{
+  AutoLock p_lock(profiler_lock);
+  if(cuda_module == nullptr)
+    cuda_module = new Cuda::CudaModule(mod);
+  return cuda_module;
+}
+
+namespace Cuda {
+  CudaModule::CudaModule(Realm::Cuda::CudaModule *intern)
+    : Realm::Module(intern->get_name())
+    , internal(intern)
+  {}
+
+  CudaModule::~CudaModule(void) {}
+
+  Event CudaModule::make_realm_event(CUevent_st *cuda_event)
+  {
+    const Realm::Event result = internal->make_realm_event(cuda_event);
+    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA Event");
+    return result;
+  }
+
+  Event CudaModule::make_realm_event(CUstream_st *cuda_stream)
+  {
+    const Realm::Event result = internal->make_realm_event(cuda_stream);
+    ThreadProfiler::get_thread_profiler().record_external_event(result, "CUDA Stream");
+    return result;
+  }
+} // namespace Cuda
+#endif
+
 } // namespace PRealm
