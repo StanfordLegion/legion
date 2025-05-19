@@ -27,20 +27,17 @@ namespace Realm {
     , received_flags(total_chunks, false)
   {}
 
-  void FragmentedMessage::add_chunk(uint32_t chunk_id, const void *data, size_t size)
+  bool FragmentedMessage::add_chunk(uint32_t chunk_id, const void *data, size_t size)
   {
-    if(chunk_id >= total_chunks) {
-      throw std::out_of_range("Chunk ID exceeds total_chunks");
-    }
-
-    if(received_flags[chunk_id]) {
-      return; // Ignore duplicates
+    if(chunk_id >= total_chunks || received_flags[chunk_id]) {
+      return false;
     }
 
     received_chunks[chunk_id].resize(size);
     std::memcpy(received_chunks[chunk_id].data(), data, size);
     received_flags[chunk_id] = true;
     received_count++;
+    return true;
   }
 
   bool FragmentedMessage::is_complete() const
@@ -63,7 +60,7 @@ namespace Realm {
   std::vector<char> FragmentedMessage::reassemble() const
   {
     if(!is_complete()) {
-      throw std::runtime_error("Message is incomplete");
+      return std::vector<char>();
     }
 
     std::vector<char> message(size());

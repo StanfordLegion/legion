@@ -422,7 +422,9 @@ namespace Realm {
                    .first;
         }
 
-        it->second->add_chunk(frag_info->chunk_id, payload, payload_size);
+        bool ok =
+          it->second->add_chunk(frag_info->chunk_id, payload, payload_size);
+        assert(ok);
 
         if(!it->second->is_complete()) {
           total_messages_handled += 1;

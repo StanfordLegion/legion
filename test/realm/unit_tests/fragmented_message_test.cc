@@ -18,7 +18,7 @@ protected:
 TEST_F(FragmentedMessageTest, AddChunkWorksCorrectly)
 {
   const char chunk1[] = "Data";
-  EXPECT_NO_THROW(message->add_chunk(0, chunk1, sizeof(chunk1) - 1));
+  EXPECT_TRUE(message->add_chunk(0, chunk1, sizeof(chunk1) - 1));
   EXPECT_EQ(message->size(), sizeof(chunk1) - 1);
 }
 
@@ -52,7 +52,8 @@ TEST_F(FragmentedMessageTest, ReassembleThrowsOnIncompleteMessage)
 {
   const char chunk1[] = "Data";
   message->add_chunk(0, chunk1, sizeof(chunk1));
-  EXPECT_THROW(message->reassemble(), std::runtime_error);
+  std::vector<char> msg = message->reassemble();
+  EXPECT_TRUE(msg.empty());
 }
 
 TEST_F(FragmentedMessageTest, ReassembleWorksCorrectly)
@@ -76,8 +77,9 @@ TEST_F(FragmentedMessageTest, ReassembleWorksCorrectly)
 TEST_F(FragmentedMessageTest, ReassembleThrowsWhenIncomplete)
 {
   const char chunk1[] = "Incomplete";
-  message->add_chunk(0, chunk1, sizeof(chunk1));
-  EXPECT_THROW(message->reassemble(), std::runtime_error);
+  EXPECT_TRUE(message->add_chunk(0, chunk1, sizeof(chunk1)));
+  std::vector<char> msg = message->reassemble();
+  EXPECT_TRUE(msg.empty());
 }
 
 TEST_F(FragmentedMessageTest, SizeCalculation)
@@ -97,12 +99,13 @@ TEST_F(FragmentedMessageTest, SizeCalculation)
 TEST_F(FragmentedMessageTest, AddChunkOutOfBounds)
 {
   const char chunk[] = "OutOfBounds";
-  EXPECT_THROW(message->add_chunk(5, chunk, sizeof(chunk)), std::out_of_range);
+  EXPECT_FALSE(message->add_chunk(5, chunk, sizeof(chunk)));
 }
 
 TEST_F(FragmentedMessageTest, EmptyReassemble)
 {
-  EXPECT_THROW(message->reassemble(), std::runtime_error);
+  std::vector<char> msg = message->reassemble();
+  EXPECT_TRUE(msg.empty());
 }
 
 TEST_F(FragmentedMessageTest, HandlesLargeChunks)

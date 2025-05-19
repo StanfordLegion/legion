@@ -28,12 +28,10 @@ namespace Realm {
   public:
     explicit FragmentedMessage(uint32_t total_chunks = 0);
 
-    void add_chunk(uint32_t chunk_id, const void *data, size_t size);
+    bool add_chunk(uint32_t chunk_id, const void *data, size_t size);
 
     bool is_complete() const;
-
     size_t size() const;
-
     std::vector<char> reassemble() const;
 
   private:
