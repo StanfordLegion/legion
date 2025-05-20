@@ -2376,28 +2376,21 @@ impl StateDataSource {
         // TODO: This should really be done on a path-by-path basis since
         // some paths will naturally have better bandwidth than others
         // but this is a good first approximation for now
-        if bandwidth < u64::pow(10, 9) {
-            // < 1 GB/s is bad
-            result.push((
-                self.fields.effective_bandwidth,
-                Field::String(effective),
-                Some(Color32::RED),
-            ));
+        // < 1 GB/s is bad
+        // 1-10 GB/s is ok-ish
+        // > 10 GB/s is good
+        let color = if bandwidth < u64::pow(10, 9) {
+            Some(Color32::RED)
         } else if bandwidth < u64::pow(10, 10) {
-            // 1-10 GB/s is ok-ish
-            result.push((
-                self.fields.effective_bandwidth,
-                Field::String(effective),
-                Some(Color32::GOLD),
-            ));
+            Some(Color32::GOLD)
         } else {
-            // > 10 GB/s is good
-            result.push((
-                self.fields.effective_bandwidth,
-                Field::String(effective),
-                None,
-            ));
-        }
+            None
+        };
+        result.push((
+            self.fields.effective_bandwidth,
+            Field::String(effective),
+            color,
+        ));
     }
 
     fn generate_chan_slot_meta_tile(
