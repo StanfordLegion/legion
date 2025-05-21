@@ -556,7 +556,7 @@ namespace Realm {
   struct has_frag_info<T, std::void_t<decltype(std::declval<T>().frag_info)>>
     : std::true_type {};
   template <typename T>
-  constexpr bool has_frag_info_v = has_frag_info<T>::value;
+  constexpr inline bool has_frag_info_v = has_frag_info<T>::value;
 
   template <typename T, typename T2>
   ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
