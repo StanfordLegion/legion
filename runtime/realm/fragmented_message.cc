@@ -59,11 +59,11 @@ namespace Realm {
 
   std::vector<char> FragmentedMessage::reassemble() const
   {
+    std::vector<char> message;
     if(!is_complete()) {
-      return std::vector<char>();
+      return message;
     }
 
-    std::vector<char> message;
     message.reserve(size());
     for(const std::vector<char> &chunk : received_chunks) {
       message.insert(message.end(), chunk.begin(), chunk.end());
