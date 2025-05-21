@@ -37,6 +37,7 @@ namespace Realm {
     std::memcpy(received_chunks[chunk_id].data(), data, size);
     received_flags[chunk_id] = true;
     received_count++;
+    total_size += size;
     return true;
   }
 
@@ -48,12 +49,6 @@ namespace Realm {
 
   size_t FragmentedMessage::size() const
   {
-    size_t total_size = 0;
-    for(size_t i = 0; i < total_chunks; ++i) {
-      if(received_flags[i]) { // Only sum valid chunks
-        total_size += received_chunks[i].size();
-      }
-    }
     return total_size;
   }
 

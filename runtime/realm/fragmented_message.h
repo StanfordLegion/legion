@@ -36,6 +36,7 @@ namespace Realm {
 
   private:
     uint32_t total_chunks{0};
+    size_t total_size{0};
     std::vector<std::vector<char>> received_chunks;
     std::vector<bool> received_flags;
     uint32_t received_count{0};
