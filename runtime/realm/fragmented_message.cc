@@ -63,12 +63,10 @@ namespace Realm {
       return std::vector<char>();
     }
 
-    std::vector<char> message(size());
-
-    size_t offset = 0;
+    std::vector<char> message;
+    message.reserve(size());
     for(const std::vector<char> &chunk : received_chunks) {
-      std::memcpy(message.data() + offset, chunk.data(), chunk.size());
-      offset += chunk.size();
+      message.insert(message.end(), chunk.begin(), chunk.end());
     }
 
     return message;
