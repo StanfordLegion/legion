@@ -6568,7 +6568,7 @@ namespace Legion {
       if (interesting_count < 2)
         return bounds.volume();
       else
-        return (1 << (morton_order * interesting_count));
+        return (1ULL << (morton_order * interesting_count));
     }
 
     //--------------------------------------------------------------------------
