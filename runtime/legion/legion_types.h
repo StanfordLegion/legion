@@ -2915,8 +2915,8 @@ namespace Legion {
       inline void wait_faultaware(bool &poisoned, bool from_application) const;
       inline bool is_barrier(void) const;
     protected:
-      void begin_context_wait(Context ctx, bool from_application) const;
-      void end_context_wait(Context ctx, bool from_application) const;
+      void begin_wait(Context ctx, bool from_application) const;
+      void end_wait(Context ctx, bool from_application) const;
       void begin_mapper_call_wait(MappingCallInfo *call) const;
       void record_event_wait(LegionProfInstance *profiler, 
                              Realm::Backtrace &bt) const;
@@ -3318,15 +3318,13 @@ namespace Legion {
         // Make a user event and notify all the thread locks
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
-        if (local_ctx != NULL)
-          begin_context_wait(local_ctx, false/*from application*/); 
+        begin_wait(local_ctx, false/*from application*/); 
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
-        if (local_ctx != NULL)
-          end_context_wait(local_ctx, false/*from application*/);
+        end_wait(local_ctx, false/*from application*/);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // If we're profiling we need to record that we triggered this
@@ -3347,14 +3345,12 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
-        if (local_ctx != NULL)
-          begin_context_wait(local_ctx, false/*from application*/);
+        begin_wait(local_ctx, false/*from application*/);
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
         else
           Realm::Event::wait();
-        if (local_ctx != NULL)
-          end_context_wait(local_ctx, false/*from application*/);
+        end_wait(local_ctx, false/*from application*/);
       }
       // Write the context back
       Internal::implicit_context = local_ctx;
@@ -3435,15 +3431,13 @@ namespace Legion {
         // Make a user event and notify all the thread locks
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
-        if (local_ctx != NULL)
-          begin_context_wait(local_ctx, from_app);
+        begin_wait(local_ctx, from_app);
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
-        if (local_ctx != NULL)
-          end_context_wait(local_ctx, from_app);
+        end_wait(local_ctx, from_app);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
         // If we're profiling we need to record that we triggered this
@@ -3464,14 +3458,12 @@ namespace Legion {
       }
       else // Just do the normal wait
       {
-        if (local_ctx != NULL)
-          begin_context_wait(local_ctx, from_app);
+        begin_wait(local_ctx, from_app);
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait_faultaware(poisoned);
         else
           Realm::Event::wait_faultaware(poisoned);
-        if (local_ctx != NULL)
-          end_context_wait(local_ctx, from_app);
+        end_wait(local_ctx, from_app);
       }
       // Write the context back
       Internal::implicit_context = local_ctx;

@@ -245,15 +245,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionProfInstance::LegionProfInstance(LegionProfiler *own)
-      : owner(own)
+    LegionProfInstance::LegionProfInstance(LegionProfiler *own, 
+        Processor local, LgEvent ext)
+      : external_fevent(ext), local_proc(local), 
+        external_start(external_fevent.exists() ?
+          Realm::Clock::current_time_in_nanoseconds() : 0), owner(own)
     //--------------------------------------------------------------------------
     {
+      if (external_fevent.exists())
+        implicit_fevent = external_fevent;
     }
 
     //--------------------------------------------------------------------------
     LegionProfInstance::LegionProfInstance(const LegionProfInstance &rhs)
-      : owner(rhs.owner)
+      : external_fevent(rhs.external_fevent), local_proc(rhs.local_proc),
+        external_start(rhs.external_start), owner(rhs.owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1398,7 +1404,7 @@ namespace Legion {
       info.op_id = op_id;
       info.task_id = tid;
       info.variant_id = 0; // no variants for implicit tasks
-      info.proc_id = owner->get_implicit_processor();
+      info.proc_id = local_proc.id;
       // We make create, ready, and start all the same for implicit tasks
       info.create = start_time;
       info.ready = start_time;
@@ -1406,6 +1412,13 @@ namespace Legion {
       info.stop = stop_time;
       info.wait_intervals.swap(waits);
       info.finish_event = finish_event;
+      // Also record an implicit wait on the external thread for this task
+      // to make it seem like we were blocked waiting for it
+      WaitInfo& wait = external_wait_infos.emplace_back(WaitInfo());
+      wait.wait_start = start_time;
+      wait.wait_ready = stop_time;
+      wait.wait_end = stop_time;
+      wait.wait_event = finish_event;
     }
 
     //--------------------------------------------------------------------------
@@ -1458,20 +1471,6 @@ namespace Legion {
                               UniqueID uid, long long start, long long stop)
     //--------------------------------------------------------------------------
     {
-      Processor current = Processor::get_executing_processor();
-      if (!current.exists())
-      {
-        // Ignore mapper calls that happen from outside threads
-        if ((implicit_context == NULL) ||
-            (implicit_context->owner_task == NULL))
-          return;
-        // Implicit top-level task case where we're not actually running
-        // on a Realm processor so we need to get the proxy processor
-        // for the context instead
-        current.id = owner->get_implicit_processor();
-      }
-      else
-        process_proc_desc(current);
       // Check to see if it exceeds the call threshold
       if ((stop - start) < owner->minimum_call_threshold)
         return;
@@ -1483,7 +1482,7 @@ namespace Legion {
       info.op_id = uid;
       info.start = start;
       info.stop = stop;
-      info.proc_id = current.id;
+      info.proc_id = local_proc.id;
       info.finish_event = implicit_fevent;
       owner->update_footprint(sizeof(MapperCallInfo), this);
     }
@@ -1493,20 +1492,6 @@ namespace Legion {
                                                 long long start, long long stop)
     //--------------------------------------------------------------------------
     {
-      Processor current = Processor::get_executing_processor();
-      if (!current.exists())
-      {
-        // Ignore runtime calls that happen from outside threads
-        if ((implicit_context == NULL) ||
-            (implicit_context->owner_task == NULL))
-          return;
-        // Implicit top-level task case where we're not actually running
-        // on a Realm processor so we need to get the proxy processor
-        // for the context instead
-        current.id = owner->get_implicit_processor();
-      }
-      else
-        process_proc_desc(current);
       // Check to see if it exceeds the call threshold
       if ((stop - start) < owner->minimum_call_threshold)
         return;
@@ -1515,7 +1500,7 @@ namespace Legion {
       info.kind = kind;
       info.start = start;
       info.stop = stop;
-      info.proc_id = current.id;
+      info.proc_id = local_proc.id;
       info.finish_event = implicit_fevent;
       owner->update_footprint(sizeof(RuntimeCallInfo), this);
     }
@@ -1525,14 +1510,6 @@ namespace Legion {
                               ProvenanceID pid, long long start, long long stop)
     //--------------------------------------------------------------------------
     {
-      Processor current = Processor::get_executing_processor();
-      if (!current.exists())
-      {
-        // Implicit top-level task case where we're not actually running
-        // on a Realm processor so we need to get the proxy processor
-        // for the context instead
-        current.id = owner->get_implicit_processor();
-      }
       // We don't filter application call ranges currently since presumably 
       // the application knows what its doing and wants to see everything 
       application_call_infos.emplace_back(ApplicationCallInfo());
@@ -1540,7 +1517,7 @@ namespace Legion {
       info.pid = pid;
       info.start = start;
       info.stop = stop;
-      info.proc_id = current.id;
+      info.proc_id = local_proc.id;
       info.finish_event = implicit_fevent;
       owner->update_footprint(sizeof(ApplicationCallInfo), this);
     }
@@ -1550,21 +1527,37 @@ namespace Legion {
                                                Realm::Backtrace &bt)
     //--------------------------------------------------------------------------
     {
-      Processor current = Processor::get_executing_processor();
-      if (!current.exists())
-      {
-        // Implicit top-level task case where we're not actually running
-        // on a Realm processor so we need to get the proxy processor
-        // for the context instead
-        current.id = owner->get_implicit_processor();
-      }
       // Check to see if we have a backtrace ID for this backtrace yet 
       unsigned long long backtrace_id = owner->find_backtrace_id(bt);
       event_wait_infos.emplace_back(
-          EventWaitInfo{current.id, implicit_fevent, event, backtrace_id});
+          EventWaitInfo{local_proc.id, implicit_fevent, event, backtrace_id});
       if (event.is_barrier())
         record_barrier_use(event, implicit_provenance);
       owner->update_footprint(sizeof(EventWaitInfo), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::begin_external_wait(LgEvent event)
+    //--------------------------------------------------------------------------
+    {
+      WaitInfo& info = external_wait_infos.emplace_back(WaitInfo());
+      info.wait_event = event;
+      info.wait_start = Realm::Clock::current_time_in_nanoseconds();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::end_external_wait(LgEvent event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!external_wait_infos.empty());
+#endif
+      WaitInfo& info = external_wait_infos.back();
+#ifdef DEBUG_LEGION
+      assert(info.wait_event == event);
+#endif
+      info.wait_ready = Realm::Clock::current_time_in_nanoseconds();
+      info.wait_end = info.wait_ready;
     }
 
     //--------------------------------------------------------------------------
@@ -1589,7 +1582,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LegionProfInstance::dump_state(LegionProfSerializer *serializer)
     //--------------------------------------------------------------------------
-    {
+    { 
       for (std::deque<OperationInstance>::const_iterator it = 
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
@@ -1845,7 +1838,27 @@ namespace Legion {
       event_trigger_infos.clear();
       event_poison_infos.clear();
       barrier_arrival_infos.clear();
-      reservation_acquire_infos.clear();
+      reservation_acquire_infos.clear(); 
+      // Finally if we're an external thread, dump our implicit
+      // top-level task information for ourselves
+      if (external_fevent.exists())
+      {
+        TaskInfo external_info;
+        external_info.op_id = owner->runtime->get_unique_operation_id();
+        external_info.task_id = Processor::TASK_ID_PROCESSOR_NOP;
+        external_info.variant_id = Processor::NO_KIND;
+        external_info.proc_id = local_proc.id;
+        external_info.create = external_start;
+        external_info.ready = external_start;
+        external_info.start = external_start;
+        external_info.stop = Realm::Clock::current_time_in_nanoseconds();
+        external_info.finish_event = external_fevent;
+        serializer->serialize(external_info, true/*implicit*/);
+        for (std::vector<WaitInfo>::const_iterator it =
+              external_wait_infos.begin(); it !=
+              external_wait_infos.end(); it++)
+          serializer->serialize(*it, external_info);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2646,13 +2659,24 @@ namespace Legion {
 #endif
         return proc;
       }
+      implicit_top_level_task_proc.store(proc);
       // Record the processor kind as being an I/O kind so that the profiler
       // renders all implicit top-level tasks separately
       LegionProfDesc::ProcDesc desc;
       desc.proc_id = proc;
       desc.kind = Processor::IO_PROC;
       serializer->serialize(desc);
-      implicit_top_level_task_proc.store(proc);
+      // Also record a task and variant for external threads
+      LegionProfDesc::TaskKind external_task;
+      external_task.task_id = Processor::TASK_ID_PROCESSOR_NOP;
+      external_task.name = "External Thread";
+      external_task.overwrite = true;
+      serializer->serialize(external_task);
+      LegionProfDesc::TaskVariant external_variant;
+      external_variant.task_id = Processor::TASK_ID_PROCESSOR_NOP;
+      external_variant.variant_id = Processor::NO_KIND;
+      external_variant.name = "External Thread";
+      serializer->serialize(external_variant);
       return proc;
     }
 
@@ -3559,22 +3583,34 @@ namespace Legion {
     {
       if (implicit_profiler != NULL)
         return implicit_profiler;
-      const Processor current = Processor::get_executing_processor();
-      // If the processor already exists then we can use an existing instance
-      // on anything except I/O processors which can have multiple threads
-      // running at the same time
-      if (current.exists() && (current.kind() != Processor::IO_PROC))
+      Processor current = Processor::get_executing_processor();
+      LgEvent external;
+      if (!current.exists())
       {
+        const Realm::UserEvent ext = Realm::UserEvent::create_user_event();
+        ext.trigger();
+        external = LgEvent(ext);
+        // Also get the implicit processor to make sure it exists
+        // and register the external top-level task
+        current.id = get_implicit_processor();
+      }
+      else if (current.kind() != Processor::IO_PROC)
+      {
+        // If the processor already exists then we can use an existing instance
+        // on anything except I/O processors which can have multiple threads
+        // running at the same time
         AutoLock p_lock(profiler_lock,1,false/*exclusive*/);
         std::map<Processor,LegionProfInstance*>::const_iterator finder =
           processor_instances.find(current);
         if (finder != processor_instances.end())
           return finder->second;
       }
-      LegionProfInstance *instance = new LegionProfInstance(this);
+      if (!external.exists())
+        record_processor(current);
+      LegionProfInstance *instance = new LegionProfInstance(this, current, external);
       // Take the lock and save the instance 
       AutoLock p_lock(profiler_lock);
-      if (current.exists() && (current.kind() != Processor::IO_PROC))
+      if (!instance->is_external_thread() && (current.kind() != Processor::IO_PROC))
       {
         std::map<Processor,LegionProfInstance*>::const_iterator finder =
           processor_instances.find(current);

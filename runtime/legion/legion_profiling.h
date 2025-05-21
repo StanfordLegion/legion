@@ -587,11 +587,15 @@ namespace Legion {
         LgEvent critical;
       };
     public:
-      LegionProfInstance(LegionProfiler *owner);
+      LegionProfInstance(LegionProfiler *owner,
+                         Processor local, LgEvent external);
       LegionProfInstance(const LegionProfInstance &rhs);
       ~LegionProfInstance(void);
     public:
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
+    public:
+      inline bool is_external_thread(void) const
+        { return external_fevent.exists(); }
     public: 
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID kind);
@@ -696,6 +700,8 @@ namespace Legion {
       void record_application_range(ProvenanceID pid,
                                     timestamp_t start, timestamp_t stop);
       void record_event_wait(LgEvent event, Realm::Backtrace &bt);
+      void begin_external_wait(LgEvent event);
+      void end_external_wait(LgEvent event);
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
           timestamp_t stop, LgEvent creator, LgEvent finish_event, 
@@ -703,6 +709,13 @@ namespace Legion {
     public:
       void dump_state(LegionProfSerializer *serializer);
       size_t dump_inter(LegionProfSerializer *serializer, const double over);
+    public:
+      // If this profiler instance is associated with an external thread
+      // then it will have an external fevent that will eventually be
+      // rendered in Legion Prof as an implicit top-level task
+      const LgEvent external_fevent;
+      const Processor local_proc; // might be fake
+      const long long external_start;
     private:
       LegionProfiler *const owner;
       std::deque<OperationInstance> operation_instances;
@@ -745,6 +758,7 @@ namespace Legion {
       std::deque<InstanceReadyInfo> instance_ready_infos;
       std::deque<InstanceRedistrictInfo> instance_redistrict_infos;
       std::deque<CompletionQueueInfo> completion_queue_infos;
+      std::vector<WaitInfo> external_wait_infos;
       // keep track of MemIDs/ProcIDs to avoid duplicate entries
       std::vector<MemID> mem_ids;
       std::vector<ProcID> proc_ids;

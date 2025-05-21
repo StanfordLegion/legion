@@ -1171,6 +1171,7 @@ namespace Legion {
       PhaseBarrier get_legion_wait_phase_barrier(void);
       PhaseBarrier get_legion_arrive_phase_barrier(void);
       void advance_legion_handshake(void);
+      void record_external_handshake(Provenance *provenance);
     private:
       const bool init_in_ext;
     private:
@@ -1182,6 +1183,13 @@ namespace Legion {
       ApBarrier legion_wait_barrier;
       ApBarrier legion_next_barrier; // one gen ahead of wait
       ApBarrier legion_arrive_barrier;
+    private:
+      // For profiling
+      std::optional<long long> previous_external_time;
+      static std::atomic<Provenance*> external_wait;
+      static std::atomic<Provenance*> external_handoff;
+      static constexpr std::string_view EXTERNAL_WAIT = "External Legion Handshake Wait on Legion";
+      static constexpr std::string_view EXTERNAL_HANDOFF = "External Legion Handshake Handoff to Legion";
     };
 
     class MPIRankTable {
