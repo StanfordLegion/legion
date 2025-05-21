@@ -587,7 +587,7 @@ namespace Realm {
 
     if constexpr(has_frag_info_v<T>) {
       extract_frag_info = [](const void *hdr) -> const FragmentInfo * {
-        return &reinterpret_cast<const T *>(hdr)->frag_info;
+        return &static_cast<const T *>(hdr)->frag_info;
       };
     } else {
       extract_frag_info = nullptr;
