@@ -418,7 +418,9 @@ namespace Realm {
         auto it = frag_message.find(key);
 
         if(it == frag_message.end()) {
-          it = frag_message.emplace(key, new FragmentedMessage(frag_info->total_chunks))
+          it = frag_message
+                   .emplace(key,
+                            std::make_unique<FragmentedMessage>(frag_info->total_chunks))
                    .first;
         }
 
@@ -433,7 +435,6 @@ namespace Realm {
 
         message = it->second->reassemble();
 
-        delete it->second;
         frag_message.erase(it);
       }
     }

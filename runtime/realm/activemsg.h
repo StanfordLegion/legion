@@ -446,7 +446,8 @@ namespace Realm {
       }
     };
 
-    std::unordered_map<std::pair<NodeID, uint64_t>, FragmentedMessage *, PairHash>
+    std::unordered_map<std::pair<NodeID, uint64_t>, std::unique_ptr<FragmentedMessage>,
+                       PairHash>
         frag_message;
   };
 
