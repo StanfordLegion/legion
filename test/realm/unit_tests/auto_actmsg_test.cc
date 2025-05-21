@@ -32,15 +32,12 @@ public:
   T *operator->() { return &header_; }
   const T *operator->() const { return &header_; }
 
-  static std::vector<std::pair<T, std::vector<char>>> sent_messages;
+  static inline std::vector<std::pair<T, std::vector<char>>> sent_messages;
 
 private:
   T header_{};
   std::vector<char> payload_;
 };
-
-template <typename T>
-std::vector<std::pair<T, std::vector<char>>> MockActiveMessage<T>::sent_messages;
 
 /**********************************************************************
  *                         Unit Tests                                 *
