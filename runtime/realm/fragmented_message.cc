@@ -47,10 +47,7 @@ namespace Realm {
     return received_count == total_chunks;
   }
 
-  size_t FragmentedMessage::size() const
-  {
-    return total_size;
-  }
+  size_t FragmentedMessage::size() const { return total_size; }
 
   std::vector<char> FragmentedMessage::reassemble() const
   {

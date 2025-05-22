@@ -424,8 +424,7 @@ namespace Realm {
                    .first;
         }
 
-        bool ok =
-          it->second->add_chunk(frag_info->chunk_id, payload, payload_size);
+        bool ok = it->second->add_chunk(frag_info->chunk_id, payload, payload_size);
         assert(ok);
 
         if(!it->second->is_complete()) {
@@ -439,12 +438,11 @@ namespace Realm {
       }
     }
 
-    if (!message.empty()) {
+    if(!message.empty()) {
       payload = message.data();
       payload_size = message.size();
       payload_mode = PAYLOAD_COPY;
     }
-
 
     // if we have an inline handler and enough time to run it, give it
     //  a go
