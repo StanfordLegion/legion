@@ -29,6 +29,8 @@
 #include "realm/threads.h"
 #include "realm/bgwork.h"
 
+#include <optional>
+
 namespace Realm {
 
   namespace Config {
