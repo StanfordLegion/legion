@@ -45,6 +45,7 @@ set(REALM_SOURCES
     threads.cc
     shm.cc
     hardware_topology.cc
+    fragmented_message.cc
     transfer/lowlevel_disk.cc
     transfer/address_list.cc
     transfer/channel_common.cc
