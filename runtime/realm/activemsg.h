@@ -273,8 +273,8 @@ namespace Realm {
       MessageHandlerNoTimeout handler_notimeout;
       MessageHandlerInline handler_inline;
       ActiveMessageHandlerStats stats;
-      using FragInfoExtractor = const FragmentInfo *(*)(const void *);
-      FragInfoExtractor extract_frag_info = nullptr;
+
+      std::optional<const FragmentInfo &(*)(const void *)> extract_frag_info;
     };
 
     HandlerEntry *lookup_message_handler(MessageID id);
@@ -298,8 +298,7 @@ namespace Realm {
     const char *name;
     bool must_free;
     ActiveMessageHandlerRegBase *next_handler;
-    using FragInfoExtractor = const FragmentInfo *(*)(const void *);
-    FragInfoExtractor extract_frag_info = nullptr;
+    std::optional<const FragmentInfo &(*)(const void *)> extract_frag_info;
   };
 
   template <typename T, typename T2 = T>
