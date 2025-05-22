@@ -2304,7 +2304,7 @@ namespace Legion {
                                    const bool self_prof,
                                    const bool no_critical,
                                    const bool all_arrivals)
-      : runtime(rt), done_event(Runtime::create_rt_user_event()), 
+      : runtime(rt), done_event(Realm::UserEvent::create_user_event()),
         minimum_call_threshold(call_threshold * 1000 /*convert us to ns*/),
         output_footprint_threshold(footprint_threshold), 
         output_target_latency(target_latency),
@@ -3462,7 +3462,7 @@ namespace Legion {
           return;
       }
       assert(!done_event.has_triggered());
-      Runtime::trigger_event(done_event);
+      done_event.trigger();
     }
 #else
     //--------------------------------------------------------------------------
@@ -3486,7 +3486,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!done_event.has_triggered());
 #endif
-        Runtime::trigger_event(done_event);
+        done_event.trigger();
       }
     }
 #endif

@@ -21464,7 +21464,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_runtime(std::vector<RtEvent> &shutdown_preconditions)
+    void Runtime::finalize_runtime(
+                              std::vector<Realm::Event> &shutdown_preconditions)
     //--------------------------------------------------------------------------
     {
       if (!separate_runtime_instances)
@@ -21481,8 +21482,8 @@ namespace Legion {
           if (total_address_spaces <= next)
             break;
           MessageManager *messenger = find_messenger(next);
-          shutdown_preconditions.push_back(RtEvent(messenger->target.spawn(
-                  LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+          shutdown_preconditions.push_back(messenger->target.spawn(
+                  LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests));
         }
       }
       // Have the memory managers for deletion of all their instances
@@ -36128,16 +36129,13 @@ namespace Legion {
       implicit_profiler = NULL;
       implicit_fevent = LgEvent::NO_LG_EVENT;
       // Finalize the runtime and then delete it
-      std::vector<RtEvent> shutdown_events;
+      std::vector<Realm::Event> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
       delete runtime;
       // If we have any shutdown events we need to wait for them to have
       // finished before we return and end up marking ourselves finished
       if (!shutdown_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(shutdown_events);
-        wait_on.wait();
-      }
+        Realm::Event::merge_events(shutdown_events).wait();
     }
 
     //--------------------------------------------------------------------------
