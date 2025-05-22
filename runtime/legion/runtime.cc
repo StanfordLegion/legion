@@ -136,11 +136,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LgEvent::record_event_wait(LegionProfInstance *profiler,
-                                    Realm::Backtrace &bt) const
+    void LgEvent::record_event_wait(Realm::Backtrace &bt) const
     //--------------------------------------------------------------------------
     {
-      profiler->record_event_wait(*this, bt);
+#ifdef DEBUG_LEGION
+      assert(exists());
+      assert(implicit_profiler != NULL);
+#endif
+      implicit_profiler->record_event_wait(*this, bt);
     }
 
     //--------------------------------------------------------------------------
@@ -7105,9 +7108,8 @@ namespace Legion {
           previous_external_time = Realm::Clock::current_time_in_nanoseconds();
       }
       // Wait for ext to be ready to run
-      // Note we use the external wait to be sure 
-      // we don't get drafted by the Realm runtime
-      ext_wait_barrier.external_wait();
+      // Use LgEvent::wait so we will profile this correctly
+      ext_wait_barrier.wait_faultignorant();
       // Now we can advance our wait barrier
       Runtime::advance_barrier(ext_wait_barrier);
       if (implicit_profiler != nullptr)

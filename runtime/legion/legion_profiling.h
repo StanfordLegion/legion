@@ -828,6 +828,7 @@ namespace Legion {
       // (Note also that the same implicit top-level task doesn't even
       // need to stay on the same external thread for its whole lifespan.)
       ProcID get_implicit_processor(void);
+      TaskID get_external_implicit_task(void);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, TaskID tid, 
                             VariantID vid, UniqueID task_uid, Processor p, 
@@ -956,6 +957,7 @@ namespace Legion {
       std::atomic<size_t> total_memory_footprint;
     private:
       std::atomic<ProcID> implicit_top_level_task_proc;
+      std::optional<TaskID> external_implicit_task;
     private:
       // Issue the default mapper warning
       std::atomic<bool> need_default_mapper_warning; 

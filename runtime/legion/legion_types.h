@@ -2918,8 +2918,7 @@ namespace Legion {
       void begin_wait(Context ctx, bool from_application) const;
       void end_wait(Context ctx, bool from_application) const;
       void begin_mapper_call_wait(MappingCallInfo *call) const;
-      void record_event_wait(LegionProfInstance *profiler, 
-                             Realm::Backtrace &bt) const;
+      void record_event_wait(Realm::Backtrace &bt) const;
       void record_event_trigger(LgEvent precondition) const;
     };
 
@@ -3271,54 +3270,43 @@ namespace Legion {
       if (!exists())
         return;
 #ifdef DEBUG_LEGION_CALLERS
-      LgTaskID local_kind = Internal::implicit_task_kind;
-      LgTaskID local_caller = Internal::implicit_task_caller;
+      LgTaskID local_kind = implicit_task_kind;
+      LgTaskID local_caller = implicit_task_caller;
 #endif
       // Save the mapper call locally
-      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      MappingCallInfo *local_call = nullptr;
+      std::swap(local_call, implicit_mapper_call);
       // If we're in a mapper call, notify the mapper that we're waiting
       // Do this first in case we get a re-entrant wait (e.g. because
       // SerializingManager::pause_mapper_call takes and lock and we might
       // end up coming back around here to wait on that event too)
       if (local_call != NULL)
-      {
-        Internal::implicit_mapper_call = NULL;
         begin_mapper_call_wait(local_call);
-      }
       // Save whether we are in a registration callback
-      unsigned local_callback = Internal::inside_registration_callback;
+      unsigned local_callback = 0;
+      std::swap(local_callback, inside_registration_callback);
       // Save the reference tracker that we have
-      ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
-      Internal::implicit_reference_tracker = NULL;
-      LegionProfInstance *local_profiler = Internal::implicit_profiler;
-      if (local_profiler != NULL)
-      {
-        // Cannot call back into wait while recording a wait
-        implicit_profiler = NULL;
-        Realm::Backtrace bt;
-        bt.capture_backtrace();
-        record_event_wait(local_profiler, bt);
-      }
+      ImplicitReferenceTracker *local_tracker = nullptr;
+      std::swap(local_tracker, implicit_reference_tracker);
       // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      Internal::implicit_context = NULL; 
+      TaskContext *local_ctx = nullptr; 
+      std::swap(local_ctx, implicit_context);
       // Save the implicit fevent
-      LgEvent local_fevent = Internal::implicit_fevent;
-      Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
+      LgEvent local_fevent;
+      std::swap(local_fevent, implicit_fevent);
       // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
-      Internal::implicit_provenance = 0;
+      UniqueID local_provenance = 0;
+      std::swap(local_provenance, implicit_provenance);
       // Check to see if we have any local locks to notify
-      if (Internal::local_lock_list != NULL)
+      if (local_lock_list != nullptr)
       {
         // Make a copy of the local locks here
-        AutoLock *local_lock_list_copy = Internal::local_lock_list;
-        // Set this back to NULL until we are done waiting
-        Internal::local_lock_list = NULL;
+        AutoLock *local_lock_list_copy = nullptr;
+        std::swap(local_lock_list_copy, local_lock_list);
         // Make a user event and notify all the thread locks
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
-        begin_wait(local_ctx, false/*from application*/); 
+        begin_wait(local_ctx, false/*from application*/);
         // Now we can do the wait
         if (!Processor::get_executing_processor().exists())
           Realm::Event::external_wait();
@@ -3327,21 +3315,27 @@ namespace Legion {
         end_wait(local_ctx, false/*from application*/);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
-        // If we're profiling we need to record that we triggered this
-        // event as it will help us hook up the critical path for
-        // local lock acquires
-        if (local_profiler != NULL)
-        {
-          // Make sure to restore this before recording
-          Internal::implicit_fevent = local_fevent;
-          Internal::implicit_profiler = local_profiler;
-          const LgEvent to_trigger(done);
-          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
-        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
-        Internal::local_lock_list = local_lock_list_copy; 
+        local_lock_list = local_lock_list_copy;
+        // Restore our implicit fevent in case we have profiling to do
+        implicit_fevent = local_fevent;
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (implicit_profiler != nullptr)
+        {
+          // Have to do this recording after the wait because it might
+          // end up waiting on an event too and don't want to cause
+          // a stack overflow with repeated calls into wait
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+          // Record the backtrace too
+          Realm::Backtrace bt;
+          bt.capture_backtrace();
+          record_event_wait(bt);
+        }
       }
       else // Just do the normal wait
       {
@@ -3351,28 +3345,35 @@ namespace Legion {
         else
           Realm::Event::wait();
         end_wait(local_ctx, false/*from application*/);
+        // Restore our implicit fevent in case we have profiling to do
+        implicit_fevent = local_fevent;
+        if (implicit_profiler != nullptr)
+        {
+          // Have to do this recording after the wait because it might
+          // end up waiting on an event too and don't want to cause
+          // a stack overflow with repeated calls into wait
+          Realm::Backtrace bt;
+          bt.capture_backtrace();
+          record_event_wait(bt);
+        }
       }
       // Write the context back
-      Internal::implicit_context = local_ctx;
+      implicit_context = local_ctx;
       // Write the mapper call back
-      Internal::implicit_mapper_call = local_call;
-      // Write the implicit fevent back
-      Internal::implicit_fevent = local_fevent;
+      implicit_mapper_call = local_call;
       // Write the provenance information back
-      Internal::implicit_provenance = local_provenance;
-      // Restore the local profiler
-      Internal::implicit_profiler = local_profiler;
+      implicit_provenance = local_provenance;
 #ifdef DEBUG_LEGION_CALLERS
-      Internal::implicit_task_kind = local_kind;
-      Internal::implicit_task_caller = local_caller;
+      implicit_task_kind = local_kind;
+      implicit_task_caller = local_caller;
 #endif
       // Write the registration callback information back
-      Internal::inside_registration_callback = local_callback;
+      inside_registration_callback = local_callback;
 #ifdef DEBUG_LEGION
-      assert(Internal::implicit_reference_tracker == NULL);
+      assert(implicit_reference_tracker == nullptr);
 #endif
       // Write the local reference tracker back
-      Internal::implicit_reference_tracker = local_tracker;
+      implicit_reference_tracker = local_tracker;
     }
 
     //--------------------------------------------------------------------------
@@ -3384,50 +3385,39 @@ namespace Legion {
       if (has_triggered_faultaware(poisoned))
         return;
 #ifdef DEBUG_LEGION_CALLERS
-      LgTaskID local_kind = Internal::implicit_task_kind;
-      LgTaskID local_caller = Internal::implicit_task_caller;
+      LgTaskID local_kind = implicit_task_kind;
+      LgTaskID local_caller = implicit_task_caller;
 #endif
       // Save the mapper call locally
-      Internal::MappingCallInfo *local_call = Internal::implicit_mapper_call;
+      MappingCallInfo *local_call = nullptr;
+      std::swap(local_call, implicit_mapper_call);
       // If we're in a mapper call, notify the mapper that we're waiting
       // Do this first in case we get a re-entrant wait (e.g. because
       // SerializingManager::pause_mapper_call takes and lock and we might
       // end up coming back around here to wait on that event too)
       if (local_call != NULL)
-      {
-        Internal::implicit_mapper_call = NULL;
         begin_mapper_call_wait(local_call);
-      }
       // Save whether we are in a registration callback
-      unsigned local_callback = Internal::inside_registration_callback;
+      unsigned local_callback = 0;
+      std::swap(local_callback, inside_registration_callback);
       // Save the reference tracker that we have
-      ImplicitReferenceTracker *local_tracker = implicit_reference_tracker;
-      Internal::implicit_reference_tracker = NULL;
-      LegionProfInstance *local_profiler = Internal::implicit_profiler;
-      if (local_profiler != NULL)
-      {
-        // Cannot call back into wait while recording a wait
-        implicit_profiler = NULL;
-        Realm::Backtrace bt;
-        bt.capture_backtrace();
-        record_event_wait(local_profiler, bt);
-      }
+      ImplicitReferenceTracker *local_tracker = nullptr;
+      std::swap(local_tracker, implicit_reference_tracker);
       // Save the context locally
-      Internal::TaskContext *local_ctx = Internal::implicit_context; 
-      Internal::implicit_context = NULL;
+      TaskContext *local_ctx = nullptr;
+      std::swap(local_ctx, implicit_context);
       // Save the fevent
-      LgEvent local_fevent = Internal::implicit_fevent;
-      Internal::implicit_fevent = LgEvent::NO_LG_EVENT;
+      LgEvent local_fevent;
+      std::swap(local_fevent, implicit_fevent);
       // Save the task provenance information
-      UniqueID local_provenance = Internal::implicit_provenance;
-      Internal::implicit_provenance = 0;
+      UniqueID local_provenance = 0;
+      std::swap(local_provenance, implicit_provenance);
       // Check to see if we have any local locks to notify
-      if (Internal::local_lock_list != NULL)
+      if (local_lock_list != nullptr)
       {
         // Make a copy of the local locks here
-        AutoLock *local_lock_list_copy = Internal::local_lock_list;
-        // Set this back to NULL until we are done waiting
-        Internal::local_lock_list = NULL;
+        AutoLock *local_lock_list_copy = nullptr;
+        std::swap(local_lock_list_copy, local_lock_list);
         // Make a user event and notify all the thread locks
         const Realm::UserEvent done = Realm::UserEvent::create_user_event();
         local_lock_list_copy->advise_sleep_entry(done);
@@ -3440,21 +3430,27 @@ namespace Legion {
         end_wait(local_ctx, from_app);
         // When we wake up, notify that we are done and exited the wait
         local_lock_list_copy->advise_sleep_exit();
-        // If we're profiling we need to record that we triggered this
-        // event as it will help us hook up the critical path for
-        // local lock acquires
-        if (local_profiler != NULL)
-        {
-          // Make sure to restore this before recording
-          Internal::implicit_fevent = local_fevent;
-          Internal::implicit_profiler = local_profiler;
-          const LgEvent to_trigger(done);
-          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
-        }
         // Trigger the user-event
         done.trigger();
         // Restore our local lock list
-        Internal::local_lock_list = local_lock_list_copy; 
+        local_lock_list = local_lock_list_copy;
+        // Restore our implicit fevent in case we have profiling to do
+        implicit_fevent = local_fevent;
+        // If we're profiling we need to record that we triggered this
+        // event as it will help us hook up the critical path for
+        // local lock acquires
+        if (implicit_profiler != nullptr)
+        {
+          // Have to do this recording after the wait because it might
+          // end up waiting on an event too and don't want to cause
+          // a stack overflow with repeated calls into wait
+          const LgEvent to_trigger(done);
+          to_trigger.record_event_trigger(LgEvent::NO_LG_EVENT);
+          // Record the backtrace too
+          Realm::Backtrace bt;
+          bt.capture_backtrace();
+          record_event_wait(bt);
+        }
       }
       else // Just do the normal wait
       {
@@ -3464,28 +3460,35 @@ namespace Legion {
         else
           Realm::Event::wait_faultaware(poisoned);
         end_wait(local_ctx, from_app);
+        // Restore our implicit fevent in case we have profiling to do
+        implicit_fevent = local_fevent;
+        if (implicit_profiler != nullptr)
+        {
+          // Have to do this recording after the wait because it might
+          // end up waiting on an event too and don't want to cause
+          // a stack overflow with repeated calls into wait
+          Realm::Backtrace bt;
+          bt.capture_backtrace();
+          record_event_wait(bt);
+        }
       }
       // Write the context back
-      Internal::implicit_context = local_ctx;
+      implicit_context = local_ctx;
       // Write the mapper call back
-      Internal::implicit_mapper_call = local_call;
-      // Write the implicit fevent back
-      Internal::implicit_fevent = local_fevent;
+      implicit_mapper_call = local_call;
       // Write the provenance information back
-      Internal::implicit_provenance = local_provenance;
-      // Restore the local profiler
-      Internal::implicit_profiler = local_profiler;
+      implicit_provenance = local_provenance;
 #ifdef DEBUG_LEGION_CALLERS
-      Internal::implicit_task_kind = local_kind;
-      Internal::implicit_task_caller = local_caller;
+      implicit_task_kind = local_kind;
+      implicit_task_caller = local_caller;
 #endif
       // Write the registration callback information back
-      Internal::inside_registration_callback = local_callback;
+      inside_registration_callback = local_callback;
 #ifdef DEBUG_LEGION
-      assert(Internal::implicit_reference_tracker == NULL);
+      assert(implicit_reference_tracker == nullptr);
 #endif
       // Write the local reference tracker back
-      Internal::implicit_reference_tracker = local_tracker;
+      implicit_reference_tracker = local_tracker;
     }
 
     //--------------------------------------------------------------------------

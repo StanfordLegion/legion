@@ -1540,6 +1540,7 @@ namespace Legion {
     void LegionProfInstance::begin_external_wait(LgEvent event)
     //--------------------------------------------------------------------------
     {
+      // You cannot do anything in here that waits on an event!
       WaitInfo& info = external_wait_infos.emplace_back(WaitInfo());
       info.wait_event = event;
       info.wait_start = Realm::Clock::current_time_in_nanoseconds();
@@ -1549,6 +1550,7 @@ namespace Legion {
     void LegionProfInstance::end_external_wait(LgEvent event)
     //--------------------------------------------------------------------------
     {
+      // You cannot do anything in here that waits on an event!
 #ifdef DEBUG_LEGION
       assert(!external_wait_infos.empty());
 #endif
@@ -1845,8 +1847,8 @@ namespace Legion {
       {
         TaskInfo external_info;
         external_info.op_id = owner->runtime->get_unique_operation_id();
-        external_info.task_id = Processor::TASK_ID_PROCESSOR_NOP;
-        external_info.variant_id = Processor::NO_KIND;
+        external_info.task_id = owner->get_external_implicit_task();
+        external_info.variant_id = 0;
         external_info.proc_id = local_proc.id;
         external_info.create = external_start;
         external_info.ready = external_start;
@@ -2660,6 +2662,8 @@ namespace Legion {
         return proc;
       }
       implicit_top_level_task_proc.store(proc);
+      assert(!external_implicit_task);
+      external_implicit_task = runtime->generate_dynamic_task_id(false);
       // Record the processor kind as being an I/O kind so that the profiler
       // renders all implicit top-level tasks separately
       LegionProfDesc::ProcDesc desc;
@@ -2668,16 +2672,26 @@ namespace Legion {
       serializer->serialize(desc);
       // Also record a task and variant for external threads
       LegionProfDesc::TaskKind external_task;
-      external_task.task_id = Processor::TASK_ID_PROCESSOR_NOP;
+      external_task.task_id = *external_implicit_task;
       external_task.name = "External Thread";
       external_task.overwrite = true;
       serializer->serialize(external_task);
       LegionProfDesc::TaskVariant external_variant;
-      external_variant.task_id = Processor::TASK_ID_PROCESSOR_NOP;
-      external_variant.variant_id = Processor::NO_KIND;
+      external_variant.task_id = *external_implicit_task;
+      external_variant.variant_id = 0;
       external_variant.name = "External Thread";
       serializer->serialize(external_variant);
       return proc;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskID LegionProfiler::get_external_implicit_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(external_implicit_task);
+#endif
+      return *external_implicit_task;
     }
 
     //--------------------------------------------------------------------------
