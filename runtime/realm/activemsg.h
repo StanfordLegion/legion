@@ -465,6 +465,47 @@ namespace Realm {
   template <typename Hdr>
   using DefaultActiveMessageBuilder = ActiveMessage<WrappedWithFragInfo<Hdr>>;
 
+  //////////////////////////////////////////////////////////////////////////////
+  //
+  // class ActiveMessageAuto
+  //
+  // A thin convenience wrapper that hides the decision of whether a payload
+  // must be transmitted as a *single* ActiveMessage or split across multiple
+  // FragmentedActiveMessages – hence the name "Auto".  The public interface
+  // mirrors that of `ActiveMessage` so that existing call-sites can switch to
+  // the automatic behaviour with only a type alias change.
+  //
+  // Behaviour
+  // ---------
+  // 1.  When `commit()` is called and the aggregated payload size is **less
+  //     than or equal to** the `max_payload_size` provided to the
+  //     constructor, the object internally constructs a single
+  //     `ActiveMessage<WrappedWithFragInfo<UserHdr>>` (via the `Builder`
+  //     template parameter) and sends it.
+  // 2.  Otherwise the payload is automatically split into the minimum number
+  //     of fragments.  Each fragment is sent with a compact `FragmentInfo`
+  //     header and the remote side stitches them back together transparently
+  //     via `FragmentedMessage`.
+  //
+  // Template Parameters
+  // -------------------
+  //  * `UserHdr` – the user-defined struct that forms the logical AM header.
+  //  * `Builder` – meta-function that, given a *wire* header type, produces
+  //               the concrete ActiveMessage builder to use.  The default
+  //               simply wraps `UserHdr` with `FragmentInfo` so that the
+  //               fragmentation metadata travels on the wire.
+  //
+  // Example
+  // -------
+  //   struct MyHdr { int value; };
+  //   ActiveMessageAuto<MyHdr> msg(target_node,
+  //                                 ActiveMessage<MyHdr>::recommended_max_payload(
+  //                                     target_node, /*with_congestion=*/false));
+  //   msg->value = 123;
+  //   msg.add_payload(data_ptr, data_bytes);
+  //   msg.commit();
+  //
+
   template <typename UserHdr,
             template <typename> class Builder = DefaultActiveMessageBuilder>
   class ActiveMessageAuto {

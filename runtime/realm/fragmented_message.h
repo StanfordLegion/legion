@@ -24,6 +24,37 @@
 
 namespace Realm {
 
+  /**
+   * \file fragmented_message.h
+   * \brief Helper utility for reconstructing large ActiveMessages that were
+   *        split into multiple network packets.
+   *
+   * Realm (and the underlying network transports such as GASNet-EX or UCX) may
+   * have an upper bound on the size of a single *medium* or *long* active
+   * message.  When an application attempts to send a payload larger than that
+   * limit, the `FragmentedActiveMessage` helper in activemsg.h automatically
+   * chops the data into `N` smaller packets.  On the receiver side those
+   * packets must be collected and concatenated *before* the logical AM handler
+   * can be invoked.
+   *
+   * The `FragmentedMessage` class performs exactly that role:
+   *   – The sender embeds a small `FragmentInfo` structure in every fragment
+   *     that conveys a 0-based `chunk_id`, the total number of chunks, and a
+   *     unique `msg_id`.
+   *   – The receiver creates one `FragmentedMessage` instance (looked up by the
+   *     `<sender, msg_id>` pair) and calls `add_chunk()` each time a fragment
+   *     arrives.
+   *   – When all `total_chunks` pieces have been delivered, `is_complete()`
+   *     returns *true* and the caller can safely call `reassemble()` to obtain
+   *     a contiguous `std::vector<char>` containing the payload in order.
+   *
+   * A few design notes:
+   *   • Duplicate fragments are ignored, allowing simple resend logic on the
+   *     transmit path.
+   *   • No per-fragment dynamic allocations are performed – each chunk's
+   *     storage is reserved exactly once when its size becomes known.
+   */
+
   class FragmentedMessage {
   public:
     explicit FragmentedMessage(uint32_t total_chunks = 0);
