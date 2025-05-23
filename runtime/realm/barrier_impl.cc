@@ -262,14 +262,12 @@ namespace Realm {
             sender, args.barrier_id, trigger_gen, trigger_args.internal.previous_gen,
             trigger_args.internal.first_generation, trigger_args.internal.redop_id,
             trigger_args.internal.migration_target, trigger_args.internal.broadcast_index,
-            trigger_args.remote_notifications, trigger_args.internal.sequence_number,
-            trigger_args.internal.is_complete_list,
             trigger_args.internal.base_arrival_count, data, datalen, work_until);
       }
 
       static void send_request(NodeID target, ID::IDType barrier_id,
                                BarrierTriggerMessageArgs &trigger_args, const void *data,
-                               size_t datalen)
+                               size_t datalen, size_t max_payload_size)
       {
         Serialization::DynamicBufferSerializer dbs(datalen);
         bool ok = dbs & trigger_args;
@@ -278,7 +276,9 @@ namespace Realm {
           ok = dbs.append_bytes(data, datalen);
         }
         size_t total_payload_size = dbs.bytes_used();
-        ActiveMessage<BarrierTriggerMessage> amsg(target, total_payload_size);
+
+        ActiveMessageAuto<BarrierTriggerMessage> amsg(target, total_payload_size);
+
         amsg->barrier_id = barrier_id;
         amsg.add_payload(dbs.get_buffer(), total_payload_size);
         amsg.commit();
@@ -361,9 +361,11 @@ namespace Realm {
 
   void BarrierCommunicator::trigger(NodeID target, ID::IDType barrier_id,
                                     BarrierTriggerMessageArgs &trigger_args,
-                                    const void *data, size_t datalen)
+                                    const void *data, size_t datalen,
+                                    size_t max_payload_size)
   {
-    BarrierTriggerMessage::send_request(target, barrier_id, trigger_args, data, datalen);
+    BarrierTriggerMessage::send_request(target, barrier_id, trigger_args, data, datalen,
+                                        max_payload_size);
   }
 
   void BarrierCommunicator::subscribe(NodeID target, ID::IDType barrier_id,
@@ -560,13 +562,15 @@ namespace Realm {
     for(const NodeID target : broadcast_targets) {
       EventImpl::gen_t trigger_gen = ordered_notifications[target].trigger_gen;
 
-      const void *reduce_data = data;
-      size_t reduce_data_size = datalen;
+      const char *reduce_data_ptr = static_cast<const char *>(data);
+      size_t remaining_data_size = datalen;
 
       if(datalen == 0 && redopid != 0) {
-        reduce_data =
-            (char *)data + ((broadcast_previous - oldest_previous) * redop->sizeof_lhs);
-        reduce_data_size = (trigger_gen - broadcast_previous) * redop->sizeof_lhs;
+        reduce_data_ptr =
+            (data) ? static_cast<const char *>(data) +
+                         ((broadcast_previous - oldest_previous) * redop->sizeof_lhs)
+                   : nullptr;
+        remaining_data_size = (trigger_gen - broadcast_previous) * redop->sizeof_lhs;
       }
 
       BarrierTriggerMessageArgs trigger_args;
@@ -578,35 +582,29 @@ namespace Realm {
       trigger_args.internal.base_arrival_count = base_arrival_count;
       trigger_args.internal.broadcast_index = target + 1;
 
-      const size_t max_recommended_payload = barrier_comm->recommend_max_payload(
+      const size_t header_size =
+          sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t);
+
+      BarrierTriggerPayload payload;
+      payload.remotes = ordered_notifications;
+
+      if(remaining_data_size > 0) {
+        payload.reduction.insert(payload.reduction.end(), reduce_data_ptr,
+                                 reduce_data_ptr + remaining_data_size);
+      }
+
+      Serialization::DynamicBufferSerializer dbs_first(remaining_data_size + header_size);
+      bool ok = dbs_first & trigger_args;
+      assert(ok);
+      ok = dbs_first & payload;
+      assert(ok);
+
+      size_t max_payload_size = barrier_comm->recommend_max_payload(
           ordered_notifications[target].node, sizeof(BarrierTriggerMessage));
 
-      assert(((long long)max_recommended_payload - (long long)reduce_data_size -
-              (long long)sizeof(BarrierTriggerMessageArgsInternal) -
-              (long long)sizeof(size_t)) > 0);
-
-      const size_t max_notifications =
-          std::min(size_t(BarrierConfig::max_notifies_payload),
-                   (max_recommended_payload - reduce_data_size -
-                    sizeof(BarrierTriggerMessageArgsInternal) - sizeof(size_t)) /
-                       sizeof(RemoteNotification));
-
-      int sequence_number = 0;
-      std::vector<std::vector<RemoteNotification>> pubs;
-      for(size_t start = 0; start < ordered_notifications.size();
-          start += max_notifications) {
-        size_t end = std::min(start + max_notifications, ordered_notifications.size());
-
-        if(include_notifications) {
-          std::vector<RemoteNotification> chunk_remote_notifications(
-              ordered_notifications.begin() + start, ordered_notifications.begin() + end);
-          trigger_args.internal.sequence_number = sequence_number++;
-          trigger_args.internal.is_complete_list = (end == ordered_notifications.size());
-          trigger_args.remote_notifications = chunk_remote_notifications;
-        }
-        barrier_comm->trigger(ordered_notifications[target].node, me.id, trigger_args,
-                              reduce_data, reduce_data_size);
-      }
+      barrier_comm->trigger(ordered_notifications[target].node, me.id, trigger_args,
+                            dbs_first.get_buffer(), dbs_first.bytes_used(),
+                            max_payload_size);
     }
   }
 
@@ -1244,31 +1242,55 @@ namespace Realm {
   void BarrierImpl::handle_remote_trigger(
       NodeID sender, ID::IDType barrier_id, EventImpl::gen_t trigger_gen,
       EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen, ReductionOpID redop_id,
-      NodeID migration_target, int broadcast_index,
-      const std::vector<RemoteNotification> remote_notifications, int sequence_number,
-      bool is_complete_list, unsigned base_count, const void *data, size_t datalen,
-      TimeLimit work_until)
+      NodeID migration_target, int broadcast_index, unsigned base_count, const void *data,
+      size_t datalen, TimeLimit work_until)
   {
     // Make a copy here because this can change later
     const EventImpl::gen_t original_gen = trigger_gen;
-    if(!remote_notifications.empty()) {
-      AutoLock<> a(mutex);
 
-      ordered_buffer.emplace_back(sequence_number, remote_notifications);
-      if(is_complete_list == false) {
-        return;
+    BarrierTriggerPayload payload;
+
+    if(datalen > 0) {
+      AutoLock<> al(mutex);
+      assert(data);
+
+      Serialization::FixedBufferDeserializer payload_fbd(data, datalen);
+      bool ok = payload_fbd & payload;
+      assert(ok);
+    }
+
+    if(!payload.reduction.empty()) {
+      assert(redop_id != 0);
+      if(redop == 0) {
+        log_barrier.fatal() << "no reduction op registered for ID " << redop_id;
+        abort();
+      }
+      first_generation = first_gen;
+
+      int rel_gen = trigger_gen - first_generation;
+      assert(rel_gen > 0);
+      if(value_capacity < static_cast<size_t>(rel_gen)) {
+        size_t new_capacity = rel_gen;
+        final_values.resize(new_capacity * redop->sizeof_lhs);
+        // no need to initialize new entries - we'll overwrite them now or when data
+        // does show up
+        value_capacity = new_capacity;
       }
 
-      std::vector<RemoteNotification> ordered_notifications;
-      if(needs_ordering) {
-        std::sort(ordered_buffer.begin(), ordered_buffer.end(),
-                  [](const auto &a, const auto &b) { return a.first < b.first; });
-      }
+      assert(original_gen <= trigger_gen);
+      // trigger_gen might have changed so make sure you use original_gen here
+      assert(payload.reduction.size() ==
+             (redop->sizeof_lhs * (original_gen - previous_gen)));
+      assert(previous_gen >= first_gen);
+      memcpy(final_values.data() +
+                 ((previous_gen - first_generation) * redop->sizeof_lhs),
+             payload.reduction.data(), payload.reduction.size());
+    }
 
-      for(const auto &[_, chunk] : ordered_buffer) {
-        ordered_notifications.insert(ordered_notifications.end(), chunk.begin(),
-                                     chunk.end());
-      }
+    if(!payload.remotes.empty()) {
+      AutoLock<> al(mutex);
+
+      auto ordered_notifications = payload.remotes;
 
       std::vector<NodeID> broadcast_targets;
       get_broadcast_targets(broadcast_index, ordered_notifications.size(),
@@ -1277,8 +1299,6 @@ namespace Realm {
       broadcast_trigger(ordered_notifications, broadcast_targets,
                         /*oldest_previous=*/0, /*broadcast_previous=*/0, first_gen,
                         migration_target, base_arrival_count, redop_id, data, datalen);
-
-      ordered_buffer.clear();
     }
 
     // we'll probably end up with a list of local waiters to notify
@@ -1339,34 +1359,6 @@ namespace Realm {
         log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)", barrier_id,
                          generation.load(), previous_gen, trigger_gen);
         held_triggers[previous_gen] = trigger_gen;
-      }
-
-      // is there any data we need to store?
-      if(datalen) {
-        assert(redop_id != 0);
-        if(redop == 0) {
-          log_barrier.fatal() << "no reduction op registered for ID " << redop_id;
-          abort();
-        }
-        first_generation = first_gen;
-
-        int rel_gen = trigger_gen - first_generation;
-        assert(rel_gen > 0);
-        if(value_capacity < static_cast<size_t>(rel_gen)) {
-          size_t new_capacity = rel_gen;
-          final_values.resize(new_capacity * redop->sizeof_lhs);
-          // no need to initialize new entries - we'll overwrite them now or when data
-          // does show up
-          value_capacity = new_capacity;
-        }
-
-        assert(original_gen <= trigger_gen);
-        // trigger_gen might have changed so make sure you use original_gen here
-        assert(datalen == (redop->sizeof_lhs * (original_gen - previous_gen)));
-        assert(previous_gen >= first_gen);
-        memcpy(final_values.data() +
-                   ((previous_gen - first_generation) * redop->sizeof_lhs),
-               data, datalen);
       }
 
       // external waiters need to be signalled inside the lock

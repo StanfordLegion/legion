@@ -57,6 +57,19 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // struct BarrierTriggerPayload
+  //
+
+  template <typename S>
+  bool serdez(S &ser, const BarrierTriggerPayload &notification)
+  {
+    bool success = false;
+    success = (ser & notification.remotes) && (ser & notification.reduction);
+    return success;
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // struct BarrierTriggerMessageArgs
   //
 
@@ -69,10 +82,7 @@ namespace Realm {
               (ser & args.internal.first_generation) && (ser & args.internal.redop_id) &&
               (ser & args.internal.migration_target) &&
               (ser & args.internal.base_arrival_count) &&
-              (ser & args.internal.broadcast_index) &&
-              (ser & args.internal.is_complete_list) &&
-              (ser & args.internal.sequence_number) &&
-              (ser & args.remote_notifications);
+              (ser & args.internal.broadcast_index);
 
     return success;
   }
