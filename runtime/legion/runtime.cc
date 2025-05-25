@@ -31554,6 +31554,9 @@ namespace Legion {
         if (manager != NULL)
           manager->confirm_shutdown(shutdown_manager, phase_one);
       }
+      // If we have a profiler, make sure that it has sent all its messages
+      if ((profiler != nullptr) && !profiler->confirm_shutdown())
+        shutdown_manager->record_recent_message();
     }
 
     //--------------------------------------------------------------------------
