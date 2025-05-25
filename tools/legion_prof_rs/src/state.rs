@@ -638,6 +638,7 @@ pub struct Proc {
     pub kind: Option<ProcKind>,
     entries: BTreeMap<ProfUID, ProcEntry>,
     tasks: BTreeMap<OpID, ProfUID>,
+    message_tasks: BTreeSet<ProfUID>,
     meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     event_waits: BTreeMap<ProfUID, BTreeMap<EventID, BacktraceID>>,
     max_levels: u32,
@@ -658,6 +659,7 @@ impl Proc {
             kind: None,
             entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
+            message_tasks: BTreeSet::new(),
             meta_tasks: BTreeMap::new(),
             event_waits: BTreeMap::new(),
             max_levels: 0,
@@ -773,6 +775,13 @@ impl Proc {
         entry.creator = new_creator_uid;
         entry.time_range.create = Some(create);
         entry.time_range.ready = Some(ready);
+    }
+
+    fn record_spawn_time(&mut self, prof_uid: ProfUID, spawn: Timestamp) {
+        let entry = self.entries.get_mut(&prof_uid).unwrap();
+        assert!(entry.time_range.spawn.is_none());
+        entry.time_range.spawn = Some(spawn);
+        self.message_tasks.insert(prof_uid);
     }
 
     fn sort_calls_and_waits(&mut self) {
@@ -3865,7 +3874,7 @@ impl State {
             let proc = self.procs.get(&proc_id).unwrap();
             let entry = proc.find_entry(creator_uid).unwrap();
             // Profiling responses are created at the same time task is created
-            let create = entry.time_range().create.unwrap();
+            let create = entry.creation_time();
             // Profiling responses are ready when the task is done executing
             let ready = entry.time_range().stop.unwrap();
             (entry.creator(), create, ready)
@@ -3874,7 +3883,7 @@ impl State {
             let chan = self.chans.get(&chan_id).unwrap();
             let entry = chan.find_entry(creator_uid).unwrap();
             // Profiling responses are created at the same time the op is created
-            let create = entry.time_range().create.unwrap();
+            let create = entry.creation_time();
             // Profiling response sare ready when the op is done executing
             let ready = entry.time_range().stop.unwrap();
             (entry.creator(), create, ready)
@@ -3882,7 +3891,7 @@ impl State {
             let mem = self.mems.get(&mem_id).unwrap();
             let inst = mem.entry(creator_uid);
             // Profiling responses are created at the same time as the instance
-            let create = inst.time_range().create.unwrap();
+            let create = inst.creation_time();
             if completion {
                 // Profiling responses are ready at the same time as the instance is deleted
                 let ready = inst.time_range().stop.unwrap();
@@ -3942,6 +3951,37 @@ impl State {
         let mut total_messages = 0;
         let mut total_skew = Timestamp::ZERO;
         let mut skew_nodes = BTreeMap::new();
+        let mut check_for_skew = |proc: &Proc, prof_uid: ProfUID| {
+            let entry = proc.entry(prof_uid);
+            // Check for the presence of skew
+            if entry.time_range.spawn.unwrap() <= entry.time_range.create.unwrap() {
+                return;
+            }
+            skew_messages += 1;
+            let skew = entry.time_range.spawn.unwrap() - entry.time_range.create.unwrap();
+            total_skew += skew;
+            // Find the creator processor for the creator
+            // The meta task might not have a creator if it was started by an
+            // external thread
+            if let Some(creator) = entry.creator {
+                // The creator might not have a processor if it was the start-up
+                // or endpoint meta-task which are not profiled currently or
+                // if the user didn't give us a file for the node of the creator
+                if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
+                    // Creator node should be different than execution node
+                    assert!(creator_proc.node_id() != proc.proc_id.node_id());
+                    let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
+                    let node_skew = skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
+                    // Wellford's algorithm for online variance calculation
+                    node_skew.0 += 1;
+                    let value = skew.to_ns() as f64;
+                    let delta = value - node_skew.1;
+                    node_skew.1 += delta / node_skew.0 as f64;
+                    let delta2 = value - node_skew.1;
+                    node_skew.2 += delta * delta2;
+                }
+            }
+        };
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
                 let variant = self.meta_variants.get(variant_id).unwrap();
@@ -3950,38 +3990,16 @@ impl State {
                 }
                 total_messages += meta_tasks.len();
                 for meta_uid in meta_tasks {
-                    let meta_task = proc.entry(*meta_uid);
-                    // Check for the presence of skew
-                    if meta_task.time_range.spawn.unwrap() <= meta_task.time_range.create.unwrap() {
-                        continue;
-                    }
-                    skew_messages += 1;
-                    let skew =
-                        meta_task.time_range.spawn.unwrap() - meta_task.time_range.create.unwrap();
-                    total_skew += skew;
-                    // Find the creator processor for the creator
-                    // The meta task might not have a creator if it was started by an
-                    // external thread
-                    if let Some(creator) = meta_task.creator {
-                        // The creator might not have a processor if it was the start-up
-                        // or endpoint meta-task which are not profiled currently or
-                        // if the user didn't give us a file for the node of the creator
-                        if let Some(creator_proc) = self.prof_uid_proc.get(&creator) {
-                            // Creator node should be different than execution node
-                            assert!(creator_proc.node_id() != proc.proc_id.node_id());
-                            let nodes = (creator_proc.node_id(), proc.proc_id.node_id());
-                            let node_skew =
-                                skew_nodes.entry(nodes).or_insert_with(|| (0, 0.0, 0.0));
-                            // Wellford's algorithm for online variance calculation
-                            node_skew.0 += 1;
-                            let value = skew.to_ns() as f64;
-                            let delta = value - node_skew.1;
-                            node_skew.1 += delta / node_skew.0 as f64;
-                            let delta2 = value - node_skew.1;
-                            node_skew.2 += delta * delta2;
-                        }
-                    }
+                    check_for_skew(proc, *meta_uid);
                 }
+            }
+            // In Legion programs we should never have any skew on application tasks
+            // because they won't be launched across nodes, but for PRealm programs
+            // we can have such skew because we can spawn application tasks from one
+            // address space to another.
+            total_messages += proc.message_tasks.len();
+            for message_uid in &proc.message_tasks {
+                check_for_skew(proc, *message_uid);
             }
         }
         if total_messages == 0 {
@@ -5338,6 +5356,12 @@ fn process_record(
                 let src = state.find_event_node(precondition);
                 state.event_graph.add_edge(src, dst, ());
             }
+        }
+        Record::SpawnInfo { fevent, spawn } => {
+            let task_uid = state.create_fevent_reference(*fevent);
+            let proc_id = state.prof_uid_proc.get(&task_uid).unwrap();
+            let proc = state.procs.get_mut(&proc_id).unwrap();
+            proc.record_spawn_time(task_uid, *spawn);
         }
     }
 }

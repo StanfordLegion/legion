@@ -154,6 +154,7 @@ pub enum Record {
     CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
     InstanceReadyInfo { result: EventID, precondition: Option<EventID>, unique: EventID, performed: Timestamp },
     InstanceRedistrictInfo { result: EventID, precondition: Option<EventID>, previous: EventID, next: EventID, performed: Timestamp },
+    SpawnInfo { fevent: EventID, spawn: Timestamp },
 }
 
 fn convert_value_format(name: String) -> Option<ValueFormat> {
@@ -1343,6 +1344,11 @@ fn parse_completion_queue_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Re
         },
     ))
 }
+fn parse_spawn_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, spawn) = parse_timestamp(input)?;
+    Ok((input, Record::SpawnInfo { fevent, spawn }))
+}
 
 fn filter_record<'a>(
     record: &'a Record,
@@ -1509,6 +1515,7 @@ fn parse<'a>(
     insert("InstanceReadyInfo", parse_instance_ready_info);
     insert("InstanceRedistrictInfo", parse_instance_redistrict_info);
     insert("CompletionQueueInfo", parse_completion_queue_info);
+    insert("SpawnInfo", parse_spawn_info);
 
     let mut input = input;
     let mut max_dim = -1;
