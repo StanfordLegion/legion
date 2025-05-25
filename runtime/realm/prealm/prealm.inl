@@ -227,6 +227,11 @@ public:
     Event fevent;
     unsigned long long provenance;
   };
+  struct SpawnInfo {
+  public:
+    Event fevent;
+    timestamp_t spawn;
+  };
 
 public:
   ThreadProfiler(Processor p, Realm::Event implicit);
@@ -297,6 +302,7 @@ private:
   std::deque<InstTimelineInfo> inst_timeline_infos;
   std::deque<ProfTaskInfo> prof_task_infos;
   std::deque<ApplicationInfo> application_infos;
+  std::deque<SpawnInfo> spawn_infos;
   std::vector<ProcID> proc_ids;
   std::vector<MemID> mem_ids;
   std::vector<WaitInfo> implicit_waits;

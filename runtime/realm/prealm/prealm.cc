@@ -223,6 +223,7 @@ public:
   void serialize(const ThreadProfiler::InstTimelineInfo &info) const;
   void serialize(const ThreadProfiler::ProfTaskInfo &info) const;
   void serialize(const ThreadProfiler::ApplicationInfo &info) const;
+  void serialize(const ThreadProfiler::SpawnInfo &info) const;
 
 #ifdef REALM_USE_CUDA
 public:
@@ -314,6 +315,7 @@ enum
   PROFTASK_INFO_ID,
   APPLICATION_INFO_ID,
   PROVENANCE_ID,
+  SPAWN_INFO_ID,
 };
 
 enum DepPartOpKind {
@@ -963,10 +965,21 @@ void ThreadProfiler::record_external_event(Realm::Event event,
       GPUTaskInfo &info = gpu_task_infos.emplace_back(GPUTaskInfo());
       info.task_id = args->id.task;
       info.proc = usage.proc;
+      size_t spawn_size = 0;
       // This happens if we had a wrapper task
-      if (args->create_time != 0)
-        info.create = args->create_time;
-      else
+      if(args->create_time != 0) {
+        // See if this is cross-node task
+        const Realm::ID id(args->provenance.id);
+        if(usage.proc.address_space() != id.event_creator_node()) {
+          // This is a cross-node task so record the spawn time
+          SpawnInfo &spawn = spawn_infos.emplace_back(SpawnInfo());
+          spawn.fevent = finish.finish_event;
+          spawn.spawn = args->create_time;
+          spawn_size = sizeof(spawn);
+          info.create = timeline.create_time;
+        } else
+          info.create = args->create_time;
+      } else
         info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.start = timeline.start_time;
@@ -990,16 +1003,27 @@ void ThreadProfiler::record_external_event(Realm::Event event,
       info.critical = args->critical;
 
       info.finish_event = finish.finish_event;
-      profiler.update_footprint(sizeof(info) + num_intervals * sizeof(WaitInfo),
-                                this);
+      profiler.update_footprint(
+          sizeof(info) + spawn_size + num_intervals * sizeof(WaitInfo), this);
     } else {
       TaskInfo &info = task_infos.emplace_back(TaskInfo());
       info.task_id = args->id.task;
       info.proc = usage.proc;
+      size_t spawn_size = 0;
       // This happens if we had a wrapper task
-      if (args->create_time != 0)
-        info.create = args->create_time;
-      else
+      if(args->create_time != 0) {
+        // See if this is cross-node task
+        const Realm::ID id(args->provenance.id);
+        if(usage.proc.address_space() != id.event_creator_node()) {
+          // This is a cross-node task so record the spawn time
+          SpawnInfo &spawn = spawn_infos.emplace_back(SpawnInfo());
+          spawn.fevent = finish.finish_event;
+          spawn.spawn = args->create_time;
+          spawn_size = sizeof(spawn);
+          info.create = timeline.create_time;
+        } else
+          info.create = args->create_time;
+      } else
         info.create = timeline.create_time;
       info.ready = timeline.ready_time;
       info.start = timeline.start_time;
@@ -1018,8 +1042,8 @@ void ThreadProfiler::record_external_event(Realm::Event event,
       info.creator = args->provenance;
       info.critical = args->critical;
       info.finish_event = finish.finish_event;
-      profiler.update_footprint(sizeof(info) + num_intervals * sizeof(WaitInfo),
-                                this);
+      profiler.update_footprint(
+          sizeof(info) + spawn_size + num_intervals * sizeof(WaitInfo), this);
     }
     finish_event = finish.finish_event;
     break;
@@ -1293,6 +1317,15 @@ size_t ThreadProfiler::dump_inter(long long target_latency) {
     if(t_curr >= t_stop)
       return diff;
   }
+  while(!spawn_infos.empty()) {
+    SpawnInfo &info = spawn_infos.front();
+    profiler.serialize(info);
+    diff += sizeof(info);
+    spawn_infos.pop_front();
+    const long long t_curr = Realm::Clock::current_time_in_microseconds();
+    if(t_curr >= t_stop)
+      return diff;
+  }
   return diff;
 }
 
@@ -1330,6 +1363,8 @@ void ThreadProfiler::finalize(void) {
     profiler.serialize(prof_task_infos[idx]);
   for(unsigned idx = 0; idx < application_infos.size(); idx++)
     profiler.serialize(application_infos[idx]);
+  for(unsigned idx = 0; idx < spawn_infos.size(); idx++)
+    profiler.serialize(spawn_infos[idx]);
   if (is_implicit())
     profiler.record_implicit(start_time, implicit_fevent, implicit_waits);
 }
@@ -1765,6 +1800,11 @@ void Profiler::log_preamble(void) const {
      << "provenance:unsigned long long:" << sizeof(unsigned long long) << delim
      << "prov:string:-1}" << std::endl;
 
+  ss << "SpawnInfo {"
+     << "id:" << SPAWN_INFO_ID << delim << "fevent:unsigned long long:" << sizeof(Event)
+     << delim << "spawn:timestamp_t:" << sizeof(timestamp_t) << delim
+     << "create:timestamp_t:" << sizeof(timestamp_t) << "}" << std::endl;
+
   // An empty line indicates the end of the preamble.
   ss << std::endl;
   std::string preamble = ss.str();
@@ -2160,6 +2200,14 @@ void Profiler::serialize(const ThreadProfiler::ApplicationInfo &info) const
   pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
 }
 
+void Profiler::serialize(const ThreadProfiler::SpawnInfo &info) const
+{
+  int ID = SPAWN_INFO_ID;
+  pr_fwrite(f, (char *)&ID, sizeof(ID));
+  pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
+  pr_fwrite(f, (char *)&(info.spawn), sizeof(info.spawn));
+}
+
 void Profiler::finalize(void) {
   {
     AutoLock p_lock(profiler_lock);
@@ -2417,7 +2465,7 @@ void Profiler::record_task(Processor::TaskFuncID task_id,
   } else if(registered_tasks.find(task_id) == registered_tasks.end()) {
     std::string name;
     name += "Task ";
-    name += task_id;
+    name += std::to_string(task_id);
     int ID = TASK_KIND_ID;
     pr_fwrite(f, (char *)&ID, sizeof(ID));
     pr_fwrite(f, (char *)&task_id, sizeof(task_id));
@@ -2641,11 +2689,8 @@ void Profiler::update_footprint(size_t diff, ThreadProfiler *profiler) {
   assert(wargs->spawn_time != 0);
   ProfilingRequestSet requests;
   ThreadProfiler::get_thread_profiler().add_task_request(
-      requests, wargs->task_id, wargs->wait_on, wargs->fevent,
-      // Use the spawn time if we don't have an after which means that
-      // this wrapper was also deferred and will mess up the create time
-      // for the profiling unless we do this
-      wargs->after.exists() ? 0 : wargs->spawn_time);
+      requests, wargs->task_id, wargs->wait_on, wargs->fevent, wargs->spawn_time);
+
   const Realm::Event done = p.spawn(
       wargs->task_id, (wargs->arglen > 0) ? (void *)(wargs + 1) : nullptr,
       wargs->arglen, requests, wargs->wait_on, wargs->priority);
@@ -2825,7 +2870,7 @@ Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
       if (arglen > 0) {
         const size_t buffer_size = sizeof(Profiler::WrapperArgs) + arglen;
         Profiler::WrapperArgs *wrapper_args =
-            (Profiler::WrapperArgs *)malloc(buffer_size);
+            (Profiler::WrapperArgs *)std::malloc(buffer_size);
         wrapper_args->wait_on = wait_on;
         wrapper_args->arglen = arglen;
         wrapper_args->task_id = func_id;
@@ -2837,6 +2882,7 @@ Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
         std::memcpy(wrapper_args + 1, args, arglen);
         Realm::Processor::spawn(Profiler::WRAPPER_TASK_ID, wrapper_args,
                                 buffer_size, Event::NO_EVENT, priority);
+        std::free(wrapper_args);
       } else {
         Profiler::WrapperArgs wrapper_args{
             wait_on,  0 /*arglen*/,          func_id,
@@ -2897,7 +2943,7 @@ Event Runtime::collective_spawn(Processor target_proc,
   if (arglen > 0) {
     const size_t buffer_size = sizeof(Profiler::WrapperArgs) + arglen;
     Profiler::WrapperArgs *wrapper_args =
-        (Profiler::WrapperArgs *)malloc(buffer_size);
+        (Profiler::WrapperArgs *)std::malloc(buffer_size);
     wrapper_args->wait_on = wait_on;
     wrapper_args->arglen = arglen;
     wrapper_args->task_id = task_id;
@@ -2910,7 +2956,7 @@ Event Runtime::collective_spawn(Processor target_proc,
     const Event result = Realm::Runtime::collective_spawn(
         target_proc, Profiler::WRAPPER_TASK_ID, wrapper_args, buffer_size,
         wait_on, priority);
-    free(wrapper_args);
+    std::free(wrapper_args);
     return result;
   } else {
     const Profiler::WrapperArgs wrapper_args{wait_on,
@@ -2940,7 +2986,7 @@ Event Runtime::collective_spawn_by_kind(Processor::Kind target_kind,
   if (arglen > 0) {
     const size_t buffer_size = sizeof(Profiler::WrapperArgs) + arglen;
     Profiler::WrapperArgs *wrapper_args =
-        (Profiler::WrapperArgs *)malloc(buffer_size);
+        (Profiler::WrapperArgs *)std::malloc(buffer_size);
     wrapper_args->wait_on = wait_on;
     wrapper_args->arglen = arglen;
     wrapper_args->task_id = task_id;
@@ -2953,7 +2999,7 @@ Event Runtime::collective_spawn_by_kind(Processor::Kind target_kind,
     const Event result = Realm::Runtime::collective_spawn_by_kind(
         target_kind, Profiler::WRAPPER_TASK_ID, wrapper_args, buffer_size,
         one_per_node, wait_on, priority);
-    free(wrapper_args);
+    std::free(wrapper_args);
     return result;
   } else {
     const Profiler::WrapperArgs wrapper_args{wait_on,

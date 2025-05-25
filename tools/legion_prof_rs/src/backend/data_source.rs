@@ -2089,7 +2089,7 @@ impl StateDataSource {
                         // Created before critical event triggered so list both
                         // fields separately since they wil be different
                         if let Some(creator) = entry.creator() {
-                            let creation_time = entry.time_range.create.unwrap();
+                            let creation_time = entry.creation_time();
                             fields.push((
                                 self.fields.creator,
                                 self.generate_creator_link(creator, creation_time),
@@ -2120,7 +2120,7 @@ impl StateDataSource {
             }
             if need_critical {
                 // No critical event so check conditions 2 and 3
-                let creation_time = entry.time_range.create.unwrap();
+                let creation_time = entry.creation_time();
                 if entry.allocated_immediately() {
                     // Critical path is the creator
                     if let Some(creator) = entry.creator() {
@@ -2158,7 +2158,7 @@ impl StateDataSource {
                     ));
                     // Still need to record the creator
                     if let Some(creator) = entry.creator() {
-                        let creation_time = entry.time_range.create.unwrap();
+                        let creation_time = entry.creation_time();
                         fields.push((
                             self.fields.creator,
                             self.generate_creator_link(creator, creation_time),
