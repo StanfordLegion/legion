@@ -31547,6 +31547,9 @@ namespace Legion {
         }
 #endif
       }
+      // If we have a profiler, make sure that it has sent all its messages
+      if ((profiler != nullptr) && !profiler->confirm_shutdown())
+        shutdown_manager->record_recent_message();
       // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
@@ -31554,9 +31557,6 @@ namespace Legion {
         if (manager != NULL)
           manager->confirm_shutdown(shutdown_manager, phase_one);
       }
-      // If we have a profiler, make sure that it has sent all its messages
-      if ((profiler != nullptr) && !profiler->confirm_shutdown())
-        shutdown_manager->record_recent_message();
     }
 
     //--------------------------------------------------------------------------
