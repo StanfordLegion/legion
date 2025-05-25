@@ -1059,16 +1059,28 @@ namespace Legion {
       info.critical = prof_info->critical;
       if (prof_info->critical.is_barrier())
         record_barrier_use(prof_info->critical, prof_info->op_id);
+      size_t diff = sizeof(MessageInfo) + num_intervals * sizeof(WaitInfo);
       Realm::ProfilingMeasurements::OperationFinishEvent finish;
       if (response.get_measurement(finish))
       {
         const LgEvent original_event = LgEvent(finish.finish_event);
         // Lookup the renamed fevent that we gave it
-        info.finish_event = owner->find_message_fevent(original_event,
-            info.creator, info.spawn, vc);
+        info.finish_event = owner->find_message_fevent(original_event);
+        // If this was sent on an ordered virtual channel then need
+        // to record the relationship between the events so we the
+        // profiler can use that for critical path analysis
+        if (LAST_UNORDERED_VIRTUAL_CHANNEL < vc)
+        {
+          // Record the trigger for the implicit fevent
+          EventTriggerInfo &trigger_info = event_trigger_infos.emplace_back(
+              EventTriggerInfo());
+          trigger_info.performed = info.spawn;
+          trigger_info.result = info.finish_event;
+          trigger_info.precondition = original_event;
+          trigger_info.fevent = info.creator;
+          diff += sizeof(trigger_info);
+        }
       }
-      const size_t diff = sizeof(MessageInfo) + 
-        num_intervals * sizeof(WaitInfo);
       owner->update_footprint(diff, this);
     }
 
@@ -3403,8 +3415,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LgEvent LegionProfiler::find_message_fevent(LgEvent original_fevent,
-        LgEvent creator, timestamp_t spawn, VirtualChannelKind vc)
+    LgEvent LegionProfiler::find_message_fevent(LgEvent original_fevent)
     //--------------------------------------------------------------------------
     {
       AutoLock prof_lock(profiler_lock);
@@ -3415,34 +3426,7 @@ namespace Legion {
 #endif
       const LgEvent result = finder->second;
       message_fevents.erase(finder);
-      // Check to see if this message kind was sent on an ordered
-      // virtual channel in which case we need to send a message 
-      // back to the spawning node for the message to tell it about
-      // the implicit fevent that we made to represent the completion
-      // event for the task.
-      // Only send this back if it's not a profiler message otherwise
-      // we'll create an infinite loop of profiling messages
-      if ((LAST_UNORDERED_VIRTUAL_CHANNEL < vc) && 
-          (vc != PROFILING_VIRTUAL_CHANNEL))
-      {
-        const LegionProfInstance::EventTriggerInfo remote_info =
-          { original_fevent, creator, result, spawn };
-        Serializer rez;
-        rez.serialize(remote_info);
-        const Realm::ID id = original_fevent.id;
-        const AddressSpaceID target = id.event_creator_node();
-        runtime->send_profiler_event_trigger(target, rez);
-      }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LegionProfiler::confirm_shutdown(void) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock prof_lock(profiler_lock,1,false/*exclusive*/);
-      // Make sure we don't have any messages left to send
-      return message_fevents.empty();
     }
 
 #ifdef DEBUG_LEGION
