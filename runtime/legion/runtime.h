@@ -2121,15 +2121,16 @@ namespace Legion {
       RtEvent last_message_event;
       MessageHeader header;
       unsigned packaged_messages;
+    public:
       // For unordered channels so we can group partial
       // messages from remote nodes
       unsigned partial_message_id;
       bool partial;
-    private:
       const bool ordered_channel;
       const bool profile_outgoing_messages;
       const LgPriority request_priority;
       const LgPriority response_priority;
+    private:
       static const unsigned MAX_UNORDERED_EVENTS = 32;
       std::set<RtEvent> unordered_events;
     private:

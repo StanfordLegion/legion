@@ -1065,21 +1065,8 @@ namespace Legion {
       {
         const LgEvent original_event = LgEvent(finish.finish_event);
         // Lookup the renamed fevent that we gave it
-        info.finish_event = owner->find_message_fevent(original_event);
-        // If this was sent on an ordered virtual channel then need
-        // to record the relationship between the events so we the
-        // profiler can use that for critical path analysis
-        if (LAST_UNORDERED_VIRTUAL_CHANNEL < vc)
-        {
-          // Record the trigger for the implicit fevent
-          EventTriggerInfo &trigger_info = event_trigger_infos.emplace_back(
-              EventTriggerInfo());
-          trigger_info.performed = info.spawn;
-          trigger_info.result = info.finish_event;
-          trigger_info.precondition = original_event;
-          trigger_info.fevent = info.creator;
-          diff += sizeof(trigger_info);
-        }
+        info.finish_event = 
+          owner->find_message_fevent(original_event, true/*remove*/);
       }
       owner->update_footprint(diff, this);
     }
@@ -3411,21 +3398,24 @@ namespace Legion {
       implicit_fevent = fevent;
       // Save the current implicit fevent so we can look it up later
       AutoLock prof_lock(profiler_lock); 
-      message_fevents[original_fevent] = fevent;
+      message_fevents[fevent] = original_fevent;
     }
 
     //--------------------------------------------------------------------------
-    LgEvent LegionProfiler::find_message_fevent(LgEvent original_fevent)
+    LgEvent LegionProfiler::find_message_fevent(LgEvent fevent, bool remove)
     //--------------------------------------------------------------------------
     {
       AutoLock prof_lock(profiler_lock);
       std::map<LgEvent,LgEvent>::iterator finder = 
-        message_fevents.find(original_fevent);
+        message_fevents.find(fevent);
 #ifdef DEBUG_LEGION
       assert(finder != message_fevents.end());
 #endif
       const LgEvent result = finder->second;
       message_fevents.erase(finder);
+      // Reverse the order so we can find it the other way in the response
+      if (!remove)
+        message_fevents[result] = fevent;
       return result;
     }
 

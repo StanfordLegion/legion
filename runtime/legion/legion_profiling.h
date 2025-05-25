@@ -900,7 +900,7 @@ namespace Legion {
                              const char *provenance, size_t size);
     public:
       void increment_outstanding_message_request(void);
-      LgEvent find_message_fevent(LgEvent original_fevent);
+      LgEvent find_message_fevent(LgEvent original_fevent, bool remove);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,

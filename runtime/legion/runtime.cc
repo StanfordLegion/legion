@@ -16914,11 +16914,24 @@ namespace Legion {
     {
       // Pull the channel off to do the receiving
       const char *buffer = (const char*)args;
-      VirtualChannelKind channel = *((const VirtualChannelKind*)buffer);
-      buffer += sizeof(channel);
-      arglen -= sizeof(channel);
-      channels[channel].process_message(buffer, arglen, runtime, 
-                                        remote_address_space);
+      VirtualChannelKind kind = *((const VirtualChannelKind*)buffer);
+      buffer += sizeof(kind);
+      arglen -= sizeof(kind);
+      VirtualChannel& channel = channels[kind];
+      // If this is an ordered virtual channel hook up the implicit fevent
+      // that we made with the original fevent for critical path analysis.
+      // Note we can't do this for the profiling virtual channel or we would
+      // end up introducing an infinite loop and never complete
+      if (channel.profile_outgoing_messages)
+      {
+        const LgEvent original_fevent =
+          runtime->profiler->find_message_fevent(
+              implicit_fevent, false/*remove*/);
+        if (channel.ordered_channel && (kind != PROFILING_VIRTUAL_CHANNEL))
+          implicit_profiler->record_event_trigger(
+              original_fevent, implicit_fevent);
+      }
+      channel.process_message(buffer, arglen, runtime, remote_address_space);
     }
 
     //--------------------------------------------------------------------------
