@@ -22,6 +22,7 @@
 #include <cstring>
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
+#include "realm/activemsg.h"
 
 #define DISABLE_BARRIER_MIGRATION
 
@@ -269,18 +270,9 @@ namespace Realm {
                                BarrierTriggerMessageArgs &trigger_args, const void *data,
                                size_t datalen, size_t max_payload_size)
       {
-        Serialization::DynamicBufferSerializer dbs(datalen);
-        bool ok = dbs & trigger_args;
-        assert(ok);
-        if(datalen > 0) {
-          ok = dbs.append_bytes(data, datalen);
-        }
-        size_t total_payload_size = dbs.bytes_used();
-
-        ActiveMessageAuto<BarrierTriggerMessage> amsg(target, total_payload_size);
-
+        ActiveMessageAuto<BarrierTriggerMessage> amsg(target, max_payload_size);
         amsg->barrier_id = barrier_id;
-        amsg.add_payload(dbs.get_buffer(), total_payload_size);
+        amsg.add_payload(data, datalen);
         amsg.commit();
       }
     };
@@ -1398,15 +1390,12 @@ namespace Realm {
 
     std::memcpy(value, &final_values[(rel_gen - 1) * redop->sizeof_lhs],
                 redop->sizeof_lhs);
-
-    // memcpy(value, final_values + ((rel_gen - 1) * redop->sizeof_lhs),
-    //      redop->sizeof_lhs);
-
     return true;
   }
 
+  REALM_REGISTER_AUTOMESSAGE(BarrierTriggerMessage)
   ActiveMessageHandlerReg<BarrierAdjustMessage> barrier_adjust_message_handler;
   ActiveMessageHandlerReg<BarrierSubscribeMessage> barrier_subscribe_message_handler;
-  ActiveMessageHandlerReg<BarrierTriggerMessage> barrier_trigger_message_handler;
+  //ActiveMessageHandlerReg<BarrierTriggerMessage> barrier_trigger_message_handler;
   ActiveMessageHandlerReg<BarrierMigrationMessage> barrier_migration_message_handler;
 }; // namespace Realm

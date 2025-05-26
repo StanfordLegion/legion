@@ -28,6 +28,8 @@
 #include "realm/atomics.h"
 #include "realm/threads.h"
 #include "realm/bgwork.h"
+#include <type_traits>
+#include <mutex>
 
 #include <optional>
 
@@ -281,6 +283,8 @@ namespace Realm {
 
     HandlerEntry *lookup_message_handler(MessageID id);
 
+    void ensure_constructed();
+
   protected:
     static ActiveMessageHandlerRegBase *pending_handlers;
 
@@ -529,7 +533,26 @@ namespace Realm {
     UserHdr user_header_{};
   };
 
-}; // namespace Realm
+  // Utility to force early registration of wire headers associated with
+  // ActiveMessageAuto without exposing WrappedWithFragInfo at the call‐site.
+  template <typename UserHdr>
+  struct AutoMessageRegistrar {
+    static ActiveMessageHandlerReg<WrappedWithFragInfo<UserHdr>, UserHdr> reg;
+  };
+  template <typename UserHdr>
+  ActiveMessageHandlerReg<WrappedWithFragInfo<UserHdr>, UserHdr>
+      AutoMessageRegistrar<UserHdr>::reg;
+
+} // namespace Realm
+
+// Helper macro – invoke in a translation unit to guarantee that the
+// auto-generated wire header for `UserHdr` is registered before the handler
+// table is constructed, without leaking internal wrapper details.
+#define REALM_REGISTER_AUTOMESSAGE(UserHdr)                                                     \
+  namespace {                                                                                   \
+  static auto *const _realm_am_reg_##UserHdr __attribute__((unused)) =                          \
+      &Realm::AutoMessageRegistrar<UserHdr>::reg;                                               \
+  }
 
 #include "realm/activemsg.inl"
 

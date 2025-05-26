@@ -121,8 +121,9 @@ namespace Realm {
   ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
   {}
 
-  ActiveMessageHandlerTable::HandlerEntry *ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
+  ActiveMessageHandlerTable::HandlerEntry *ActiveMessageHandlerTable::lookup_message_handler(MessageID id)
   {
+    ensure_constructed();
     assert(id < handlers.size());
     return &handlers[id];
   }
@@ -204,6 +205,12 @@ namespace Realm {
 			     << ": " << handlers[i].name
 			     << (handlers[i].handler ? " (timeout)" : "")
 			     << (handlers[i].handler_inline ? " (inline)" : "");
+  }
+
+  void ActiveMessageHandlerTable::ensure_constructed()
+  {
+    static std::once_flag flag;
+    std::call_once(flag, [this]() { this->construct_handler_table(); });
   }
 
   /*static*/ ActiveMessageHandlerRegBase *ActiveMessageHandlerTable::pending_handlers = 0;
