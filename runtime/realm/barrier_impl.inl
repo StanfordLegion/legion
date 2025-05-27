@@ -26,6 +26,8 @@ namespace Realm {
 
 namespace Realm {
 
+  TYPE_IS_SERIALIZABLE(Realm::RemoteNotification);
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class BarrierImpl

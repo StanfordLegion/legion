@@ -30,8 +30,6 @@ namespace BarrierConfig {
   int max_notifies_payload = 256;
 }; // namespace BarrierConfig
 
-TYPE_IS_SERIALIZABLE(Realm::RemoteNotification);
-
 namespace Realm {
 
   Logger log_barrier("barrier");
