@@ -550,10 +550,9 @@ namespace Realm {
 // table is constructed, without leaking internal wrapper details.
 #define REALM_REGISTER_AUTOMESSAGE(UserHdr)                                              \
   namespace {                                                                            \
-    static auto *const _realm_am_reg_##UserHdr __attribute__((unused)) =                 \
+    static auto *const _realm_am_reg_##UserHdr =                                         \
         &Realm::AutoMessageRegistrar<UserHdr>::reg;                                      \
   }
-
 
 #include "realm/activemsg.inl"
 
