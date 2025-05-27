@@ -1256,9 +1256,7 @@ namespace Realm {
     BarrierTriggerPayload payload;
 
     if(datalen > 0) {
-      AutoLock<> al(mutex);
       assert(data);
-
       Serialization::FixedBufferDeserializer payload_fbd(data, datalen);
       bool ok = payload_fbd & payload;
       assert(ok);
@@ -1293,9 +1291,7 @@ namespace Realm {
     }
 
     if(!payload.remotes.empty()) {
-      AutoLock<> al(mutex);
-
-      auto ordered_notifications = payload.remotes;
+      std::vector<RemoteNotification> ordered_notifications = payload.remotes;
 
       std::vector<NodeID> broadcast_targets;
       get_broadcast_targets(broadcast_index, ordered_notifications.size(),
