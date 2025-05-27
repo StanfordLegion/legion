@@ -1406,9 +1406,8 @@ namespace Realm {
     return true;
   }
 
-  REALM_REGISTER_AUTOMESSAGE(BarrierTriggerMessage)
+  AutoMessageRegistrar<BarrierTriggerMessage> handler;
   ActiveMessageHandlerReg<BarrierAdjustMessage> barrier_adjust_message_handler;
   ActiveMessageHandlerReg<BarrierSubscribeMessage> barrier_subscribe_message_handler;
-  // ActiveMessageHandlerReg<BarrierTriggerMessage> barrier_trigger_message_handler;
   ActiveMessageHandlerReg<BarrierMigrationMessage> barrier_migration_message_handler;
 }; // namespace Realm
