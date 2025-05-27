@@ -283,8 +283,6 @@ namespace Realm {
 
     HandlerEntry *lookup_message_handler(MessageID id);
 
-    void ensure_constructed();
-
   protected:
     static ActiveMessageHandlerRegBase *pending_handlers;
 

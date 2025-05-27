@@ -521,7 +521,6 @@ namespace Realm {
   template <typename T>
   ActiveMessageHandlerTable::MessageID ActiveMessageHandlerTable::lookup_message_id(void) const
   {
-    const_cast<ActiveMessageHandlerTable *>(this)->ensure_constructed();
     // first convert the type name into a hash
     TypeHash h = 0;
     const char *name = typeid(T).name();
