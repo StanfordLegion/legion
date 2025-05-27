@@ -61,7 +61,7 @@ std::ostream &operator<<(std::ostream &os, const Pad<T, BYTES> &pad)
   return os;
 }
 
-static constexpr int BYTES = 65000;
+static constexpr int BYTES = 64;
 
 class ReductionOpIntAdd {
 public:
