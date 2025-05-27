@@ -65,8 +65,8 @@ static constexpr int BYTES = 65000;
 
 class ReductionOpIntAdd {
 public:
-  typedef Pad<int, BYTES> LHS;
-  typedef Pad<int, BYTES> RHS;
+  typedef Pad<float, BYTES> LHS;
+  typedef Pad<float, BYTES> RHS;
 
   template <bool EXCL>
   static void apply(LHS &lhs, RHS rhs)
