@@ -250,7 +250,7 @@ namespace Realm {
         Barrier b = id.convert<Barrier>();
         BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
-        if(datalen > 0) {
+        if(datalen > 0 && (trigger_args.internal.redop_id != 0)) {
           assert(trigger_args.internal.redop_id != 0);
           impl->redop_id = trigger_args.internal.redop_id;
           impl->redop =
@@ -264,8 +264,7 @@ namespace Realm {
             trigger_args.internal.base_arrival_count, data, datalen, work_until);
       }
 
-      static void send_request(NodeID target, ID::IDType barrier_id,
-                               BarrierTriggerMessageArgs &trigger_args, const void *data,
+      static void send_request(NodeID target, ID::IDType barrier_id, const void *data,
                                size_t datalen, size_t max_payload_size)
       {
         ActiveMessageAuto<BarrierTriggerMessage> amsg(target, max_payload_size);
@@ -350,11 +349,10 @@ namespace Realm {
   }
 
   void BarrierCommunicator::trigger(NodeID target, ID::IDType barrier_id,
-                                    BarrierTriggerMessageArgs &trigger_args,
                                     const void *data, size_t datalen,
                                     size_t max_payload_size)
   {
-    BarrierTriggerMessage::send_request(target, barrier_id, trigger_args, data, datalen,
+    BarrierTriggerMessage::send_request(target, barrier_id, data, datalen,
                                         max_payload_size);
   }
 
@@ -592,7 +590,7 @@ namespace Realm {
       size_t max_payload_size = barrier_comm->recommend_max_payload(
           ordered_notifications[target].node, sizeof(BarrierTriggerMessage));
 
-      barrier_comm->trigger(ordered_notifications[target].node, me.id, trigger_args,
+      barrier_comm->trigger(ordered_notifications[target].node, me.id,
                             dbs_first.get_buffer(), dbs_first.bytes_used(),
                             max_payload_size);
     }
@@ -1220,8 +1218,25 @@ namespace Realm {
       trigger_args.internal.base_arrival_count = 0;
       trigger_args.internal.broadcast_index = 0;
 
-      barrier_comm->trigger(subscriber, me.id, trigger_args, final_values_copy,
-                            final_values_size);
+      const size_t header_size =
+          sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t);
+      Serialization::DynamicBufferSerializer dbs(header_size);
+      bool ok = dbs & trigger_args;
+      assert(ok);
+      if(final_values_size > 0) {
+        BarrierTriggerPayload payload;
+        payload.reduction.insert(
+            payload.reduction.end(), static_cast<const char *>(final_values_copy),
+            static_cast<const char *>(final_values_copy) + final_values_size);
+        ok = dbs & payload;
+        assert(ok);
+      }
+
+      size_t max_payload_size = barrier_comm->recommend_max_payload(
+          forward_to_node, sizeof(BarrierTriggerMessage));
+
+      barrier_comm->trigger(subscriber, me.id, dbs.get_buffer(), dbs.bytes_used(),
+                            max_payload_size);
     }
 
     if(final_values_copy) {
@@ -1394,6 +1409,6 @@ namespace Realm {
   REALM_REGISTER_AUTOMESSAGE(BarrierTriggerMessage)
   ActiveMessageHandlerReg<BarrierAdjustMessage> barrier_adjust_message_handler;
   ActiveMessageHandlerReg<BarrierSubscribeMessage> barrier_subscribe_message_handler;
-  //ActiveMessageHandlerReg<BarrierTriggerMessage> barrier_trigger_message_handler;
+  // ActiveMessageHandlerReg<BarrierTriggerMessage> barrier_trigger_message_handler;
   ActiveMessageHandlerReg<BarrierMigrationMessage> barrier_migration_message_handler;
 }; // namespace Realm

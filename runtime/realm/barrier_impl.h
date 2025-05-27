@@ -59,7 +59,7 @@ namespace Realm {
                         NodeID sender, bool forwarded, const void *data, size_t datalen);
 
     virtual void trigger(NodeID target, ID::IDType barrier_id,
-                         BarrierTriggerMessageArgs &trigger_args, const void *data,
+                         const void *data,
                          size_t datalen, size_t max_payload_size = 0);
 
     virtual void subscribe(NodeID target, ID::IDType barrier_id,
