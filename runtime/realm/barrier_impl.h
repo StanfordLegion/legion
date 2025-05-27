@@ -58,8 +58,7 @@ namespace Realm {
     virtual void adjust(NodeID target, Barrier barrier, int delta, Event wait_on,
                         NodeID sender, bool forwarded, const void *data, size_t datalen);
 
-    virtual void trigger(NodeID target, ID::IDType barrier_id,
-                         const void *data,
+    virtual void trigger(NodeID target, ID::IDType barrier_id, const void *data,
                          size_t datalen, size_t max_payload_size = 0);
 
     virtual void subscribe(NodeID target, ID::IDType barrier_id,

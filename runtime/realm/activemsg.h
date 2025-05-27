@@ -548,11 +548,12 @@ namespace Realm {
 // Helper macro – invoke in a translation unit to guarantee that the
 // auto-generated wire header for `UserHdr` is registered before the handler
 // table is constructed, without leaking internal wrapper details.
-#define REALM_REGISTER_AUTOMESSAGE(UserHdr)                                                     \
-  namespace {                                                                                   \
-  static auto *const _realm_am_reg_##UserHdr __attribute__((unused)) =                          \
-      &Realm::AutoMessageRegistrar<UserHdr>::reg;                                               \
+#define REALM_REGISTER_AUTOMESSAGE(UserHdr)                                              \
+  namespace {                                                                            \
+    static auto *const _realm_am_reg_##UserHdr __attribute__((unused)) =                 \
+        &Realm::AutoMessageRegistrar<UserHdr>::reg;                                      \
   }
+
 
 #include "realm/activemsg.inl"
 
