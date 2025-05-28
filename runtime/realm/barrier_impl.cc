@@ -251,7 +251,6 @@ namespace Realm {
         BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
         if(datalen > 0 && (trigger_args.internal.redop_id != 0)) {
-          assert(trigger_args.internal.redop_id != 0);
           impl->redop_id = trigger_args.internal.redop_id;
           impl->redop =
               get_runtime()->reduce_op_table.get(trigger_args.internal.redop_id, 0);

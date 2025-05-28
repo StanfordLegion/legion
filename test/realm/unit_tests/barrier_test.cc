@@ -582,15 +582,15 @@ TEST_F(BarrierRedopTest, LocalArriveWithRemoteSubscribersRadix4SplitPayload)
   }
 
   ASSERT_GE(barrier_communicator->sent_trigger_count, radix - 1);
-  return; // TODO: FIX ME
-  for(int i = 1; i <= num_subscribers; i++) {
+
+  /*for(int i = 1; i <= num_subscribers; i++) {
     // ASSERT_EQ(barrier_communicator->data_bytes[i], sizeof(reduce_value[0]));
     LargeReductionOpIntAdd::LHS pad_value;
     // std::memcpy(&pad_value, barrier_communicator->payloads[i].reduction.data(),
     // sizeof(LargeReductionOpIntAdd::LHS));
 
     ASSERT_EQ(pad_value, result);
-  }
+  }*/
   ASSERT_EQ(barrier.generation.load(), arrival_gen);
 }
 
