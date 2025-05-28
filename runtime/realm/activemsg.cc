@@ -121,7 +121,8 @@ namespace Realm {
   ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
   {}
 
-  ActiveMessageHandlerTable::HandlerEntry *ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
+  ActiveMessageHandlerTable::HandlerEntry *
+  ActiveMessageHandlerTable::lookup_message_handler(MessageID id)
   {
     assert(id < handlers.size());
     return &handlers[id];

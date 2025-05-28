@@ -38,15 +38,17 @@ namespace Realm {
     NodeID migration_target;
     unsigned base_arrival_count;
     int broadcast_index;
-    bool is_complete_list;
-    int sequence_number;
   };
 
   struct RemoteNotification;
 
+  struct BarrierTriggerPayload {
+    std::vector<RemoteNotification> remotes;
+    std::vector<char> reduction;
+  };
+
   struct BarrierTriggerMessageArgs {
     BarrierTriggerMessageArgsInternal internal;
-    std::vector<RemoteNotification> remote_notifications;
   };
 
   class BarrierCommunicator {
@@ -56,9 +58,8 @@ namespace Realm {
     virtual void adjust(NodeID target, Barrier barrier, int delta, Event wait_on,
                         NodeID sender, bool forwarded, const void *data, size_t datalen);
 
-    virtual void trigger(NodeID target, ID::IDType barrier_id,
-                         BarrierTriggerMessageArgs &trigger_args, const void *data,
-                         size_t datalen);
+    virtual void trigger(NodeID target, ID::IDType barrier_id, const void *data,
+                         size_t datalen, size_t max_payload_size = 0);
 
     virtual void subscribe(NodeID target, ID::IDType barrier_id,
                            EventImpl::gen_t subscribe_gen, NodeID subscriber,
@@ -131,11 +132,8 @@ namespace Realm {
                                EventImpl::gen_t trigger_gen,
                                EventImpl::gen_t previous_gen, EventImpl::gen_t first_gen,
                                ReductionOpID redop_id, NodeID migration_target,
-                               int broadcast_index,
-                               const std::vector<RemoteNotification> remote_notifications,
-                               int sequence_number, bool is_complete_list,
-                               unsigned base_count, const void *data, size_t datalen,
-                               TimeLimit work_until);
+                               int broadcast_index, unsigned base_count, const void *data,
+                               size_t datalen, TimeLimit work_until);
 
     bool get_result(gen_t result_gen, void *value, size_t value_size);
 

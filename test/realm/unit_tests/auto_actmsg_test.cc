@@ -60,9 +60,12 @@ protected:
   void SetUp() override { MockActiveMessage<WrappedWithFragInfo<TestMessage>>::reset(); }
 };
 
+template <typename Hdr>
+using MockAmBuilder = MockActiveMessage<WrappedWithFragInfo<Hdr>>;
+
 TEST_F(ActiveMessageAutoTest, NoFragmentForSmallPayload)
 {
-  ActiveMessageAuto<TestMessage, MockActiveMessage> msg(target_node, max_payload);
+  ActiveMessageAuto<TestMessage, MockAmBuilder> msg(target_node, max_payload);
   auto data = make_payload(max_payload);
   msg.add_payload(data.data(), data.size());
   msg.commit();
@@ -77,7 +80,7 @@ TEST_F(ActiveMessageAutoTest, NoFragmentForSmallPayload)
 TEST_F(ActiveMessageAutoTest, FragmentForOversizePayload)
 {
   const size_t payload_size = 45;
-  ActiveMessageAuto<TestMessage, MockActiveMessage> msg(target_node, max_payload);
+  ActiveMessageAuto<TestMessage, MockAmBuilder> msg(target_node, max_payload);
   auto data = make_payload(payload_size);
   msg.add_payload(data.data(), data.size());
   msg.commit();
@@ -96,7 +99,7 @@ TEST_F(ActiveMessageAutoTest, FragmentForOversizePayload)
 TEST_F(ActiveMessageAutoTest, ReassemblePayload)
 {
   const size_t payload_size = 60;
-  ActiveMessageAuto<TestMessage, MockActiveMessage> msg(target_node, max_payload);
+  ActiveMessageAuto<TestMessage, MockAmBuilder> msg(target_node, max_payload);
   auto data = make_payload(payload_size);
   msg.add_payload(data.data(), data.size());
   msg.commit();

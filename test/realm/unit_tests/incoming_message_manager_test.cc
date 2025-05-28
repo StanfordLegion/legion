@@ -67,9 +67,8 @@ namespace {
   std::vector<std::vector<char>> FragmentedMessage::received_payloads;
   std::atomic<int> FragmentedMessage::call_count{0};
 
-  // force registration at static initialization time
-  static ActiveMessageHandlerReg<FragmentedMessage> frag_msg_reg;
   static ActiveMessageHandlerReg<RegularMessage> reg_msg_reg;
+  static ActiveMessageHandlerReg<FragmentedMessage> frag_msg_reg;
 
   class IncomingMessageManagerTest : public ::testing::Test {
   protected:

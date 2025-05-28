@@ -27,9 +27,8 @@ public:
     sent_adjust_arrivals++;
   }
 
-  virtual void trigger(NodeID target, ID::IDType barrier_id,
-                       BarrierTriggerMessageArgs &trigger_args, const void *data,
-                       size_t datalen)
+  virtual void trigger(NodeID target, ID::IDType barrier_id, const void *data,
+                       size_t datalen, size_t max_payload_size = 0)
   {
     sent_trigger_count++;
   }
@@ -236,7 +235,7 @@ TEST_F(BarrierTest, LocalArriveWithRemoteSubscribersRadix4SplitPayload)
   const EventImpl::gen_t arrival_gen = 1;
   const int radix = 4;
   const int num_subscribers = 3;
-  const int message_split = 2;
+  const int message_split = 1;
   int num_active_messages = 0;
 
   MockBarrierCommunicator *barrier_communicator = new MockBarrierCommunicator(
@@ -381,9 +380,6 @@ TEST_F(BarrierTest, HandleRemoteTriggerNextGen)
   NodeID migration_target = owner;
 
   int broadcast_index = 0;
-  std::vector<RemoteNotification> notifications;
-  int sequence_number = 0;
-  bool is_complete_list = true;
 
   unsigned base_count = 2;
   auto barrier_id = ID::make_barrier(owner, 0, 0);
@@ -395,8 +391,7 @@ TEST_F(BarrierTest, HandleRemoteTriggerNextGen)
   barrier.add_waiter(trigger_gen + 1, &waiter_two);
 
   barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, 0,
-                                migration_target, broadcast_index, notifications,
-                                sequence_number, is_complete_list, base_count, nullptr, 0,
+                                migration_target, broadcast_index, base_count, nullptr, 0,
                                 TimeLimit::responsive());
 
   EXPECT_EQ(barrier.generation.load(), trigger_gen);
@@ -414,17 +409,13 @@ TEST_F(BarrierTest, HandleRemoteTriggerCurrGen)
   NodeID migration_target = owner;
 
   int broadcast_index = 0;
-  std::vector<RemoteNotification> notifications;
-  int sequence_number = 0;
-  bool is_complete_list = true;
 
   unsigned base_count = 2;
   auto barrier_id = ID::make_barrier(owner, 0, 0);
 
   barrier.init(barrier_id, owner);
   barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, 0,
-                                migration_target, broadcast_index, notifications,
-                                sequence_number, is_complete_list, base_count, nullptr, 0,
+                                migration_target, broadcast_index, base_count, nullptr, 0,
                                 TimeLimit::responsive());
 
   EXPECT_EQ(barrier.generation.load(), 0);
@@ -440,17 +431,13 @@ TEST_F(BarrierTest, HandleRemoteTriggerHigherPrevGen)
   NodeID migration_target = owner;
 
   int broadcast_index = 0;
-  std::vector<RemoteNotification> notifications;
-  int sequence_number = 0;
-  bool is_complete_list = true;
 
   unsigned base_count = 2;
   auto barrier_id = ID::make_barrier(owner, 0, 0);
 
   barrier.init(barrier_id, owner);
   barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, 0,
-                                migration_target, broadcast_index, notifications,
-                                sequence_number, is_complete_list, base_count, nullptr, 0,
+                                migration_target, broadcast_index, base_count, nullptr, 0,
                                 TimeLimit::responsive());
 
   EXPECT_EQ(barrier.generation.load(), 0);
@@ -493,6 +480,119 @@ protected:
   ReductionOpUntyped *redop;
   ReductionOpID redop_id = 1;
 };
+
+template <typename T, size_t BYTES>
+struct Pad {
+  static_assert(BYTES >= sizeof(T), "Padding size must be at least the size of T");
+
+  T val;
+  char padding[BYTES - sizeof(T)];
+
+  Pad() {}
+  Pad(T _val)
+    : val(_val)
+  {}
+
+  operator T() const { return val; }
+
+  Pad &operator+=(const T &rhs)
+  {
+    val += rhs;
+    return *this;
+  }
+
+  Pad &operator*=(const T &rhs)
+  {
+    val *= rhs;
+    return *this;
+  }
+};
+
+template <typename T, size_t BYTES>
+std::ostream &operator<<(std::ostream &, const Pad<T, BYTES> &);
+
+template <typename T, size_t BYTES>
+std::ostream &operator<<(std::ostream &os, const Pad<T, BYTES> &pad)
+{
+  os << pad.val;
+  return os;
+}
+
+class LargeReductionOpIntAdd {
+public:
+  static constexpr int bytes = 64;
+  typedef Pad<float, bytes> LHS;
+  typedef Pad<float, bytes> RHS;
+
+  template <bool EXCL>
+  static void apply(LHS &lhs, RHS rhs)
+  {
+    lhs += rhs;
+  }
+
+  static const RHS identity;
+
+  template <bool EXCL>
+  static void fold(RHS &rhs1, RHS rhs2)
+  {
+    rhs1 += rhs2;
+  }
+};
+
+const LargeReductionOpIntAdd::RHS LargeReductionOpIntAdd::identity = 0;
+
+TEST_F(BarrierRedopTest, LocalArriveWithRemoteSubscribersRadix4SplitPayload)
+{
+  const NodeID owner = 0;
+  const EventImpl::gen_t subscribe_gen = 1;
+  const EventImpl::gen_t arrival_gen = 1;
+  const int radix = 4;
+  const int num_subscribers = 3;
+
+  std::unique_ptr<ReductionOpUntyped> large_redop =
+      std::make_unique<ReductionOp<LargeReductionOpIntAdd>>();
+
+  MockBarrierCommunicator *barrier_communicator = new MockBarrierCommunicator(
+      sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t) + 16);
+
+  BarrierImpl barrier(barrier_communicator, radix);
+
+  std::vector<LargeReductionOpIntAdd::LHS> reduce_value(1, 4);
+  LargeReductionOpIntAdd::LHS result(0);
+  barrier.init(ID::make_barrier(owner, 0, 0), owner);
+  barrier.initial_value = std::make_unique<char[]>(sizeof(LargeReductionOpIntAdd::LHS));
+  barrier.redop = large_redop.get();
+  barrier.redop_id = redop_id;
+  barrier.base_arrival_count = 2;
+
+  for(int i = 1; i <= num_subscribers; i++) {
+    barrier.handle_remote_subscription(/*subscriber=*/i, subscribe_gen, 0, 0, 0);
+  }
+
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/1, 0,
+                         reinterpret_cast<void *>(reduce_value.data()),
+                         (sizeof(reduce_value[0])), TimeLimit::responsive());
+
+  barrier.adjust_arrival(arrival_gen, -1, 0, Event::NO_EVENT, /*sender=*/2, 0,
+                         reinterpret_cast<void *>(reduce_value.data()),
+                         sizeof(reduce_value[0]), TimeLimit::responsive());
+
+  for(unsigned i = 0; i < barrier.base_arrival_count; i++) {
+    LargeReductionOpIntAdd::apply<true>(result, reduce_value[0]);
+  }
+
+  ASSERT_GE(barrier_communicator->sent_trigger_count, radix - 1);
+
+  /*for(int i = 1; i <= num_subscribers; i++) {
+    // ASSERT_EQ(barrier_communicator->data_bytes[i], sizeof(reduce_value[0]));
+    LargeReductionOpIntAdd::LHS pad_value;
+    // std::memcpy(&pad_value, barrier_communicator->payloads[i].reduction.data(),
+    // sizeof(LargeReductionOpIntAdd::LHS));
+
+    ASSERT_EQ(pad_value, result);
+  }*/
+  ASSERT_EQ(barrier.generation.load(), arrival_gen);
+}
 
 TEST_F(BarrierRedopTest, GetEmptyResultForUntriggeredGen)
 {
@@ -551,9 +651,6 @@ TEST_F(BarrierRedopTest, GetResultForRemoteTriggeredGen)
   BarrierImpl barrier(barrier_comm);
 
   int broadcast_index = 0;
-  std::vector<RemoteNotification> notifications;
-  int sequence_number = 0;
-  bool is_complete_list = true;
 
   barrier.init(barrier_id, owner);
   barrier.initial_value = std::make_unique<char[]>(sizeof(int));
@@ -561,14 +658,23 @@ TEST_F(BarrierRedopTest, GetResultForRemoteTriggeredGen)
   barrier.redop_id = redop_id;
   barrier.base_arrival_count = 2;
 
-  barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, redop_id,
-                                migration_target, broadcast_index, notifications,
-                                sequence_number, is_complete_list, base_count,
-                                reinterpret_cast<void *>(reduce_value.data()),
-                                sizeof(result[0]), TimeLimit::responsive());
+  const char *reduce_data_ptr = reinterpret_cast<const char *>(reduce_value.data());
+  BarrierTriggerPayload payload;
+  payload.reduction.insert(payload.reduction.end(), reduce_data_ptr,
+                           reduce_data_ptr + sizeof(int) * reduce_value.size());
+  size_t payload_size = payload.reduction.size();
 
-  bool ok = barrier.get_result(trigger_gen, reinterpret_cast<void *>(result.data()),
-                               sizeof(result[0]));
+  Serialization::DynamicBufferSerializer dbs(payload_size);
+  bool ok = dbs & payload;
+  assert(ok);
+
+  barrier.handle_remote_trigger(0, 0, trigger_gen, previous_gen, first_gen, redop_id,
+                                migration_target, broadcast_index, base_count,
+                                dbs.get_buffer(), dbs.bytes_used(),
+                                TimeLimit::responsive());
+
+  ok = barrier.get_result(trigger_gen, reinterpret_cast<void *>(result.data()),
+                          sizeof(result[0]));
 
   EXPECT_TRUE(ok);
   EXPECT_EQ(barrier.generation.load(), trigger_gen);
@@ -590,9 +696,6 @@ TEST_F(BarrierRedopTest, GetResultRemoteTriggeredGens)
   BarrierImpl barrier(barrier_comm);
 
   int broadcast_index = 0;
-  std::vector<RemoteNotification> notifications;
-  int sequence_number = 0;
-  bool is_complete_list = true;
 
   barrier.init(barrier_id, owner);
   barrier.initial_value = std::make_unique<char[]>(sizeof(int));
@@ -600,17 +703,25 @@ TEST_F(BarrierRedopTest, GetResultRemoteTriggeredGens)
   barrier.redop_id = redop_id;
   barrier.base_arrival_count = 2;
 
+  const char *reduce_data_ptr = reinterpret_cast<const char *>(reduce_value.data());
+  BarrierTriggerPayload payload;
+  payload.reduction.insert(payload.reduction.end(), reduce_data_ptr,
+                           reduce_data_ptr + sizeof(int) * reduce_value.size());
+  size_t payload_size = payload.reduction.size();
+
+  Serialization::DynamicBufferSerializer dbs(payload_size);
+  bool ok = dbs & payload;
+  assert(ok);
+
   barrier.handle_remote_trigger(/*sender=*/0, 0, trigger_gen, previous_gen, first_gen,
-                                redop_id, migration_target, broadcast_index,
-                                notifications, sequence_number, is_complete_list,
-                                base_count, reinterpret_cast<void *>(reduce_value.data()),
-                                sizeof(reduce_value[0]), TimeLimit::responsive());
+                                redop_id, migration_target, broadcast_index, base_count,
+                                dbs.get_buffer(), dbs.bytes_used(),
+                                TimeLimit::responsive());
 
   barrier.handle_remote_trigger(/*sender=*/2, 0, trigger_gen + 1, previous_gen + 1,
                                 first_gen, redop_id, migration_target, broadcast_index,
-                                notifications, sequence_number, is_complete_list,
-                                base_count, reinterpret_cast<void *>(reduce_value.data()),
-                                sizeof(reduce_value[0]), TimeLimit::responsive());
+                                base_count, dbs.get_buffer(), dbs.bytes_used(),
+                                TimeLimit::responsive());
 
   bool ok_gen1 = barrier.get_result(
       trigger_gen, reinterpret_cast<void *>(result_1.data()), sizeof(result_1[0]));

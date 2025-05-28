@@ -28,6 +28,8 @@
 #include "realm/atomics.h"
 #include "realm/threads.h"
 #include "realm/bgwork.h"
+#include <type_traits>
+#include <mutex>
 
 #include <optional>
 
@@ -529,7 +531,12 @@ namespace Realm {
     UserHdr user_header_{};
   };
 
-}; // namespace Realm
+  template <typename UserHdr>
+  struct AutoMessageRegistrar {
+    ActiveMessageHandlerReg<WrappedWithFragInfo<UserHdr>, UserHdr> reg;
+  };
+
+} // namespace Realm
 
 #include "realm/activemsg.inl"
 
