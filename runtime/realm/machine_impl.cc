@@ -412,11 +412,12 @@ namespace Realm {
 
     MachineImpl *machine_singleton = 0;
 
-  MachineImpl::MachineImpl(void)
-  {
-    assert(machine_singleton == 0);
-    machine_singleton = this;
-  }
+    MachineImpl::MachineImpl(RuntimeImpl *_runtime_impl)
+      : runtime_impl(_runtime_impl)
+    {
+      assert(machine_singleton == 0);
+      machine_singleton = this;
+    }
 
   MachineImpl::~MachineImpl(void)
   {
@@ -469,72 +470,71 @@ namespace Realm {
   }
 #endif
 
-    void MachineImpl::parse_node_announce_data(int node_id,
-					       const void *args, size_t arglen,
-					       bool remote)
-    {
-      AutoLock<> al(mutex);
+  void MachineImpl::parse_node_announce_data(int node_id, const void *args, size_t arglen,
+                                             bool remote)
+  {
+    AutoLock<> al(mutex);
 
-      assert(node_id <= Network::max_node_id);
-      Node& n = get_runtime()->nodes[node_id];
+    assert(node_id <= Network::max_node_id);
+    Node &n = runtime_impl->nodes[node_id];
 
-      Serialization::FixedBufferDeserializer fbd(args, arglen);
-      bool ok = true;
-      while(ok && (fbd.bytes_left() > 0)) {
-	NodeAnnounceTag tag;
-	if(!(fbd >> tag)) {
-	  log_annc.fatal() << "unexpected end of input";
-	  assert(0);
-	}
+    Serialization::FixedBufferDeserializer fbd(args, arglen);
+    bool ok = true;
+    while(ok && (fbd.bytes_left() > 0)) {
+      NodeAnnounceTag tag;
+      if(!(fbd >> tag)) {
+        log_annc.fatal() << "unexpected end of input";
+        assert(0);
+      }
 
-	switch(tag) {
-        case NODE_ANNOUNCE_PROC:
-        {
-          Processor p;
-          Processor::Kind kind;
-          int num_cores;
-          ok = (ok && (fbd >> p) && (fbd >> kind) && (fbd >> num_cores));
-          if(ok) {
-            assert(NodeID(ID(p).proc_owner_node()) == node_id);
-            log_annc.debug() << "adding proc " << p << " (kind = " << kind
-                             << " num_cores = " << num_cores << ")";
-            if(remote) {
-              RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
-              if(n.processors.size() <= ID(p).proc_proc_idx())
-                n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
-              n.processors[ID(p).proc_proc_idx()] = proc;
-            }
+      switch(tag) {
+      case NODE_ANNOUNCE_PROC:
+      {
+        Processor p;
+        Processor::Kind kind;
+        int num_cores;
+        ok = (ok && (fbd >> p) && (fbd >> kind) && (fbd >> num_cores));
+        if(ok) {
+          assert(NodeID(ID(p).proc_owner_node()) == node_id);
+          log_annc.debug() << "adding proc " << p << " (kind = " << kind
+                           << " num_cores = " << num_cores << ")";
+          if(remote) {
+            RemoteProcessor *proc = new RemoteProcessor(runtime_impl, p, kind, num_cores);
+            if(n.processors.size() <= ID(p).proc_proc_idx())
+              n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
+            n.processors[ID(p).proc_proc_idx()] = proc;
           }
-          break;
         }
+        break;
+      }
 
-        case NODE_ANNOUNCE_MEM:
-        {
-          Memory m;
-          Memory::Kind kind;
-          size_t size;
-          bool has_rdma_info = false;
-          ByteArray rdma_info;
-          ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
-                (fbd >> has_rdma_info));
-          if(has_rdma_info)
-            ok = ok && (fbd >> rdma_info);
-          if(ok) {
-            assert(NodeID(ID(m).memory_owner_node()) == node_id);
-            log_annc.debug() << "adding memory " << m << " (kind = " << kind
-                             << ", size = " << size << ", has_rdma = " << has_rdma_info
-                             << ")";
-            if(remote) {
-              MemoryImpl *mem;
-              if(has_rdma_info) {
-                mem = Network::get_network(node_id)->create_remote_memory(m, size, kind,
-                                                                          rdma_info);
-              } else {
-                mem = new RemoteMemory(m, size, kind);
-              }
-              if(n.memories.size() >= ID(m).memory_mem_idx())
-                n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
-              n.memories[ID(m).memory_mem_idx()] = mem;
+      case NODE_ANNOUNCE_MEM:
+      {
+        Memory m;
+        Memory::Kind kind;
+        size_t size;
+        bool has_rdma_info = false;
+        ByteArray rdma_info;
+        ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
+              (fbd >> has_rdma_info));
+        if(has_rdma_info)
+          ok = ok && (fbd >> rdma_info);
+        if(ok) {
+          assert(NodeID(ID(m).memory_owner_node()) == node_id);
+          log_annc.debug() << "adding memory " << m << " (kind = " << kind
+                           << ", size = " << size << ", has_rdma = " << has_rdma_info
+                           << ")";
+          if(remote) {
+            MemoryImpl *mem;
+            if(has_rdma_info) {
+              mem = Network::get_network(node_id)->create_remote_memory(m, size, kind,
+                                                                        rdma_info);
+            } else {
+              mem = new RemoteMemory(m, size, kind);
+            }
+            if(n.memories.size() >= ID(m).memory_mem_idx())
+              n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
+            n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
 		{
@@ -547,107 +547,107 @@ namespace Realm {
 		    continue;
 		}
 #endif
-            }
           }
-          break;
         }
-
-        case NODE_ANNOUNCE_IB_MEM:
-        {
-          Memory m;
-          Memory::Kind kind;
-          size_t size;
-          bool has_rdma_info = false;
-          ByteArray rdma_info;
-          ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
-                (fbd >> has_rdma_info));
-          if(has_rdma_info)
-            ok = ok && (fbd >> rdma_info);
-          if(ok) {
-            assert(NodeID(ID(m).memory_owner_node()) == node_id);
-            log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
-                             << ", size = " << size << ", has_rdma = " << has_rdma_info
-                             << ")";
-            if(remote) {
-              IBMemory *ibmem;
-              if(has_rdma_info) {
-                ibmem = Network::get_network(node_id)->create_remote_ib_memory(
-                    m, size, kind, rdma_info);
-              } else {
-                ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
-              }
-
-              if(n.ib_memories.size() >= ID(m).memory_mem_idx())
-                n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
-              n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
-            }
-          }
-          break;
-        }
-
-        case NODE_ANNOUNCE_PMA:
-        {
-          Machine::ProcessorMemoryAffinity pma;
-          ok = (ok && (fbd >> pma));
-          if(ok) {
-            log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
-                             << " (bw = " << pma.bandwidth
-                             << ", latency = " << pma.latency << ")";
-
-            add_proc_mem_affinity(pma, true /*lock held*/);
-            // proc_mem_affinities.push_back(pma);
-          }
-          break;
-        }
-
-        case NODE_ANNOUNCE_DMA_CHANNEL:
-        {
-          RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
-          if(rci) {
-            size_t num_redops = 0;
-            RemoteChannel *rc = rci->create_remote_channel();
-            delete rci;
-
-            fbd >> num_redops;
-            for(size_t i = 0; i < num_redops; i++) {
-              ReductionOpID redop_id = 0;
-              fbd >> redop_id;
-              rc->register_redop(redop_id);
-            }
-
-            log_annc.debug() << "adding channel: " << *rc;
-            assert(rc->node == node_id);
-            if(remote)
-              get_runtime()->add_dma_channel(rc);
-            else
-              delete rc; // don't actually need it
-          }
-          break;
-        }
-
-        case NODE_ANNOUNCE_PROCESS_INFO:
-        {
-          Machine::ProcessInfo process_info;
-          ok = (ok && (fbd >> process_info));
-          if(ok) {
-            add_process_info(node_id, process_info, true);
-          }
-          break;
-        }
-
-        default:
-          log_annc.fatal() << "unknown tag: " << tag;
-          assert(0);
-        }
+        break;
       }
 
-      assert(ok && (fbd.bytes_left() == 0));
+      case NODE_ANNOUNCE_IB_MEM:
+      {
+        Memory m;
+        Memory::Kind kind;
+        size_t size;
+        bool has_rdma_info = false;
+        ByteArray rdma_info;
+        ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
+              (fbd >> has_rdma_info));
+        if(has_rdma_info)
+          ok = ok && (fbd >> rdma_info);
+        if(ok) {
+          assert(NodeID(ID(m).memory_owner_node()) == node_id);
+          log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
+                           << ", size = " << size << ", has_rdma = " << has_rdma_info
+                           << ")";
+          if(remote) {
+            IBMemory *ibmem;
+            if(has_rdma_info) {
+              ibmem = Network::get_network(node_id)->create_remote_ib_memory(
+                  m, size, kind, rdma_info);
+            } else {
+              ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
+            }
+
+            if(n.ib_memories.size() >= ID(m).memory_mem_idx())
+              n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
+            n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
+          }
+        }
+        break;
+      }
+
+      case NODE_ANNOUNCE_PMA:
+      {
+        Machine::ProcessorMemoryAffinity pma;
+        ok = (ok && (fbd >> pma));
+        if(ok) {
+          log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
+                           << " (bw = " << pma.bandwidth << ", latency = " << pma.latency
+                           << ")";
+
+          add_proc_mem_affinity(pma, true /*lock held*/);
+          // proc_mem_affinities.push_back(pma);
+        }
+        break;
+      }
+
+      case NODE_ANNOUNCE_DMA_CHANNEL:
+      {
+        RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
+        if(rci) {
+          size_t num_redops = 0;
+          RemoteChannel *rc = rci->create_remote_channel();
+          delete rci;
+
+          fbd >> num_redops;
+          for(size_t i = 0; i < num_redops; i++) {
+            ReductionOpID redop_id = 0;
+            fbd >> redop_id;
+            rc->register_redop(redop_id);
+          }
+
+          log_annc.debug() << "adding channel: " << *rc;
+          assert(rc->node == node_id);
+          if(remote)
+            runtime_impl->add_dma_channel(rc);
+          else
+            delete rc; // don't actually need it
+        }
+        break;
+      }
+
+      case NODE_ANNOUNCE_PROCESS_INFO:
+      {
+        Machine::ProcessInfo process_info;
+        ok = (ok && (fbd >> process_info));
+        if(ok) {
+          add_process_info(node_id, process_info, true);
+        }
+        break;
+      }
+
+      default:
+        log_annc.fatal() << "unknown tag: " << tag;
+        assert(0);
+      }
     }
 
-    void MachineImpl::get_all_memories(std::set<Memory>& mset) const
-    {
-      // TODO: consider using a reader/writer lock here instead
-      AutoLock<> al(mutex);
+    assert(ok && (fbd.bytes_left() == 0));
+  }
+
+  void MachineImpl::get_all_memories(std::set<Memory> &mset) const
+  {
+    // TODO: consider using a reader/writer lock here instead
+    AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -663,7 +663,7 @@ namespace Realm {
 	    ++it2)
 	  mset.insert(it2->first);
 #endif
-    }
+  }
 
     void MachineImpl::get_all_processors(std::set<Processor>& pset) const
     {

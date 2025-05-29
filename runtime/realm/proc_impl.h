@@ -47,7 +47,8 @@ namespace Realm {
 
     class ProcessorImpl {
     public:
-      ProcessorImpl(Processor _me, Processor::Kind _kind, int _num_cores=1);
+      ProcessorImpl(RuntimeImpl *runtime_impl, Processor _me, Processor::Kind _kind,
+                    int _num_cores = 1);
 
       virtual ~ProcessorImpl(void);
 
@@ -134,7 +135,8 @@ namespace Realm {
     // scheduler and pass in with the set_scheduler() method
     class LocalTaskProcessor : public ProcessorImpl {
     public:
-      LocalTaskProcessor(Processor _me, Processor::Kind _kind, int num_cores=1);
+      LocalTaskProcessor(RuntimeImpl *runtime_impl, Processor _me, Processor::Kind _kind,
+                         int num_cores = 1);
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
@@ -198,10 +200,9 @@ namespace Realm {
 
     class LocalCPUProcessor : public LocalTaskProcessor {
     public:
-      LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-			size_t _stack_size, bool _force_kthreads,
-			BackgroundWorkManager *bgwork,
-			long long bgwork_timeslice);
+      LocalCPUProcessor(RuntimeImpl *runtime_impl, Processor _me, CoreReservationSet &crs,
+                        size_t _stack_size, bool _force_kthreads,
+                        BackgroundWorkManager *bgwork, long long bgwork_timeslice);
       virtual ~LocalCPUProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -209,11 +210,10 @@ namespace Realm {
 
     class LocalUtilityProcessor : public LocalTaskProcessor {
     public:
-      LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-			    size_t _stack_size, bool _force_kthreads,
-                            bool _pin_util_proc,
-			    BackgroundWorkManager *bgwork,
-			    long long bgwork_timeslice);
+      LocalUtilityProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                            CoreReservationSet &crs, size_t _stack_size,
+                            bool _force_kthreads, bool _pin_util_proc,
+                            BackgroundWorkManager *bgwork, long long bgwork_timeslice);
       virtual ~LocalUtilityProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -221,8 +221,8 @@ namespace Realm {
 
     class LocalIOProcessor : public LocalTaskProcessor {
     public:
-      LocalIOProcessor(Processor _me, CoreReservationSet& crs, size_t _stack_size,
-		       int _concurrent_io_threads);
+      LocalIOProcessor(RuntimeImpl *runtime_impl, Processor _me, CoreReservationSet &crs,
+                       size_t _stack_size, int _concurrent_io_threads);
       virtual ~LocalIOProcessor(void);
     protected:
       CoreReservation *core_rsrv;
@@ -230,7 +230,8 @@ namespace Realm {
 
     class RemoteProcessor : public ProcessorImpl {
     public:
-      RemoteProcessor(Processor _me, Processor::Kind _kind, int _num_cores=1);
+      RemoteProcessor(RuntimeImpl *runtime_impl, Processor _me, Processor::Kind _kind,
+                      int _num_cores = 1);
       virtual ~RemoteProcessor(void);
 
       virtual void enqueue_task(Task *task);
@@ -251,6 +252,14 @@ namespace Realm {
 
     class ProcessorGroupImpl : public ProcessorImpl {
     public:
+      // TODO:: pass in runtime_impl, currently we are getting an error when we try to
+      // pass in runtime_impl dynamic_table.inl:129:40: error: constructor for
+      // 'Realm::DynamicTableNode<Realm::ProcessorGroupImpl, 16, Realm::UnfairMutex,
+      // unsigned long long>' must explicitly initialize the member 'elems' which does not
+      // have a default constructor
+      //   |   DynamicTableNode<ET, _SIZE, LT, IT>::DynamicTableNode(int _level, IT
+      //   _first_index, IT _last_index)
+      // We need to update the DynamicTableAllocator to take in a runtime_impl
       ProcessorGroupImpl(void);
 
       virtual ~ProcessorGroupImpl(void);

@@ -86,7 +86,7 @@ namespace Realm {
 
     class MachineImpl {
     public:
-      MachineImpl(void);
+      MachineImpl(RuntimeImpl *_runtime_impl);
       ~MachineImpl(void);
 
       void get_all_memories(std::set<Memory>& mset) const;
@@ -122,10 +122,9 @@ namespace Realm {
 			       Memory restrict_mem1 = Memory::NO_MEMORY,
 			       Memory restrict_mem2 = Memory::NO_MEMORY,
 			       bool local_only = true) const;
-      
-      void parse_node_announce_data(int node_id,
-				    const void *args, size_t arglen,
-				    bool remote);
+
+      void parse_node_announce_data(int node_id, const void *args, size_t arglen,
+                                    bool remote);
 
       void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma,
 				 bool lock_held = false);
@@ -151,6 +150,8 @@ namespace Realm {
       MachineNodeInfo *get_nodeinfo(Processor p) const;
       MachineNodeInfo *get_nodeinfo(Memory m) const;
       void invalidate_query_caches();
+
+      RuntimeImpl *runtime_impl{nullptr};
     };
 
     template <typename T, typename T2>

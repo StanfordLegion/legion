@@ -414,8 +414,8 @@ namespace Realm {
 
     class GPUProcessor : public Realm::LocalTaskProcessor {
     public:
-      GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet& crs,
-                   size_t _stack_size);
+      GPUProcessor(RuntimeImpl *runtime_impl, GPU *_gpu, Processor _me,
+                   Realm::CoreReservationSet &crs, size_t _stack_size);
       virtual ~GPUProcessor(void);
 
     public:

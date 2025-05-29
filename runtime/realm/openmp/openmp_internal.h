@@ -33,10 +33,9 @@ namespace Realm {
 
   class LocalOpenMPProcessor : public LocalTaskProcessor {
   public:
-    LocalOpenMPProcessor(Processor _me, int _numa_node,
-			 int _num_threads, bool _fake_cpukind,
-			 CoreReservationSet& crs, size_t _stack_size,
-			 bool _force_kthreads);
+    LocalOpenMPProcessor(RuntimeImpl *runtime_impl, Processor _me, int _numa_node,
+                         int _num_threads, bool _fake_cpukind, CoreReservationSet &crs,
+                         size_t _stack_size, bool _force_kthreads);
     virtual ~LocalOpenMPProcessor(void);
 
     virtual void shutdown(void);
