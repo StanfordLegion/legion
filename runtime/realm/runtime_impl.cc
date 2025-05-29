@@ -1003,30 +1003,26 @@ namespace Realm {
 
     for(int i = 0; i < config->num_util_procs; i++) {
       Processor p = runtime->next_local_processor_id();
-      ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
-						    config->stack_size,
-						    Config::force_kernel_threads,
-                                                    config->pin_util_procs,
-						    &runtime->bgwork,
-						    config->util_bgwork_timeslice);
+      ProcessorImpl *pi = new LocalUtilityProcessor(
+          runtime, p, runtime->core_reservation_set(), config->stack_size,
+          Config::force_kernel_threads, config->pin_util_procs, &runtime->bgwork,
+          config->util_bgwork_timeslice);
       runtime->add_processor(pi);
     }
 
     for(int i = 0; i < config->num_io_procs; i++) {
       Processor p = runtime->next_local_processor_id();
-      ProcessorImpl *pi = new LocalIOProcessor(p, runtime->core_reservation_set(),
-					       config->stack_size,
-					       config->concurrent_io_threads);
+      ProcessorImpl *pi =
+          new LocalIOProcessor(runtime, p, runtime->core_reservation_set(),
+                               config->stack_size, config->concurrent_io_threads);
       runtime->add_processor(pi);
     }
 
     for(int i = 0; i < config->num_cpu_procs; i++) {
       Processor p = runtime->next_local_processor_id();
-      ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						config->stack_size,
-						Config::force_kernel_threads,
-						&runtime->bgwork,
-						config->cpu_bgwork_timeslice);
+      ProcessorImpl *pi = new LocalCPUProcessor(
+          runtime, p, runtime->core_reservation_set(), config->stack_size,
+          Config::force_kernel_threads, &runtime->bgwork, config->cpu_bgwork_timeslice);
       runtime->add_processor(pi);
     }
   }
@@ -1106,7 +1102,7 @@ namespace Realm {
       , modules_created(false)
       , module_configs_created(false)
     {
-      machine = new MachineImpl;
+      machine = new MachineImpl(this);
     }
 
     RuntimeImpl::~RuntimeImpl(void)

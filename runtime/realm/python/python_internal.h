@@ -128,13 +128,13 @@ namespace Realm {
   //  to run on the specified numa domain
   class LocalPythonProcessor : public ProcessorImpl {
   public:
-    LocalPythonProcessor(Processor _me, int _numa_node,
-                         CoreReservationSet& crs, size_t _stack_size,
+    LocalPythonProcessor(RuntimeImpl *runtime_impl, Processor _me, int _numa_node,
+                         CoreReservationSet &crs, size_t _stack_size,
 #ifdef REALM_USE_OPENMP
-			 int _omp_workers,
+                         int _omp_workers,
 #endif
-			 const std::vector<std::string>& _import_modules,
-			 const std::vector<std::string>& _init_scripts);
+                         const std::vector<std::string> &_import_modules,
+                         const std::vector<std::string> &_init_scripts);
     virtual ~LocalPythonProcessor(void);
 
     virtual void enqueue_task(Task *task);

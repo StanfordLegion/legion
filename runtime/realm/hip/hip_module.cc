@@ -847,9 +847,9 @@ namespace Realm {
     //
     // class GPUProcessor
 
-    GPUProcessor::GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet& crs,
-                               size_t _stack_size)
-      : LocalTaskProcessor(_me, Processor::TOC_PROC)
+    GPUProcessor::GPUProcessor(RuntimeImpl *runtime_impl, GPU *_gpu, Processor _me,
+                               Realm::CoreReservationSet &crs, size_t _stack_size)
+      : LocalTaskProcessor(runtime_impl, _me, Processor::TOC_PROC)
       , gpu(_gpu)
       , block_on_synchronize(false)
       , ctxsync(_gpu, _gpu->device_id, crs, _gpu->module->config->cfg_max_ctxsync_threads)
@@ -2169,9 +2169,8 @@ namespace Realm {
     void GPU::create_processor(RuntimeImpl *runtime, size_t stack_size)
     {
       Processor p = runtime->next_local_processor_id();
-      proc = new GPUProcessor(this, p,
-			      runtime->core_reservation_set(),
-			      stack_size);
+      proc =
+          new GPUProcessor(runtime, this, p, runtime->core_reservation_set(), stack_size);
       runtime->add_processor(proc);
 
       // this processor is able to access its own FB and the ZC mem (if any)

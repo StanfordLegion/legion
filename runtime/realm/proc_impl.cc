@@ -464,9 +464,13 @@ namespace Realm {
   // class ProcessorImpl
   //
 
-    ProcessorImpl::ProcessorImpl(Processor _me, Processor::Kind _kind,
-                                 int _num_cores)
-      : free_local_events(get_runtime()->local_events, Network::my_node_id, get_runtime()->local_event_free_list), me(_me), kind(_kind), num_cores(_num_cores)
+    ProcessorImpl::ProcessorImpl(RuntimeImpl *runtime_impl, Processor _me,
+                                 Processor::Kind _kind, int _num_cores)
+      : free_local_events(runtime_impl->local_events, Network::my_node_id,
+                          runtime_impl->local_event_free_list)
+      , me(_me)
+      , kind(_kind)
+      , num_cores(_num_cores)
     {
     }
 
@@ -651,8 +655,10 @@ namespace Realm {
   //
 
     ProcessorGroupImpl::ProcessorGroupImpl(void)
-      : ProcessorImpl(Processor::NO_PROC, Processor::PROC_GROUP),
-	members_valid(false), members_requested(false), next_free(0)
+      : ProcessorImpl(get_runtime(), Processor::NO_PROC, Processor::PROC_GROUP)
+      , members_valid(false)
+      , members_requested(false)
+      , next_free(0)
       , ready_task_count(0)
     {
       deferred_spawn_cache.clear();
@@ -922,21 +928,18 @@ namespace Realm {
   // class RemoteProcessor
   //
 
-    RemoteProcessor::RemoteProcessor(Processor _me, Processor::Kind _kind,
-                                     int _num_cores)
-      : ProcessorImpl(_me, _kind, _num_cores)
-    {
-    }
+  RemoteProcessor::RemoteProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                   Processor::Kind _kind, int _num_cores)
+    : ProcessorImpl(runtime_impl, _me, _kind, _num_cores)
+  {}
 
-    RemoteProcessor::~RemoteProcessor(void)
-    {
-    }
+  RemoteProcessor::~RemoteProcessor(void) {}
 
-    void RemoteProcessor::enqueue_task(Task *task)
-    {
-      // should never be called
-      assert(0);
-    }
+  void RemoteProcessor::enqueue_task(Task *task)
+  {
+    // should never be called
+    assert(0);
+  }
 
     void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
     {
@@ -1018,15 +1021,15 @@ namespace Realm {
   // class LocalTaskProcessor
   //
 
-  LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind,
-                                         int _num_cores)
-    : ProcessorImpl(_me, _kind, _num_cores)
-    , sched(0)
-    , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
-  {
-    task_queue.set_gauge(&ready_task_count);
-    deferred_spawn_cache.clear();
-  }
+    LocalTaskProcessor::LocalTaskProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                           Processor::Kind _kind, int _num_cores)
+      : ProcessorImpl(runtime_impl, _me, _kind, _num_cores)
+      , sched(0)
+      , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
+    {
+      task_queue.set_gauge(&ready_task_count);
+      deferred_spawn_cache.clear();
+    }
 
   LocalTaskProcessor::~LocalTaskProcessor(void)
   {
@@ -1219,11 +1222,12 @@ namespace Realm {
   // class LocalCPUProcessor
   //
 
-  LocalCPUProcessor::LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-				       size_t _stack_size, bool _force_kthreads,
-				       BackgroundWorkManager *bgwork,
-				       long long bgwork_timeslice)
-    : LocalTaskProcessor(_me, Processor::LOC_PROC)
+  LocalCPUProcessor::LocalCPUProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                       CoreReservationSet &crs, size_t _stack_size,
+                                       bool _force_kthreads,
+                                       BackgroundWorkManager *bgwork,
+                                       long long bgwork_timeslice)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::LOC_PROC)
   {
     CoreReservationParameters params;
     params.set_num_cores(1);
@@ -1266,11 +1270,13 @@ namespace Realm {
   // class LocalUtilityProcessor
   //
 
-  LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc,
-					       BackgroundWorkManager *bgwork,
-					       long long bgwork_timeslice)
-    : LocalTaskProcessor(_me, Processor::UTIL_PROC)
+  LocalUtilityProcessor::LocalUtilityProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                               CoreReservationSet &crs,
+                                               size_t _stack_size, bool _force_kthreads,
+                                               bool _pin_util_proc,
+                                               BackgroundWorkManager *bgwork,
+                                               long long bgwork_timeslice)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
     params.set_num_cores(1);
@@ -1320,9 +1326,10 @@ namespace Realm {
   // class LocalIOProcessor
   //
 
-  LocalIOProcessor::LocalIOProcessor(Processor _me, CoreReservationSet& crs,
-				     size_t _stack_size, int _concurrent_io_threads)
-    : LocalTaskProcessor(_me, Processor::IO_PROC)
+  LocalIOProcessor::LocalIOProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                     CoreReservationSet &crs, size_t _stack_size,
+                                     int _concurrent_io_threads)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::IO_PROC)
   {
     CoreReservationParameters params;
     params.set_alu_usage(params.CORE_USAGE_SHARED);

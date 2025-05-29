@@ -37,20 +37,18 @@ namespace Realm {
 
   class LocalNumaProcessor : public LocalTaskProcessor {
   public:
-    LocalNumaProcessor(Processor _me, int _numa_node,
-		       CoreReservationSet& crs, size_t _stack_size,
-		       bool _force_kthreads);
+    LocalNumaProcessor(RuntimeImpl *runtime_impl, Processor _me, int _numa_node,
+                       CoreReservationSet &crs, size_t _stack_size, bool _force_kthreads);
     virtual ~LocalNumaProcessor(void);
   protected:
     int numa_node;
     CoreReservation *core_rsrv;
   };
 
-  LocalNumaProcessor::LocalNumaProcessor(Processor _me, int _numa_node,
-					 CoreReservationSet& crs,
-					 size_t _stack_size,
-					 bool _force_kthreads)
-    : LocalTaskProcessor(_me, Processor::LOC_PROC)
+  LocalNumaProcessor::LocalNumaProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                         int _numa_node, CoreReservationSet &crs,
+                                         size_t _stack_size, bool _force_kthreads)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::LOC_PROC)
     , numa_node(_numa_node)
   {
     CoreReservationParameters params;
@@ -303,27 +301,26 @@ namespace Realm {
 	int cpu_node = it->first;
 	for(int i = 0; i < it->second; i++) {
 	  Processor p = runtime->next_local_processor_id();
-	  ProcessorImpl *pi = new LocalNumaProcessor(p, it->first,
-						     runtime->core_reservation_set(),
-						     config->cfg_stack_size,
-						     Config::force_kernel_threads);
-	  runtime->add_processor(pi);
+          ProcessorImpl *pi = new LocalNumaProcessor(
+              runtime, p, it->first, runtime->core_reservation_set(),
+              config->cfg_stack_size, Config::force_kernel_threads);
+          runtime->add_processor(pi);
 
-	  // create affinities between this processor and system/reg memories
-	  // if the memory is one we created, use the kernel-reported distance
-	  // to adjust the answer
-	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
-	  for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
-	      it2 != local_mems.end();
-	      ++it2) {
-	    Memory::Kind kind = (*it2)->get_kind();
-	    if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM) &&
+          // create affinities between this processor and system/reg memories
+          // if the memory is one we created, use the kernel-reported distance
+          // to adjust the answer
+          std::vector<MemoryImpl *> &local_mems =
+              runtime->nodes[Network::my_node_id].memories;
+          for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
+              it2 != local_mems.end(); ++it2) {
+            Memory::Kind kind = (*it2)->get_kind();
+            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::REGDMA_MEM) &&
                (kind != Memory::SOCKET_MEM) && (kind != Memory::Z_COPY_MEM))
-	      continue;
+              continue;
 
-	    Machine::ProcessorMemoryAffinity pma;
-	    pma.p = p;
-	    pma.m = (*it2)->me;
+            Machine::ProcessorMemoryAffinity pma;
+            pma.p = p;
+            pma.m = (*it2)->me;
 
             if (kind == Memory::SOCKET_MEM) {
               LocalCPUMemory *cpu_mem = static_cast<LocalCPUMemory*>(*it2);
@@ -353,8 +350,8 @@ namespace Realm {
             }
 	    
 	    runtime->add_proc_mem_affinity(pma);
-	  }
-	}
+          }
+        }
       }
     }
     
