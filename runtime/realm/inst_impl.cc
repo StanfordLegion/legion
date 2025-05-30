@@ -1449,9 +1449,9 @@ namespace Realm {
       if(e.exists()) {
 	GenEventImpl *e_impl = get_runtime()->get_genevent_impl(msg.valid_event);
 	EventMerger *m = &(e_impl->merger);
-	m->prepare_merger(msg.valid_event, false/*!ignore faults*/, 1);
-	m->add_precondition(e);
-	m->arm_merger();
+        m->prepare_merger(msg.valid_event, false /*!ignore faults*/);
+        m->add_precondition(e);
+        m->arm_merger();
       } else {
 	GenEventImpl::trigger(msg.valid_event, false /*!poisoned*/, work_until);
       }	

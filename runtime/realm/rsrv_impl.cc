@@ -480,24 +480,24 @@ namespace Realm {
 		after_impl = GenEventImpl::create_genevent();
 		after_lock = after_impl->current_event();
 	      }
-	      after_impl->merger.prepare_merger(after_lock,
-						false /*!ignore_faults*/, 1);
-	      EventMerger::MergeEventPrecondition *p = after_impl->merger.get_next_precondition();
-	      after_impl->merger.arm_merger();
+              after_impl->merger.prepare_merger(after_lock, false /*!ignore_faults*/);
+              EventMerger::MergeEventPrecondition *p =
+                  after_impl->merger.get_next_precondition();
+              after_impl->merger.arm_merger();
 
-	      if(new_mode == MODE_EXCL) {
-		local_excl_waiters.push_back(p);
-	      } else {
-		LocalSharedInfo& info = local_shared[new_mode];
-		info.count++;
-		info.waiters.push_back(p);
-	      }
-	      break;
-	    }
+              if(new_mode == MODE_EXCL) {
+                local_excl_waiters.push_back(p);
+              } else {
+                LocalSharedInfo &info = local_shared[new_mode];
+                info.count++;
+                info.waiters.push_back(p);
+              }
+              break;
+            }
 
-	  case ACQUIRE_NONBLOCKING:
-	    {
-	      // can't handle an existing after_event
+            case ACQUIRE_NONBLOCKING:
+            {
+              // can't handle an existing after_event
 	      assert(!after_lock.exists());
 
 	      RetryInfo& info = retries[new_mode];
@@ -511,9 +511,9 @@ namespace Realm {
 	      after_lock = info.event;
 
 	      break;
-	    }
+            }
 
-	  case ACQUIRE_NONBLOCKING_RETRY:
+          case ACQUIRE_NONBLOCKING_RETRY:
 	    {
 	      // same as ACQUIRE_NONBLOCKING, but no increment of the retry count, since we
 	      //  already did that on the first request
