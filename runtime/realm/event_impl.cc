@@ -746,12 +746,14 @@ namespace Realm {
 
   bool EventMerger::is_active(void) const { return (count_needed.load() != 0); }
 
-  void EventMerger::prepare_merger(Event _finish_event, bool _ignore_faults)
+  void EventMerger::prepare_merger(Event _finish_event, bool _ignore_faults,
+                                   bool _recycle_preconditions)
   {
     assert(!is_active());
     finish_gen = ID(_finish_event).event_generation();
     assert(event_impl->make_event(finish_gen) == _finish_event);
     ignore_faults = _ignore_faults;
+    recycle_preconditions = _recycle_preconditions;
     count_needed.store(1); // this matches the subsequent call to arm()
     faults_observed.store(0);
   }
@@ -793,17 +795,23 @@ namespace Realm {
   {
     assert(is_active());
     count_needed.fetch_add_acqrel(1);
-#ifndef TSAN_ENABLED
-    // Can unsafely test this if TSAN is not enabled, we can still lose
-    // the race but it will be safe
-    if(!free_preconditions.empty())
-#endif
-    {
-      AutoLock<> a(event_impl->mutex);
+    if(!recycle_preconditions) {
+      // No need for the lock since we're not racing with append to the free list
       EventWaiter *waiter = free_preconditions.pop_front();
       if(waiter)
         return checked_cast<MergeEventPrecondition *>(waiter);
-    }
+    } else
+#ifndef TSAN_ENABLED
+      // Can unsafely test this if TSAN is not enabled, we can still lose
+      // the race but it will be safe
+      if(!free_preconditions.empty())
+#endif
+      {
+        AutoLock<> a(event_impl->mutex);
+        EventWaiter *waiter = free_preconditions.pop_front();
+        if(waiter)
+          return checked_cast<MergeEventPrecondition *>(waiter);
+      }
     overflow_preconditions.resize(overflow_preconditions.size() + 1);
     MergeEventPrecondition &result = overflow_preconditions.back();
     result.merger = this;
@@ -833,7 +841,7 @@ namespace Realm {
       }
     }
 
-    if(precondition) {
+    if(recycle_preconditions && precondition) {
       AutoLock<> a(event_impl->mutex);
       // Record ourself on the free list of merge event preconditions
       // so that we can be reused for later events added to the merger
@@ -870,6 +878,18 @@ namespace Realm {
         // Put the inline preconditions back in the list
         for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
           free_preconditions.push_back(inline_preconditions + i);
+      } else if(!recycle_preconditions) {
+        // Put the inline preconditions back in the list
+        if(free_preconditions.empty()) {
+          for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
+            free_preconditions.push_back(inline_preconditions + i);
+        } else {
+          // Push the preconditions that we used back onto the list
+          MergeEventPrecondition *head =
+              checked_cast<MergeEventPrecondition *>(free_preconditions.front());
+          while(head != inline_preconditions)
+            free_preconditions.push_front(--head);
+        }
       }
 
       // trigger on the last input event, unless we did an early poison propagation

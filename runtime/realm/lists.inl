@@ -182,6 +182,12 @@ namespace Realm {
   }
 
   template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
+  inline T *IntrusiveList<T, LINK, LT>::front(void) const
+  {
+    return head.next;
+  }
+
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
   inline T *IntrusiveList<T, LINK, LT>::pop_front(void)
   {
     T *popped = 0;
