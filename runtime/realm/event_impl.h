@@ -56,6 +56,8 @@ namespace Realm {
     typedef IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter, ew_list_link),
                           DummyLock>
         EventWaiterList;
+    using PreconditionList =
+        IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter, ew_list_link), Mutex>;
   };
 
   // triggering events can often result in recursive expansion of work -
@@ -171,9 +173,7 @@ namespace Realm {
     MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
     // std::deque does not invalidate references on resize
     std::deque<MergeEventPrecondition> overflow_preconditions;
-    using PreconditionList =
-        IntrusiveList<EventWaiter, REALM_PMTA_USE(EventWaiter, ew_list_link), Mutex>;
-    PreconditionList free_preconditions;
+    EventWaiter::PreconditionList free_preconditions;
   };
 
   class EventCommunicator {

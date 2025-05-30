@@ -498,42 +498,43 @@ namespace Realm {
             case ACQUIRE_NONBLOCKING:
             {
               // can't handle an existing after_event
-	      assert(!after_lock.exists());
+              assert(!after_lock.exists());
 
-	      RetryInfo& info = retries[new_mode];
+              RetryInfo &info = retries[new_mode];
 
-	      // first, record that we'll eventually see a retry of this
-	      info.count++;
+              // first, record that we'll eventually see a retry of this
+              info.count++;
 
-	      // now, make a retry event if we don't have one, or reuse an existing one
-	      if(!info.event.exists())
-		info.event = GenEventImpl::create_genevent()->current_event();
-	      after_lock = info.event;
+              // now, make a retry event if we don't have one, or reuse an existing one
+              if(!info.event.exists())
+                info.event = GenEventImpl::create_genevent()->current_event();
+              after_lock = info.event;
 
-	      break;
+              break;
             }
 
-          case ACQUIRE_NONBLOCKING_RETRY:
-	    {
-	      // same as ACQUIRE_NONBLOCKING, but no increment of the retry count, since we
-	      //  already did that on the first request
+            case ACQUIRE_NONBLOCKING_RETRY:
+            {
+              // same as ACQUIRE_NONBLOCKING, but no increment of the retry count, since
+              // we
+              //  already did that on the first request
 
-	      // can't handle an existing after_event
-	      assert(!after_lock.exists());
+              // can't handle an existing after_event
+              assert(!after_lock.exists());
 
-	      RetryInfo& info = retries[new_mode];
+              RetryInfo &info = retries[new_mode];
 
-	      if(!info.event.exists())
-		info.event = GenEventImpl::create_genevent()->current_event();
-	      after_lock = info.event;
+              if(!info.event.exists())
+                info.event = GenEventImpl::create_genevent()->current_event();
+              after_lock = info.event;
 
-	      break;
-	    }
+              break;
+            }
 
-	  default:
-	    assert(0);
-	  }
-	}
+            default:
+              assert(0);
+            }
+        }
       }
 
       if(lock_request_target != -1)
