@@ -760,8 +760,13 @@ namespace Realm {
   {
     assert(is_active());
 
+    if(!wait_for.exists())
+      return;
+
     bool poisoned = false;
-    if(wait_for.has_triggered_faultaware(poisoned)) {
+    const ID id(wait_for.id);
+    EventImpl *impl = get_runtime()->get_event_impl(wait_for);
+    if(impl->has_triggered(id.event_generation(), poisoned)) {
       if(poisoned) {
         // always count faults, but don't necessarily propagate
         bool first_fault = (faults_observed.fetch_add(1) == 0);
@@ -776,13 +781,9 @@ namespace Realm {
           }
         }
       }
-      // either way we return to the caller without updating the count_needed
-      return;
+    } else {
+      impl->add_waiter(id.event_generation(), get_next_precondition());
     }
-
-    // figure out which precondition slot we'll use
-    MergeEventPrecondition *p = get_next_precondition();
-    EventImpl::add_waiter(wait_for, p);
   }
 
   // as an alternative to add_precondition, get_next_precondition can
@@ -792,9 +793,17 @@ namespace Realm {
   {
     assert(is_active());
     count_needed.fetch_add_acqrel(1);
-    EventWaiter *waiter = free_preconditions.pop_front();
-    if(waiter)
-      return checked_cast<MergeEventPrecondition *>(waiter);
+#ifndef TSAN_ENABLED
+    // Can unsafely test this if TSAN is not enabled, we can still lose
+    // the race but it will be safe
+    if(!free_preconditions.empty())
+#endif
+    {
+      AutoLock<> a(event_impl->mutex);
+      EventWaiter *waiter = free_preconditions.pop_front();
+      if(waiter)
+        return checked_cast<MergeEventPrecondition *>(waiter);
+    }
     overflow_preconditions.resize(overflow_preconditions.size() + 1);
     MergeEventPrecondition &result = overflow_preconditions.back();
     result.merger = this;
@@ -825,6 +834,7 @@ namespace Realm {
     }
 
     if(precondition) {
+      AutoLock<> a(event_impl->mutex);
       // Record ourself on the free list of merge event preconditions
       // so that we can be reused for later events added to the merger
       free_preconditions.push_back(precondition);
