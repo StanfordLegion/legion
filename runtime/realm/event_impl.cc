@@ -739,8 +739,9 @@ namespace Realm {
   EventMerger::~EventMerger(void)
   {
     assert(!is_active());
-    for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
+    for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
       free_preconditions.pop_front();
+    }
     assert(free_preconditions.empty());
   }
 
@@ -798,8 +799,9 @@ namespace Realm {
     if(!recycle_preconditions) {
       // No need for the lock since we're not racing with append to the free list
       EventWaiter *waiter = free_preconditions.pop_front();
-      if(waiter)
+      if(waiter != nullptr) {
         return checked_cast<MergeEventPrecondition *>(waiter);
+      }
     } else
 #ifndef TSAN_ENABLED
       // Can unsafely test this if TSAN is not enabled, we can still lose
@@ -809,8 +811,9 @@ namespace Realm {
       {
         AutoLock<> a(event_impl->mutex);
         EventWaiter *waiter = free_preconditions.pop_front();
-        if(waiter)
+        if(waiter != nullptr) {
           return checked_cast<MergeEventPrecondition *>(waiter);
+        }
       }
     overflow_preconditions.resize(overflow_preconditions.size() + 1);
     MergeEventPrecondition &result = overflow_preconditions.back();
@@ -841,7 +844,7 @@ namespace Realm {
       }
     }
 
-    if(recycle_preconditions && precondition) {
+    if(recycle_preconditions && (precondition != nullptr)) {
       AutoLock<> a(event_impl->mutex);
       // Record ourself on the free list of merge event preconditions
       // so that we can be reused for later events added to the merger
@@ -872,23 +875,27 @@ namespace Realm {
       if(!overflow_preconditions.empty()) {
         // Remove entries from the list
         // This is not very efficient but it helps with list checking
-        while(!free_preconditions.empty())
+        while(!free_preconditions.empty()) {
           free_preconditions.pop_front();
+        }
         overflow_preconditions.clear();
         // Put the inline preconditions back in the list
-        for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
+        for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
           free_preconditions.push_back(inline_preconditions + i);
+        }
       } else if(!recycle_preconditions) {
         // Put the inline preconditions back in the list
         if(free_preconditions.empty()) {
-          for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
+          for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
             free_preconditions.push_back(inline_preconditions + i);
+          }
         } else {
           // Push the preconditions that we used back onto the list
           MergeEventPrecondition *head =
               checked_cast<MergeEventPrecondition *>(free_preconditions.front());
-          while(head != inline_preconditions)
+          while(head != inline_preconditions) {
             free_preconditions.push_front(--head);
+          }
         }
       }
 
