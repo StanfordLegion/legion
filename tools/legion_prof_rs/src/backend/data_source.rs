@@ -1312,26 +1312,29 @@ impl StateDataSource {
         })
     }
 
+    fn generate_unknown_event_field(&self, event: EventID) -> Field {
+        let node = event.node_id();
+        if event.is_barrier() {
+            // If you get here it means the user was running with
+            // -lg:prof_all_critical_arrivals
+            Field::String(format!(
+                "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
+                event.0, node.0
+            ))
+        } else {
+            Field::String(format!(
+                "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
+                event.0, node.0
+            ))
+        }
+    }
+
     // Use this function when the event entry for the critical path is actually the
     // critical path and we need to generate a link to the corresponding event entry
     fn generate_critical_link(&self, event: EventID, event_entry: &EventEntry) -> Field {
         let node = event.node_id();
         match event_entry.kind {
-            EventEntryKind::UnknownEvent => {
-                if event.is_barrier() {
-                    // If you get here it means the user was running with
-                    // -lg:prof_all_critical_arrivals
-                    Field::String(format!(
-                        "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
-                        event.0, node.0
-                    ))
-                } else {
-                    Field::String(format!(
-                        "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
-                        event.0, node.0
-                    ))
-                }
-            }
+            EventEntryKind::UnknownEvent => self.generate_unknown_event_field(event),
             EventEntryKind::TaskEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
@@ -1823,6 +1826,18 @@ impl StateDataSource {
                                     }
                                     need_critical = false;
                                 }
+                            } else {
+                                need_critical = false;
+                                fields.push((
+                                    self.fields.creator,
+                                    self.generate_creator_link(creator, entry.creation_time()),
+                                    None,
+                                ));
+                                fields.push((
+                                    self.fields.critical,
+                                    self.generate_unknown_event_field(critical),
+                                    None,
+                                ));
                             }
                         }
                         if need_critical {
@@ -1869,6 +1884,13 @@ impl StateDataSource {
                                         self.select_interval_color(trigger_time, ready_time),
                                     ));
                                 }
+                            } else {
+                                // Did not have the critical event precondition so report it
+                                fields.push((
+                                    self.fields.critical,
+                                    self.generate_unknown_event_field(critical),
+                                    None,
+                                ));
                             }
                         }
                     }
@@ -2089,10 +2111,9 @@ impl StateDataSource {
                         // Created before critical event triggered so list both
                         // fields separately since they wil be different
                         if let Some(creator) = entry.creator() {
-                            let creation_time = entry.creation_time();
                             fields.push((
                                 self.fields.creator,
-                                self.generate_creator_link(creator, creation_time),
+                                self.generate_creator_link(creator, entry.creation_time()),
                                 None,
                             ));
                         }
@@ -2116,6 +2137,20 @@ impl StateDataSource {
                         }
                         need_critical = false;
                     }
+                } else {
+                    need_critical = false;
+                    if let Some(creator) = entry.creator() {
+                        fields.push((
+                            self.fields.creator,
+                            self.generate_creator_link(creator, entry.creation_time()),
+                            None,
+                        ));
+                    }
+                    fields.push((
+                        self.fields.critical,
+                        self.generate_unknown_event_field(critical),
+                        None,
+                    ));
                 }
             }
             if need_critical {
@@ -2471,10 +2506,10 @@ impl StateDataSource {
                             }
                         }
                     } else {
-                        // No critical entry so assume creation was the critical path
+                        // No critical entry to report the unknown event
                         fields.push((
                             self.fields.critical,
-                            self.generate_critical_creator_link(creator, entry.creation_time()),
+                            self.generate_unknown_event_field(critical),
                             None,
                         ));
                     }
@@ -2507,6 +2542,12 @@ impl StateDataSource {
                             self.select_interval_color(trigger_time, ready_time),
                         ));
                     }
+                } else {
+                    fields.push((
+                        self.fields.critical,
+                        self.generate_unknown_event_field(critical),
+                        None,
+                    ));
                 }
             }
             if let Some(ready) = time_range.ready {

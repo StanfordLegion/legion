@@ -5288,13 +5288,13 @@ fn process_record(
                         EventEntryKind::UnknownEvent => {
                             node_weight.kind = EventEntryKind::ArriveBarrier;
                             node_weight.creator = Some(creator_uid);
-                            node_weight.trigger_time = Some(*performed);
+                            node_weight.creation_time = Some(*performed);
                         }
                         EventEntryKind::ArriveBarrier => {
                             // Check to see if this arrive came after the previous latest arrive
-                            if node_weight.trigger_time.unwrap() < *performed {
+                            if node_weight.creation_time.unwrap() < *performed {
                                 node_weight.creator = Some(creator_uid);
-                                node_weight.trigger_time = Some(*performed);
+                                node_weight.creation_time = Some(*performed);
                             }
                         }
                         _ => unreachable!(),
