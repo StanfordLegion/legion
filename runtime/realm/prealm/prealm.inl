@@ -115,6 +115,7 @@ public:
   public:
     Event external;
     Event fevent;
+    timestamp_t created;
     timestamp_t triggered;
     unsigned long long provenance; 
   };
