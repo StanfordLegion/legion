@@ -148,7 +148,7 @@ pub enum Record {
     EventMergerInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
     EventTriggerInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
     EventPoisonInfo { result: EventID, fevent: EventID, performed: Timestamp },
-    ExternalEventInfo { external: EventID, fevent: EventID, triggered: Timestamp, provenance: ProvenanceID },
+    ExternalEventInfo { external: EventID, fevent: EventID, performed: Timestamp, triggered: Timestamp, provenance: ProvenanceID },
     BarrierArrivalInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp },
     ReservationAcquireInfo { result: EventID, fevent: EventID, precondition: Option<EventID>, performed: Timestamp, reservation: u64 },
     CompletionQueueInfo { result: EventID, fevent: EventID, performed: Timestamp, pre0: Option<EventID>, pre1: Option<EventID>, pre2: Option<EventID>, pre3: Option<EventID> },
@@ -1247,6 +1247,7 @@ fn parse_event_poison_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record
 fn parse_external_event_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, external) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
+    let (input, performed) = parse_timestamp(input)?;
     let (input, triggered) = parse_timestamp(input)?;
     let (input, provenance) = parse_provenance_id(input)?;
     Ok((
@@ -1254,6 +1255,7 @@ fn parse_external_event_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Reco
         Record::ExternalEventInfo {
             external,
             fevent,
+            performed,
             triggered,
             provenance,
         },

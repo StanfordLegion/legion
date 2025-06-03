@@ -3212,6 +3212,7 @@ type CriticalPathVertex = NodeIndex<usize>;
 pub struct EventEntry {
     pub kind: EventEntryKind,
     pub creator: Option<ProfUID>,
+    pub creation_time: Option<Timestamp>,
     pub trigger_time: Option<Timestamp>,
     pub critical: Option<CriticalPathVertex>,
 }
@@ -3220,11 +3221,13 @@ impl EventEntry {
     fn new(
         kind: EventEntryKind,
         creator: Option<ProfUID>,
+        creation_time: Option<Timestamp>,
         trigger_time: Option<Timestamp>,
     ) -> Self {
         EventEntry {
             kind,
             creator,
+            creation_time,
             trigger_time,
             critical: None,
         }
@@ -3305,13 +3308,15 @@ impl State {
         fevent: EventID,
         kind: EventEntryKind,
         creator: ProfUID,
-        time: Timestamp,
+        creation_time: Timestamp,
+        trigger_time: Option<Timestamp>,
         deduplicate: bool,
     ) -> CriticalPathVertex {
         if let Some(index) = self.event_lookup.get(&fevent) {
             let node_weight = self.event_graph.node_weight_mut(*index).unwrap();
             if node_weight.kind == EventEntryKind::UnknownEvent {
-                *node_weight = EventEntry::new(kind, Some(creator), Some(time));
+                *node_weight =
+                    EventEntry::new(kind, Some(creator), Some(creation_time), trigger_time);
             } else if deduplicate {
                 assert!(node_weight.kind == kind);
                 assert!(node_weight.creator.unwrap() == creator);
@@ -3324,9 +3329,12 @@ impl State {
             }
             *index
         } else {
-            let index = self
-                .event_graph
-                .add_node(EventEntry::new(kind, Some(creator), Some(time)));
+            let index = self.event_graph.add_node(EventEntry::new(
+                kind,
+                Some(creator),
+                Some(creation_time),
+                trigger_time,
+            ));
             self.event_lookup.insert(fevent, index);
             index
         }
@@ -3336,9 +3344,12 @@ impl State {
         if let Some(index) = self.event_lookup.get(&event) {
             return *index;
         }
-        let index =
-            self.event_graph
-                .add_node(EventEntry::new(EventEntryKind::UnknownEvent, None, None));
+        let index = self.event_graph.add_node(EventEntry::new(
+            EventEntryKind::UnknownEvent,
+            None,
+            None,
+            None,
+        ));
         self.event_lookup.insert(event, index);
         // This is an important detail: Realm barriers have to trigger
         // in order so add a dependence between this generation and the
@@ -3424,11 +3435,15 @@ impl State {
             // populated by the corresponding fevent
             self.find_event_node(fevent);
         } else {
+            // Record initially with the creation time so we can use
+            // that for determining the triggering critical path
+            assert!(time_range.stop.is_some());
             self.record_event_node(
                 fevent,
                 EventEntryKind::TaskEvent,
                 base.prof_uid,
-                time_range.stop.unwrap(),
+                time_range.create.unwrap(),
+                time_range.stop,
                 false,
             );
         }
@@ -3472,11 +3487,13 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
+        assert!(time_range.stop.is_some());
         self.record_event_node(
             fevent,
             EventEntryKind::TaskEvent,
             base.prof_uid,
-            time_range.stop.unwrap(),
+            time_range.spawn.or(time_range.create).unwrap(),
+            time_range.stop,
             false,
         );
         let proc = self.procs.create_proc(proc_id);
@@ -3615,11 +3632,13 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = alloc.create_reference(creator);
         let base = Base::from_fevent(alloc, fevent);
+        assert!(time_range.stop.is_some());
         self.record_event_node(
             fevent,
             EventEntryKind::TaskEvent,
             base.prof_uid,
-            time_range.stop.unwrap(),
+            time_range.start.unwrap(),
+            time_range.stop,
             false,
         );
         let proc = self.procs.create_proc(proc_id);
@@ -3651,11 +3670,13 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
+        assert!(time_range.stop.is_some());
         self.record_event_node(
             fevent,
             EventEntryKind::CopyEvent,
             base.prof_uid,
-            time_range.stop.unwrap(),
+            time_range.create.unwrap(),
+            time_range.stop,
             false,
         );
         assert!(!copies.contains_key(&fevent));
@@ -3685,11 +3706,13 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
         let base = Base::from_fevent(alloc, fevent);
+        assert!(time_range.stop.is_some());
         self.record_event_node(
             fevent,
             EventEntryKind::FillEvent,
             base.prof_uid,
-            time_range.stop.unwrap(),
+            time_range.create.unwrap(),
+            time_range.stop,
             false,
         );
         assert!(!fills.contains_key(&fevent));
@@ -3712,11 +3735,13 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         let base = Base::from_fevent(alloc, fevent); // FIXME: construct here to avoid mutability conflict
         let creator_uid = creator.map(|e| alloc.create_reference(e));
+        assert!(time_range.stop.is_some());
         self.record_event_node(
             fevent,
             EventEntryKind::DepPartEvent,
             base.prof_uid,
-            time_range.stop.unwrap(),
+            time_range.create.unwrap(),
+            time_range.stop,
             false,
         );
         let chan_id = ChanID::new_deppart(node_id);
@@ -4271,28 +4296,34 @@ impl State {
                     // Iterate over all the incoming edges and determine the latest
                     // precondition event to trigger leading into this node
                     let mut latest = None;
+                    // Also check to see if we've been tainted by an unknown event
+                    let mut unknown = None;
                     // Also keep track of the earliest trigger time in case this
                     // a completion queue event and we need to know the first of
                     // our event preconditions to trigger
                     let mut earliest: Option<(CriticalPathVertex, Timestamp)> = None;
                     for edge in self.event_graph.edges_directed(vertex, Direction::Incoming) {
                         let src = self.event_graph.node_weight(edge.source()).unwrap();
-                        // Skip uknown events
-                        if src.kind == EventEntryKind::UnknownEvent {
-                            continue;
-                        }
-                        // Everything else should have a timestamp
-                        let trigger_time = src.trigger_time.unwrap();
-                        if let Some((_, latest_time)) = latest {
-                            if latest_time < trigger_time {
+                        // Check to see if it has a trigger time or whether it
+                        // was tained by something else and therefore has no trigger time
+                        if let Some(trigger_time) = src.trigger_time {
+                            if let Some((_, latest_time)) = latest {
+                                if latest_time < trigger_time {
+                                    latest = Some((src.critical.unwrap(), trigger_time));
+                                }
+                                if trigger_time < earliest.unwrap().1 {
+                                    earliest = Some((src.critical.unwrap(), trigger_time));
+                                }
+                            } else {
                                 latest = Some((src.critical.unwrap(), trigger_time));
-                            }
-                            if trigger_time < earliest.unwrap().1 {
-                                earliest = Some((src.critical.unwrap(), trigger_time));
+                                earliest = latest;
                             }
                         } else {
-                            latest = Some((src.critical.unwrap(), trigger_time));
-                            earliest = latest;
+                            // Source is tainted with unknown event so this node
+                            // is also going to end up being tainted
+                            unknown = src.critical;
+                            assert!(unknown.is_some());
+                            break;
                         }
                     }
                     let event_entry = self.event_graph.node_weight_mut(vertex).unwrap();
@@ -4300,29 +4331,57 @@ impl State {
                     if event_entry.kind == EventEntryKind::UnknownEvent {
                         // they should not have had any preconditions
                         assert!(latest.is_none());
+                        // Record that we are our own critical entry
+                        event_entry.critical = Some(vertex);
                         continue;
                     }
-                    // If this is a completion queue event, then switch the earliest
-                    // to be the "latest" since it's the earliest event that triggers
-                    // that determines when a completion queue event triggers
-                    if event_entry.kind == EventEntryKind::CompletionQueueEvent {
-                        latest = earliest;
-                    }
-                    // Now check to see if the latest comes after the point where
-                    // we made this particular event
-                    if let Some((latest_vertex, latest_time)) = latest {
-                        let trigger_time = event_entry.trigger_time.unwrap();
-                        if trigger_time < latest_time {
-                            event_entry.critical = Some(latest_vertex);
-                            // Update the time at which this triggered
-                            event_entry.trigger_time = Some(latest_time);
+                    // Check to see if we were tainted with an unknown event
+                    if unknown.is_some() {
+                        // Make the critical path be the unknown event
+                        event_entry.critical = unknown;
+                    } else {
+                        // If this is a completion queue event, then switch the earliest
+                        // to be the "latest" since it's the earliest event that triggers
+                        // that determines when a completion queue event triggers
+                        if event_entry.kind == EventEntryKind::CompletionQueueEvent {
+                            latest = earliest;
+                        }
+                        // Now check to see if the latest comes after the point where
+                        // we made this particular event
+                        let mut trigger_time = event_entry.creation_time;
+                        if let Some((latest_vertex, latest_time)) = latest {
+                            let creation_time = event_entry.creation_time.unwrap();
+                            if creation_time < latest_time {
+                                event_entry.critical = Some(latest_vertex);
+                                trigger_time = Some(latest_time);
+                            } else {
+                                // We're our own critical path
+                                event_entry.critical = Some(vertex);
+                            }
                         } else {
                             // We're our own critical path
                             event_entry.critical = Some(vertex);
                         }
-                    } else {
-                        // We're our own critical path
-                        event_entry.critical = Some(vertex);
+                        // Propagate the triggering time for events, everything else
+                        // should already have a trigger time set
+                        match event_entry.kind {
+                            EventEntryKind::MergeEvent
+                            | EventEntryKind::TriggerEvent
+                            | EventEntryKind::PoisonEvent
+                            | EventEntryKind::ArriveBarrier
+                            | EventEntryKind::InstanceReady
+                            | EventEntryKind::InstanceRedistrict
+                            | EventEntryKind::ExternalHandshake
+                            | EventEntryKind::ReservationAcquire
+                            | EventEntryKind::CompletionQueueEvent => {
+                                // Assume that event triggering is instanteous
+                                assert!(event_entry.trigger_time.is_none());
+                                event_entry.trigger_time = trigger_time;
+                            }
+                            _ => {
+                                assert!(event_entry.trigger_time.is_some());
+                            }
+                        }
                     }
                 }
             }
@@ -4944,7 +5003,8 @@ fn process_record(
                 *fevent,
                 EventEntryKind::InstanceDeletion,
                 inst_uid,
-                *destroy,
+                *create,
+                Some(*destroy),
                 false,
             );
             state.update_last_time(*destroy);
@@ -5092,6 +5152,7 @@ fn process_record(
                 EventEntryKind::MergeEvent,
                 creator_uid,
                 *performed,
+                None,
                 true,
             );
             if let Some(pre0) = *pre0 {
@@ -5125,6 +5186,7 @@ fn process_record(
                 EventEntryKind::TriggerEvent,
                 creator_uid,
                 *performed,
+                None,
                 deduplicate,
             );
             if let Some(precondition) = *precondition {
@@ -5150,12 +5212,14 @@ fn process_record(
                 EventEntryKind::PoisonEvent,
                 creator_uid,
                 *performed,
+                None,
                 deduplicate,
             );
         }
         Record::ExternalEventInfo {
             external,
             fevent,
+            performed,
             triggered,
             provenance,
         } => {
@@ -5164,7 +5228,8 @@ fn process_record(
                 *external,
                 EventEntryKind::ExternalEvent(*provenance),
                 creator_uid,
-                *triggered,
+                *performed,
+                Some(*triggered),
                 false,
             );
         }
@@ -5200,6 +5265,7 @@ fn process_record(
                         EventEntryKind::ExternalHandshake,
                         None,
                         Some(*performed),
+                        None,
                     ));
                     state.event_lookup.insert(*result, index);
                     // This is an important detail: Realm barriers have to trigger
@@ -5238,6 +5304,7 @@ fn process_record(
                         EventEntryKind::ArriveBarrier,
                         Some(creator_uid),
                         Some(*performed),
+                        None,
                     ));
                     state.event_lookup.insert(*result, index);
                     // This is an important detail: Realm barriers have to trigger
@@ -5270,6 +5337,7 @@ fn process_record(
                 EventEntryKind::ReservationAcquire,
                 creator_uid,
                 *performed,
+                None,
                 false,
             );
             if let Some(precondition) = *precondition {
@@ -5295,6 +5363,7 @@ fn process_record(
                 EventEntryKind::CompletionQueueEvent,
                 creator_uid,
                 *performed,
+                None,
                 true,
             );
             if let Some(pre0) = *pre0 {
@@ -5326,6 +5395,7 @@ fn process_record(
                 EventEntryKind::InstanceReady,
                 creator_uid,
                 *performed,
+                None,
                 false,
             );
             if let Some(precondition) = *precondition {
@@ -5347,6 +5417,7 @@ fn process_record(
                 EventEntryKind::InstanceRedistrict,
                 creator_uid,
                 *performed,
+                None,
                 true, /*deduplicate*/
             );
             let next_inst = state.create_inst(*next, insts);
