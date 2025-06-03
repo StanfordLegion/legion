@@ -1312,26 +1312,29 @@ impl StateDataSource {
         })
     }
 
+    fn generate_unknown_event_field(&self, event: EventID) -> Field {
+        let node = event.node_id();
+        if event.is_barrier() {
+            // If you get here it means the user was running with
+            // -lg:prof_all_critical_arrivals
+            Field::String(format!(
+                "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
+                event.0, node.0
+            ))
+        } else {
+            Field::String(format!(
+                "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
+                event.0, node.0
+            ))
+        }
+    }
+
     // Use this function when the event entry for the critical path is actually the
     // critical path and we need to generate a link to the corresponding event entry
     fn generate_critical_link(&self, event: EventID, event_entry: &EventEntry) -> Field {
         let node = event.node_id();
         match event_entry.kind {
-            EventEntryKind::UnknownEvent => {
-                if event.is_barrier() {
-                    // If you get here it means the user was running with
-                    // -lg:prof_all_critical_arrivals
-                    Field::String(format!(
-                        "Unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.",
-                        event.0, node.0
-                    ))
-                } else {
-                    Field::String(format!(
-                        "Unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.",
-                        event.0, node.0
-                    ))
-                }
-            }
+            EventEntryKind::UnknownEvent => self.generate_unknown_event_field(event),
             EventEntryKind::TaskEvent => {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
@@ -1777,72 +1780,96 @@ impl StateDataSource {
                         fields.push((self.fields.caller, self.generate_proc_link(creator), None));
                     }
                     _ => {
-                        // Find the completion time of the previous entry that was executing
-                        // on this processor so that we can check to see if it was why we
-                        // were delayed from running
-                        let mut has_critical = false;
-                        let mut need_critical = self.state.has_critical_path_data();
-                        // Check to see if we have a critical path event
-                        if let Some(critical) = entry.critical() {
-                            has_critical = true;
-                            if let Some(event_entry) = self.state.find_critical_entry(critical) {
-                                // Check to see if the critical entry happened before or after
-                                // the creation of this processor entry
-                                let creation_time = entry.creation_time();
-                                // If we don't know about the critical event then we always
-                                // report that as the critical path so the user is aware
-                                // that there is a missing critical path
-                                if event_entry.kind == EventEntryKind::UnknownEvent
-                                    || creation_time <= event_entry.trigger_time.unwrap()
+                        if self.state.has_critical_path_data() {
+                            // Find the completion time of the previous entry that was executing
+                            // on this processor so that we can check to see if it was why we
+                            // were delayed from running
+                            if let Some(critical) = entry.critical() {
+                                let mut unknown_critical_event = true;
+                                if let Some(event_entry) = self.state.find_critical_entry(critical)
                                 {
-                                    // Created before critical event triggered so list both
-                                    // fields separately since they wil be different
+                                    if event_entry.kind != EventEntryKind::UnknownEvent {
+                                        unknown_critical_event = false;
+                                        // Check to see if the critical entry happened before or after
+                                        // the creation of this processor entry
+                                        let creation_time = entry.creation_time();
+                                        if creation_time < event_entry.trigger_time.unwrap() {
+                                            // Created before critical event triggered so list both
+                                            // fields separately since they wil be different
+                                            fields.push((
+                                                self.fields.creator,
+                                                self.generate_creator_link(creator, creation_time),
+                                                None,
+                                            ));
+                                            // Critical path is critical event triggering
+                                            fields.push((
+                                                self.fields.critical,
+                                                self.generate_critical_link(critical, event_entry),
+                                                self.select_critical_color(event_entry),
+                                            ));
+                                            // Record the time it took Realm to propagate the event trigger
+                                            let trigger_time = event_entry.trigger_time.unwrap();
+                                            let ready_time = entry.time_range.ready.unwrap();
+                                            fields.push((
+                                                self.fields.trigger_time,
+                                                Field::Interval(ts::Interval::new(
+                                                    trigger_time.into(),
+                                                    ready_time.into(),
+                                                )),
+                                                self.select_interval_color(
+                                                    trigger_time,
+                                                    ready_time,
+                                                ),
+                                            ));
+                                        } else {
+                                            // Created after the critical event triggered so
+                                            // the creator is the critical path
+                                            fields.push((
+                                                self.fields.critical,
+                                                self.generate_critical_creator_link(
+                                                    creator,
+                                                    entry.creation_time(),
+                                                ),
+                                                Some(Color32::RED),
+                                            ));
+                                        }
+                                    }
+                                }
+                                if unknown_critical_event {
+                                    // Unknown critical event
                                     fields.push((
                                         self.fields.creator,
-                                        self.generate_creator_link(creator, creation_time),
+                                        self.generate_creator_link(creator, entry.creation_time()),
                                         None,
                                     ));
-                                    // Critical path is critical event triggering
                                     fields.push((
                                         self.fields.critical,
-                                        self.generate_critical_link(critical, event_entry),
-                                        self.select_critical_color(event_entry),
+                                        self.generate_unknown_event_field(critical),
+                                        None,
                                     ));
-                                    if event_entry.kind != EventEntryKind::UnknownEvent {
-                                        // Record the time it took Realm to propagate the event trigger
-                                        let trigger_time = event_entry.trigger_time.unwrap();
-                                        let ready_time = entry.time_range.ready.unwrap();
-                                        fields.push((
-                                            self.fields.trigger_time,
-                                            Field::Interval(ts::Interval::new(
-                                                trigger_time.into(),
-                                                ready_time.into(),
-                                            )),
-                                            self.select_interval_color(trigger_time, ready_time),
-                                        ));
-                                    }
-                                    need_critical = false;
                                 }
+                            } else {
+                                // No critical event means creator is the critical path
+                                fields.push((
+                                    self.fields.critical,
+                                    self.generate_critical_creator_link(
+                                        creator,
+                                        entry.creation_time(),
+                                    ),
+                                    None,
+                                ));
                             }
-                        }
-                        if need_critical {
-                            // Did not record the critical path yet
-                            // Critical path is creation of the task
+                        } else {
+                            // No critical path data so just report the creator
                             fields.push((
-                                self.fields.critical,
-                                self.generate_critical_creator_link(creator, entry.creation_time()),
-                                // If we had a critical event but it triggered before we were made
-                                // then that is very bad, otherwise we're fine
-                                if has_critical {
-                                    Some(Color32::RED)
-                                } else {
-                                    None
-                                },
+                                self.fields.creator,
+                                self.generate_creator_link(creator, entry.creation_time()),
+                                None,
                             ));
                         }
                     }
                 }
-            } else {
+            } else if self.state.has_critical_path_data() {
                 // No creator, still need to record the critical path if there is one
                 match entry.kind {
                     ProcEntryKind::Task(..)
@@ -1869,6 +1896,13 @@ impl StateDataSource {
                                         self.select_interval_color(trigger_time, ready_time),
                                     ));
                                 }
+                            } else {
+                                // Did not have the critical event precondition so report it
+                                fields.push((
+                                    self.fields.critical,
+                                    self.generate_unknown_event_field(critical),
+                                    None,
+                                ));
                             }
                         }
                     }
@@ -2070,24 +2104,120 @@ impl StateDataSource {
                     None,
                 ));
             }
-            // Do the critical path analysis for this instance
-            // There are three things that can delay an instance creation
-            // 1. The precondition event can be slow to trigger
-            // 2. The caller task can be slow to create it
-            // 3. We might need to wait for space in the memory to be freed for it to be ready
-            let mut need_critical = self.state.has_critical_path_data();
-            if let Some(critical) = entry.critical() {
-                if let Some(event_entry) = self.state.find_critical_entry(critical) {
-                    // Check to see if the critical entry happened before or after
-                    // the creation of this processor entry
+            if self.state.has_critical_path_data() {
+                // Do the critical path analysis for this instance
+                // There are three things that can delay an instance creation
+                // 1. The precondition event can be slow to trigger
+                // 2. The caller task can be slow to create it
+                // 3. We might need to wait for space in the memory to be freed for it to be ready
+                if let Some(critical) = entry.critical() {
+                    let mut unknown_critical_event = true;
+                    if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                        if event_entry.kind != EventEntryKind::UnknownEvent {
+                            unknown_critical_event = false;
+                            let creation_time = entry.creation_time();
+                            if creation_time < event_entry.trigger_time.unwrap() {
+                                // Created before critical event triggered so list both
+                                // fields separately since they wil be different
+                                if let Some(creator) = entry.creator() {
+                                    fields.push((
+                                        self.fields.creator,
+                                        self.generate_creator_link(creator, entry.creation_time()),
+                                        None,
+                                    ));
+                                }
+                                fields.push((
+                                    self.fields.critical,
+                                    self.generate_critical_link(critical, event_entry),
+                                    self.select_critical_color(event_entry),
+                                ));
+                                // Record the time it took Realm to propagate the event trigger
+                                let trigger_time = event_entry.trigger_time.unwrap();
+                                let ready_time = entry.time_range.ready.unwrap();
+                                fields.push((
+                                    self.fields.trigger_time,
+                                    Field::Interval(ts::Interval::new(
+                                        trigger_time.into(),
+                                        ready_time.into(),
+                                    )),
+                                    self.select_interval_color(trigger_time, ready_time),
+                                ));
+                            } else {
+                                // Created after the critical event triggered so
+                                // the creator is the critical path
+                                if let Some(creator) = entry.creator() {
+                                    fields.push((
+                                        self.fields.critical,
+                                        self.generate_critical_creator_link(creator, creation_time),
+                                        Some(Color32::RED),
+                                    ));
+                                } else {
+                                    let creation_ts: ts::Timestamp = creation_time.into();
+                                    fields.push((
+                                        self.fields.critical,
+                                        Field::String(format!(
+                                            "Unknown creator at {}",
+                                            creation_ts
+                                        )),
+                                        Some(Color32::BLUE),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if unknown_critical_event {
+                        if let Some(creator) = entry.creator() {
+                            fields.push((
+                                self.fields.creator,
+                                self.generate_creator_link(creator, entry.creation_time()),
+                                None,
+                            ));
+                        }
+                        fields.push((
+                            self.fields.critical,
+                            self.generate_unknown_event_field(critical),
+                            None,
+                        ));
+                    }
+                } else {
+                    // No critical event so check conditions 2 and 3
                     let creation_time = entry.creation_time();
-                    // If we don't know about the critical event then we always want to
-                    // report that as the critical event so the user is aware of it
-                    if event_entry.kind == EventEntryKind::UnknownEvent
-                        || creation_time <= event_entry.trigger_time.unwrap()
-                    {
-                        // Created before critical event triggered so list both
-                        // fields separately since they wil be different
+                    if entry.allocated_immediately() {
+                        // Critical path is the creator
+                        if let Some(creator) = entry.creator() {
+                            fields.push((
+                                self.fields.critical,
+                                self.generate_critical_creator_link(creator, creation_time),
+                                None,
+                            ));
+                        } else {
+                            let creation_ts: ts::Timestamp = creation_time.into();
+                            fields.push((
+                                self.fields.critical,
+                                Field::String(format!("Unknown creator at {}", creation_ts)),
+                                Some(Color32::BLUE),
+                            ));
+                        }
+                    } else {
+                        // Critical path is waiting for other instances to be deleted
+                        let ready_time = entry.time_range.ready.unwrap();
+                        let ready_ts: ts::Timestamp = ready_time.into();
+                        fields.push((
+                            self.fields.critical,
+                            Field::String(format!(
+                                "Waiting for deallocation of other instances until {}",
+                                ready_ts
+                            )),
+                            Some(Color32::GOLD),
+                        ));
+                        // Record the deferred time here for how long we waited for
+                        // the instance to be ready
+                        fields.push((
+                            self.fields.deferred_time,
+                            Field::Interval(ts::Interval::new(creation_time.into(), ready_ts)),
+                            self.select_interval_color(creation_time, ready_time),
+                        ));
+                        // Still need to record the creator
                         if let Some(creator) = entry.creator() {
                             let creation_time = entry.creation_time();
                             fields.push((
@@ -2096,75 +2226,16 @@ impl StateDataSource {
                                 None,
                             ));
                         }
-                        fields.push((
-                            self.fields.critical,
-                            self.generate_critical_link(critical, event_entry),
-                            self.select_critical_color(event_entry),
-                        ));
-                        if event_entry.kind != EventEntryKind::UnknownEvent {
-                            // Record the time it took Realm to propagate the event trigger
-                            let trigger_time = event_entry.trigger_time.unwrap();
-                            let ready_time = entry.time_range.ready.unwrap();
-                            fields.push((
-                                self.fields.trigger_time,
-                                Field::Interval(ts::Interval::new(
-                                    trigger_time.into(),
-                                    ready_time.into(),
-                                )),
-                                self.select_interval_color(trigger_time, ready_time),
-                            ));
-                        }
-                        need_critical = false;
                     }
                 }
-            }
-            if need_critical {
-                // No critical event so check conditions 2 and 3
-                let creation_time = entry.creation_time();
-                if entry.allocated_immediately() {
-                    // Critical path is the creator
-                    if let Some(creator) = entry.creator() {
-                        fields.push((
-                            self.fields.critical,
-                            self.generate_critical_creator_link(creator, creation_time),
-                            None,
-                        ));
-                    } else {
-                        let creation_ts: ts::Timestamp = creation_time.into();
-                        fields.push((
-                            self.fields.critical,
-                            Field::String(format!("Unknown creator at {}", creation_ts)),
-                            Some(Color32::BLUE),
-                        ));
-                    }
-                } else {
-                    // Critical path is waiting for other instances to be deleted
-                    let ready_time = entry.time_range.ready.unwrap();
-                    let ready_ts: ts::Timestamp = ready_time.into();
+            } else {
+                // No critical path data so just record the creator
+                if let Some(creator) = entry.creator() {
                     fields.push((
-                        self.fields.critical,
-                        Field::String(format!(
-                            "Waiting for deallocation of other instances until {}",
-                            ready_ts
-                        )),
-                        Some(Color32::GOLD),
+                        self.fields.creator,
+                        self.generate_creator_link(creator, entry.creation_time()),
+                        None,
                     ));
-                    // Record the deferred time here for how long we waited for
-                    // the instance to be ready
-                    fields.push((
-                        self.fields.deferred_time,
-                        Field::Interval(ts::Interval::new(creation_time.into(), ready_ts)),
-                        self.select_interval_color(creation_time, ready_time),
-                    ));
-                    // Still need to record the creator
-                    if let Some(creator) = entry.creator() {
-                        let creation_time = entry.creation_time();
-                        fields.push((
-                            self.fields.creator,
-                            self.generate_creator_link(creator, creation_time),
-                            None,
-                        ));
-                    }
                 }
             }
 
@@ -2426,52 +2497,69 @@ impl StateDataSource {
             }
             let time_range = entry.time_range();
             if let Some(creator) = entry.creator() {
-                if let Some(critical) = entry.critical() {
-                    if let Some(event_entry) = self.state.find_critical_entry(critical) {
-                        // Check to see if the critical entry happened before or after
-                        // the creation of this processor entry
-                        let creation_time = entry.creation_time();
-                        // If we don't know about the critical event then we always
-                        // report that as the critical path so the user is aware
-                        // that there is a missing critical path
-                        if event_entry.kind != EventEntryKind::UnknownEvent
-                            && event_entry.trigger_time.unwrap() < creation_time
-                        {
-                            // Created after critical event triggered
-                            fields.push((
-                                self.fields.critical,
-                                self.generate_critical_creator_link(creator, creation_time),
-                                Some(Color32::RED),
-                            ));
-                        } else {
-                            // Created before critical event triggered so list both
-                            // fields separately since they will be different
+                if self.state.has_critical_path_data() {
+                    if let Some(critical) = entry.critical() {
+                        let mut unknown_critical_event = true;
+                        if let Some(event_entry) = self.state.find_critical_entry(critical) {
+                            if event_entry.kind != EventEntryKind::UnknownEvent {
+                                unknown_critical_event = false;
+                                // Check to see if the critical entry happened before or after
+                                // the creation of this processor entry
+                                let creation_time = entry.creation_time();
+                                if creation_time < event_entry.trigger_time.unwrap() {
+                                    // Created before critical event triggered so list both
+                                    // fields separately since they wil be different
+                                    fields.push((
+                                        self.fields.creator,
+                                        self.generate_creator_link(creator, creation_time),
+                                        None,
+                                    ));
+                                    // Critical path is critical event triggering
+                                    fields.push((
+                                        self.fields.critical,
+                                        self.generate_critical_link(critical, event_entry),
+                                        self.select_critical_color(event_entry),
+                                    ));
+                                    // Record the time it took Realm to propagate the event trigger
+                                    let trigger_time = event_entry.trigger_time.unwrap();
+                                    let ready_time = time_range.ready.unwrap();
+                                    fields.push((
+                                        self.fields.trigger_time,
+                                        Field::Interval(ts::Interval::new(
+                                            trigger_time.into(),
+                                            ready_time.into(),
+                                        )),
+                                        self.select_interval_color(trigger_time, ready_time),
+                                    ));
+                                } else {
+                                    // Created after the critical event triggered so
+                                    // the creator is the critical path
+                                    fields.push((
+                                        self.fields.critical,
+                                        self.generate_critical_creator_link(
+                                            creator,
+                                            entry.creation_time(),
+                                        ),
+                                        Some(Color32::RED),
+                                    ));
+                                }
+                            }
+                        }
+                        if unknown_critical_event {
+                            // Unknown critical event
                             fields.push((
                                 self.fields.creator,
-                                self.generate_creator_link(creator, creation_time),
+                                self.generate_creator_link(creator, entry.creation_time()),
                                 None,
                             ));
                             fields.push((
                                 self.fields.critical,
-                                self.generate_critical_link(critical, event_entry),
-                                self.select_critical_color(event_entry),
+                                self.generate_unknown_event_field(critical),
+                                None,
                             ));
-                            if event_entry.kind != EventEntryKind::UnknownEvent {
-                                // Record the time it took Realm to propagate the event trigger
-                                let trigger_time = event_entry.trigger_time.unwrap();
-                                let ready_time = time_range.ready.unwrap();
-                                fields.push((
-                                    self.fields.trigger_time,
-                                    Field::Interval(ts::Interval::new(
-                                        trigger_time.into(),
-                                        ready_time.into(),
-                                    )),
-                                    self.select_interval_color(trigger_time, ready_time),
-                                ));
-                            }
                         }
                     } else {
-                        // No critical entry so assume creation was the critical path
+                        // No critical event means creator is the critical path
                         fields.push((
                             self.fields.critical,
                             self.generate_critical_creator_link(creator, entry.creation_time()),
@@ -2479,32 +2567,41 @@ impl StateDataSource {
                         ));
                     }
                 } else {
-                    // No critical event so the creation was definitely the critical path
+                    // No critical path data so just report the creator
                     fields.push((
-                        self.fields.critical,
-                        self.generate_critical_creator_link(creator, entry.creation_time()),
+                        self.fields.creator,
+                        self.generate_creator_link(creator, entry.creation_time()),
                         None,
                     ));
                 }
-            } else if let Some(critical) = entry.critical() {
+            } else if self.state.has_critical_path_data() {
                 // No creator so if we have critical entry that is the critical path
-                if let Some(event_entry) = self.state.find_critical_entry(critical) {
-                    fields.push((
-                        self.fields.critical,
-                        self.generate_critical_link(critical, event_entry),
-                        self.select_critical_color(event_entry),
-                    ));
-                    if event_entry.kind != EventEntryKind::UnknownEvent {
-                        let trigger_time = event_entry.trigger_time.unwrap();
-                        let ready_time = time_range.ready.unwrap();
-                        // Record the time it took Realm to propagate the event trigger
+                if let Some(critical) = entry.critical() {
+                    if let Some(event_entry) = self.state.find_critical_entry(critical) {
                         fields.push((
-                            self.fields.trigger_time,
-                            Field::Interval(ts::Interval::new(
-                                trigger_time.into(),
-                                ready_time.into(),
-                            )),
-                            self.select_interval_color(trigger_time, ready_time),
+                            self.fields.critical,
+                            self.generate_critical_link(critical, event_entry),
+                            self.select_critical_color(event_entry),
+                        ));
+                        if event_entry.kind != EventEntryKind::UnknownEvent {
+                            let trigger_time = event_entry.trigger_time.unwrap();
+                            let ready_time = time_range.ready.unwrap();
+                            // Record the time it took Realm to propagate the event trigger
+                            fields.push((
+                                self.fields.trigger_time,
+                                Field::Interval(ts::Interval::new(
+                                    trigger_time.into(),
+                                    ready_time.into(),
+                                )),
+                                self.select_interval_color(trigger_time, ready_time),
+                            ));
+                        }
+                    } else {
+                        // Did not have the critical event precondition so report it
+                        fields.push((
+                            self.fields.critical,
+                            self.generate_unknown_event_field(critical),
+                            None,
                         ));
                     }
                 }

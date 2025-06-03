@@ -664,6 +664,12 @@ void ThreadProfiler::record_external_event(Realm::Event event,
     // Take the timing measurement of when this happened first
     ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
     info.triggered = Realm::Clock::current_time_in_nanoseconds();
+    // Doing created after triggered makes it look like the event was
+    // ready before it was created, which it probably was since it
+    // triggered almost immediately after it was created, so while
+    // not strictly accurate it reflects what actually happened so
+    // the profiler can give good feedback
+    info.created = Realm::Clock::current_time_in_nanoseconds();
     info.external = event;
     info.fevent = get_fevent();
     info.provenance = profiler.find_provenance_id(prov);
@@ -1131,6 +1137,7 @@ void ThreadProfiler::process_external(ProfilingResponse &response)
     std::abort();
 
   ExternalEventInfo &info = external_event_infos.emplace_back(ExternalEventInfo());
+  info.created = timeline.create_time;
   info.triggered = timeline.ready_time;
   info.external = args->external;
   info.fevent = args->fevent;
@@ -1741,6 +1748,7 @@ void Profiler::log_preamble(void) const {
      << "id:" << EXTERNAL_EVENT_INFO_ID << delim
      << "external:unsigned long long:" << sizeof(Event) << delim
      << "fevent:unsigned long long:" << sizeof(Event) << delim
+     << "created:timestamp_t:" << sizeof(timestamp_t) << delim
      << "trigger:timestamp_t:" << sizeof(timestamp_t) << delim
      << "prov:unsigned long long:" << sizeof(unsigned long long) << "}" << std::endl;
 
@@ -1974,6 +1982,7 @@ void Profiler::serialize(const ThreadProfiler::ExternalEventInfo &info) const
   pr_fwrite(f, (char *)&ID, sizeof(ID));
   pr_fwrite(f, (char *)&info.external.id, sizeof(info.external.id));
   pr_fwrite(f, (char *)&info.fevent.id, sizeof(info.fevent.id));
+  pr_fwrite(f, (char *)&info.created, sizeof(info.triggered));
   pr_fwrite(f, (char *)&info.triggered, sizeof(info.triggered));
   pr_fwrite(f, (char *)&info.provenance, sizeof(info.provenance));
 }
