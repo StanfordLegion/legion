@@ -30,6 +30,10 @@ cache: &global_cache
   - key: "external-deps"
     paths:
       - $DEP_CACHE
+  - key: "cargo"
+    paths:
+      - $HOME/.cargo
+      - $CI_PROJECT_DIR/tools/legion_prof_rs/target
 
 
 # Local variables (included on a case-by-case basis in each job):
