@@ -9,6 +9,8 @@ pub mod common;
     feature = "viewer"
 ))]
 pub mod data_source;
+#[cfg(feature = "duckdb")]
+pub mod duckdb;
 pub mod dump;
 #[cfg(feature = "nvtxw")]
 pub mod nvtxw;
