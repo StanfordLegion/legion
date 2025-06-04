@@ -57,6 +57,7 @@ TESTS += version_check
 TESTS += proc_group
 TESTS += deppart
 TESTS += scatter
+TESTS += barrier_arrivals
 TESTS += compqueue
 TESTS += event_subscribe
 #TESTS += deferred_allocs

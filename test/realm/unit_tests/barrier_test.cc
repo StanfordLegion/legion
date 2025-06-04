@@ -30,6 +30,8 @@ public:
   virtual void trigger(NodeID target, ID::IDType barrier_id, const void *data,
                        size_t datalen, size_t max_payload_size = 0)
   {
+    payload_size = datalen;
+    buf = data;
     sent_trigger_count++;
   }
 
@@ -50,6 +52,8 @@ public:
   int sent_subscription_count = 0;
   int sent_notification_count = 0;
   size_t max_rec_size;
+  size_t payload_size = 0;
+  const void *buf = nullptr;
 };
 
 class BarrierTest : public ::testing::Test {
@@ -441,6 +445,47 @@ TEST_F(BarrierTest, HandleRemoteTriggerHigherPrevGen)
                                 TimeLimit::responsive());
 
   EXPECT_EQ(barrier.generation.load(), 0);
+}
+
+TEST_F(BarrierTest, HandleRemoteTriggerCheckPayload)
+{
+  NodeID owner = 1;
+  auto barrier_id = ID::make_barrier(owner, 0, 0);
+  EventImpl::gen_t trigger_gen = 1;
+  EventImpl::gen_t previous_gen = 0;
+  EventImpl::gen_t first_gen = 0;
+  NodeID migration_target = owner;
+  unsigned base_count = 2;
+
+  BarrierImpl barrier(barrier_comm);
+
+  int broadcast_index = 0;
+
+  barrier.init(barrier_id, owner);
+  barrier.base_arrival_count = 2;
+
+  BarrierTriggerPayload payload;
+  RemoteNotification rn;
+  rn.trigger_gen = trigger_gen;
+  rn.node = 4;
+  rn.previous_gen = 0;
+  payload.remotes.emplace_back(rn);
+
+  Serialization::DynamicBufferSerializer dbs(payload.remotes.size() *
+                                             sizeof(RemoteNotification));
+  bool ok = dbs & payload;
+  assert(ok);
+
+  barrier.handle_remote_trigger(
+      0, 0, trigger_gen, previous_gen, first_gen, 0, migration_target, broadcast_index,
+      base_count, dbs.get_buffer(), dbs.bytes_used(), TimeLimit::responsive());
+
+  EXPECT_TRUE(ok);
+
+  EXPECT_EQ(barrier.generation.load(), trigger_gen);
+  ASSERT_GE(barrier_comm->payload_size, sizeof(BarrierTriggerMessageArgs));
+  ASSERT_EQ(dbs.bytes_used(),
+            barrier_comm->payload_size - sizeof(BarrierTriggerMessageArgs));
 }
 
 class ReductionOpIntAdd {

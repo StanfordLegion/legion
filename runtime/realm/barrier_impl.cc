@@ -872,13 +872,9 @@ namespace Realm {
                                                              POISON_FIXME, work_until);
       }
 
-      // now do remote notifications
-      // barrier_comm->trigger((*it).node, me.id, tgt_trigger_gen, (*it).previous_gen,
-      // first_generation, redop_id, migration_target,
-      // base_arrival_count, data, datalen);
-
       if(!remote_notifications.empty()) {
         AutoLock<> al(mutex);
+
         broadcast_trigger(remote_notifications, remote_broadcast_targets, oldest_previous,
                           broadcast_previous, first_generation, migration_target,
                           base_arrival_count, redop_id, final_values_copy, /*datalen=*/0);
@@ -1291,14 +1287,18 @@ namespace Realm {
 
     if(!payload.remotes.empty()) {
       std::vector<RemoteNotification> ordered_notifications = payload.remotes;
-
       std::vector<NodeID> broadcast_targets;
       get_broadcast_targets(broadcast_index, ordered_notifications.size(),
                             broadcast_radix, broadcast_targets);
 
+      const void *red_data =
+          payload.reduction.empty() ? nullptr : payload.reduction.data();
+      size_t red_size = payload.reduction.size();
+
       broadcast_trigger(ordered_notifications, broadcast_targets,
                         /*oldest_previous=*/0, /*broadcast_previous=*/0, first_gen,
-                        migration_target, base_arrival_count, redop_id, data, datalen);
+                        migration_target, base_arrival_count, redop_id, red_data,
+                        red_size);
     }
 
     // we'll probably end up with a list of local waiters to notify
