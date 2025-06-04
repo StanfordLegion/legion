@@ -800,7 +800,7 @@ namespace Realm {
       // No need for the lock since we're not racing with append to the free list
       EventWaiter *waiter = free_preconditions.pop_front();
       if(waiter != nullptr) {
-        return checked_cast<MergeEventPrecondition *>(waiter);
+        return static_cast<MergeEventPrecondition *>(waiter);
       }
     } else
 #ifndef TSAN_ENABLED
@@ -812,7 +812,7 @@ namespace Realm {
         AutoLock<> a(event_impl->mutex);
         EventWaiter *waiter = free_preconditions.pop_front();
         if(waiter != nullptr) {
-          return checked_cast<MergeEventPrecondition *>(waiter);
+          return static_cast<MergeEventPrecondition *>(waiter);
         }
       }
     overflow_preconditions.resize(overflow_preconditions.size() + 1);
@@ -892,7 +892,7 @@ namespace Realm {
         } else {
           // Push the preconditions that we used back onto the list
           MergeEventPrecondition *head =
-              checked_cast<MergeEventPrecondition *>(free_preconditions.front());
+              static_cast<MergeEventPrecondition *>(free_preconditions.front());
           while(head != inline_preconditions) {
             free_preconditions.push_front(--head);
           }
