@@ -2235,6 +2235,15 @@ namespace Realm {
         runtime->add_proc_mem_affinity(pma);
       }
 
+      if(fb_dmem) {
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = fb_dmem->me;
+        pma.bandwidth = info->logical_peer_bandwidth[info->index];
+        pma.latency = info->logical_peer_latency[info->index];
+        runtime->add_proc_mem_affinity(pma);
+      }
+
       for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
           it != pinned_sysmems.end(); ++it) {
         // no processor affinity to IB memories
