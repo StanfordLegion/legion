@@ -83,6 +83,11 @@ namespace Realm {
       GenEventImpl *create_genevent();
       void free_genevent(GenEventImpl *);
 
+      // A helper function to get the kind of a processor when we only have the processor
+      // ID
+      static Processor::Kind get_processor_kind(RuntimeImpl *runtime_impl,
+                                                Processor processor);
+
     protected:
       friend class Task;
 
@@ -411,6 +416,7 @@ namespace Realm {
       // Assume zero initialized
       extern REALM_THREAD_LOCAL Processor current_processor;
     }
+
 }; // namespace Realm
 
 #endif // ifndef REALM_PROC_IMPL_H

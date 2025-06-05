@@ -58,15 +58,12 @@ namespace Realm {
 
     Memory::Kind Memory::kind(void) const
     {
-      return (*this == Memory::NO_MEMORY)
-                 ? NO_MEMKIND
-                 : get_runtime()->get_memory_impl(*this)->get_kind();
+      return MemoryImpl::get_memory_kind(get_runtime(), *this);
     }
 
     size_t Memory::capacity(void) const
     {
-      return (*this == Memory::NO_MEMORY) ? 0
-                                          : get_runtime()->get_memory_impl(*this)->size;
+      return MemoryImpl::get_memory_size(get_runtime(), *this);
     }
 
     // reports a problem with a memory in general (this is primarily for fault injection)
@@ -2127,6 +2124,7 @@ namespace Realm {
 							 const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
+    assert(impl != nullptr && "invalid memory handle");
     RegionInstanceImpl *inst = impl->get_instance(args.inst);
 
     // deserialize the layout
@@ -2171,6 +2169,7 @@ namespace Realm {
 							   const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
+    assert(impl != nullptr && "invalid memory handle");
     RegionInstanceImpl *inst = impl->get_instance(args.inst);
 
     impl->release_storage_deferrable(inst,
@@ -2196,5 +2195,39 @@ namespace Realm {
   ActiveMessageHandlerReg<MemStorageAllocResponse> mem_storage_alloc_response_handler;
   ActiveMessageHandlerReg<MemStorageReleaseRequest> mem_storage_release_request_handler;
   ActiveMessageHandlerReg<MemStorageReleaseResponse> mem_storage_release_response_handler;
+
+  /* static */ Memory::Kind MemoryImpl::get_memory_kind(const RuntimeImpl *runtime_impl,
+                                                        Memory memory)
+  {
+    if(memory == Memory::NO_MEMORY) {
+      return Memory::NO_MEMKIND;
+    }
+    if(runtime_impl == nullptr) {
+      return Memory::NO_MEMKIND;
+    }
+    MemoryImpl *impl = runtime_impl->get_memory_impl(memory);
+    if(impl == nullptr) {
+      return Memory::NO_MEMKIND;
+    }
+    // Becareful: use get_kind() instead of kind because we need lowlevel kind of
+    // MemoryImpl
+    return impl->get_kind();
+  }
+
+  /* static */ size_t MemoryImpl::get_memory_size(const RuntimeImpl *runtime_impl,
+                                                  Memory memory)
+  {
+    if(memory == Memory::NO_MEMORY) {
+      return 0;
+    }
+    if(runtime_impl == nullptr) {
+      return 0;
+    }
+    MemoryImpl *impl = runtime_impl->get_memory_impl(memory);
+    if(impl == nullptr) {
+      return 0;
+    }
+    return impl->size;
+  }
 
 }; // namespace Realm

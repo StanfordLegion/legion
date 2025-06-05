@@ -63,7 +63,7 @@ namespace Realm {
   };
 
   struct MachineNodeInfo {
-    MachineNodeInfo(int _node);
+    MachineNodeInfo(int _node, RuntimeImpl *_runtime_impl);
     ~MachineNodeInfo(void);
     bool add_processor(Processor p);
     bool add_memory(Memory m);
@@ -71,11 +71,15 @@ namespace Realm {
     bool add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
     bool add_process_info(const Machine::ProcessInfo &proc_info);
 
-    void update_kind_maps();
+    void update_kind_maps(void);
 
     int node;
 
-    Machine::ProcessInfo *process_info;
+    // The runtime_impl is not const because we calls get_processor_impl(), which is not
+    // const but the runtime_impl should not be modified in this class
+    RuntimeImpl *runtime_impl{nullptr};
+
+    Machine::ProcessInfo *process_info{nullptr};
 
     std::map<Processor, MachineProcInfo *> procs;
     std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> > proc_by_kind;
@@ -88,6 +92,8 @@ namespace Realm {
     public:
       MachineImpl(RuntimeImpl *_runtime_impl);
       ~MachineImpl(void);
+
+      RuntimeImpl *get_runtime_impl(void) const;
 
       void get_all_memories(std::set<Memory>& mset) const;
       void get_all_processors(std::set<Processor>& pset) const;
@@ -161,8 +167,8 @@ namespace Realm {
 
       virtual QueryPredicate<T,T2> *clone(void) const = 0;
 
-      virtual bool matches_predicate(MachineImpl *machine, T thing,
-				     const T2 *info = 0) const = 0;
+      virtual bool matches_predicate(const MachineImpl *machine, T thing,
+                                     const T2 *info = 0) const = 0;
     };
 
     typedef QueryPredicate<Processor,MachineProcInfo> ProcQueryPredicate;
@@ -173,8 +179,8 @@ namespace Realm {
 
       virtual ProcQueryPredicate *clone(void) const;
 
-      virtual bool matches_predicate(MachineImpl *machine, Processor thing,
-				     const MachineProcInfo *info = 0) const;
+      virtual bool matches_predicate(const MachineImpl *machine, Processor thing,
+                                     const MachineProcInfo *info = 0) const;
 
     protected:
       Memory memory;
@@ -188,8 +194,8 @@ namespace Realm {
 
       virtual ProcQueryPredicate *clone(void) const;
 
-      virtual bool matches_predicate(MachineImpl *machine, Processor thing,
-				     const MachineProcInfo *info = 0) const;
+      virtual bool matches_predicate(const MachineImpl *machine, Processor thing,
+                                     const MachineProcInfo *info = 0) const;
 
     protected:
       Memory memory;
@@ -210,6 +216,7 @@ namespace Realm {
    class ProcessorQueryImpl {
     public:
       ProcessorQueryImpl(const Machine& _machine);
+      ProcessorQueryImpl(const MachineImpl *_machine_impl);
 
       static unsigned int init, cache_invalid_count;
       static bool global_valid_cache;
@@ -243,7 +250,7 @@ namespace Realm {
 
     protected:
       atomic<int> references;
-      MachineImpl *machine;
+      const MachineImpl *machine;
       bool is_restricted_node;
       int restricted_node_id;
       bool is_restricted_kind;
@@ -270,8 +277,8 @@ namespace Realm {
 
       virtual MemoryQueryPredicate *clone(void) const;
 
-      virtual bool matches_predicate(MachineImpl *machine, Memory thing,
-				     const MachineMemInfo *info = 0) const;
+      virtual bool matches_predicate(const MachineImpl *machine, Memory thing,
+                                     const MachineMemInfo *info = 0) const;
 
     protected:
       Processor proc;
@@ -285,8 +292,8 @@ namespace Realm {
 
       virtual MemoryQueryPredicate *clone(void) const;
 
-      virtual bool matches_predicate(MachineImpl *machine, Memory thing,
-				     const MachineMemInfo *info = 0) const;
+      virtual bool matches_predicate(const MachineImpl *machine, Memory thing,
+                                     const MachineMemInfo *info = 0) const;
 
     protected:
       Memory memory;
@@ -300,8 +307,8 @@ namespace Realm {
 
       virtual MemoryQueryPredicate *clone(void) const;
 
-      virtual bool matches_predicate(MachineImpl *machine, Memory thing,
-				     const MachineMemInfo *info = 0) const;
+      virtual bool matches_predicate(const MachineImpl *machine, Memory thing,
+                                     const MachineMemInfo *info = 0) const;
 
     protected:
       Processor proc;
@@ -315,8 +322,8 @@ namespace Realm {
 
       virtual MemoryQueryPredicate *clone(void) const;
 
-      virtual bool matches_predicate(MachineImpl *machine, Memory thing,
-				     const MachineMemInfo *info = 0) const;
+      virtual bool matches_predicate(const MachineImpl *machine, Memory thing,
+                                     const MachineMemInfo *info = 0) const;
 
     protected:
       Memory memory;
@@ -327,6 +334,8 @@ namespace Realm {
     class MemoryQueryImpl {
     public:
       MemoryQueryImpl(const Machine& _machine);
+      MemoryQueryImpl(const MachineImpl *_machine_impl);
+
       static unsigned int init, cache_invalid_count;
       static bool global_valid_cache;
       static std::map<Memory::Kind, std::vector<Memory> > _mem_cache;
@@ -359,7 +368,7 @@ namespace Realm {
 
     protected:
       atomic<int> references;
-      MachineImpl *machine;
+      const MachineImpl *machine;
       bool is_restricted_node;
       int restricted_node_id;
       bool is_restricted_kind;

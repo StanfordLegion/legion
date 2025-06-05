@@ -310,9 +310,9 @@ namespace Realm {
       BarrierImpl *get_barrier_impl(Event e);
 
       ReservationImpl *get_lock_impl(ID id);
-      MemoryImpl *get_memory_impl(ID id);
-      IBMemory *get_ib_memory_impl(ID id);
-      ProcessorImpl *get_processor_impl(ID id);
+      MemoryImpl *get_memory_impl(ID id) const;
+      IBMemory *get_ib_memory_impl(ID id) const;
+      ProcessorImpl *get_processor_impl(ID id); // TODO: refactor it to const version
       ProcessorGroupImpl *get_procgroup_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
@@ -333,7 +333,8 @@ namespace Realm {
       LockedMap<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
 
       atomic<size_t> num_untriggered_events;
-      Node *nodes;
+      Node *nodes; // TODO: replace with std::vector<Node>
+      size_t num_nodes;
       DynamicTable<LocalEventTableAllocator> local_events;
       LocalEventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;

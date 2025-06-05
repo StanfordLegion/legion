@@ -1079,7 +1079,8 @@ namespace Realm {
     RuntimeImpl::RuntimeImpl(void)
       : machine(0)
       , num_untriggered_events(0)
-      , nodes(0)
+      , nodes(nullptr)
+      , num_nodes(0)
       , local_event_free_list(0)
       , local_barrier_free_list(0)
       , local_reservation_free_list(0)
@@ -1862,6 +1863,7 @@ namespace Realm {
       BarrierImpl::barrier_adjustment_timestamp.store((((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1);
 
       nodes = new Node[Network::max_node_id + 1];
+      num_nodes = Network::max_node_id + 1;
 
       // configure the bit sets used by NodeSet
       {
@@ -3099,46 +3101,58 @@ namespace Realm {
       return 0;
     }
 
-    template <class T>
-    inline T *null_check(T *ptr)
+    MemoryImpl *RuntimeImpl::get_memory_impl(ID id) const
     {
-      assert(ptr != 0);
-      return ptr;
-    }
-
-    MemoryImpl *RuntimeImpl::get_memory_impl(ID id)
-    {
+      size_t mem_idx;
       if(id.is_memory()) {
-	return null_check(nodes[id.memory_owner_node()].memories[id.memory_mem_idx()]);
+        size_t node_idx = id.memory_owner_node();
+        if(node_idx >= num_nodes) {
+          return nullptr;
+        }
+        mem_idx = id.memory_mem_idx();
+        if(mem_idx < nodes[node_idx].memories.size()) {
+          return nodes[node_idx].memories[mem_idx];
+        }
+      } else if(id.is_ib_memory()) {
+        size_t node_idx = id.memory_owner_node();
+        if(node_idx >= num_nodes) {
+          return nullptr;
+        }
+        mem_idx = id.memory_mem_idx();
+        if(mem_idx < nodes[node_idx].ib_memories.size()) {
+          return nodes[node_idx].ib_memories[mem_idx];
+        }
+      } else if(id.is_instance()) {
+        size_t node_idx = id.instance_owner_node();
+        if(node_idx >= num_nodes) {
+          return nullptr;
+        }
+        mem_idx = id.instance_mem_idx();
+        if(mem_idx < nodes[node_idx].memories.size()) {
+          return nodes[node_idx].memories[mem_idx];
+        }
       }
 
-      if(id.is_ib_memory()) {
-        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
-      }
-#ifdef TODO
-      if(id.is_allocator()) {
-	return null_check(nodes[id.allocator.owner_node].memories[id.allocator.mem_idx]);
-      }
-#endif
-
-      if(id.is_instance()) {
-	return null_check(nodes[id.instance_owner_node()].memories[id.instance_mem_idx()]);
-      }
-
-      log_runtime.fatal() << "invalid memory handle: id=" << id;
-      assert(0 && "invalid memory handle");
-      return 0;
+      return nullptr;
     }
 
-    IBMemory *RuntimeImpl::get_ib_memory_impl(ID id)
+    IBMemory *RuntimeImpl::get_ib_memory_impl(ID id) const
     {
-      if(id.is_ib_memory()) {
-        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
+      if(!id.is_ib_memory()) {
+        return nullptr;
       }
 
-      log_runtime.fatal() << "invalid ib memory handle: id=" << id;
-      assert(0 && "invalid ib memory handle");
-      return 0;
+      size_t node_idx = id.memory_owner_node();
+      if(node_idx >= num_nodes) {
+        return nullptr;
+      }
+
+      size_t mem_idx = id.memory_mem_idx();
+      if(mem_idx >= nodes[node_idx].ib_memories.size()) {
+        return nullptr;
+      }
+
+      return nodes[node_idx].ib_memories[mem_idx];
     }
 
     ProcessorImpl *RuntimeImpl::get_processor_impl(ID id)
@@ -3147,11 +3161,20 @@ namespace Realm {
 	return get_procgroup_impl(id);
 
       if(!id.is_processor()) {
-	log_runtime.fatal() << "invalid processor handle: id=" << id;
-	assert(0 && "invalid processor handle");
+        return nullptr;
       }
 
-      return null_check(nodes[id.proc_owner_node()].processors[id.proc_proc_idx()]);
+      size_t node_idx = id.proc_owner_node();
+      if(node_idx >= num_nodes) {
+        return nullptr;
+      }
+
+      size_t proc_idx = id.proc_proc_idx();
+      if(proc_idx >= nodes[node_idx].processors.size()) {
+        return nullptr;
+      }
+
+      return nodes[node_idx].processors[proc_idx];
     }
 
     ProcessorGroupImpl *RuntimeImpl::get_procgroup_impl(ID id)
@@ -3195,6 +3218,7 @@ namespace Realm {
       }
 
       MemoryImpl *mem = get_memory_impl(id);
+      assert(mem != nullptr && "invalid memory handle");
 
       return mem->get_instance(id.convert<RegionInstance>());
 #if 0

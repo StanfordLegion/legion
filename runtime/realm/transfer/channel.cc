@@ -480,6 +480,7 @@ namespace Realm {
       const XferDesPortInfo &ii = inputs_info[i];
 
       p.mem = get_runtime()->get_memory_impl(ii.mem);
+      assert(p.mem != nullptr && "invalid memory handle");
       p.iter = ii.iter;
       if(ii.serdez_id != 0) {
         const CustomSerdezUntyped *op =
@@ -538,6 +539,7 @@ namespace Realm {
       const XferDesPortInfo &oi = outputs_info[i];
 
       p.mem = get_runtime()->get_memory_impl(oi.mem);
+      assert(p.mem != nullptr && "invalid memory handle");
       p.iter = oi.iter;
       if(oi.serdez_id != 0) {
         const CustomSerdezUntyped *op =
@@ -3210,6 +3212,7 @@ namespace Realm {
           {
             if(src_mem.exists() && (NodeID(ID(src_mem).memory_owner_node()) == node)) {
               MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+              assert(src_impl != nullptr && "invalid memory handle");
               // detection of rdma-ness depends on whether memory is
               //  local/remote to us, not the channel
               if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
@@ -3225,6 +3228,7 @@ namespace Realm {
           {
             if(src_mem.exists() && (NodeID(ID(src_mem).memory_owner_node()) != node)) {
               MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
+              assert(src_impl != nullptr && "invalid memory handle");
               // detection of rdma-ness depends on whether memory is
               //  local/remote to us, not the channel
               if(NodeID(ID(src_mem).memory_owner_node()) == Network::my_node_id) {
@@ -3278,6 +3282,7 @@ namespace Realm {
           {
             if(NodeID(ID(dst_mem).memory_owner_node()) == node) {
               MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+              assert(dst_impl != nullptr && "invalid memory handle");
               // detection of rdma-ness depends on whether memory is
               //  local/remote to us, not the channel
               if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {
@@ -3293,6 +3298,7 @@ namespace Realm {
           {
             if(NodeID(ID(dst_mem).memory_owner_node()) != node) {
               MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
+              assert(dst_impl != nullptr && "invalid memory handle");
               // detection of rdma-ness depends on whether memory is
               //  local/remote to us, not the channel
               if(NodeID(ID(dst_mem).memory_owner_node()) == Network::my_node_id) {

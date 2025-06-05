@@ -169,6 +169,12 @@ namespace Realm {
 
     Memory::Kind get_kind(void) const;
 
+    // A helper function to get the kind of a memory when we only have the memory ID
+    static Memory::Kind get_memory_kind(const RuntimeImpl *runtime_impl, Memory memory);
+
+    // A helper function to get the size of a memory when we only have the memory ID
+    static size_t get_memory_size(const RuntimeImpl *runtime_impl, Memory memory);
+
     // TODO: lift into a helper superclass?
     template <typename T>
     T *find_module_specific();
