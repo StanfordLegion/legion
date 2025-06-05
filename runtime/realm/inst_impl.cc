@@ -446,6 +446,7 @@ namespace Realm {
                                      const ProfilingRequestSet &prs, Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return inst_impl->redistrict(&instance, &layout, 1, &prs, wait_on);
     }
@@ -456,6 +457,7 @@ namespace Realm {
                                      Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
     }
@@ -507,6 +509,7 @@ namespace Realm {
       log_inst.info() << "instance destroyed: inst=" << *this << " wait_on=" << wait_on;
 
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       mem_impl->release_storage_deferrable(inst_impl, wait_on);
     }
@@ -530,6 +533,7 @@ namespace Realm {
     ExternalInstanceResource *RegionInstance::generate_resource_info(bool read_only) const
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return mem_impl->generate_resource_info(inst_impl,
 					      0, span<const FieldID>(),
@@ -541,6 +545,7 @@ namespace Realm {
 								     bool read_only) const
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return mem_impl->generate_resource_info(inst_impl,
 					      &space, fields,
@@ -600,6 +605,7 @@ namespace Realm {
       // the "field offset" picks up both the actual per-field offset but also
       //  the base of the instance itself
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       void *ptr = mem->get_inst_ptr(r_impl, 0,
 				    r_impl->metadata.layout->bytes_used);
       assert(ptr != 0);
@@ -630,6 +636,7 @@ namespace Realm {
       // the "field offset" picks up both the actual per-field offset but also
       //  the base of the instance itself
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       void *ptr = mem->get_inst_ptr(r_impl, 0,
 				    r_impl->metadata.layout->bytes_used);
       assert(ptr != 0);
@@ -663,6 +670,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       mem->get_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
     }
 
@@ -674,6 +682,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       mem->put_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
     }
 
@@ -687,6 +696,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
       if(redop == 0) {
 	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
@@ -725,6 +735,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
       if(redop == 0) {
 	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
@@ -763,6 +774,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       void *ptr = mem->get_inst_ptr(r_impl, offset, datalen);
       return ptr;
     }
@@ -827,6 +839,7 @@ namespace Realm {
 							 Event wait_on)
     {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(m_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
       // we can also fail if there is not enough space for the instance
@@ -966,6 +979,7 @@ namespace Realm {
 
       std::vector<RegionInstanceImpl *> insts(num_layouts);
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(m_impl != nullptr && "invalid memory handle");
 
       // TODO(apryakhin): Handle redistricting from non-owner node
       assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
@@ -1405,6 +1419,7 @@ namespace Realm {
       measurements.clear();
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(m_impl != nullptr && "invalid memory handle");
       m_impl->release_instance(me);
     }
 
@@ -1463,6 +1478,7 @@ namespace Realm {
 						      off_t field_offset)
     {
       MemoryImpl *mem = get_runtime()->get_memory_impl(memory);
+      assert(mem != nullptr && "invalid memory handle");
 
       // this exists for compatibility and assumes N=1, T=long long
       const InstanceLayout<1,long long> *inst_layout = dynamic_cast<const InstanceLayout<1,long long> *>(metadata.layout);

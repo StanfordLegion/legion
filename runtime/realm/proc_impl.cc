@@ -49,7 +49,7 @@ namespace Realm {
 
     Processor::Kind Processor::kind(void) const
     {
-      return get_runtime()->get_processor_impl(*this)->kind;
+      return ProcessorImpl::get_processor_kind(get_runtime(), *this);
     }
 
     void Processor::get_group_members(Processor *members, size_t& num_members) const
@@ -73,7 +73,9 @@ namespace Realm {
 
     int Processor::get_num_cores(void) const
     {
-      return get_runtime()->get_processor_impl(*this)->num_cores;
+      ProcessorImpl *proc_impl = get_runtime()->get_processor_impl(*this);
+      assert(proc_impl != nullptr && "invalid processor handle");
+      return proc_impl->num_cores;
     }
 
     Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
@@ -81,6 +83,7 @@ namespace Realm {
 			   Event wait_on, int priority) const
     {
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
+      assert(p != nullptr && "invalid processor handle");
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
       Event e = finish_event->current_event();
@@ -95,6 +98,7 @@ namespace Realm {
 			   Event wait_on, int priority) const
     {
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
+      assert(p != nullptr && "invalid processor handle");
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
       Event e = finish_event->current_event();
@@ -196,9 +200,10 @@ namespace Realm {
 	    it != local_procs.end();
 	    it++) {
 	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	  bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
-	  assert(ok); // TODO: poison completion instead
-	}
+          assert(p != nullptr && "invalid processor handle");
+          bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
+          assert(ok); // TODO: poison completion instead
+        }
       }
 
       for(std::map<NodeID, std::vector<Processor> >::const_iterator it = remote_procs.begin();
@@ -266,9 +271,10 @@ namespace Realm {
 	    it != local_procs.end();
 	    it++) {
 	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	  bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
-	  assert(ok); // TODO: poison completion instead
-	}
+          assert(p != nullptr && "invalid processor handle");
+          bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
+          assert(ok); // TODO: poison completion instead
+        }
       }
 
       if(global) {
@@ -687,10 +693,11 @@ namespace Realm {
 
       for(size_t i = 0; i < member_list.size(); i++) {
 	ProcessorImpl *m_impl = get_runtime()->get_processor_impl(member_list[i]);
-	members.push_back(m_impl);
-	// only the owner node actually connects up to the member processors
-	if(owner_node == Network::my_node_id)
-	  m_impl->add_to_group(this);
+        assert(m_impl != nullptr && "invalid processor handle");
+        members.push_back(m_impl);
+        // only the owner node actually connects up to the member processors
+        if(owner_node == Network::my_node_id)
+          m_impl->add_to_group(this);
       }
 
       members_requested = true;
@@ -891,16 +898,18 @@ namespace Realm {
 	  it != local_procs.end();
 	  it++) {
 	ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	bool ok = p->register_task(args.func_id, codedesc, userdata);
-	assert(ok); // TODO: poison completion instead
+        assert(p != nullptr && "invalid processor handle");
+        bool ok = p->register_task(args.func_id, codedesc, userdata);
+        assert(ok); // TODO: poison completion instead
       }
     } else {
       for(std::vector<Processor>::const_iterator it = procs.begin();
 	  it != procs.end();
 	  it++) {
 	ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	bool ok = p->register_task(args.func_id, codedesc, userdata);
-	assert(ok); // TODO: poison completion instead
+        assert(p != nullptr && "invalid processor handle");
+        bool ok = p->register_task(args.func_id, codedesc, userdata);
+        assert(ok); // TODO: poison completion instead
       }
     }
 
@@ -1423,6 +1432,7 @@ namespace Realm {
 						      size_t datalen)
   {
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
+    assert(p != nullptr && "invalid processor handle");
 
     log_task.debug() << "received remote spawn request:"
 		     << " func=" << args.func_id
@@ -1568,5 +1578,21 @@ namespace Realm {
   ActiveMessageHandlerReg<ProcGroupCreateMessage> proc_group_create_message_handler;
   ActiveMessageHandlerReg<ProcGroupDestroyMessage> proc_group_destroy_message_handler;
   ActiveMessageHandlerReg<ProcGroupDestroyAckMessage> proc_group_destroy_ack_message_handler;
+
+  /* static */ Processor::Kind
+  ProcessorImpl::get_processor_kind(RuntimeImpl *runtime_impl, Processor processor)
+  {
+    if(processor == Processor::NO_PROC) {
+      return Processor::NO_KIND;
+    }
+    if(runtime_impl == nullptr) {
+      return Processor::NO_KIND;
+    }
+    ProcessorImpl *proc_impl = runtime_impl->get_processor_impl(processor);
+    if(proc_impl == nullptr) {
+      return Processor::NO_KIND;
+    }
+    return proc_impl->kind;
+  }
 
 }; // namespace Realm

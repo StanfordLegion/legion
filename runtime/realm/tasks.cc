@@ -306,14 +306,15 @@ namespace Realm {
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  thread->start_perf_counters();
-	  get_runtime()->get_processor_impl(p)->execute_task(func_id,
-							     ByteArrayRef(argdata, arglen));
-	  thread->stop_perf_counters();
-	  thread->stop_operation(this);
-	  thread->record_perf_counters(measurements);
-	  mark_finished(true /*successful*/);
-	}
-	catch (const ExecutionException& e) {
+          ProcessorImpl *proc_impl = get_runtime()->get_processor_impl(p);
+          assert(proc_impl != nullptr && "invalid processor handle");
+          proc_impl->execute_task(func_id, ByteArrayRef(argdata, arglen));
+          thread->stop_perf_counters();
+          thread->stop_operation(this);
+          thread->record_perf_counters(measurements);
+          mark_finished(true /*successful*/);
+        }
+        catch(const ExecutionException &e) {
           thread->stop_perf_counters();
           e.populate_profiling_measurements(measurements);
           thread->stop_operation(this);
@@ -324,12 +325,13 @@ namespace Realm {
       {
 	// just run the task - if it completes, we assume it was successful
 	thread->start_perf_counters();
-	get_runtime()->get_processor_impl(p)->execute_task(func_id,
-							   ByteArrayRef(argdata, arglen));
-	thread->stop_perf_counters();
-	thread->stop_operation(this);
-	thread->record_perf_counters(measurements);
-	mark_finished(true /*successful*/);
+        ProcessorImpl *proc_impl = get_runtime()->get_processor_impl(p);
+        assert(proc_impl != nullptr && "invalid processor handle");
+        proc_impl->execute_task(func_id, ByteArrayRef(argdata, arglen));
+        thread->stop_perf_counters();
+        thread->stop_operation(this);
+        thread->record_perf_counters(measurements);
+        mark_finished(true /*successful*/);
       }
 
       // and clear the TLS when we're done
