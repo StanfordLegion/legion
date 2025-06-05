@@ -189,9 +189,9 @@ fn convert_value_format(name: String) -> Option<ValueFormat> {
     }
 }
 
-///
-/// Text parser utilities
-///
+//
+// Text parser utilities
+//
 
 fn newline(input: &[u8]) -> IResult<&[u8], ()> {
     let (input, _) = tag("\n")(input)?;
@@ -242,9 +242,9 @@ fn parse_text_type(input: &[u8]) -> IResult<&[u8], String> {
     Ok((input, String::from_utf8(name.to_owned()).unwrap()))
 }
 
-///
-/// Text parsers for the log file header
-///
+//
+// Text parsers for the log file header
+//
 
 fn parse_filetype(input: &[u8]) -> IResult<&[u8], (u32, u32)> {
     let (input, _) = tag("FileType: BinaryLegionProf v: ")(input)?;
@@ -279,9 +279,9 @@ fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
     Ok((input, RecordFormat { id, name, fields }))
 }
 
-///
-/// Binary parsers for basic types used in records
-///
+//
+// Binary parsers for basic types used in records
+//
 
 fn parse_array(input: &[u8], max_dim: i32) -> IResult<&[u8], Array> {
     assert!(max_dim > -1);
@@ -313,9 +313,9 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
     Ok((input, value))
 }
 
-///
-/// Binary parsers for type aliases
-///
+//
+// Binary parsers for type aliases
+//
 
 fn parse_option_event_id(input: &[u8]) -> IResult<&[u8], Option<EventID>> {
     map(le_u64, |x| NonZeroU64::new(x).map(EventID))(input)
@@ -381,9 +381,9 @@ fn parse_backtrace_id(input: &[u8]) -> IResult<&[u8], BacktraceID> {
     map(le_u64, BacktraceID)(input)
 }
 
-///
-/// Binary parsers for records
-///
+//
+// Binary parsers for records
+//
 
 fn parse_mapper_call_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, kind) = parse_mapper_call_kind_id(input)?;
@@ -1354,7 +1354,7 @@ fn parse_spawn_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 
 fn filter_record<'a>(
     record: &'a Record,
-    visible_nodes: &'a Vec<NodeID>,
+    visible_nodes: &'a [NodeID],
     node_id: Option<NodeID>,
 ) -> bool {
     assert!(!visible_nodes.is_empty());
@@ -1434,7 +1434,7 @@ fn parse_record<'a>(
 
 fn parse<'a>(
     input: &'a [u8],
-    visible_nodes: &'a Vec<NodeID>,
+    visible_nodes: &'a [NodeID],
     filter_input: bool,
 ) -> IResult<&'a [u8], Vec<Record>> {
     let (input, version) = parse_filetype(input)?;
@@ -1569,7 +1569,7 @@ fn read_file(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 
 pub fn deserialize<P: AsRef<Path>>(
     path: P,
-    visible_nodes: &Vec<NodeID>,
+    visible_nodes: &[NodeID],
     filter_input: bool,
 ) -> io::Result<Vec<Record>> {
     let s = read_file(path)?;

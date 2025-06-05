@@ -270,8 +270,7 @@ impl StateDataSource {
 
                 let mut proc_slots = Vec::new();
                 if node.is_some() {
-                    let mut proc_index = 0;
-                    for proc in procs {
+                    for (proc_index, proc) in procs.iter().enumerate() {
                         let proc_id = kind_id.child(proc_index as u64);
                         entry_map.insert(proc_id.clone(), EntryKind::Proc(*proc, *device));
                         proc_entries.insert(*proc, proc_id);
@@ -297,7 +296,6 @@ impl StateDataSource {
                             long_name,
                             max_rows,
                         });
-                        proc_index += 1;
                     }
                 }
 
@@ -411,7 +409,7 @@ impl StateDataSource {
 
                         let (src_name, src_short) = match chan {
                             ChanID::Copy { src, .. } | ChanID::Scatter { src } => {
-                                let kind = state.mems.get(&src).unwrap().kind;
+                                let kind = state.mems.get(src).unwrap().kind;
                                 let kind_first_letter =
                                     format!("{:?}", kind).chars().next().unwrap().to_lowercase();
                                 let src_node = src.node_id().0;
@@ -437,7 +435,7 @@ impl StateDataSource {
                             ChanID::Copy { dst, .. }
                             | ChanID::Fill { dst }
                             | ChanID::Gather { dst } => {
-                                let kind = state.mems.get(&dst).unwrap().kind;
+                                let kind = state.mems.get(dst).unwrap().kind;
                                 let kind_first_letter =
                                     format!("{:?}", kind).chars().next().unwrap().to_lowercase();
                                 let dst_node = dst.node_id().0;
@@ -701,7 +699,7 @@ impl StateDataSource {
     /// certain time interval. The sample is located in the middle of the
     /// interval.
     fn compute_sample_utilization(
-        step_utilization: &Vec<(Timestamp, f64)>,
+        step_utilization: &[(Timestamp, f64)],
         interval: ts::Interval,
         samples: u64,
     ) -> Vec<UtilPoint> {
@@ -720,7 +718,7 @@ impl StateDataSource {
             t < interval.stop
         }) + first_index;
         if last_index + 1 < step_utilization.len() {
-            last_index = last_index + 1;
+            last_index += 1;
         }
 
         let mut utilization = Vec::new();
@@ -753,7 +751,7 @@ impl StateDataSource {
                 sample_util += last_duration as f64 * last_u;
             }
 
-            sample_util = sample_util / (sample_stop - sample_start) as f64;
+            sample_util /= (sample_stop - sample_start) as f64;
             assert!(sample_util <= 1.0);
             utilization.push(UtilPoint {
                 time: Timestamp::from_ns((sample_start + sample_stop) / 2).into(),
@@ -1005,18 +1003,16 @@ impl StateDataSource {
                                             ),
                                         ));
                                     }
-                                } else {
-                                    if event.is_barrier() {
-                                        item_meta.fields.push(ItemField(
+                                } else if event.is_barrier() {
+                                    item_meta.fields.push(ItemField(
                                                 self.fields.critical,
                                                 Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.", event.0, event.node_id().0)), 
                                                 Some(Color32::BLUE)));
-                                    } else {
-                                        item_meta.fields.push(ItemField(
+                                } else {
+                                    item_meta.fields.push(ItemField(
                                                 self.fields.critical,
                                                 Field::String(format!("Waiting on unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.", event.0, event.node_id().0)),
                                                 Some(Color32::BLUE)));
-                                    }
                                 }
                             }
                             if find_previous_executing {
@@ -1170,7 +1166,7 @@ impl StateDataSource {
     fn generate_proc_link(&self, prof_uid: ProfUID) -> Field {
         // We should always be able to find the processor in this case
         let proc_id = self.state.prof_uid_proc.get(&prof_uid).unwrap();
-        let proc = self.state.procs.get(&proc_id).unwrap();
+        let proc = self.state.procs.get(proc_id).unwrap();
         let entry = proc.find_entry(prof_uid).unwrap();
         let op_name = entry.name(&self.state);
         Field::ItemLink(ItemLink {
@@ -1188,7 +1184,7 @@ impl StateDataSource {
         // Not all ProfUIDs will have a processor since some of them
         // might be referering to fevents that we never found
         if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-            let proc = self.state.procs.get(&proc_id).unwrap();
+            let proc = self.state.procs.get(proc_id).unwrap();
             // The prof_uid here is the fevent creator, find the entry that was actually
             // executing during this task at the point of creation
             let entry = proc.find_executing_entry(prof_uid, creation_time).unwrap();
@@ -1200,7 +1196,7 @@ impl StateDataSource {
                 entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
             })
         } else if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
-            let chan = self.state.chans.get(&chan_id).unwrap();
+            let chan = self.state.chans.get(chan_id).unwrap();
             let entry = chan.find_entry(prof_uid).unwrap();
             let op_name = entry.name(&self.state);
             Field::ItemLink(ItemLink {
@@ -1210,7 +1206,7 @@ impl StateDataSource {
                 entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
             })
         } else if let Some(mem_id) = self.state.insts.get(&prof_uid) {
-            let mem = self.state.mems.get(&mem_id).unwrap();
+            let mem = self.state.mems.get(mem_id).unwrap();
             let inst = mem.entry(prof_uid);
             let inst_name = inst.name(&self.state);
             Field::ItemLink(ItemLink {
@@ -1237,7 +1233,7 @@ impl StateDataSource {
         // might be referering to fevents that we never found
         let creation_ts: ts::Timestamp = creation_time.into();
         if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
-            let proc = self.state.procs.get(&proc_id).unwrap();
+            let proc = self.state.procs.get(proc_id).unwrap();
             // The prof_uid here is the fevent creator, find the entry that was actually
             // executing during this task at the point of creation
             let entry = proc.find_executing_entry(prof_uid, creation_time).unwrap();
@@ -1253,7 +1249,7 @@ impl StateDataSource {
                 entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
             })
         } else if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
-            let chan = self.state.chans.get(&chan_id).unwrap();
+            let chan = self.state.chans.get(chan_id).unwrap();
             let entry = chan.find_entry(prof_uid).unwrap();
             let op_name = entry.name(&self.state);
             let chan_name = chan.name(&self.state);
@@ -1267,7 +1263,7 @@ impl StateDataSource {
                 entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
             })
         } else if let Some(mem_id) = self.state.insts.get(&prof_uid) {
-            let mem = self.state.mems.get(&mem_id).unwrap();
+            let mem = self.state.mems.get(mem_id).unwrap();
             let inst = mem.entry(prof_uid);
             let inst_name = inst.name(&self.state);
             let mem_name = mem.name(&self.state);
@@ -1301,7 +1297,7 @@ impl StateDataSource {
         stop: Timestamp,
     ) -> Field {
         let proc_id = self.state.prof_uid_proc.get(&previous).unwrap();
-        let proc = self.state.procs.get(&proc_id).unwrap();
+        let proc = self.state.procs.get(proc_id).unwrap();
         let entry = proc.find_entry(previous).unwrap();
         let op_name = entry.name(&self.state);
         Field::ItemLink(ItemLink {
@@ -1339,7 +1335,7 @@ impl StateDataSource {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
                     let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let proc = self.state.procs.get(proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     let proc_name = proc.name(&self.state);
@@ -1365,7 +1361,7 @@ impl StateDataSource {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(chan_id) = self.state.prof_uid_chan.get(&prof_uid) {
                     let trigger_time: ts::Timestamp = event_entry.trigger_time.unwrap().into();
-                    let chan = self.state.chans.get(&chan_id).unwrap();
+                    let chan = self.state.chans.get(chan_id).unwrap();
                     let entry = chan.find_entry(prof_uid).unwrap();
                     let name = entry.name(&self.state);
                     let chan_name = chan.name(&self.state);
@@ -1395,7 +1391,7 @@ impl StateDataSource {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(mem_id) = self.state.insts.get(&prof_uid) {
                     // Compare the creation time with the performed time
-                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let mem = self.state.mems.get(mem_id).unwrap();
                     let inst = mem.entry(prof_uid);
                     let inst_name = inst.name(&self.state);
                     let mem_name = mem.name(&self.state);
@@ -1405,7 +1401,7 @@ impl StateDataSource {
                         // that created the physical instance was on the critical path
                         let creator_uid = inst.creator().unwrap();
                         if let Some(proc_id) = self.state.prof_uid_proc.get(&creator_uid) {
-                            let proc = self.state.procs.get(&proc_id).unwrap();
+                            let proc = self.state.procs.get(proc_id).unwrap();
                             let entry = proc.find_entry(creator_uid).unwrap();
                             let op_name = entry.name(&self.state);
                             let proc_name = proc.name(&self.state);
@@ -1453,13 +1449,13 @@ impl StateDataSource {
                     // If we're here that means that the instance redistricting by the caller
                     // is the thing on the critical path and not the event triggering for the
                     // redistricting to be done
-                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let mem = self.state.mems.get(mem_id).unwrap();
                     let inst = mem.entry(prof_uid);
                     let creator_uid = inst.creator().unwrap();
                     if let Some(proc_id) = self.state.prof_uid_proc.get(&creator_uid) {
                         let inst_name = inst.name(&self.state);
                         let mem_name = mem.name(&self.state);
-                        let proc = self.state.procs.get(&proc_id).unwrap();
+                        let proc = self.state.procs.get(proc_id).unwrap();
                         let entry = proc.find_entry(creator_uid).unwrap();
                         let op_name = entry.name(&self.state);
                         let proc_name = proc.name(&self.state);
@@ -1491,7 +1487,7 @@ impl StateDataSource {
                 let prof_uid = event_entry.creator.unwrap();
                 if let Some(mem_id) = self.state.insts.get(&prof_uid) {
                     // This means the critical path was the deletion of the instance
-                    let mem = self.state.mems.get(&mem_id).unwrap();
+                    let mem = self.state.mems.get(mem_id).unwrap();
                     let inst = mem.entry(prof_uid);
                     let stop_time: ts::Timestamp = inst.time_range.stop.unwrap().into();
                     let inst_name = inst.name(&self.state);
@@ -1527,7 +1523,7 @@ impl StateDataSource {
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
                     let trigger_time = event_entry.trigger_time.unwrap();
                     let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let proc = self.state.procs.get(proc_id).unwrap();
                     let entry = proc.find_entry(prof_uid).unwrap();
                     let op_name = entry.name(&self.state);
                     let proc_name = proc.name(&self.state);
@@ -1574,7 +1570,7 @@ impl StateDataSource {
                 if let Some(proc_id) = self.state.prof_uid_proc.get(&prof_uid) {
                     let trigger_time = event_entry.trigger_time.unwrap();
                     let trigger_ts: ts::Timestamp = trigger_time.into();
-                    let proc = self.state.procs.get(&proc_id).unwrap();
+                    let proc = self.state.procs.get(proc_id).unwrap();
                     // This prof UID is just the fevent prof UID, find the actual executing entry
                     let entry = proc.find_executing_entry(prof_uid, trigger_time).unwrap();
                     let op_name = entry.name(&self.state);
@@ -1687,21 +1683,17 @@ impl StateDataSource {
     }
 
     fn parse_provenance(provenance: &str) -> Field {
-        if let Ok(value) = serde_json::from_str(provenance) {
-            if let serde_json::Value::Array(vec) = value {
-                if let [_user, machine] = &*vec {
-                    if let serde_json::Value::Object(map) = machine {
-                        let mut result = Vec::new();
-                        for (k, v) in map {
-                            if let serde_json::Value::String(s) = v {
-                                result.push(Field::String(format!("{}: {}", k, s)));
-                            } else {
-                                result.push(Field::String(format!("{}: {}", k, v)));
-                            }
-                        }
-                        return Field::Vec(result);
+        if let Ok(serde_json::Value::Array(vec)) = serde_json::from_str(provenance) {
+            if let [_user, serde_json::Value::Object(map)] = &*vec {
+                let mut result = Vec::new();
+                for (k, v) in map {
+                    if let serde_json::Value::String(s) = v {
+                        result.push(Field::String(format!("{}: {}", k, s)));
+                    } else {
+                        result.push(Field::String(format!("{}: {}", k, v)));
                     }
                 }
+                return Field::Vec(result);
             }
         }
         Field::String(provenance.to_string())
@@ -1921,36 +1913,33 @@ impl StateDataSource {
                     _ => {}
                 }
             }
-            match entry.kind {
-                ProcEntryKind::MapperCall(mapper_id, mapper_proc, _) => {
-                    let mapper = self.state.mappers.get(&(mapper_id, mapper_proc)).unwrap();
+            if let ProcEntryKind::MapperCall(mapper_id, mapper_proc, _) = entry.kind {
+                let mapper = self.state.mappers.get(&(mapper_id, mapper_proc)).unwrap();
+                fields.push(ItemField(
+                    self.fields.mapper,
+                    Field::String(mapper.name.to_owned()),
+                    None,
+                ));
+                if let Some(proc) = self.state.procs.get(&mapper_proc) {
+                    let proc_name = format!(
+                        "Node {} {:?} {}",
+                        mapper_proc.node_id().0,
+                        proc.kind,
+                        mapper_proc.proc_in_node()
+                    );
                     fields.push(ItemField(
-                        self.fields.mapper,
-                        Field::String(mapper.name.to_owned()),
+                        self.fields.mapper_proc,
+                        Field::String(proc_name),
                         None,
                     ));
-                    if let Some(proc) = self.state.procs.get(&mapper_proc) {
-                        let proc_name = format!(
-                            "Node {} {:?} {}",
-                            mapper_proc.node_id().0,
-                            proc.kind,
-                            mapper_proc.proc_in_node()
-                        );
-                        fields.push(ItemField(
-                            self.fields.mapper_proc,
-                            Field::String(proc_name),
-                            None,
-                        ));
-                    } else {
-                        let proc_name = format!("Node {}", mapper_proc.node_id().0);
-                        fields.push(ItemField(
-                            self.fields.mapper_proc,
-                            Field::String(proc_name),
-                            None,
-                        ));
-                    }
+                } else {
+                    let proc_name = format!("Node {}", mapper_proc.node_id().0);
+                    fields.push(ItemField(
+                        self.fields.mapper_proc,
+                        Field::String(proc_name),
+                        None,
+                    ));
                 }
-                _ => {}
             }
             if let Some(ready) = entry.time_range.ready {
                 if let Some(create) = entry.time_range.create {
@@ -2040,15 +2029,15 @@ impl StateDataSource {
                 None,
             ));
 
-            let fspace = self.state.field_spaces.get(&fspace_id).unwrap();
-            let fspace_name = format!("{}", FSpaceShort(&fspace));
+            let fspace = self.state.field_spaces.get(fspace_id).unwrap();
+            let fspace_name = format!("{}", FSpaceShort(fspace));
             result.push(ItemField(
                 self.fields.inst_fspace,
                 Field::String(fspace_name),
                 None,
             ));
 
-            let fields = format!("{}", FieldsPretty(&fspace, inst));
+            let fields = format!("{}", FieldsPretty(fspace, inst));
             result.push(ItemField(
                 self.fields.inst_fields,
                 Field::String(fields),
