@@ -130,7 +130,7 @@ namespace Realm {
     bool is_active(void) const;
 
     void prepare_merger(Event _finish_event, bool _ignore_faults,
-                        bool _recyle_preconditions = false);
+                        std::optional<size_t> expected_events = std::optional<size_t>());
 
     void add_precondition(Event wait_for);
 
@@ -164,6 +164,7 @@ namespace Realm {
 
     GenEventImpl *event_impl;
     EventImpl::gen_t finish_gen;
+    unsigned precondition_offset;
     bool ignore_faults;
     bool recycle_preconditions;
     atomic<int> count_needed;

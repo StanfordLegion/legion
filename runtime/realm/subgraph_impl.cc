@@ -621,7 +621,8 @@ namespace Realm {
     GenEventImpl *event_impl = 0;
     if(num_final_events > 0) {
       event_impl = get_genevent_impl(finish_event);
-      event_impl->merger.prepare_merger(finish_event, false /*!ignore_faults*/);
+      event_impl->merger.prepare_merger(finish_event, false /*!ignore_faults*/,
+                                        num_final_events);
     }
 
     Event *preconds = static_cast<Event *>(alloca(max_preconditions *
@@ -668,7 +669,8 @@ namespace Realm {
 	  Event post_event = postconditions[it->op_index];
 	  if(num_preconds > 0) {
 	    GenEventImpl *post_impl = get_genevent_impl(post_event);
-            post_impl->merger.prepare_merger(post_event, false /*!ignore_faults*/);
+            post_impl->merger.prepare_merger(post_event, false /*!ignore_faults*/,
+                                             num_preconds);
             for(size_t i = 0; i < num_preconds; i++)
               post_impl->merger.add_precondition(preconds[i]);
             post_impl->merger.arm_merger();

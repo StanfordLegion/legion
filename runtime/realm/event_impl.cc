@@ -429,7 +429,7 @@ namespace Realm {
 
       // use the event's merger to wait for this precondition
       GenEventImpl *event_impl = get_genevent_impl(*this);
-      event_impl->merger.prepare_merger(*this, ignore_faults);
+      event_impl->merger.prepare_merger(*this, ignore_faults, 1);
       event_impl->merger.add_precondition(wait_on);
       event_impl->merger.arm_merger();
     }
@@ -730,31 +730,37 @@ namespace Realm {
     : event_impl(_event_impl)
     , count_needed(0)
   {
-    for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
+    for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
       inline_preconditions[i].merger = this;
-      free_preconditions.push_back(inline_preconditions + i);
-    }
   }
 
   EventMerger::~EventMerger(void)
   {
     assert(!is_active());
-    for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
-      free_preconditions.pop_front();
-    }
     assert(free_preconditions.empty());
   }
 
   bool EventMerger::is_active(void) const { return (count_needed.load() != 0); }
 
   void EventMerger::prepare_merger(Event _finish_event, bool _ignore_faults,
-                                   bool _recycle_preconditions)
+                                   std::optional<size_t> expected_events)
   {
     assert(!is_active());
     finish_gen = ID(_finish_event).event_generation();
     assert(event_impl->make_event(finish_gen) == _finish_event);
+    if(expected_events) {
+      recycle_preconditions = false;
+      if(MAX_INLINE_PRECONDITIONS < *expected_events) {
+        overflow_preconditions.resize(*expected_events - MAX_INLINE_PRECONDITIONS);
+        for(MergeEventPrecondition &pre : overflow_preconditions) {
+          pre.merger = this;
+        }
+      }
+    } else {
+      recycle_preconditions = true;
+    }
+    precondition_offset = 0;
     ignore_faults = _ignore_faults;
-    recycle_preconditions = _recycle_preconditions;
     count_needed.store(1); // this matches the subsequent call to arm()
     faults_observed.store(0);
   }
@@ -763,8 +769,9 @@ namespace Realm {
   {
     assert(is_active());
 
-    if(!wait_for.exists())
+    if(!wait_for.exists()) {
       return;
+    }
 
     bool poisoned = false;
     const ID id(wait_for.id);
@@ -796,26 +803,26 @@ namespace Realm {
   {
     assert(is_active());
     count_needed.fetch_add_acqrel(1);
-    if(!recycle_preconditions) {
-      // No need for the lock since we're not racing with append to the free list
+    unsigned offset = precondition_offset++;
+    if(offset < MAX_INLINE_PRECONDITIONS)
+      return &inline_preconditions[offset];
+    offset -= MAX_INLINE_PRECONDITIONS;
+    if(offset < overflow_preconditions.size())
+      return &overflow_preconditions[offset];
+#ifndef TSAN_ENABLED
+    // Can unsafely test this if TSAN is not enabled, we can still lose
+    // the race but it will be safe
+    if(!free_preconditions.empty())
+#endif
+    {
+      AutoLock<> a(event_impl->mutex);
       EventWaiter *waiter = free_preconditions.pop_front();
       if(waiter != nullptr) {
         return static_cast<MergeEventPrecondition *>(waiter);
       }
-    } else
-#ifndef TSAN_ENABLED
-      // Can unsafely test this if TSAN is not enabled, we can still lose
-      // the race but it will be safe
-      if(!free_preconditions.empty())
-#endif
-      {
-        AutoLock<> a(event_impl->mutex);
-        EventWaiter *waiter = free_preconditions.pop_front();
-        if(waiter != nullptr) {
-          return static_cast<MergeEventPrecondition *>(waiter);
-        }
-      }
-    overflow_preconditions.resize(overflow_preconditions.size() + 1);
+    }
+    assert(offset == overflow_preconditions.size());
+    overflow_preconditions.resize(offset + 1);
     MergeEventPrecondition &result = overflow_preconditions.back();
     result.merger = this;
     return &result;
@@ -869,36 +876,17 @@ namespace Realm {
     bool last_trigger = (count_left == 1);
 
     if(last_trigger) {
+      // Remove entries from the list
+      // This is not very efficient but it helps with list checking
+      while(!free_preconditions.empty()) {
+        free_preconditions.pop_front();
+      }
       // if we dynamically allocated space for a wide merger, give that
       //  storage back - the chance that this particular event will have
       //  another wide merge isn't particularly high
       if(!overflow_preconditions.empty()) {
-        // Remove entries from the list
-        // This is not very efficient but it helps with list checking
-        while(!free_preconditions.empty()) {
-          free_preconditions.pop_front();
-        }
         overflow_preconditions.clear();
-        // Put the inline preconditions back in the list
-        for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
-          free_preconditions.push_back(inline_preconditions + i);
-        }
-      } else if(!recycle_preconditions) {
-        // Put the inline preconditions back in the list
-        if(free_preconditions.empty()) {
-          for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++) {
-            free_preconditions.push_back(inline_preconditions + i);
-          }
-        } else {
-          // Push the preconditions that we used back onto the list
-          MergeEventPrecondition *head =
-              static_cast<MergeEventPrecondition *>(free_preconditions.front());
-          while(head != inline_preconditions) {
-            free_preconditions.push_front(--head);
-          }
-        }
       }
-
       // trigger on the last input event, unless we did an early poison propagation
       if(ignore_faults || (faults_observed.load() == 0)) {
         bool free_event = event_impl->trigger(finish_gen, Network::my_node_id,
@@ -1169,7 +1157,7 @@ namespace Realm {
     Event finish_event = event_impl->current_event();
     EventMerger *m = &(event_impl->merger);
 
-    m->prepare_merger(finish_event, ignore_faults);
+    m->prepare_merger(finish_event, ignore_faults, wait_for.size() - first_wait);
 
     for(size_t i = first_wait; i < wait_for.size(); i++) {
       log_event.info() << "event merging: event=" << finish_event
@@ -1192,7 +1180,7 @@ namespace Realm {
     GenEventImpl *event_impl = GenEventImpl::create_genevent();
     Event finish_event = event_impl->current_event();
     EventMerger *m = &(event_impl->merger);
-    m->prepare_merger(finish_event, true /*ignore faults*/);
+    m->prepare_merger(finish_event, true /*ignore faults*/, 1);
     log_event.info() << "event merging: event=" << finish_event
                      << " wait_on=" << wait_for;
     m->add_precondition(wait_for);
@@ -1243,7 +1231,7 @@ namespace Realm {
     GenEventImpl *event_impl = GenEventImpl::create_genevent();
     Event finish_event = event_impl->current_event();
     EventMerger *m = &(event_impl->merger);
-    m->prepare_merger(finish_event, false /*!ignore faults*/);
+    m->prepare_merger(finish_event, false /*!ignore faults*/, 6);
 
     if(ev1.exists()) {
       log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev1;

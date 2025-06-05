@@ -480,7 +480,7 @@ namespace Realm {
 		after_impl = GenEventImpl::create_genevent();
 		after_lock = after_impl->current_event();
 	      }
-              after_impl->merger.prepare_merger(after_lock, false /*!ignore_faults*/);
+              after_impl->merger.prepare_merger(after_lock, false /*!ignore_faults*/, 1);
               EventMerger::MergeEventPrecondition *p =
                   after_impl->merger.get_next_precondition();
               after_impl->merger.arm_merger();
