@@ -671,10 +671,10 @@ namespace Realm {
     }
 
     namespace ThreadLocal {
-      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
-      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
-      static REALM_THREAD_LOCAL int context_sync_required = 0;
+      static thread_local GPUProcessor *current_gpu_proc = 0;
+      static thread_local GPUStream *current_gpu_stream = 0;
+      static thread_local std::set<GPUStream *> *created_gpu_streams = 0;
+      static thread_local int context_sync_required = 0;
     };
 
 #ifdef REALM_USE_HIP_HIJACK

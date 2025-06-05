@@ -28,7 +28,7 @@ namespace Realm {
     extern Logger log_stream;
     extern Logger log_gpudma;
     namespace ThreadLocal {
-      extern REALM_THREAD_LOCAL GPUStream *current_gpu_stream;
+      extern thread_local GPUStream *current_gpu_stream;
     }
 
     typedef int (*PFN_cudaLaunchKernel)(const void *func, dim3 gridDim,

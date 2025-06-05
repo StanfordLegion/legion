@@ -157,7 +157,7 @@ private:
 
 public:
   static void *alloc_obj() {
-    // We use "thread_local" (since C++11) instead of REALM_THREAD_LOCAL here to
+    // We use "thread_local" (since C++11) instead of thread_local here to
     // leverage C++ TLS, which works with C++ constructors and destructors
     static thread_local std::unique_ptr<Block, decltype(&release_block)>
         current_block(nullptr, release_block);

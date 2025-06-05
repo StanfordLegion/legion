@@ -40,11 +40,11 @@ namespace Realm {
   /*static*/ const Processor Processor::NO_PROC = {/* zero-initialization */};
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL Processor current_processor = {/* zero-initialization */};
+    thread_local Processor current_processor = {/* zero-initialization */};
 
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
-    REALM_THREAD_LOCAL int scheduler_lock = 0;
+    thread_local int scheduler_lock = 0;
   };
 
     Processor::Kind Processor::kind(void) const

@@ -60,7 +60,7 @@ namespace Realm {
 #endif
   };
 
-  REALM_THREAD_LOCAL std::map<std::string, NvtxCategory *> *nvtx_categories;
+  thread_local std::map<std::string, NvtxCategory *> *nvtx_categories;
 
   static nvtxDomainHandle_t nvtxRealmDomain = nullptr;
 

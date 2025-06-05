@@ -563,9 +563,9 @@ namespace Realm {
     return false;
   }
 
-  /*static*/ REALM_THREAD_LOCAL EventWaiter::EventWaiterList
+  /*static*/ thread_local EventWaiter::EventWaiterList
       *EventTriggerNotifier::nested_normal = 0;
-  /*static*/ REALM_THREAD_LOCAL EventWaiter::EventWaiterList
+  /*static*/ thread_local EventWaiter::EventWaiterList
       *EventTriggerNotifier::nested_poisoned = 0;
 
   ////////////////////////////////////////////////////////////////////////
