@@ -2823,9 +2823,9 @@ dependencies = [
 
 [[package]]
 name = "legion_prof_viewer"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70f77c10826c8ac4368fd94eeccbf1e96ff25ade7214730996312e8d03aaf239"
+checksum = "940955aa052a42546ea7c0d9fb6f6992b1da200bb649e9c2421a0a4312d2ad4b"
 dependencies = [
  "actix-cors",
  "actix-web",
