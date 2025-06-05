@@ -170,7 +170,7 @@ namespace Realm {
     atomic<int> count_needed;
     atomic<int> faults_observed;
 
-    static const size_t MAX_INLINE_PRECONDITIONS = 6;
+    static constexpr size_t MAX_INLINE_PRECONDITIONS = 6;
     MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
     // std::deque does not invalidate references on resize
     std::deque<MergeEventPrecondition> overflow_preconditions;

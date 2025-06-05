@@ -803,12 +803,14 @@ namespace Realm {
   {
     assert(is_active());
     count_needed.fetch_add_acqrel(1);
-    unsigned offset = precondition_offset++;
-    if(offset < MAX_INLINE_PRECONDITIONS)
-      return &inline_preconditions[offset];
-    offset -= MAX_INLINE_PRECONDITIONS;
-    if(offset < overflow_preconditions.size())
+    if(precondition_offset < MAX_INLINE_PRECONDITIONS) {
+      return &inline_preconditions[precondition_offset++];
+    }
+    const unsigned offset = precondition_offset - MAX_INLINE_PRECONDITIONS;
+    if(offset < overflow_preconditions.size()) {
+      precondition_offset++;
       return &overflow_preconditions[offset];
+    }
 #ifndef TSAN_ENABLED
     // Can unsafely test this if TSAN is not enabled, we can still lose
     // the race but it will be safe
@@ -821,6 +823,7 @@ namespace Realm {
         return static_cast<MergeEventPrecondition *>(waiter);
       }
     }
+    precondition_offset++;
     assert(offset == overflow_preconditions.size());
     overflow_preconditions.resize(offset + 1);
     MergeEventPrecondition &result = overflow_preconditions.back();
