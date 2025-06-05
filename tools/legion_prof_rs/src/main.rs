@@ -20,6 +20,8 @@ use legion_prof_viewer::{
 
 #[cfg(feature = "archiver")]
 use legion_prof::backend::archiver;
+#[cfg(feature = "duckdb")]
+use legion_prof::backend::duckdb;
 #[cfg(feature = "nvtxw")]
 use legion_prof::backend::nvtxw;
 #[cfg(feature = "server")]
@@ -92,7 +94,7 @@ struct OutputArgs {
 
 #[derive(Debug, Clone, Subcommand)]
 enum Commands {
-    #[command(about = "dump an archive of the profile for sharing")]
+    #[command(about = "save an archive of the profile for sharing")]
     Archive {
         #[command(flatten)]
         args: ParserArgs,
@@ -117,6 +119,14 @@ enum Commands {
     Attach {
         #[arg(required = true, help = "URL(s) or path(s) to attach to")]
         args: Vec<OsString>,
+    },
+    #[command(name = "duckdb", about = "save profile to DuckDB database")]
+    DuckDB {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[command(flatten)]
+        out: OutputArgs,
     },
     #[command(about = "dump parsed log files in a JSON format")]
     Dump {
@@ -210,6 +220,13 @@ fn main() -> io::Result<()> {
                  Rebuild with --features=client to enable."
             );
         }
+        Commands::DuckDB { .. } => {
+            #[cfg(not(feature = "duckdb"))]
+            panic!(
+                "Legion Prof was not built with the \"duckdb\" feature. \
+                 Rebuild with --features=duckdb to enable."
+            );
+        }
         Commands::NVTXW { .. } => {
             #[cfg(not(feature = "nvtxw"))]
             panic!(
@@ -268,6 +285,7 @@ fn main() -> io::Result<()> {
         Commands::Archive { ref args, .. }
         | Commands::Dump { ref args, .. }
         | Commands::Legacy { ref args, .. }
+        | Commands::DuckDB { ref args, .. }
         | Commands::NVTXW { ref args, .. }
         | Commands::View { ref args, .. }
         | Commands::Serve { ref args, .. }
@@ -398,6 +416,14 @@ fn main() -> io::Result<()> {
                     out.force,
                     zstd_compression,
                 )?;
+            }
+        }
+        Commands::DuckDB { out, .. } => {
+            #[cfg(feature = "duckdb")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                duckdb::write(state, out.output, out.force)?;
             }
         }
         Commands::Legacy { out, .. } => {
