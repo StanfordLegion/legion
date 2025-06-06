@@ -201,7 +201,8 @@ struct Cli {
 }
 
 fn main() -> io::Result<()> {
-    env_logger::init();
+    let env = env_logger::Env::default().filter_or("RUST_LOG", "info");
+    env_logger::init_from_env(env);
 
     let cli = Cli::parse();
 
