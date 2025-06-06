@@ -75,7 +75,7 @@ fn accumulate_statistics(
                 let stats = task_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());
-                update_stats(&entry, stats);
+                update_stats(entry, stats);
             }
             ProcEntryKind::MetaTask(_)
             | ProcEntryKind::RuntimeCall(_)
@@ -83,13 +83,13 @@ fn accumulate_statistics(
                 let stats = runtime_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());
-                update_stats(&entry, stats);
+                update_stats(entry, stats);
             }
             ProcEntryKind::MapperCall(..) => {
                 let stats = mapper_stats
                     .entry(entry.kind)
                     .or_insert(ProcEntryStats::new());
-                update_stats(&entry, stats);
+                update_stats(entry, stats);
             }
             ProcEntryKind::ApplicationCall(_) => {}
         }
@@ -109,11 +109,11 @@ fn print_statistics(
         // but use a vector just to be safe
         ordering
             .entry(Reverse(stats.running_time))
-            .or_insert(Vec::new())
+            .or_default()
             .push(*entry);
     }
 
-    println!("");
+    println!();
     println!("  -------------------------");
     println!("  {}", category);
     println!("  -------------------------");
@@ -127,7 +127,7 @@ fn print_statistics(
                         "      Task {} Variant {}",
                         state
                             .task_kinds
-                            .get(&task_id)
+                            .get(task_id)
                             .unwrap()
                             .name
                             .as_ref()
@@ -138,19 +138,19 @@ fn print_statistics(
                 ProcEntryKind::MetaTask(variant_id) => {
                     println!(
                         "      Meta-Task {}",
-                        state.meta_variants.get(&variant_id).unwrap().name
+                        state.meta_variants.get(variant_id).unwrap().name
                     );
                 }
                 ProcEntryKind::MapperCall(_, _, call_kind) => {
                     println!(
                         "      Mapper Call {}",
-                        state.mapper_call_kinds.get(&call_kind).unwrap().name
+                        state.mapper_call_kinds.get(call_kind).unwrap().name
                     );
                 }
                 ProcEntryKind::RuntimeCall(call_kind) => {
                     println!(
                         "      Runtime Call {}",
-                        state.runtime_call_kinds.get(&call_kind).unwrap().name
+                        state.runtime_call_kinds.get(call_kind).unwrap().name
                     );
                 }
                 ProcEntryKind::ProfTask => {
@@ -162,7 +162,7 @@ fn print_statistics(
                         "      GPU Kernel for Task {} Variant {}",
                         state
                             .task_kinds
-                            .get(&task_id)
+                            .get(task_id)
                             .unwrap()
                             .name
                             .as_ref()
@@ -173,7 +173,7 @@ fn print_statistics(
                 ProcEntryKind::ApplicationCall(_) => {}
             }
             let threshold = Timestamp::from_us(1000000);
-            let stats = statistics.get(&entry).unwrap();
+            let stats = statistics.get(entry).unwrap();
             println!("          Invocations: {}", stats.invocations);
             if stats.total_time < threshold {
                 println!("          Total time: {:.3} us", stats.total_time.to_us());

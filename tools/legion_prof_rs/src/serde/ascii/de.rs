@@ -59,7 +59,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
     // We don't actually implement deserialize_any. This is just a way
@@ -231,7 +231,7 @@ impl<'a, 'de> Sequence<'a, 'de> {
     }
 }
 
-impl<'de, 'a> SeqAccess<'de> for Sequence<'a, 'de> {
+impl<'de> SeqAccess<'de> for Sequence<'_, 'de> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -245,7 +245,7 @@ impl<'de, 'a> SeqAccess<'de> for Sequence<'a, 'de> {
     }
 }
 
-impl<'de, 'a> MapAccess<'de> for Sequence<'a, 'de> {
+impl<'de> MapAccess<'de> for Sequence<'_, 'de> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -277,7 +277,7 @@ impl<'a, 'de> Enum<'a, 'de> {
     }
 }
 
-impl<'de, 'a> EnumAccess<'de> for Enum<'a, 'de> {
+impl<'de> EnumAccess<'de> for Enum<'_, 'de> {
     type Error = Error;
     type Variant = Self;
 
@@ -299,7 +299,7 @@ impl<'de, 'a> EnumAccess<'de> for Enum<'a, 'de> {
     }
 }
 
-impl<'de, 'a> VariantAccess<'de> for Enum<'a, 'de> {
+impl<'de> VariantAccess<'de> for Enum<'_, 'de> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
@@ -337,7 +337,7 @@ impl<'de> Deserialize<'de> for HexU64 {
         D: serde::Deserializer<'de>,
     {
         struct HexVisitor {}
-        impl<'de> Visitor<'de> for HexVisitor {
+        impl Visitor<'_> for HexVisitor {
             type Value = HexU64;
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a hexidecimal number")

@@ -26,10 +26,10 @@ pub trait StatePostprocess {
     fn proc_group_timepoints(
         &self,
         device: Option<DeviceKind>,
-        procs: &Vec<ProcID>,
+        procs: &[ProcID],
     ) -> Vec<&Vec<ProcPoint>>;
-    fn mem_group_timepoints(&self, mems: &Vec<MemID>) -> Vec<&Vec<MemPoint>>;
-    fn chan_group_timepoints(&self, chans: &Vec<ChanID>) -> Vec<&Vec<ChanPoint>>;
+    fn mem_group_timepoints(&self, mems: &[MemID]) -> Vec<&Vec<MemPoint>>;
+    fn chan_group_timepoints(&self, chans: &[ChanID]) -> Vec<&Vec<ChanPoint>>;
 
     fn group_node_proc_kind_timepoints(
         &self,
@@ -46,7 +46,7 @@ pub trait StatePostprocess {
 
     fn convert_points_to_utilization<Entry, Secondary>(
         &self,
-        points: &Vec<TimePoint<Entry, Secondary>>,
+        points: &[TimePoint<Entry, Secondary>],
         utilization: &mut Vec<TimePoint<Entry, Secondary>>,
     ) where
         Entry: Copy,
@@ -211,7 +211,7 @@ impl StatePostprocess for State {
     fn proc_group_timepoints(
         &self,
         device: Option<DeviceKind>,
-        procs: &Vec<ProcID>,
+        procs: &[ProcID],
     ) -> Vec<&Vec<ProcPoint>> {
         let mut timepoints = Vec::new();
         for proc_id in procs {
@@ -223,7 +223,7 @@ impl StatePostprocess for State {
         timepoints
     }
 
-    fn mem_group_timepoints(&self, mems: &Vec<MemID>) -> Vec<&Vec<MemPoint>> {
+    fn mem_group_timepoints(&self, mems: &[MemID]) -> Vec<&Vec<MemPoint>> {
         let mut timepoints = Vec::new();
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
@@ -234,7 +234,7 @@ impl StatePostprocess for State {
         timepoints
     }
 
-    fn chan_group_timepoints(&self, chans: &Vec<ChanID>) -> Vec<&Vec<ChanPoint>> {
+    fn chan_group_timepoints(&self, chans: &[ChanID]) -> Vec<&Vec<ChanPoint>> {
         let mut timepoints = Vec::new();
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
@@ -325,7 +325,7 @@ impl StatePostprocess for State {
                 }
                 nodes.dedup();
                 for node in nodes {
-                    if node.map_or(true, |n| State::is_on_visible_nodes(&self.visible_nodes, n)) {
+                    if node.is_none_or(|n| State::is_on_visible_nodes(&self.visible_nodes, n)) {
                         result
                             .entry(node)
                             .or_insert_with(Vec::new)
@@ -340,7 +340,7 @@ impl StatePostprocess for State {
 
     fn convert_points_to_utilization<Entry, Secondary>(
         &self,
-        points: &Vec<TimePoint<Entry, Secondary>>,
+        points: &[TimePoint<Entry, Secondary>],
         utilization: &mut Vec<TimePoint<Entry, Secondary>>,
     ) where
         Entry: Copy,
@@ -390,7 +390,7 @@ impl StatePostprocess for State {
 
             let ratio = count as f64 / max_count;
 
-            if last_time.map_or(false, |time| time == point.time) {
+            if last_time == Some(point.time) {
                 *utilization.last_mut().unwrap() = (point.time, ratio);
             } else {
                 utilization.push((point.time, ratio));
@@ -432,7 +432,7 @@ impl StatePostprocess for State {
             }
 
             let ratio = count as f64 / max_count;
-            if last_time.map_or(false, |time| time == point.time) {
+            if last_time == Some(point.time) {
                 *result.last_mut().unwrap() = (point.time, ratio);
             } else {
                 result.push((point.time, ratio));
@@ -471,7 +471,7 @@ impl StatePostprocess for State {
 
             let count = count as f64;
             let max_count = max_count as f64;
-            if last_time.map_or(false, |time| time == point.time) {
+            if last_time == Some(point.time) {
                 if count > 0.0 {
                     *utilization.last_mut().unwrap() = (point.time, 1.0);
                 } else {
@@ -620,7 +620,7 @@ impl fmt::Display for FieldsPretty<'_> {
         let align_desc = inst.align_desc.get(&fspace.fspace_id).unwrap();
         let mut i = field_ids.iter().zip(align_desc.iter()).peekable();
         while let Some((field_id, align)) = i.next() {
-            write!(f, "{}", FieldPretty(&fspace, *field_id, align))?;
+            write!(f, "{}", FieldPretty(fspace, *field_id, align))?;
             if i.peek().is_some() {
                 write!(f, ", ")?;
             }
@@ -739,7 +739,7 @@ impl fmt::Display for DimOrderPretty<'_> {
 
         let mut previous = false;
 
-        if dim_last.map_or(false, |(d, _)| d.0 != 1) {
+        if dim_last.is_some_and(|(d, _)| d.0 != 1) {
             if column_major == dim_last.unwrap().0.0 && !cmpx_order {
                 open(f, &mut previous)?;
                 write!(f, "Column Major")?;
@@ -806,7 +806,7 @@ impl fmt::Display for InstPretty<'_> {
                 write!(f, "$")?;
             }
         }
-        if inst.dim_order.len() > 0 {
+        if !inst.dim_order.is_empty() {
             write!(f, "$Layout Order: {} ", DimOrderPretty(inst, true))?;
         }
         write!(
