@@ -480,60 +480,61 @@ namespace Realm {
 		after_impl = GenEventImpl::create_genevent();
 		after_lock = after_impl->current_event();
 	      }
-	      after_impl->merger.prepare_merger(after_lock,
-						false /*!ignore_faults*/, 1);
-	      EventMerger::MergeEventPrecondition *p = after_impl->merger.get_next_precondition();
-	      after_impl->merger.arm_merger();
+              after_impl->merger.prepare_merger(after_lock, false /*!ignore_faults*/, 1);
+              EventMerger::MergeEventPrecondition *p =
+                  after_impl->merger.get_next_precondition();
+              after_impl->merger.arm_merger();
 
-	      if(new_mode == MODE_EXCL) {
-		local_excl_waiters.push_back(p);
-	      } else {
-		LocalSharedInfo& info = local_shared[new_mode];
-		info.count++;
-		info.waiters.push_back(p);
-	      }
-	      break;
-	    }
+              if(new_mode == MODE_EXCL) {
+                local_excl_waiters.push_back(p);
+              } else {
+                LocalSharedInfo &info = local_shared[new_mode];
+                info.count++;
+                info.waiters.push_back(p);
+              }
+              break;
+            }
 
-	  case ACQUIRE_NONBLOCKING:
-	    {
-	      // can't handle an existing after_event
-	      assert(!after_lock.exists());
+            case ACQUIRE_NONBLOCKING:
+            {
+              // can't handle an existing after_event
+              assert(!after_lock.exists());
 
-	      RetryInfo& info = retries[new_mode];
+              RetryInfo &info = retries[new_mode];
 
-	      // first, record that we'll eventually see a retry of this
-	      info.count++;
+              // first, record that we'll eventually see a retry of this
+              info.count++;
 
-	      // now, make a retry event if we don't have one, or reuse an existing one
-	      if(!info.event.exists())
-		info.event = GenEventImpl::create_genevent()->current_event();
-	      after_lock = info.event;
+              // now, make a retry event if we don't have one, or reuse an existing one
+              if(!info.event.exists())
+                info.event = GenEventImpl::create_genevent()->current_event();
+              after_lock = info.event;
 
-	      break;
-	    }
+              break;
+            }
 
-	  case ACQUIRE_NONBLOCKING_RETRY:
-	    {
-	      // same as ACQUIRE_NONBLOCKING, but no increment of the retry count, since we
-	      //  already did that on the first request
+            case ACQUIRE_NONBLOCKING_RETRY:
+            {
+              // same as ACQUIRE_NONBLOCKING, but no increment of the retry count, since
+              // we
+              //  already did that on the first request
 
-	      // can't handle an existing after_event
-	      assert(!after_lock.exists());
+              // can't handle an existing after_event
+              assert(!after_lock.exists());
 
-	      RetryInfo& info = retries[new_mode];
+              RetryInfo &info = retries[new_mode];
 
-	      if(!info.event.exists())
-		info.event = GenEventImpl::create_genevent()->current_event();
-	      after_lock = info.event;
+              if(!info.event.exists())
+                info.event = GenEventImpl::create_genevent()->current_event();
+              after_lock = info.event;
 
-	      break;
-	    }
+              break;
+            }
 
-	  default:
-	    assert(0);
-	  }
-	}
+            default:
+              assert(0);
+            }
+        }
       }
 
       if(lock_request_target != -1)

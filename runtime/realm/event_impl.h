@@ -130,13 +130,19 @@ namespace Realm {
     bool is_active(void) const;
 
     void prepare_merger(Event _finish_event, bool _ignore_faults,
-                        unsigned _max_preconditions);
+                        std::optional<size_t> expected_events = std::optional<size_t>());
 
     void add_precondition(Event wait_for);
 
     void arm_merger(void);
 
     class MergeEventPrecondition : public EventWaiter {
+    public:
+      MergeEventPrecondition(void) = default;
+      MergeEventPrecondition(const MergeEventPrecondition &) = delete;
+      MergeEventPrecondition(MergeEventPrecondition &&) = delete;
+      virtual ~MergeEventPrecondition(void) = default;
+
     public:
       EventMerger *merger;
 
@@ -151,20 +157,24 @@ namespace Realm {
     MergeEventPrecondition *get_next_precondition(void);
 
   protected:
-    void precondition_triggered(bool poisoned, TimeLimit work_until);
+    void precondition_triggered(bool poisoned, TimeLimit work_until,
+                                MergeEventPrecondition *precondition = nullptr);
 
     friend class MergeEventPrecondition;
 
     GenEventImpl *event_impl;
     EventImpl::gen_t finish_gen;
+    unsigned precondition_offset;
     bool ignore_faults;
+    bool recycle_preconditions;
     atomic<int> count_needed;
     atomic<int> faults_observed;
 
-    static const size_t MAX_INLINE_PRECONDITIONS = 6;
+    static constexpr size_t MAX_INLINE_PRECONDITIONS = 6;
     MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
-    MergeEventPrecondition *preconditions;
-    unsigned num_preconditions, max_preconditions;
+    // std::deque does not invalidate references on resize
+    std::deque<MergeEventPrecondition> overflow_preconditions;
+    EventWaiter::EventWaiterList free_preconditions;
   };
 
   class EventCommunicator {
