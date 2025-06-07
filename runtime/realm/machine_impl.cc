@@ -1571,9 +1571,8 @@ namespace Realm {
     , is_cached_mem(false)
     , shared_cached_list(false)
     , valid_cache(false)
-    , cur_cached_list(NULL)
+    , cur_cached_list(nullptr)
     , invalid_count(cache_invalid_count)
-
   {}
 
   ProcessorQueryImpl::ProcessorQueryImpl(const ProcessorQueryImpl& copy_from)
@@ -2477,11 +2476,10 @@ namespace Realm {
     , valid_cache(false)
     , cur_cached_list(NULL)
     , invalid_count(cache_invalid_count)
-
   {
   }
 
-  MemoryQueryImpl::MemoryQueryImpl(const MemoryQueryImpl& copy_from)
+  MemoryQueryImpl::MemoryQueryImpl(const MemoryQueryImpl &copy_from)
     : references(1)
     , machine(copy_from.machine)
     , is_restricted_node(copy_from.is_restricted_node)
@@ -2493,7 +2491,6 @@ namespace Realm {
     , valid_cache(copy_from.valid_cache)
     , cur_cached_list(copy_from.cur_cached_list)
     , invalid_count(cache_invalid_count)
-
   {
     predicates.reserve(copy_from.predicates.size());
     for(std::vector<MemoryQueryPredicate *>::const_iterator it = copy_from.predicates.begin();

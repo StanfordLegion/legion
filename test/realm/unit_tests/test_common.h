@@ -20,6 +20,12 @@
 #include "realm/inst_layout.h"
 #include <utility>
 
+#define ASSERT_REALM(expr)                                                               \
+  do {                                                                                   \
+    realm_status_t _status = (expr);                                                     \
+    ASSERT_EQ(_status, REALM_SUCCESS);                                                   \
+  } while(0)
+
 namespace Realm {
 
   template <int N, typename T>

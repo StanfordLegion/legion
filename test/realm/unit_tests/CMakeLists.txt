@@ -79,8 +79,22 @@ add_executable(realm_tests ${REALM_TESTS})
 
 target_sources(realm_tests PRIVATE ${UCX_SOURCES})
 
+list(APPEND REALM_C_TESTS
+  c_processor_query.cc
+  c_memory_query.cc
+  c_processor_attr.cc
+  c_memory_attr.cc
+  c_processor_task.cc
+  c_event.cc
+ )
+
+add_executable(realm_c_tests ${REALM_C_TESTS})
+
+target_sources(realm_c_tests PRIVATE ${UCX_SOURCES})
+
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
+  realm_c_tests
 )
 
 foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)

@@ -30,7 +30,15 @@ namespace Realm {
     class REALM_PUBLIC_API Memory {
     public:
       typedef ::realm_id_t id_t;
-      id_t id;
+      id_t id{REALM_NO_MEM};
+
+      Memory() = default;
+      constexpr explicit Memory(id_t id)
+        : id(id)
+      {}
+
+      constexpr operator id_t() const { return id; }
+
       bool operator<(const Memory &rhs) const { return id < rhs.id; }
       bool operator==(const Memory &rhs) const { return id == rhs.id; }
       bool operator!=(const Memory &rhs) const { return id != rhs.id; }

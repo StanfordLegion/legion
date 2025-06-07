@@ -416,6 +416,25 @@ namespace Realm {
     /// @param handle
     void close_handle(OsHandle handle);
 
+    class Logger;
+
+    class RealmEntryExitRAII {
+    public:
+      RealmEntryExitRAII(Logger &_logger, const char *_func);
+      ~RealmEntryExitRAII();
+
+    private:
+      Logger &logger;
+      const char *func = nullptr;
+    };
+
+#if REALM_DEFAULT_LOG_LEVEL > REALM_SPEW
+#define REALM_ENTRY_EXIT(logger)                                                         \
+  Realm::RealmEntryExitRAII __entry_exit(logger, __FUNCTION__)
+#else
+#define REALM_ENTRY_EXIT(logger)
+#endif
+
 }; // namespace Realm
 
 #include "realm/utils.inl"

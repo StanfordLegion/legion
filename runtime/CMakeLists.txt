@@ -26,7 +26,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 
 # Realm runtime
 list(APPEND REALM_SRC
-  realm/realm_c.h
+  realm/realm_c.h                          realm/realm_c.cc
   realm/transfer/lowlevel_disk.cc
   realm/transfer/address_list.h            realm/transfer/address_list.cc
   realm/transfer/addrsplit_channel.h       realm/transfer/addrsplit_channel.cc
