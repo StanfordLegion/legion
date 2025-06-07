@@ -1626,7 +1626,7 @@ namespace Realm {
   namespace ThreadLocal {
     // you can't delete a user thread until you've switched off of it, so
     //  use TLS to mark when that should happen
-    static REALM_THREAD_LOCAL Thread *terminated_user_thread = 0;
+    static thread_local Thread *terminated_user_thread = 0;
   };
 
   inline void UserThreadTaskScheduler::request_user_thread_cleanup(Thread *thread)

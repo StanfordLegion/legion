@@ -42,7 +42,7 @@ namespace Realm {
     namespace ThreadLocal {
       // if nonzero, prevents application thread from yielding execution
       //  resources on an Event wait
-      extern REALM_THREAD_LOCAL int scheduler_lock;
+      extern thread_local int scheduler_lock;
     };
 
     class ProcessorImpl {
@@ -414,7 +414,7 @@ namespace Realm {
 
     namespace ThreadLocal {
       // Assume zero initialized
-      extern REALM_THREAD_LOCAL Processor current_processor;
+      extern thread_local Processor current_processor;
     }
 
 }; // namespace Realm

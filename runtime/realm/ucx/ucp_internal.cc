@@ -81,7 +81,7 @@ namespace UCP {
 #endif
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL const TimeLimit *ucp_work_until = nullptr;
+    thread_local const TimeLimit *ucp_work_until = nullptr;
   };
 
   struct CompList {

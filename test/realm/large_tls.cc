@@ -33,7 +33,7 @@ struct LargeStruct {
   char data[256000];
 };
 
-REALM_THREAD_LOCAL LargeStruct large_tls_var;
+thread_local LargeStruct large_tls_var;
 
 void top_level_task(const void *args, size_t arglen,
 		    const void *userdata, size_t userlen, Processor p)

@@ -173,7 +173,7 @@ namespace Realm {
   //
 
   namespace ThreadLocal {
-    static REALM_THREAD_LOCAL int error_signal_value = 0;
+    static thread_local int error_signal_value = 0;
   };
 
   static void register_error_signal_handler(void (*handler)(int))

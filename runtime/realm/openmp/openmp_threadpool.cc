@@ -24,7 +24,7 @@ namespace Realm {
   Logger log_pool("threadpool");
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL ThreadPool::WorkerInfo *threadpool_workerinfo = 0;
+    thread_local ThreadPool::WorkerInfo *threadpool_workerinfo = 0;
   };
 
   ////////////////////////////////////////////////////////////////////////

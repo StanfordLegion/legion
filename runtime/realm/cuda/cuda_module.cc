@@ -159,10 +159,10 @@ namespace Realm {
     static bool cuhook_enabled = false;
 
     namespace ThreadLocal {
-      REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams = 0;
-      static REALM_THREAD_LOCAL int context_sync_required = 0;
-      REALM_THREAD_LOCAL bool block_on_synchronize = false;
+      thread_local GPUStream *current_gpu_stream = 0;
+      thread_local std::set<GPUStream *> *created_gpu_streams = 0;
+      static thread_local int context_sync_required = 0;
+      thread_local bool block_on_synchronize = false;
     }; // namespace ThreadLocal
 
     ////////////////////////////////////////////////////////////////////////

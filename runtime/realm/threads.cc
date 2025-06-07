@@ -151,7 +151,7 @@ namespace Realm {
 #endif
 
   namespace ThreadLocal {
-    /*extern*/ REALM_THREAD_LOCAL Thread *current_thread = 0;
+    /*extern*/ thread_local Thread *current_thread = 0;
   };
 
   ////////////////////////////////////////////////////////////////////////
@@ -1385,15 +1385,15 @@ namespace Realm {
 
   namespace ThreadLocal {
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    REALM_THREAD_LOCAL ucontext_t *host_context = 0;
+    thread_local ucontext_t *host_context = 0;
 #endif
 #ifdef REALM_ON_WINDOWS
-    REALM_THREAD_LOCAL LPVOID host_context = 0;
+    thread_local LPVOID host_context = 0;
 #endif
     // current_user_thread is redundant with current_thread, but kept for debugging
     //  purposes for now
-    REALM_THREAD_LOCAL UserThread *current_user_thread = 0;
-    REALM_THREAD_LOCAL Thread *current_host_thread = 0;
+    thread_local UserThread *current_user_thread = 0;
+    thread_local Thread *current_host_thread = 0;
   };
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)

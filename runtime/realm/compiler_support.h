@@ -93,13 +93,6 @@
 #define REALM_CUDA_HD
 #endif
 
-// REALM_THREAD_LOCAL - type modifier for a thread-local variable
-#ifdef _MSC_VER
-  #define REALM_THREAD_LOCAL __declspec(thread)
-#else
-  #define REALM_THREAD_LOCAL __thread
-#endif
-
 // REALM_ASSERT(cond, message) - abort program if 'cond' is not true
 #if defined (__CUDACC__) || defined (__HIPCC__)
 #define REALM_ASSERT(cond, message)  assert(cond)

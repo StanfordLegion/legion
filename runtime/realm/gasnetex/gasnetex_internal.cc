@@ -132,8 +132,8 @@ namespace Realm {
   }
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL const TimeLimit *gex_work_until = nullptr;
-    REALM_THREAD_LOCAL bool in_am_handler = false;
+    thread_local const TimeLimit *gex_work_until = nullptr;
+    thread_local bool in_am_handler = false;
   };
 
   ////////////////////////////////////////////////////////////////////////

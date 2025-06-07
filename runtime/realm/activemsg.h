@@ -342,7 +342,7 @@ namespace Realm {
 
   namespace ThreadLocal {
     // this flag will be true when we are running a message handler
-    extern REALM_THREAD_LOCAL bool in_message_handler;
+    extern thread_local bool in_message_handler;
   };
   
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE IncomingMessageManager : public BackgroundWorkItem {

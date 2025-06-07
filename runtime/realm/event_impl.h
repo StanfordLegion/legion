@@ -75,8 +75,8 @@ namespace Realm {
     EventWaiter::EventWaiterList delayed_normal;
     EventWaiter::EventWaiterList delayed_poisoned;
 
-    static REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_normal;
-    static REALM_THREAD_LOCAL EventWaiter::EventWaiterList *nested_poisoned;
+    static thread_local EventWaiter::EventWaiterList *nested_normal;
+    static thread_local EventWaiter::EventWaiterList *nested_poisoned;
   };
 
   // parent class of GenEventImpl and BarrierImpl

@@ -333,7 +333,7 @@ namespace Realm {
 
   namespace ThreadLocal {
     // this flag will be true when we are running a message handler
-    REALM_THREAD_LOCAL bool in_message_handler = false;
+    thread_local bool in_message_handler = false;
   };
 
   IncomingMessageManager::IncomingMessageManager(int _nodes,
