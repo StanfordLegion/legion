@@ -52,7 +52,7 @@ public:
     Event provenance;
     timestamp_t create_time;
     union {
-      Realm::Event inst;
+      Realm::Event inst = Realm::Event::NO_EVENT;
       Processor::TaskFuncID task;
       NameClosure *closure;
     } id;

@@ -49,7 +49,15 @@ namespace Realm {
     public:
       typedef ::realm_id_t id_t;
 
-      id_t id;
+      id_t id{REALM_NO_EVENT};
+
+      Event() = default;
+      constexpr explicit Event(id_t id)
+        : id(id)
+      {}
+
+      constexpr operator id_t() const { return id; }
+
       bool operator<(const Event& rhs) const;
       bool operator==(const Event& rhs) const;
       bool operator!=(const Event& rhs) const;
@@ -200,6 +208,10 @@ namespace Realm {
      */
     class REALM_PUBLIC_API UserEvent : public Event {
     public:
+      UserEvent() = default;
+      constexpr UserEvent(id_t id)
+        : Event(id)
+      {}
 
       /**
        * Create a new user event.

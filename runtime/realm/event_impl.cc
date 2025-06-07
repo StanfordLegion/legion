@@ -30,8 +30,9 @@ namespace Realm {
   // class Event
   //
 
-  /*static*/ const Event Event::NO_EVENT = {/* zero-initialization */};
-  /*static*/ const UserEvent UserEvent::NO_USER_EVENT = {/* zero-initialization */};
+  /*static*/ const Event Event::NO_EVENT{REALM_NO_EVENT /* zero-initialization */};
+  /*static*/ const UserEvent UserEvent::NO_USER_EVENT{
+      REALM_NO_USER_EVENT /* zero-initialization */};
 
   bool Event::has_triggered(void) const
   {
@@ -1269,8 +1270,12 @@ namespace Realm {
 
   /*static*/ GenEventImpl *GenEventImpl::create_genevent(void)
   {
+    return create_genevent(get_runtime());
+  }
+
+  /*static*/ GenEventImpl *GenEventImpl::create_genevent(RuntimeImpl *runtime_impl)
+  {
     GenEventImpl *impl = nullptr;
-    RuntimeImpl *runtime_impl = get_runtime();
 
     Processor current_proc = Processor::get_executing_processor();
     if(current_proc != Processor::NO_PROC) {

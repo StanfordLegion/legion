@@ -15,7 +15,6 @@
 
 #include "realm/event_impl.h"
 #include "realm/barrier_impl.h"
-
 #include "realm/runtime_impl.h"
 #include "realm/logging.h"
 

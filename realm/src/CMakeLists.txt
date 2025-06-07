@@ -45,6 +45,7 @@ set(REALM_SOURCES
     threads.cc
     shm.cc
     hardware_topology.cc
+    realm_c.cc
     fragmented_message.cc
     transfer/lowlevel_disk.cc
     transfer/address_list.cc

@@ -2841,7 +2841,7 @@ namespace Legion {
         // therefore always add the owner address space to the source to 
         // produce a non-zero processor ID. Note that this formulation also
         // avoid conflicts from different remote sources.
-        const Processor fake_proc = { source + manager->owner_space };
+        const Processor fake_proc( source + manager->owner_space );
 #ifdef DEBUG_LEGION
         assert(fake_proc.id != 0);
 #endif

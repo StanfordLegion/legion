@@ -40,7 +40,7 @@
 
 namespace Realm {
 
-  typedef int FieldID;
+  typedef realm_field_id_t FieldID;
 
   template <int N, typename T> struct Rect;
   template <int N, typename T> struct IndexSpace;

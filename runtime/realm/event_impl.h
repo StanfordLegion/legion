@@ -203,7 +203,10 @@ namespace Realm {
 
     void init(ID _me, unsigned _init_owner);
 
-    static GenEventImpl *create_genevent(void);
+    static GenEventImpl *
+    create_genevent(void); // TODO: remove this once we get rid of get_runtime()
+
+    static GenEventImpl *create_genevent(RuntimeImpl *runtime_impl);
 
     static ID make_id(const GenEventImpl &dummy, int owner, ID::IDType index)
     {

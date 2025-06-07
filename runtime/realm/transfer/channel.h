@@ -776,13 +776,13 @@ namespace Realm {
           uint64_t mems[BITMASK_SIZE], ib_mems[BITMASK_SIZE];
         };
 	union {
-	  Memory src_mem;
-	  Memory::Kind src_kind;
+          Memory src_mem;
+          Memory::Kind src_kind;
           MemBitmask src_bitmask;
 	};
 	union {
-	  Memory dst_mem;
-	  Memory::Kind dst_kind;
+          Memory dst_mem;
+          Memory::Kind dst_kind;
           MemBitmask dst_bitmask;
 	};
 	XferDesKind xd_kind;
@@ -792,6 +792,12 @@ namespace Realm {
         unsigned char max_src_dim, max_dst_dim;
 	bool redops_allowed; // TODO: list of redops?
 	bool serdez_allowed; // TODO: list of serdez ops?
+
+        // constructor
+        SupportedPath()
+          : src_mem(Memory::NO_MEMORY)
+          , dst_mem(Memory::NO_MEMORY)
+        {}
 
         // mutators to modify less-common fields
         SupportedPath& set_max_dim(int src_and_dst_dim);

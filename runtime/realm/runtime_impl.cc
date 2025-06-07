@@ -731,37 +731,7 @@ namespace Realm {
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/,
 			   int result_code /*= 0*/)
     {
-      // if we're called from inside a task, automatically include the
-      //  task's finish event as well
-      if(Thread::self()) {
-	Operation *op = Thread::self()->get_operation();
-	if(op != 0) {
-	  log_runtime.debug() << "shutdown merging finish event=" << op->get_finish_event();
-	  wait_on = Event::merge_events(wait_on, op->get_finish_event());
-	}
-      }
-
-      log_runtime.info() << "shutdown requested - wait_on=" << wait_on
-			 << " code=" << result_code;
-
-      // send a message to the shutdown master if it's not us
-      NodeID shutdown_master_node = 0;
-      if(Network::my_node_id != shutdown_master_node) {
-	ActiveMessage<RuntimeShutdownRequest> amsg(shutdown_master_node);
-	amsg->wait_on = wait_on;
-	amsg->result_code = result_code;
-	amsg.commit();
-	return;
-      }
-
-      RuntimeImpl *r_impl = static_cast<RuntimeImpl *>(impl);
-      bool duplicate = r_impl->request_shutdown(wait_on, result_code);
-      if(!duplicate) {
-	if(wait_on.has_triggered())
-	  r_impl->initiate_shutdown();
-	else
-	  r_impl->deferred_shutdown.defer(r_impl, wait_on);
-      }
+      static_cast<RuntimeImpl *>(impl)->shutdown(wait_on, result_code);
     }
 
     int Runtime::wait_for_shutdown(void)
@@ -1074,37 +1044,37 @@ namespace Realm {
   // class RuntimeImpl
   //
 
-    RuntimeImpl *runtime_singleton = 0;
+  RuntimeImpl *runtime_singleton = nullptr;
 
-    RuntimeImpl::RuntimeImpl(void)
-      : machine(0)
-      , num_untriggered_events(0)
-      , nodes(nullptr)
-      , num_nodes(0)
-      , local_event_free_list(0)
-      , local_barrier_free_list(0)
-      , local_reservation_free_list(0)
-      , local_compqueue_free_list(0)
-      ,
-      // local_sparsity_map_free_list(0),
-      run_method_called(false)
-      , shutdown_condvar(shutdown_mutex)
-      , shutdown_request_received(false)
-      , shutdown_result_code(0)
-      , shutdown_initiated(false)
-      , shutdown_in_progress(false)
-      , core_reservations(0)
-      , message_manager(0)
-      , sampling_profiler(true /*system default*/)
-      , num_local_memories(0)
-      , num_local_ib_memories(0)
-      , num_local_processors(0)
-      , module_registrar(this)
-      , modules_created(false)
-      , module_configs_created(false)
-    {
-      machine = new MachineImpl(this);
-    }
+  RuntimeImpl::RuntimeImpl(void)
+    : machine(0)
+    , num_untriggered_events(0)
+    , nodes(nullptr)
+    , num_nodes(0)
+    , local_event_free_list(0)
+    , local_barrier_free_list(0)
+    , local_reservation_free_list(0)
+    , local_compqueue_free_list(0)
+    ,
+    // local_sparsity_map_free_list(0),
+    run_method_called(false)
+    , shutdown_condvar(shutdown_mutex)
+    , shutdown_request_received(false)
+    , shutdown_result_code(0)
+    , shutdown_initiated(false)
+    , shutdown_in_progress(false)
+    , core_reservations(0)
+    , message_manager(0)
+    , sampling_profiler(true /*system default*/)
+    , num_local_memories(0)
+    , num_local_ib_memories(0)
+    , num_local_processors(0)
+    , module_registrar(this)
+    , modules_created(false)
+    , module_configs_created(false)
+  {
+    machine = new MachineImpl(this);
+  }
 
     RuntimeImpl::~RuntimeImpl(void)
     {
@@ -2699,6 +2669,42 @@ namespace Realm {
 	assert(shutdown_request_received);
 	shutdown_initiated = true;
 	shutdown_condvar.broadcast();
+      }
+    }
+
+    void RuntimeImpl::shutdown(Event wait_on /*= Event::NO_EVENT*/,
+                               int result_code /*= 0*/)
+    {
+      // if we're called from inside a task, automatically include the
+      //  task's finish event as well
+      if(Thread::self()) {
+        Operation *op = Thread::self()->get_operation();
+        if(op != 0) {
+          log_runtime.debug() << "shutdown merging finish event="
+                              << op->get_finish_event();
+          wait_on = Event::merge_events(wait_on, op->get_finish_event());
+        }
+      }
+
+      log_runtime.info() << "shutdown requested - wait_on=" << wait_on
+                         << " code=" << result_code;
+
+      // send a message to the shutdown master if it's not us
+      NodeID shutdown_master_node = 0;
+      if(Network::my_node_id != shutdown_master_node) {
+        ActiveMessage<RuntimeShutdownRequest> amsg(shutdown_master_node);
+        amsg->wait_on = wait_on;
+        amsg->result_code = result_code;
+        amsg.commit();
+        return;
+      }
+
+      bool duplicate = request_shutdown(wait_on, result_code);
+      if(!duplicate) {
+        if(wait_on.has_triggered())
+          initiate_shutdown();
+        else
+          deferred_shutdown.defer(this, wait_on);
       }
     }
 

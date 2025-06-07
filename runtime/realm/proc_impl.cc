@@ -37,7 +37,7 @@ namespace Realm {
   // class Processor
   //
 
-  /*static*/ const Processor Processor::NO_PROC = {/* zero-initialization */};
+  /*static*/ const Processor Processor::NO_PROC{REALM_NO_PROC /* zero-initialization */};
 
   namespace ThreadLocal {
     REALM_THREAD_LOCAL Processor current_processor = {/* zero-initialization */};

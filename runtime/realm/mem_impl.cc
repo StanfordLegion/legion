@@ -45,16 +45,18 @@ namespace Realm {
   // class Memory
   //
 
-    AddressSpace Memory::address_space(void) const
-    {
-      // this is a hack for the Legion runtime
-      ID id(*this);
-      unsigned n = id.memory_owner_node();
-      if(n <= ID::MAX_NODE_ID)
-        return n;
-      else
-        return 0;  // claim node 0 owns "global" things
-    }
+  /*static*/ const Memory Memory::NO_MEMORY{REALM_NO_MEM /* zero-initialization */};
+
+  AddressSpace Memory::address_space(void) const
+  {
+    // this is a hack for the Legion runtime
+    ID id(*this);
+    unsigned n = id.memory_owner_node();
+    if(n <= ID::MAX_NODE_ID)
+      return n;
+    else
+      return 0; // claim node 0 owns "global" things
+  }
 
     Memory::Kind Memory::kind(void) const
     {
@@ -73,8 +75,6 @@ namespace Realm {
     {
       assert(0);
     }
-
-    /*static*/ const Memory Memory::NO_MEMORY = {/* zero-initialization */};
 
     ////////////////////////////////////////////////////////////////////////
     //

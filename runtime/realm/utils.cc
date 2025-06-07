@@ -360,4 +360,13 @@ namespace Realm {
 #endif
     }
   }
+
+  RealmEntryExitRAII::RealmEntryExitRAII(Logger &_logger, const char *_func)
+    : logger(_logger)
+    , func(_func)
+  {
+    logger.spew("%s entered", func);
+  }
+
+  RealmEntryExitRAII::~RealmEntryExitRAII() { logger.spew("%s exit", func); }
 };

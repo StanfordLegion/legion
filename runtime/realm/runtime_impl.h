@@ -294,6 +294,9 @@ namespace Realm {
       // indicates shutdown has been initiated, wakes up a waiter if already present
       void initiate_shutdown(void);
 
+      // shutdown the runtime
+      void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
+
       // returns value of result_code passed to shutdown()
       int wait_for_shutdown(void);
 

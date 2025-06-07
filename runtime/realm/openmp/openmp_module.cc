@@ -159,9 +159,9 @@ namespace Realm {
     }
     if(!proc->omp_threads_mapped) {
       if(!affinity_result) {
-        log_omp.warning(
-            "OMP Proc %llx failed setaffinity, which will lead to low performance.",
-            proc->me.id);
+        log_omp.warning("OMP Proc " IDFMT
+                        " failed setaffinity, which will lead to low performance.",
+                        proc->me.id);
       }
       proc->omp_threads_mapped = true;
     }
