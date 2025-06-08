@@ -260,7 +260,6 @@ private:
   std::unordered_set<Processor::TaskFuncID> registered_tasks;
   std::map<uintptr_t, unsigned long long> backtrace_ids;
   std::unordered_set<unsigned long long> provenance_ids;
-  unsigned long long next_backtrace_id;
   std::atomic<size_t> total_memory_footprint;
   unsigned total_address_spaces;
   Event shutdown_precondition;
@@ -1458,7 +1457,6 @@ void Profiler::initialize(void) {
   assert(!local_proc.exists());
   local_proc = local_procs.first();
   assert(local_proc.exists());
-  next_backtrace_id = local_proc.address_space();
   if (!enabled)
     return;
   size_t pct = file_name.find_first_of('%', 0);
@@ -2412,17 +2410,28 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   std::stringstream ss;
   ss << bt;
   const std::string str = ss.str();
+  // Compute the backtrace based on the symbols using a deterministic
+  // hash function, we can't use std::hash because it is not
+  // guaranteed to be the same across processes
+  std::vector<std::string> symbols;
+  bt.print_symbols(symbols);
+  unsigned long long result = 0;
+  constexpr unsigned long long large_prime = 18446744073709551557;
+  for(std::vector<std::string>::const_iterator it = symbols.begin(); it != symbols.end();
+      it++) {
+    for(unsigned idx = 0; idx < it->size(); idx++) {
+      const unsigned long long c = it->at(idx);
+      result = ((result << (8 * sizeof(char))) + c) % large_prime;
+    }
+  }
   // Now retake the lock and see if we lost the race
   AutoLock p_lock(profiler_lock);
   std::map<uintptr_t, unsigned long long>::const_iterator finder =
       backtrace_ids.find(hash);
   if (finder != backtrace_ids.end()) {
-    unsigned long long result = finder->second;
+    assert(result == finder->second);
     return result;
   }
-  // Didn't lose the race so generate a new ID for this backtrace
-  unsigned long long result = next_backtrace_id;
-  next_backtrace_id += total_address_spaces;
   // Save the backtrace into the file
   int ID = BACKTRACE_DESC_ID;
   pr_fwrite(f, (char *)&ID, sizeof(ID));
@@ -2434,7 +2443,15 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
 
 unsigned long long Profiler::find_provenance_id(const std::string_view &provenance)
 {
-  const unsigned long long hash = std::hash<std::string_view>{}(provenance);
+  // Compute a simple deterministic hash of this string, we can't use std::hash
+  // becasue it is not guaranteed to be the same across processes and we want
+  // this to be the same across all processes
+  unsigned long long hash = 0;
+  constexpr unsigned long long large_prime = 18446744073709551557;
+  for(unsigned idx = 0; idx < provenance.size(); idx++) {
+    const unsigned long long c = provenance[idx];
+    hash = ((hash << (8 * sizeof(char))) + c) % large_prime;
+  }
   {
     AutoLock p_lock(profiler_lock, false /*exclusive*/);
     std::unordered_set<unsigned long long>::const_iterator finder =
