@@ -2416,7 +2416,7 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   std::vector<std::string> symbols;
   bt.print_symbols(symbols);
   unsigned long long result = 0;
-  constexpr unsigned long long large_prime = 18446744073709551557;
+  constexpr unsigned long long large_prime = 18446744073709551557UL;
   for(std::vector<std::string>::const_iterator it = symbols.begin(); it != symbols.end();
       it++) {
     for(unsigned idx = 0; idx < it->size(); idx++) {
@@ -2447,7 +2447,7 @@ unsigned long long Profiler::find_provenance_id(const std::string_view &provenan
   // becasue it is not guaranteed to be the same across processes and we want
   // this to be the same across all processes
   unsigned long long hash = 0;
-  constexpr unsigned long long large_prime = 18446744073709551557;
+  constexpr unsigned long long large_prime = 18446744073709551557UL;
   for(unsigned idx = 0; idx < provenance.size(); idx++) {
     const unsigned long long c = provenance[idx];
     hash = ((hash << (8 * sizeof(char))) + c) % large_prime;
