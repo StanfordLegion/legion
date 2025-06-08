@@ -31,13 +31,13 @@
 namespace Realm {
 
   struct BarrierTriggerMessageArgsInternal {
-    EventImpl::gen_t trigger_gen;
-    EventImpl::gen_t previous_gen;
-    EventImpl::gen_t first_generation;
-    ReductionOpID redop_id;
-    NodeID migration_target;
-    unsigned base_arrival_count;
-    int broadcast_index;
+    EventImpl::gen_t trigger_gen = 0;
+    EventImpl::gen_t previous_gen = 0;
+    EventImpl::gen_t first_generation = 0;
+    ReductionOpID redop_id = 0;
+    NodeID migration_target = 0;
+    unsigned base_arrival_count = 0;
+    int broadcast_index = 0;
   };
 
   struct RemoteNotification;
