@@ -2415,13 +2415,12 @@ unsigned long long Profiler::find_backtrace_id(Backtrace &bt) {
   // guaranteed to be the same across processes
   std::vector<std::string> symbols;
   bt.print_symbols(symbols);
-  unsigned long long result = 0;
-  constexpr unsigned long long large_prime = 18446744073709551557UL;
+  // djb2 algorithm for string hashing
+  unsigned long long result = 5381;
   for(std::vector<std::string>::const_iterator it = symbols.begin(); it != symbols.end();
       it++) {
     for(unsigned idx = 0; idx < it->size(); idx++) {
-      const unsigned long long c = it->at(idx);
-      result = ((result << (8 * sizeof(char))) + c) % large_prime;
+      result = ((result << 5) + result) + it->at(idx);
     }
   }
   // Now retake the lock and see if we lost the race
@@ -2446,11 +2445,10 @@ unsigned long long Profiler::find_provenance_id(const std::string_view &provenan
   // Compute a simple deterministic hash of this string, we can't use std::hash
   // becasue it is not guaranteed to be the same across processes and we want
   // this to be the same across all processes
-  unsigned long long hash = 0;
-  constexpr unsigned long long large_prime = 18446744073709551557UL;
+  // djb2 algorithm for string hashing
+  unsigned long long hash = 5381;
   for(unsigned idx = 0; idx < provenance.size(); idx++) {
-    const unsigned long long c = provenance[idx];
-    hash = ((hash << (8 * sizeof(char))) + c) % large_prime;
+    hash = ((hash << 5) + hash) + provenance[idx];
   }
   {
     AutoLock p_lock(profiler_lock, false /*exclusive*/);
