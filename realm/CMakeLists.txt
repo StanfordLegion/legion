@@ -107,6 +107,7 @@ option(REALM_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOPLEVEL})
 option(REALM_BUILD_BENCHMARKS "Build benchmarks" ${PROJECT_IS_TOPLEVEL})
 option(REALM_BUILD_TUTORIALS "Build tutorials" ${PROJECT_IS_TOPLEVEL})
 
+cmake_dependent_option(REALM_ENABLE_RDTSC "Compile with RDTSC support" ON "NOT WIN32" OFF)
 option(REALM_ENABLE_CUDA "Compile with CUDA support" ON)
 option(REALM_ENABLE_HIP "Compile with HIP support" ON)
 option(REALM_ENABLE_LLVM "Compile with LLVMJIT support" OFF)
@@ -735,6 +736,9 @@ set(REALM_USE_LIBDL ${REALM_ENABLE_LIBDL})
 add_feature_info(libdl REALM_USE_LIBDL "Enables use of dlopen")
 set(REALM_USE_SHM ${REALM_ENABLE_SHM})
 add_feature_info(shm REALM_USE_SHM "Enables use of shared memory for CPU IPC")
+set(REALM_TIMERS_USE_RDTSC ${REALM_ENABLE_RDTSC})
+add_feature_info(rdtsc REALM_TIMERS_USE_RDTSC "Enables use of rdtsc for Realm::Clock")
+add_feature_info(mpi_comm_split REALM_MPI_HAS_COMM_SPLIT_TYPE "Enables use of MPI_Comm_split_type in realm to identify shared peers")
 #endregion
 
 #region Source lists

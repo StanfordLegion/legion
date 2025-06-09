@@ -383,6 +383,16 @@ if(Legion_USE_LIBDL)
 endif()
 
 #------------------------------------------------------------------------------#
+# rdtsc configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_RDTSC "Enable run-time support for dynamic shared objects" ON)
+if(Legion_USE_RDTSC AND NOT WIN32)
+  # define variable for realm_defines.h
+  set(REALM_TIMERS_USE_RDTSC ON)
+endif()
+
+
+#------------------------------------------------------------------------------#
 # network interface configuration
 #------------------------------------------------------------------------------#
 set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
