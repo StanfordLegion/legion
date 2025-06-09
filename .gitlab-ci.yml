@@ -16,6 +16,7 @@ variables:
   CCACHE_DIR: $CI_PROJECT_DIR/.cache/ccache
   USE_CCACHE: "1"
   CPM_SOURCE_CACHE: $CI_PROJECT_DIR/.cache/cpm_src
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
   REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
   GASNET_SHA256: "f3b379b2c650b8deb24e33ca101303c1af2482e996e603291ebf16c02a708da1"
   GASNET_COMMIT: "3db4ea2f92ea6bfba6fe9538cb001b6a34b2f373"
@@ -30,11 +31,13 @@ cache: &global_cache
   - key: "external-deps"
     paths:
       - $DEP_CACHE
-  - key: "cargo"
+  - key:
+      files:
+        - tools/legion_prof_rs/Cargo.lock
+      prefix: cargo
     paths:
-      - $HOME/.cargo
-      - $CI_PROJECT_DIR/tools/legion_prof_rs/target
-
+      - $CARGO_HOME
+      - tools/legion_prof_rs/target/
 
 # Local variables (included on a case-by-case basis in each job):
 .no_ccache: &no_ccache
@@ -400,6 +403,10 @@ before_script:
       ccache --zero-stats
       ccache --show-stats
     fi
+  - |
+    (find $CARGO_HOME -type f -print0 | perl -0ne 'END {print $.}') || true
+  - |
+    (find $CI_PROJECT_DIR/tools/legion_prof_rs/target -type f -print0 | perl -0ne 'END {print $.}') || true
   - |
     if [[ "$USE_CUDA" -eq 1 ]]; then
       # make sure dynamic loading finds the right libcudart.so
