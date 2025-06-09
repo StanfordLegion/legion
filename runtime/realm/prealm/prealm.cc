@@ -655,6 +655,8 @@ void ThreadProfiler::record_event_merger(Event result,
 void ThreadProfiler::record_external_event(Realm::Event event,
                                            const std::string_view &prov)
 {
+  if(!event.exists())
+    return;
   Profiler &profiler = Profiler::get_profiler();
   if(!profiler.enabled || profiler.no_critical_paths)
     return;
