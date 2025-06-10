@@ -45,7 +45,7 @@ struct FairStruct {
   Processor orig;
   Reservation lock;
   Event precondition;
-  int depth;
+  size_t depth;
 };
 
 // forward declaration
@@ -98,18 +98,37 @@ Processor get_next_processor(Processor cur)
   return Processor::NO_PROC;
 }
 
+struct MakeLocksParams {
+  realm_id_t proc;
+  size_t locks_per_processor;
+};
+
+struct ReturnLocksParams {
+  size_t num_locks;
+  realm_id_t reservations[1];
+};
+struct LaunchUnfairParams {
+  realm_id_t proc;
+  realm_id_t start_event;
+  size_t tasks_per_processor_per_lock;
+  size_t lock_set_size;
+  realm_id_t reservations[1];
+};
+
 void top_level_task(const void *args, size_t arglen, 
                     const void *userdata, size_t userlen, Processor p)
 {
   bool fair = false;
-  int locks_per_processor = 16;
-  int tasks_per_processor_per_lock = 8;
+  size_t locks_per_processor = 16;
+  size_t tasks_per_processor_per_lock = 8;
   // Parse the input arguments
-#define INT_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = atoi((argv)[++i]);		\
-          continue;					\
-        } } while(0)
+#define INT_ARG(argname, varname)                                                        \
+  do {                                                                                   \
+    if(!strcmp((argv)[i], argname)) {                                                    \
+      varname = static_cast<decltype(varname)>(atoi((argv)[++i]));                       \
+      continue;                                                                          \
+    }                                                                                    \
+  } while(0)
 
 #define BOOL_ARG(argname, varname) do { \
         if(!strcmp((argv)[i], argname)) {		\
@@ -136,28 +155,24 @@ void top_level_task(const void *args, size_t arglen,
   std::set<Processor> all_procs;
   Machine::get_machine().get_all_processors(all_procs);
   // Send a request to each processor to make the given number of locks
+  // Send a request to each processor to make the given number of locks
   {
-    size_t buffer_size = sizeof(Processor) + sizeof(int);
-    void *buffer = malloc(buffer_size);
-    char *ptr = (char*)buffer;
-    *((Processor*)ptr) = p;
-    ptr += sizeof(Processor);
-    *((int*)ptr) = locks_per_processor;
-    for (std::set<Processor>::const_iterator it = all_procs.begin();
-          it != all_procs.end(); it++)
-    {
-      Processor copy = *it;
-      Event wait_event = copy.spawn(MAKE_LOCKS_TASK,buffer,buffer_size);
+    MakeLocksParams params;
+    params.proc = p.id;
+    params.locks_per_processor = locks_per_processor;
+    for(Processor copy : all_procs) {
+      Event wait_event = copy.spawn(MAKE_LOCKS_TASK, &params, sizeof(params));
       wait_event.wait();
     }
-    free(buffer);
   }
   if (fair)
   {
-    fprintf(stdout,"Running FAIR lock contention experiment with %d locks per processor and %d tasks per lock per processor\n",
+    fprintf(stdout,
+            "Running FAIR lock contention experiment with %zu locks per processor and "
+            "%zu tasks per lock per processor\n",
             locks_per_processor, tasks_per_processor_per_lock);
     // For each lock in the lock set, stripe it through all the processors with dependences
-    int lock_depth = tasks_per_processor_per_lock * all_procs.size();
+    size_t lock_depth = tasks_per_processor_per_lock * all_procs.size();
     std::set<Reservation> &lock_set = get_lock_set();
     for (std::set<Reservation>::const_iterator it = lock_set.begin();
           it != lock_set.end(); it++)
@@ -169,37 +184,28 @@ void top_level_task(const void *args, size_t arglen,
   }
   else
   {
-    fprintf(stdout,"Running UNFAIR lock contention experiment with %d locks per processor and %d tasks per lock per processor\n",
+    fprintf(stdout,
+            "Running UNFAIR lock contention experiment with %zu locks per processor and "
+            "%zu tasks per lock per processor\n",
             locks_per_processor, tasks_per_processor_per_lock);
     std::set<Reservation> &lock_set = get_lock_set();
     // Package up all the locks and tell the processor how many tasks to register for each
-    size_t buffer_size = sizeof(Processor) + sizeof(Event) + sizeof(int) + sizeof(size_t) + (lock_set.size() * sizeof(Reservation));
-    void *buffer = malloc(buffer_size);
-    char *ptr = (char*)buffer;
-    *((Processor*)ptr) = p;
-    ptr += sizeof(Processor);
-    *((Event*)ptr) = start_event;
-    ptr += sizeof(Event);
-    *((int*)ptr) = tasks_per_processor_per_lock;
-    ptr += sizeof(int);
-    *((size_t*)ptr) = lock_set.size();
-    ptr += sizeof(size_t);
-    for (std::set<Reservation>::const_iterator it = lock_set.begin();
-          it != lock_set.end(); it++)
-    {
-      Reservation lock = *it;
-      *((Reservation*)ptr) = lock;
-      ptr += sizeof(Reservation);
+    size_t buffer_size =
+        sizeof(LaunchUnfairParams) + ((lock_set.size() - 1) * sizeof(Reservation));
+    LaunchUnfairParams *params = (LaunchUnfairParams *)malloc(buffer_size);
+    params->proc = p.id;
+    params->start_event = start_event.id;
+    params->tasks_per_processor_per_lock = tasks_per_processor_per_lock;
+    params->lock_set_size = 0;
+    for(Reservation reservation : lock_set) {
+      params->reservations[params->lock_set_size++] = reservation.id;
     }
     // Send the message to all the processors
-    for (std::set<Processor>::const_iterator it = all_procs.begin();
-          it != all_procs.end(); it++)
-    {
-      Processor target = *it;
-      Event wait_event = target.spawn(LAUNCH_UNFAIR_LOCK_TASK,buffer,buffer_size);
+    for(Processor target : all_procs) {
+      Event wait_event = target.spawn(LAUNCH_UNFAIR_LOCK_TASK, params, buffer_size);
       wait_event.wait();
     }
-    free(buffer);
+    free(params);
   }
 
   Event final_event = Event::merge_events(get_final_events());
@@ -228,40 +234,34 @@ void top_level_task(const void *args, size_t arglen,
 void make_locks_task(const void *args, size_t arglen, 
                      const void *userdata, size_t userlen, Processor p)
 {
-  assert(arglen == (sizeof(Processor) + sizeof(int)));
-  char *ptr = (char*)args;
-  Processor orig = *((Processor*)ptr);
-  ptr += sizeof(Processor);
-  int num_locks = *((int*)ptr);
+  assert(arglen == sizeof(MakeLocksParams));
+  const MakeLocksParams *param = reinterpret_cast<const MakeLocksParams *>(args);
+  Processor orig;
+  orig.id = param->proc;
+  size_t num_locks = param->locks_per_processor;
 
-  size_t buffer_size = sizeof(int) + num_locks*sizeof(Reservation);
-  void * buffer = malloc(buffer_size);
-  ptr = (char*)buffer;
-  *((int*)ptr) = num_locks;
-  ptr += sizeof(int);
-
-  for (int idx = 0; idx < num_locks; idx++)
-  {
-    Realm::Reservation r = Realm::Reservation::create_reservation();
-    memcpy(ptr, &r, sizeof(Realm::Reservation));
-    ptr += sizeof(Realm::Reservation);
+  size_t buffer_size = sizeof(ReturnLocksParams) + (num_locks - 1) * sizeof(Reservation);
+  ReturnLocksParams *rparams = (ReturnLocksParams *)malloc(buffer_size);
+  rparams->num_locks = num_locks;
+  for(size_t idx = 0; idx < num_locks; idx++) {
+    Reservation res = Reservation::create_reservation();
+    rparams->reservations[idx] = res.id;
   }
-  Event wait_event = orig.spawn(RETURN_LOCKS_TASK,buffer,buffer_size);
-  free(buffer);
+  Event wait_event = orig.spawn(RETURN_LOCKS_TASK, rparams, buffer_size);
   wait_event.wait();
+  free(rparams);
 }
 
 void return_locks_task(const void *args, size_t arglen, 
                        const void *userdata, size_t userlen, Processor p)
 {
-  char *ptr = (char*)args;
-  int num_locks = *((int*)ptr);
-  ptr += sizeof(int);
+  assert(arglen >= sizeof(ReturnLocksParams));
+  const ReturnLocksParams *params = reinterpret_cast<const ReturnLocksParams *>(args);
+  size_t num_locks = params->num_locks;
   std::set<Reservation> &lockset = get_lock_set();
-  for (int idx = 0; idx < num_locks; idx++)
-  {
-    Reservation remote = *((Reservation*)ptr);
-    ptr += sizeof(Reservation);
+  for(size_t idx = 0; idx < num_locks; idx++) {
+    Reservation remote;
+    remote.id = params->reservations[idx];
     lockset.insert(remote);
   }
 }
@@ -293,29 +293,24 @@ void fair_locks_task(const void *args, size_t arglen,
 void unfair_locks_task(const void *args, size_t arglen, 
                        const void *userdata, size_t userlen, Processor p)
 {
-  char *ptr = (char*)args;
-  Processor orig = *((Processor*)ptr);
-  ptr += sizeof(Processor);
-  Event precondition = *((Event*)ptr);
-  ptr += sizeof(Event);
-  int tasks_per_processor_per_lock = *((int*)ptr);
-  ptr += sizeof(int);
-  size_t num_locks = *((size_t*)ptr);
-  ptr += sizeof(size_t);
+  assert(arglen >= sizeof(LaunchUnfairParams));
+  const LaunchUnfairParams *params = reinterpret_cast<const LaunchUnfairParams *>(args);
+  Processor orig;
+  orig.id = params->proc;
+  Event precondition;
+  precondition.id = params->start_event;
+  const size_t tasks_per_processor_per_lock = params->tasks_per_processor_per_lock;
+  const size_t num_locks = params->lock_set_size;
   std::set<Reservation> lock_set;
   for (unsigned idx = 0; idx < num_locks; idx++)
   {
-    Reservation lock = *((Reservation*)ptr);
-    ptr += sizeof(Reservation);
+    Reservation lock;
+    lock.id = params->reservations[idx];
     lock_set.insert(lock);
   }
   std::set<Event> wait_for_events;
-  for (std::set<Reservation>::const_iterator it = lock_set.begin();
-        it != lock_set.end(); it++)
-  {
-    Reservation lock = *it;
-    for (int idx = 0; idx < tasks_per_processor_per_lock; idx++)
-    {
+  for(Reservation lock : lock_set) {
+    for(size_t idx = 0; idx < tasks_per_processor_per_lock; idx++) {
       Event lock_event = lock.acquire(0,true,precondition);
       Event task_event = p.spawn(DUMMY_TASK,NULL,0,lock_event);
       lock.release(task_event);
