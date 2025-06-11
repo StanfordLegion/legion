@@ -147,6 +147,16 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size,
 
   std::vector<TransposeExperiment<N> *> experiments;
 
+  const size_t total_size_bytes = is_pad.volume() * sizeof(FT);
+  if((total_size_bytes > src_mem.capacity()) || (total_size_bytes > dst_mem.capacity())) {
+    log_app.info("memory pair not large enough for transfer test, skipping...");
+    return;
+  }
+  if((dst_mem == src_mem) && ((total_size_bytes * 2) > src_mem.capacity())) {
+    log_app.info("memory pair not large enough for transfer test, skipping...");
+    return;
+  }
+
   Event wait_for = Event::NO_EVENT;
   std::vector<Event> done_events;
   for(unsigned i = 0; i < perms.size(); i++) {

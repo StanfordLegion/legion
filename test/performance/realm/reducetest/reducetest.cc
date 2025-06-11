@@ -61,7 +61,11 @@ template <class LHS, class RHS>
 struct DoAdd<false,LHS,RHS> {
   static void do_add(LHS& lhs, RHS rhs)
   {
+#if defined(_WIN32)
+    InterlockedAdd((volatile LONG *)&lhs, (LONG)rhs);
+#else
     __sync_fetch_and_add(&lhs, (LHS)rhs);
+#endif
   }
 };
 
