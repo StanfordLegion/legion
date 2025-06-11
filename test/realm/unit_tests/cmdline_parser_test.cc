@@ -267,7 +267,7 @@ TEST(CommandLineParserTest, ErrorOutputStringTooShort)
   for(int version = 0; version < 2; version++) {
     std::vector<std::string> cmdline = {"-success", "123", "-teststring", "toolong"};
     int succeed_arg = 0;
-    size_t string_len = 2;
+    const size_t string_len = 2;
     char teststring[string_len];
     CommandLineParser cp;
     cp.add_option_int("-success", succeed_arg)
