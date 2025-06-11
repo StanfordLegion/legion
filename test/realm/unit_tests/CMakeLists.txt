@@ -28,7 +28,6 @@ list(APPEND REALM_TESTS
   comp_queue_test.cc
   ucx_mpool_test.cc
   indexspace_iterator_test.cc
-  barrier_test.cc
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
@@ -53,6 +52,7 @@ list(APPEND REALM_TESTS
   auto_actmsg_test.cc
   fragmented_message_test.cc
   incoming_message_manager_test.cc
+  barrier_test.cc
  )
 
 list(APPEND UCX_SOURCES
