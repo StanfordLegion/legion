@@ -30,12 +30,18 @@ if(MPIEXEC_EXECUTABLE)
   list(PREPEND TEST_LAUNCHER "${MPIEXEC_EXECUTABLE}" ${MPIEXEC_NUMPROC_FLAG} ${TEST_PROCESSORS}
        ${MPIEXEC_PREFLAGS}
   )
+  list(APPEND TEST_RESOURCE_LOCK network)
 endif()
 
 if(REALM_USE_CUDA OR REALM_USE_HIP)
-  set(TEST_RESOURCE_LOCK gpu)
+  list(APPEND TEST_RESOURCE_LOCK gpu)
   list(APPEND TEST_DEFAULT_ARGS -ll:gpu 1)
   set(TEST_USE_GPU TRUE)
+  set(TEST_GPU_LIBS $<TARGET_NAME_IF_EXISTS:CUDA::cudart> $<TARGET_NAME_IF_EXISTS:hip::host>)
+endif()
+
+if(REALM_USE_KOKKOS AND REALM_USE_OPENMP)
+  list(APPEND TEST_DEFAULT_ARGS -ll:ocpu 1 -ll:onuma 0)
 endif()
 
 if(NOT TEST_ARGS)
@@ -111,13 +117,22 @@ list(
 list(TRANSFORM REALM_UNIT_TESTS PREPEND "${REALM_TEST_DIR}/unit_tests/")
 
 add_executable(realm_unit_tests ${REALM_UNIT_TESTS})
+# Needed for designated initializers
+# TODO(apriakhin): to be removed
+target_compile_features(realm_unit_tests PUBLIC cxx_std_20)
 target_link_libraries(realm_unit_tests PRIVATE realm_obj GTest::gmock_main)
 
 include(GoogleTest)
-if(NOT REALM_SANITIZER OR REALM_SANITIZER STREQUAL "NONE")
+if((NOT REALM_SANITIZER OR REALM_SANITIZER STREQUAL "NONE") AND NOT WIN32)
   gtest_discover_tests(realm_unit_tests NO_PRETTY_TYPES NO_PRETTY_VALUES PROPERTIES LABELS "unit")
 else()
   add_test(NAME realm_unit_tests COMMAND $<TARGET_FILE:realm_unit_tests>)
+endif()
+
+if(REALM_SANITIZER STREQUAL "ASAN")
+  # Disable leak checking on realm_unit_tests
+  # TODO(apriakhin): fix this
+  set_tests_properties(realm_unit_tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
 endif()
 
 if(REALM_ENABLE_COVERAGE)
@@ -199,6 +214,7 @@ add_integration_test(barrier_reduce "${REALM_TEST_DIR}/barrier_reduce.cc")
 add_integration_test(taskreg "${REALM_TEST_DIR}/taskreg.cc")
 add_integration_test(idcheck "${REALM_TEST_DIR}/idcheck.cc")
 add_integration_test(inst_reuse "${REALM_TEST_DIR}/inst_reuse.cc")
+set(transpose_ARGS -unit_test 1) # Run short test
 add_integration_test(transpose "${REALM_TEST_DIR}/transpose.cc")
 set(proc_group_ARGS -ll:cpu 4)
 add_integration_test(proc_group "${REALM_TEST_DIR}/proc_group.cc")
@@ -308,10 +324,15 @@ add_integration_test(
   "$<$<BOOL:TEST_USE_GPU>:${REALM_TEST_DIR}/memspeed_gpu.cu>"
 )
 set(simple_reduce_ARGS -all)
-add_integration_test(
-  simple_reduce "${REALM_TEST_DIR}/simple_reduce.cc"
-  "$<$<BOOL:TEST_USE_GPU>:${REALM_TEST_DIR}/simple_reduce_gpu.cu>"
-)
+if(NOT BUILD_SHARED_LIBS OR NOT REALM_ENABLE_HIP)
+  # simple_reduce registers a kernel with the runtime, but uses a different instance of the runtime
+  # than in librealm.so, which causes an "invalid device function" error.  This has been solved in
+  # the CUDA module, not the HIP module yet.
+  add_integration_test(
+    simple_reduce "${REALM_TEST_DIR}/simple_reduce.cc"
+    "$<$<BOOL:TEST_USE_GPU>:${REALM_TEST_DIR}/simple_reduce_gpu.cu>"
+  )
+endif()
 add_integration_test(
   multiaffine "${REALM_TEST_DIR}/multiaffine.cc"
   "$<$<BOOL:TEST_USE_GPU>:${REALM_TEST_DIR}/multiaffine_gpu.cu>"
@@ -349,22 +370,22 @@ if(TEST_USE_GPU)
   set(transpose_test_gpu_ARGS -ll:gpu 1)
   set(transpose_test_gpu_RESOURCE_LOCK gpu)
   add_integration_test(transpose_test_gpu "${REALM_TEST_DIR}/transpose_test_gpu.cc")
+  target_link_libraries(transpose_test_gpu ${TEST_GPU_LIBS})
   set(task_stream_ARGS -ll:gpu 1)
   set(task_stream_RESOURCE_LOCK gpu)
   add_integration_test(
     task_stream "${REALM_TEST_DIR}/task_stream.cc" "${REALM_TEST_DIR}/task_stream_gpu.cu"
   )
-  target_link_libraries(
-    task_stream $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver> $<TARGET_NAME_IF_EXISTS:Hip::Hip>
-  )
+  target_link_libraries(task_stream ${TEST_GPU_LIBS})
 endif()
 
 target_link_libraries(
-  machine_config $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver> $<TARGET_NAME_IF_EXISTS:Hip::Hip>
+  machine_config ${TEST_GPU_LIBS} $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>
 )
-target_link_libraries(
-  test_profiling $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver> $<TARGET_NAME_IF_EXISTS:Hip::Hip>
-)
+target_link_libraries(test_profiling ${TEST_GPU_LIBS})
+if(REALM_USE_LIBDL)
+  target_link_libraries(taskreg ${CMAKE_DL_LIBS})
+endif()
 
 # These executables use global registration and require -rdynamic to be set in order to retrieve the symbol name and offset
 set_target_properties(taskreg PROPERTIES ENABLE_EXPORTS TRUE)

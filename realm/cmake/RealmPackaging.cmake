@@ -197,6 +197,13 @@ endif()
 
 # Snap the version for the source package and add it to the source package via the custom CPack script
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/version/VERSION" "${REALM_VERSION}")
+# Also add this to the installation package for systems that don't support either cmake nor pkg-config (like osx)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/version/VERSION"
+  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/realm"
+  COMPONENT Realm_devel
+)
+
 set(CPACK_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/CPack.cmake")
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPack.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/CPack.cmake"

@@ -628,7 +628,7 @@ if(Legion_USE_HIP)
     )
   endif()
 
-  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
+  option(Legion_HIJACK_HIP "Enable HIJACK HIP" OFF)
 
   # define variable for legion_defines.h
   set(LEGION_USE_HIP ON)

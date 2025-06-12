@@ -81,4 +81,13 @@ if(${CMAKE_FIND_PACKAGE_NAME}_static_FOUND)
   endforeach()
 endif()
 
+# If Kokkos was used, it needs to be found regardless of shared or static since
+# it's (unfortunately) part of the interface
+# TODO(cperry): move this to be header only / optional, maybe after the c++ api
+#               is implemented on top of the c api
+set(REALM_USE_KOKKOS @REALM_USE_KOKKOS@)
+if (REALM_USE_KOKKOS)
+  find_dependency(Kokkos)
+endif()
+
 check_required_components(realm)

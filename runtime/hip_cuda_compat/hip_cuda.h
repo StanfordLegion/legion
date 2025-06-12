@@ -1,7 +1,7 @@
 #ifndef HIP_CUDA_H
 #define HIP_CUDA_H
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 // types
 #define cudaDeviceProp hipDeviceProp_t
