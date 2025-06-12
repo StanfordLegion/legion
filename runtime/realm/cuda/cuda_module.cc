@@ -3257,8 +3257,8 @@ namespace Realm {
           }
 
           // For fast lookups, check if we actually have a numa preference
-          for(size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
-            if(info->numa_node_affinity[i] != (unsigned long)-1) {
+          for(size_t j = 0; j < info->MAX_NUMA_NODE_LEN; j++) {
+            if(info->numa_node_affinity[j] != (unsigned long)-1) {
               info->has_numa_preference = true;
               break;
             }
