@@ -26,12 +26,6 @@ namespace Realm {
   namespace Cuda {
 
 #ifdef __CUDACC__
-
-    typedef cudaError_t (*PFN_cudaLaunchKernel)(const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream);
-#if CUDART_VERSION >= 11000
-    typedef cudaError_t (*PFN_cudaGetFuncBySymbol)(cudaFunction_t* functionPtr, const void* symbolPtr);
-#endif
-
     // the ability to add CUDA kernels to a reduction op is only available
     //  when using a compiler that understands CUDA
     namespace ReductionKernels {
@@ -103,10 +97,15 @@ namespace Realm {
       // used for launching the above instantiations
       // We use static cast here for type safety, as cudart is not ABI stable,
       // so we want to ensure the functions used here match our expectations
+      typedef cudaError_t (*PFN_cudaLaunchKernel)(const void *func, dim3 gridDim,
+                                                  dim3 blockDim, void **args,
+                                                  size_t sharedMem, cudaStream_t stream);
       PFN_cudaLaunchKernel launch_fn =
           static_cast<PFN_cudaLaunchKernel>(cudaLaunchKernel);
       redop->cudaLaunchKernel_fn = reinterpret_cast<void *>(launch_fn);
 #if CUDART_VERSION >= 11000
+      typedef cudaError_t (*PFN_cudaGetFuncBySymbol)(cudaFunction_t * functionPtr,
+                                                     const void *symbolPtr);
       PFN_cudaGetFuncBySymbol symbol_fn =
           static_cast<PFN_cudaGetFuncBySymbol>(cudaGetFuncBySymbol);
       redop->cudaGetFuncBySymbol_fn = reinterpret_cast<void *>(symbol_fn);

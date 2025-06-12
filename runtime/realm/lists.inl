@@ -18,6 +18,7 @@
 // nop, but helps IDEs
 #include "realm/lists.h"
 
+#include <cassert>
 #include <iostream>
 
 namespace Realm {

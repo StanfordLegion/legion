@@ -275,7 +275,9 @@ namespace Realm {
     int num_logical_cores = 0;
     sysctlbyname("hw.logicalcpu", &num_logical_cores, &buflen, NULL, 0);
     // we can only handle the case that there is no hyper threads
-    assert(num_physical_cores == num_logical_cores);
+    if(num_physical_cores != num_logical_cores) {
+      log_topo.warning("Hyperthreads are not supported on OSX, ignoring.");
+    }
     for(int i = 0; i < num_physical_cores; i++) {
       HardwareTopology::Proc &proc = logical_cores.emplace_back();
       // assume mac only have one numa
