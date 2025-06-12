@@ -66,7 +66,7 @@ set(REALM_SOURCES
     procset/procset_module.cc
 )
 
-if(TARGET CUDA::cuda_driver)
+if(TARGET CUDA::cuda_driver AND REALM_USE_CUDA)
   list(APPEND REALM_SOURCES cuda/cuda_module.cc cuda/cuda_internal.cc cuda/cuda_access.cc)
   if(REALM_USE_NVTX)
     list(APPEND REALM_SOURCES nvtx.cc)
@@ -74,7 +74,7 @@ if(TARGET CUDA::cuda_driver)
   list(APPEND REALM_CUDA_SOURCES cuda/cuda_memcpy.cu)
 endif()
 
-if(TARGET hip::hip_host)
+if(TARGET hip::host)
   list(APPEND REALM_SOURCES hip/hip_module.cc hip/hip_internal.cc hip/hip_access.cc)
 endif()
 
@@ -91,6 +91,10 @@ if(REALM_USE_OPENMP)
   if(REALM_OPENMP_KMP_SUPPORT OR REALM_OPENMP_GOMP_SUPPORT)
     list(APPEND REALM_SOURCES openmp/openmp_threadpool.cc openmp/openmp_api.cc)
   endif()
+endif()
+
+if(REALM_USE_PREALM)
+  list(APPEND REALM_SOURCES prealm/prealm.cc)
 endif()
 
 if(TARGET Python3::Python)
@@ -130,10 +134,10 @@ list(TRANSFORM REALM_SOURCES PREPEND "${REALM_SOURCE_DIR}/")
 list(TRANSFORM REALM_CUDA_SOURCES PREPEND "${REALM_SOURCE_DIR}/")
 
 # Generated sources
-# TODO(cperry): fix path
+# TODO(cperry): fix path so realm_defines.h lives in realm directory
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/realm_defines.h.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/../include/realm/realm_defines.h" @ONLY
+  "${CMAKE_CURRENT_BINARY_DIR}/../include/realm_defines.h" @ONLY
 )
 
 # generate per-dimension object files for deppart stuff

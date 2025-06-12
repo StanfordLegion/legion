@@ -89,17 +89,15 @@ set(REALM_MAX_DIM
     3
     CACHE STRING "Maximum dimension compiled for"
 )
-set(REALM_LIMIT_SYMBOL_VISIBILITY 1)
+if (BUILD_SHARED_LIBS)
+  set(REALM_LIMIT_SYMBOL_VISIBILITY 1)
+endif()
 set(REALM_CXX_STANDARD
     17
     CACHE STRING "C++ standard used"
 )
-if(CMAKE_BUILD_TYPE STREQUAL Debug)
-  set(DEBUG_REALM 1)
-  set(COMPILE_TIME_MIN_LEVEL LEVEL_DEBUG)
-else()
-  set(COMPILE_TIME_MIN_LEVEL LEVEL_WARNING)
-endif()
+set(REALM_LOG_LEVEL "WARNING" CACHE STRING "Compile-time logging level")
+set_property(CACHE REALM_LOG_LEVEL PROPERTY STRINGS "SPEW;DEBUG;INFO;PRINT;WARNING;ERROR;FATAL;NONE")
 
 option(REALM_ENABLE_INSTALL "Enable installation support" ${PROJECT_IS_TOP_LEVEL})
 option(REALM_BUILD_TESTS "Build tests" ${PROJECT_IS_TOPLEVEL})
@@ -115,11 +113,12 @@ option(REALM_ENABLE_HDF5 "Compile with HDF5 support" ON)
 option(REALM_ENABLE_MPI "Compile with MPI support" OFF)
 option(REALM_ENABLE_OPENMP "Compile with OpenMP support" ON)
 option(REALM_ENABLE_KOKKOS "Compile with kokkos support" OFF)
-option(REALM_ENABLE_UCX "Compile with UCX support" ON)
+cmake_dependent_option(REALM_ENABLE_UCX "Compile with UCX support" ON "NOT WIN32" OFF)
 option(REALM_ENABLE_HWLOC "Compile with hwloc hardware discovery support" OFF)
 option(REALM_ENABLE_PAPI "Compile with PAPI thread profiling support" ON)
 option(REALM_ENABLE_CPPTRACE "Compile with cpptrace backtrace support" ON)
-option(REALM_ENABLE_LIBDL "Compile with dynamic runtime linking support" ON)
+option(REALM_ENABLE_PREALM "Compile with realm profiler" OFF)
+cmake_dependent_option(REALM_ENABLE_LIBDL "Compile with dynamic runtime linking support" ON "NOT WIN32" OFF)
 cmake_dependent_option(REALM_ENABLE_GASNETEX "Compile with GASNetEx support" ON "NOT WIN32" OFF)
 cmake_dependent_option(
   REALM_ENABLE_GASNETEX_WRAPPER "Compile with dynamic GASNetEx ABI stability wrapper" OFF
@@ -175,9 +174,9 @@ cmake_path(ABSOLUTE_PATH REALM_SOURCE_DIR NORMALIZE)
 #region Dependencies
 set(REALM_STATIC_DEPENDS)
 set_package_properties(CUDAToolkit PROPERTIES TYPE RECOMMENDED)
-set_package_properties(HIP PROPERTIES TYPE OPTIONAL)
+set_package_properties(hip PROPERTIES TYPE OPTIONAL)
 set_package_properties(LLVM PROPERTIES TYPE OPTIONAL)
-set_package_properties(hdf5 PROPERTIES TYPE OPTIONAL)
+set_package_properties(HDF5 PROPERTIES TYPE OPTIONAL)
 set_package_properties(MPI PROPERTIES TYPE OPTIONAL)
 set_package_properties(OpenMP PROPERTIES TYPE OPTIONAL)
 set_package_properties(Kokkos PROPERTIES TYPE OPTIONAL)
@@ -191,6 +190,12 @@ set_package_properties(
   TYPE RECOMMENDED
   PURPOSE "To display backtraces"
 )
+
+# TODO(cperry): rename with REALM_ prefix
+set(COMPILE_TIME_MIN_LEVEL "LEVEL_${REALM_LOG_LEVEL}")
+if(CMAKE_BUILD_TYPE STREQUAL Debug)
+  set(DEBUG_REALM 1)
+endif()
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -281,12 +286,18 @@ if(REALM_ENABLE_HIP)
   endif()
   list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
   find_package(hip CONFIG)
+  if(HIP_PLATFORM STREQUAL "nvidia")
+    set_target_properties(
+      hip::host PROPERTIES INTERFACE_COMPILE_DEFINITIONS "__HIP_PLATFORM_NVIDIA__"
+      INTERFACE_LINK_LIBRARIES CUDA::cudart
+    )
+  endif()
   if(NOT HIP_ROOT_DIR)
     set(HIP_ROOT_DIR "${ROCM_PATH}")
   endif()
-  if(HIP_FOUND)
+  if(hip_FOUND)
     list(APPEND REALM_STATIC_DEPENDS hip)
-    list(APPEND REALM_LIBRARIES hip::hip_host)
+    list(APPEND REALM_LIBRARIES hip::host)
   endif()
 endif()
 
@@ -329,10 +340,12 @@ if(REALM_ENABLE_CUDA)
       PATH_SUFFIXES include ../include extras/CUPTI/include ../extras/CUPTI/include
     )
     # Deal with the library name change in older versions of cmake
-    if(NOT TARGET CUDA::nvToolsExt)
+    if(NOT TARGET CUDA::nvToolsExt AND TARGET CUDA::nvtx3)
       add_library(CUDA::nvToolsExt ALIAS CUDA::nvtx3)
     endif()
-    list(APPEND REALM_LIBRARIES CUDA::nvToolsExt)
+    if (TARGET CUDA::nvToolsExt)
+      list(APPEND REALM_LIBRARIES CUDA::nvToolsExt)
+    endif()
     if(NOT REALM_CUDA_DYNAMIC_LOAD)
       list(APPEND REALM_LIBRARIES CUDA::cuda_driver)
     endif()
@@ -431,6 +444,14 @@ if(REALM_ENABLE_HDF5)
   if(HDF5_FOUND)
     list(APPEND REALM_STATIC_DEPENDS HDF5)
     list(APPEND REALM_LIBRARIES hdf5::hdf5)
+  endif()
+endif()
+
+if(REALM_ENABLE_PREALM)
+  find_package(ZLIB)
+  if(ZLIB_FOUND)
+    list(APPEND REALM_STATIC_DEPENDS ZLIB)
+    list(APPEND REALM_LIBRARIES ZLIB::ZLIB)
   endif()
 endif()
 
@@ -681,22 +702,22 @@ if(REALM_SANITIZER AND NOT REALM_SANITIZER STREQUAL "NONE")
   endif()
   add_compile_options($<$<CONFIG:Debug>:-fsanitize=${SANITIZER}>)
   add_link_options($<$<CONFIG:Debug>:-fsanitize=${SANITIZER}>)
-  add_compile_definitions(-D${REALM_SANITIZER}_ENABLED)
+  add_compile_definitions(${REALM_SANITIZER}_ENABLED)
 endif()
 
 #endregion
 
 #region Feature Defines
-if(TARGET CUDA::cuda_driver)
+if(TARGET CUDA::cuda_driver AND REALM_ENABLE_CUDA)
   set(REALM_USE_CUDA TRUE)
 endif()
 
-if(TARGET CUDA::nvToolsExt)
+if(TARGET CUDA::nvToolsExt AND REALM_ENABLE_CUDA)
   set(REALM_USE_NVTX TRUE)
 endif()
 add_feature_info(nvtx REALM_USE_NVTX "Enables NVTX annotations for profiling visibility")
 
-if(TARGET hip::hip_host)
+if(TARGET hip::host)
   set(REALM_USE_HIP TRUE)
 endif()
 if(TARGET LLVM::LLVM)
@@ -705,6 +726,9 @@ endif()
 if(TARGET hdf5::hdf5)
   set(REALM_USE_HDF5 TRUE)
 endif()
+if(TARGET Python3::Python)
+  set(REALM_USE_PYTHON TRUE)
+endif()
 if(TARGET MPI::MPI_CXX)
   set(REALM_USE_MPI TRUE)
 endif()
@@ -712,6 +736,11 @@ if(REALM_ENABLE_OPENMP)
   set(REALM_USE_OPENMP TRUE)
 endif()
 add_feature_info(openmp REALM_USE_OPENMP "Enables OpenMP support")
+
+if (TARGET ZLIB::ZLIB)
+  set(REALM_USE_PREALM ${REALM_ENABLE_PREALM})
+endif()
+add_feature_info(prealm REALM_USE_PREALM "Enables Realm Profiling support")
 
 if(TARGET Kokkos::kokkoscore)
   set(REALM_USE_KOKKOS TRUE)
@@ -744,7 +773,7 @@ add_feature_info(mpi_comm_split REALM_MPI_HAS_COMM_SPLIT_TYPE "Enables use of MP
 #region Source lists
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-if(TARGET CUDA::cuda_driver)
+if(TARGET CUDA::cuda_driver AND REALM_ENABLE_CUDA)
   add_library(realm_cuda_fatbin OBJECT ${REALM_CUDA_SOURCES})
   target_compile_options(
     realm_cuda_fatbin
@@ -812,6 +841,7 @@ add_library(Realm::Realm ALIAS realm)
 generate_export_header(realm EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/include/realm_exports.h")
 if(NOT BUILD_SHARED_LIBS)
   target_compile_definitions(realm_obj PUBLIC REALM_STATIC_DEFINE=1)
+  target_compile_definitions(realm PUBLIC REALM_STATIC_DEFINE=1)
 endif()
 
 target_link_libraries(realm_obj PRIVATE ${REALM_LIBRARIES})
@@ -821,6 +851,7 @@ target_include_directories(
   realm_obj
   PUBLIC $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}> $<BUILD_INTERFACE:${REALM_SOURCE_DIR}/..>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+         $<$<TARGET_EXISTS:hip::host>:${HIP_INCLUDE_DIR}>
   PRIVATE $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_CUPTI_INCLUDE_DIR}>
           $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
           $<$<TARGET_EXISTS:Python3::Python>:${Python_INCLUDE_DIRS}>
@@ -829,6 +860,7 @@ target_include_directories(
   realm
   PUBLIC $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}> $<BUILD_INTERFACE:${REALM_SOURCE_DIR}/..>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+         $<$<TARGET_EXISTS:hip::host>:${HIP_INCLUDE_DIR}>
   PRIVATE $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_CUPTI_INCLUDE_DIR}>
           $<$<TARGET_EXISTS:CUDA::cuda_driver>:${CUDAToolkit_INCLUDE_DIR}>
           $<$<TARGET_EXISTS:Python3::Python>:${Python_INCLUDE_DIRS}>
@@ -854,12 +886,13 @@ target_compile_options(
           -Wno-unused-parameter>
           $<$<CXX_COMPILER_ID:MSVC>:
           /W4
-          /WX
           /Zc:alignedNew
           /utf-8
           /Zi
           /permissive-
-          /Zc:tlsGuards>
+          /Zc:tlsGuards
+          /wd4100>
+  PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus>
 )
 target_compile_options(
   realm_obj
@@ -869,12 +902,13 @@ target_compile_options(
           -Wno-unused-parameter>
           $<$<CXX_COMPILER_ID:MSVC>:
           /W4
-          /WX
           /Zc:alignedNew
           /utf-8
           /Zi
           /permissive-
-          /Zc:tlsGuards>
+          /Zc:tlsGuards
+          /wd4100>
+  PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus>
 )
 if(REALM_ENABLE_COVERAGE AND NOT OPENCPPCOV_PATH)
   append_coverage_compiler_flags_to_target(realm_obj)
