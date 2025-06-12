@@ -518,12 +518,6 @@ before_script:
   tags:
     - macos
 
-# For MSVC-in-wine tests:
-.msvc_wine: &msvc_wine
-  tags:
-    - linux
-    - msvc_wine
-
 # For compute-heavy tests:
 .linux_compute: &linux_compute
   tags:
@@ -1467,7 +1461,7 @@ icc212_cxx17_debug_cmake_legion:
 
 # MSVC (Realm only):
 msvc178_realm:
-  <<: [*msvc_wine, *image_msvc178, *msvc_tests]
+  <<: [*linux, *image_msvc178, *msvc_tests]
   variables:
     <<: [*short]
 
