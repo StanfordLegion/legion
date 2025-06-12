@@ -31,7 +31,7 @@ namespace Realm {
 
   class REALM_PUBLIC_API CommandLineParser {
   public:
-    CommandLineParser(void);
+    CommandLineParser(void) = default;
     ~CommandLineParser(void);
 
     template <typename T>

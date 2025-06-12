@@ -13,7 +13,6 @@
 set(REALM_SOURCES
     activemsg.cc
     network.cc
-    cmdline.cc
     codedesc.cc
     logging.cc
     mutex.cc

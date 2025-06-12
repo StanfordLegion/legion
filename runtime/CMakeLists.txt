@@ -257,7 +257,7 @@ list(APPEND REALM_SRC
   realm/bytearray.inl
   realm/circ_queue.h
   realm/circ_queue.inl
-  realm/cmdline.h          realm/cmdline.cc
+  realm/cmdline.h
   realm/cmdline.inl
   realm/codedesc.h         realm/codedesc.cc
   realm/codedesc.inl
