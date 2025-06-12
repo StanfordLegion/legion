@@ -550,7 +550,7 @@ LEGION_CC_FLAGS       += -DLEGION_USE_CUDA
 # provide this for backward-compatibility in applications
 CC_FLAGS              += -DUSE_CUDA
 FC_FLAGS	      += -DUSE_CUDA
-REALM_USE_CUDART_HIJACK ?= 1
+REALM_USE_CUDART_HIJACK ?= 0
 # We don't support the hijack for nvc++
 ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
 REALM_USE_CUDART_HIJACK := 1
