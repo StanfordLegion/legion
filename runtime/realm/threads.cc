@@ -33,6 +33,8 @@
 #define REALM_USE_PTHREADS
 #define REALM_USE_ALTSTACK
 #include <pthread.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #endif
 #ifdef REALM_ON_LINUX
   #define HAVE_CPUSET
@@ -119,24 +121,27 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #include <algorithm>
 
 #ifndef CHECK_LIBC
-#define CHECK_LIBC(cmd) do { \
-  errno = 0; \
-  int ret = (cmd); \
-  if(ret != 0) { \
-    std::cerr << "ERROR: " __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " (" << strerror(errno) << ")" << std::endl;	\
-    assert(0); \
-  } \
-} while(0)
+#define CHECK_LIBC(cmd)                                                                  \
+  do {                                                                                   \
+    errno = 0;                                                                           \
+    int ret = (cmd);                                                                     \
+    if(ret != 0) {                                                                       \
+      log_thread.error() << __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " ("   \
+                         << strerror(errno) << ")";                                      \
+      assert(0 && #cmd);                                                                 \
+    }                                                                                    \
+  } while(0)
 #endif
 
 #ifndef CHECK_PTHREAD
-#define CHECK_PTHREAD(cmd) do { \
-  int ret = (cmd); \
-  if(ret != 0) { \
-    std::cerr << "PTHREAD: " #cmd " = " << ret << " (" << strerror(ret) << ")" << std::endl;	\
-    assert(0); \
-  } \
-} while(0)
+#define CHECK_PTHREAD(cmd)                                                               \
+  do {                                                                                   \
+    int ret = (cmd);                                                                     \
+    if(ret != 0) {                                                                       \
+      log_thread.error() << #cmd " = " << ret << " (" << strerror(ret) << ")";           \
+      assert(0 && #cmd);                                                                 \
+    }                                                                                    \
+  } while(0)
 #endif
 
 namespace Realm {
@@ -1375,8 +1380,10 @@ namespace Realm {
     assert(!running);
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    if(stack_base != 0)
-      free(stack_base);
+    if(stack_base != nullptr) {
+      // Make sure to include the red-zone page at the end of the stack
+      munmap(stack_base, stack_size + sysconf(_SC_PAGESIZE));
+    }
 #endif
 #ifdef REALM_ON_WINDOWS
     DeleteFiber(fiber);
@@ -1459,8 +1466,17 @@ namespace Realm {
     }
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    stack_base = malloc(stack_size);
-    assert(stack_base != 0);
+    long pg_size = sysconf(_SC_PAGESIZE);
+    // Round up to the next page, and add a page for a red zone to protect against stack
+    // overflows
+    stack_size = ((stack_size + pg_size - 1) & ~(pg_size - 1));
+    stack_base = mmap(nullptr, stack_size + pg_size, PROT_NONE,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if(stack_base == MAP_FAILED) {
+      log_thread.error() << "mmap failed: " << strerror(errno);
+    }
+    // Mark the stack as RW (leaving the last page as PROT_NONE for the red-zone)
+    CHECK_LIBC(mprotect(stack_base, stack_size, PROT_READ | PROT_WRITE));
 
     CHECK_LIBC( getcontext(&ctx) );
 
