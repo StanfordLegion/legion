@@ -496,16 +496,18 @@ if(REALM_USE_UCX)
   target_include_directories(RealmRuntime PRIVATE ${UCC_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ucc::ucc)
 
-  # build the MPI bootstrap plugin
-  add_library(realm_ucp_bootstrap_mpi MODULE
-    realm/ucx/bootstrap/bootstrap_mpi.c)
-  target_include_directories(realm_ucp_bootstrap_mpi PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_BINARY_DIR}/runtime)
-  target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
-  set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
-  install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  if(Legion_UCX_MPI_BOOTSTRAP)
+    # build the MPI bootstrap plugin
+    add_library(realm_ucp_bootstrap_mpi MODULE
+      realm/ucx/bootstrap/bootstrap_mpi.c)
+    target_include_directories(realm_ucp_bootstrap_mpi PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_BINARY_DIR}/runtime)
+    target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
+    set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
+    install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
+      DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
   # build the P2P bootstrap plugin
   add_library(realm_ucp_bootstrap_p2p MODULE
     realm/ucx/bootstrap/bootstrap_p2p.cc

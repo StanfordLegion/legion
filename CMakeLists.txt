@@ -479,15 +479,18 @@ endif()
 # UCX configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES .*ucx.*)
+  option(Legion_UCX_MPI_BOOTSTRAP "Use MPI bootstrap plugin for UCX" ON)
   if (NOT REALM_USE_LIBDL)
     message(FATAL_ERROR "UCX backend requires run-time support for dynamic shared objects")
   endif()
   find_package(ucx 1.14.0 REQUIRED CONFIG)
   message(STATUS "Found UCX: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES})")
-  find_package(MPI REQUIRED) # for MPI bootstrap plugin
+  if (Legion_UCX_MPI_BOOTSTRAP)
+    find_package(MPI REQUIRED) # for MPI bootstrap plugin
+    set(Legion_MPI_INTEROP ON)
+  endif()
   # define variable for realm_defines.h
   set(REALM_USE_UCX ON)
-  set(Legion_MPI_INTEROP ON)
   option(Legion_UCX_DYNAMIC_LOAD "Load ucx libraries at runtime" OFF)
   if(Legion_UCX_DYNAMIC_LOAD)
     set(REALM_UCX_DYNAMIC_LOAD ON)
