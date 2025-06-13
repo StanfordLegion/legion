@@ -2778,7 +2778,7 @@ impl Copy {
     }
 
     fn split_by_channel(
-        mut self,
+        self,
         allocator: &mut ProfUIDAllocator,
         event_lookup: &BTreeMap<EventID, CriticalPathVertex>,
         event_graph: &mut CriticalPathGraph,
@@ -2789,26 +2789,20 @@ impl Copy {
 
         // Assumptions:
         //
-        //  1. A given Copy will always be entirely direct or entirely indirect.
+        //  1. A given Copy is broken up into multiple requirements that are
+        //     optionally separated by indirect fields.
         //
-        //  2. A direct copy can have multiple CopyInstInfos with different
-        //     src/dst memories/instances.
+        //  2. No assumption should be made about the src/dst memories or
+        //     instances of requirements (e.g., because an indirect copy can
+        //     come from multiple places), except that the CopyInstInfos
+        //     following a given indirect field all correspond to that indirect
+        //     Copy.
         //
-        //  3. An indirect copy will have exactly one indirect field. However
-        //     it might have multiple direct fields, and those direct fields could
-        //     have different src/dst memories/instances.
-
-        // Find the indirect field (if any). There is always at most one.
-        let indirect = self
-            .copy_inst_infos
-            .iter()
-            .position(|i| i.indirect)
-            .map(|idx| self.copy_inst_infos.remove(idx));
-        assert!(self.copy_inst_infos.iter().all(|i| !i.indirect));
-
-        // Figure out which side we're indirect on, if any.
-        let indirect_src = indirect.is_some_and(|i| i.src.is_some());
-        let indirect_dst = indirect.is_some_and(|i| i.dst.is_some());
+        //  3. CopyInstInfos are recorded back-to-back with no separator in the
+        //     direct case, and separated by the indirect field in the indirect
+        //     case.
+        //
+        //  4. Split on these indirects first, and then group by src/dst memories.
 
         // Find the event node for this copy so we can update with the right prof uid
         let node_index = event_lookup.get(&fevent).unwrap();
@@ -2817,11 +2811,15 @@ impl Copy {
 
         let mut result = Vec::new();
 
-        let groups = self.copy_inst_infos.linear_group_by(|a, b| {
-            (indirect_src || a.src == b.src) && (indirect_dst || a.dst == b.dst)
-        });
-        for group in groups {
-            let info = group.first().unwrap();
+        let indirect_groups = self.copy_inst_infos.linear_group_by(|i, _| i.indirect);
+        for indirect_group in indirect_groups {
+            let indirect = indirect_group.first().filter(|i| i.indirect);
+            let rest = &indirect_group[(if indirect.is_some() { 1 } else { 0 })..];
+
+            // Figure out which side we're indirect on, if any.
+            let indirect_src = indirect.is_some_and(|i| i.src.is_some());
+            let indirect_dst = indirect.is_some_and(|i| i.dst.is_some());
+
             let copy_kind = match (indirect_src, indirect_dst) {
                 (false, false) => CopyKind::Copy,
                 (true, false) => CopyKind::Gather,
@@ -2829,35 +2827,41 @@ impl Copy {
                 (true, true) => CopyKind::GatherScatter,
             };
 
-            let chan_id = match (indirect_src, indirect_dst, info.src, info.dst) {
-                (false, false, Some(src), Some(dst)) => ChanID::new_copy(src, dst),
-                (true, false, _, Some(dst)) => ChanID::new_gather(dst),
-                (false, true, Some(src), _) => ChanID::new_scatter(src),
-                (true, true, _, _) => unimplemented!("can't assign GatherScatter channel"),
-                _ => unreachable!("invalid copy kind"),
-            };
+            let mem_groups = rest.linear_group_by(|a, b| a.src == b.src && a.dst == b.dst);
+            for mem_group in mem_groups {
+                let info = mem_group[0];
 
-            let mut group = group.to_owned();
-            // Hack: currently we just always force the indirect field to go
-            // first, which matches the current Legion implementation, but is
-            // not guaranteed.
-            if let Some(i) = indirect {
-                group.insert(0, i);
+                let chan_id = match (indirect_src, indirect_dst, info.src, info.dst) {
+                    (false, false, Some(src), Some(dst)) => ChanID::new_copy(src, dst),
+                    (true, false, _, Some(dst)) => ChanID::new_gather(dst),
+                    (false, true, Some(src), _) => ChanID::new_scatter(src),
+                    (true, true, _, _) => unimplemented!("can't assign GatherScatter channel"),
+                    _ => unreachable!("invalid copy kind"),
+                };
+
+                let mut mem_group = mem_group.to_owned();
+                // Insert the indirect field back into the first position of
+                // this group.
+                if let Some(i) = indirect {
+                    mem_group.insert(0, *i);
+                }
+
+                // Hack: update the critical path data structure to point to this
+                // copy, note this means that only the last copy that we make here
+                // will be pointed to as the critical path copy, which may or not
+                // be the actual copy here that is on the critical path since this
+                // is an arbitrary decision, but it's probably good enough for now
+                let base = Base::new(allocator);
+                node_weight.creator = Some(base.prof_uid);
+
+                result.push(Copy {
+                    base,
+                    copy_kind: Some(copy_kind),
+                    chan_id: Some(chan_id),
+                    copy_inst_infos: mem_group,
+                    ..self
+                })
             }
-            // Hack: update the critical path data structure to point to this
-            // copy, note this means that only the last copy that we make here
-            // will be pointed to as the critical path copy, which may or not
-            // be the actual copy here that is on the critical path since this
-            // is an arbitrary decision, but it's probably good enough for now
-            let base = Base::new(allocator);
-            node_weight.creator = Some(base.prof_uid);
-            result.push(Copy {
-                base,
-                copy_kind: Some(copy_kind),
-                chan_id: Some(chan_id),
-                copy_inst_infos: group,
-                ..self
-            })
         }
         result
     }
