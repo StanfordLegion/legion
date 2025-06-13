@@ -222,11 +222,6 @@ namespace Realm {
 
 #ifdef REALM_USE_DLADDR
   namespace {
-    // neither pgcc nor icpc lets us declare a weak 'main'
-#if !defined(__PGI) && !defined(__ICC)
-    extern "C" { int main(int argc, const char *argv[]) __attribute__((weak)); };
-#endif
-
     DSOReferenceImplementation *dladdr_helper(void *ptr, bool quiet)
     {
       // if dladdr() gives us something with the same base pointer, assume that's portable
@@ -245,25 +240,31 @@ namespace Realm {
 	return 0;
       }
 
-      // try to detect symbols that are in the base executable and change the filename to ""
-      // only do this if the weak 'main' reference found an actual main
-      const char *fname = inf.dli_fname;
-#if !defined(__PGI) && !defined(__ICC)
-      if(((void *)main) != 0) {
-	static std::string local_fname;
-	if(local_fname.empty()) {
-	  Dl_info inf2;
-	  ret = dladdr((void *)main, &inf2);
-	  assert(ret != 0);
-	  local_fname = inf2.dli_fname;
-	}
-	if(local_fname.compare(fname) == 0)
-	  fname = "";
+      // try to detect symbols that are in the base executable and change the filename to
+      // "" Only do this if we can actually find main
+      std::string fname = inf.dli_fname;
+      static void *base_main = nullptr;
+      static std::string local_fname;
+      if(local_fname.empty()) {
+        Dl_info inf_main;
+        void *handle_main = nullptr;
+        if((handle_main = dlopen(nullptr, RTLD_LAZY)) != nullptr) {
+          if((base_main = dlsym(handle_main, "main")) != nullptr) {
+            ret = dladdr(base_main, &inf_main);
+            if(ret != 0) {
+              local_fname = inf_main.dli_fname;
+            }
+          }
+          dlclose(handle_main);
+        }
       }
-#endif
+      if((base_main != nullptr) && local_fname == fname) {
+        fname = "";
+      }
+
       return new DSOReferenceImplementation(fname, inf.dli_sname);
     }
-  };
+  }; // namespace
 
   /*static*/ DSOReferenceImplementation *DSOReferenceImplementation::cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi,
 											 bool quiet /*= false*/)
