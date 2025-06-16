@@ -140,6 +140,7 @@ cache: &global_cache
   CXXFLAGS: ""
   CXX_STANDARD: "20"
 .cxx17_32bit_normal: &cxx17_32bit_normal
+  CFLAGS: "-m32"
   CXXFLAGS: "-m32"
   LDFLAGS: "-m32 -latomic"
   MARCH: "i686"
@@ -213,6 +214,7 @@ cache: &global_cache
   MPIR_CVAR_CH3_NOLOCAL: "1"
   # mpich-3.3 & above
   MPIR_CVAR_NOLOCAL: "1"
+  USE_MPI: "1"
 .ucx: &ucx
   REALM_NETWORKS: "ucx"
   UCX_VERSION: "1.14.1"
@@ -228,6 +230,8 @@ cache: &global_cache
   USE_CMAKE: "1"
 .kokkos: &kokkos
   USE_KOKKOS: "1"
+  USE_CCACHE: "0"
+  USE_DEFCHECK: "0"
   KOKKOS_TAG: "4.0.01"
   KOKKOS_SHA256: "bb942de8afdd519fd6d5d3974706bfc22b6585a62dd565c12e53bdb82cd154f0"
   KKERNELS_SHA256: "3f493fcb0244b26858ceb911be64092fbf7785616ad62c81abde0ea1ce86688a"
@@ -371,6 +375,7 @@ before_script:
               echo "$GASNET_SHA256  $DEP_CACHE/gasnet-${GASNET_COMMIT}.tar.gz" | sha256sum -c
             fi
             tar -zxf ${DEP_CACHE}/gasnet-${GASNET_COMMIT}.tar.gz
+            rm -rf gasnet
             mv gasnet-${GASNET_COMMIT} gasnet
             chmod -R a-w gasnet
             export EMBED_GASNET_SRC="$PWD/gasnet"
@@ -381,6 +386,7 @@ before_script:
             echo "$GASNET_SHA256  $DEP_CACHE/gasnet-${GASNET_COMMIT}.tar.gz" | sha256sum -c
           fi
           tar -zxf ${DEP_CACHE}/gasnet-${GASNET_COMMIT}.tar.gz
+          rm -rf gasnet
           mv gasnet-${GASNET_COMMIT} gasnet
           make -C gasnet -j$THREADS
           if [[ "$GASNET_DEBUG" -eq 1 ]]; then
@@ -414,6 +420,7 @@ before_script:
       export PATH=$PATH:${CUDA}/bin
       # Try to use the stubs over the driver
       export CUDA_PATH="${CUDA}"
+      export CUDA_ROOT="${CUDA}"
       # Ensure nvcc's HOST compiler is set to our CXX compiler
       export CUDAHOSTCXX="$CXX"
     fi
@@ -424,6 +431,7 @@ before_script:
         echo "$KOKKOS_SHA256  $DEP_CACHE/kokkos-$KOKKOS_TAG.tar.gz" | sha256sum -c
       fi
       tar -zxf $DEP_CACHE/kokkos-$KOKKOS_TAG.tar.gz
+      rm -rf kokkos
       mv kokkos-$KOKKOS_TAG kokkos
       mkdir -p kokkos/build
       cd kokkos/build
@@ -461,12 +469,14 @@ before_script:
       cd ../..
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
+      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$Kokkos_DIR/lib
 
       if ! echo "$KKERNELS_SHA256  $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz" | sha256sum -c; then
         wget -nv https://github.com/kokkos/kokkos-kernels/archive/refs/tags/$KOKKOS_TAG.tar.gz -O $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz
         echo "$KKERNELS_SHA256  $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz" | sha256sum -c
       fi
       tar -zxf $DEP_CACHE/kokkoskernels-$KOKKOS_TAG.tar.gz
+      rm -rf kokkos-kernels
       mv kokkos-kernels-$KOKKOS_TAG kokkos-kernels
 
       # now build kokkos-kernels
@@ -628,8 +638,10 @@ before_script:
         export DEFCHECK_CXX="${CXX}"
         export CXX=`pwd`/tools/cxx_defcheck
         # if we're using MPI, make sure mpicxx uses the right compiler too
-        export OMPI_CXX=`pwd`/tools/cxx_defcheck
-        export MPICH_CXX=`pwd`/tools/cxx_defcheck
+        export OMPI_CXX=$CXX
+        export MPICH_CXX=$CXX
+        # if we're using kokkos, make sure nvcc_wrapper uses the right compiler too
+        export NVCC_WRAPPER_DEFAULT_COMPILER=$CXX
       fi
     - free || true
     - |
@@ -686,24 +698,55 @@ before_script:
 .msvc_tests: &msvc_tests
   <<: *test_rules
   script:
-    - pwd
+    - ln -s $CPM_SOURCE_CACHE /home/wine/.wine/drive_c/cpm_src
     - ln -s `pwd` /home/wine/.wine/drive_c/repo
     - cd /home/wine/.wine/drive_c
-    - su wine -c "wine64 cmd /c 'x64.bat && cmake -G Ninja -S repo -B build -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON'"
-    - "# wine doesn't seem to cope with concurrent file access, so use a serial build"
-    - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -- -j1'"
-    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2022\\VC\\Redist\\MSVC\\14.38.33130\\debug_nonredist\\x64\\Microsoft.VC143.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.20348.0\\x64\\ucrt;%PATH% && cd build && ctest --output-on-failure'"
+    - |
+      REALM_CMAKE_ARGS="-DGASNET_ROOT_DIR="${GASNET_ROOT}" -DKokkos_ROOT="${Kokkos_DIR}" -DCPPTRACE_GET_SYMBOLS_WITH_NOTHING=ON -DREALM_BUILD_TESTS=ON -DREALM_BUILD_BENCHMARKS=ON -DHIP_PLATFORM=nvidia"
+      if [[ -z "${UCX_ROOT}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_UCX=OFF"; fi
+      if [[ -z "${GASNET_ROOT}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_GASNETEX=OFF"; fi
+      if [[ -z "${Kokkos_DIR}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_KOKKOS=OFF"; fi
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_CPPTRACE=${REALM_BACKTRACE_USE_CPPTRACE:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_PREALM=${USE_PROF:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_CUDA=${USE_CUDA:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_NVTX=${USE_NVTX:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_HIP=${USE_HIP:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_MPI=${USE_MPI:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_HDF5=${USE_HDF:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_OPENMP=${USE_OPENMP:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_PYTHON=${USE_PYTHON:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_MAX_DIM=${MAX_DIM:-3}"
+      export REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS}"
+      unset CPM_SOURCE_CACHE
+    - su wine -c "wine64 cmd /c 'x64.bat && cmake -G Ninja -S repo/realm -B build -DCMAKE_INSTALL_PREFIX=install $REALM_CMAKE_ARGS'"
+    # wine doesn't seem to cope with concurrent file access, so use a serial build
+    - su wine -c "wine64 cmd /c 'x64.bat && cmake --build build -j1'"
+    - su wine -c "wine64 cmd /c 'x64.bat && set PATH=C:\\Tools\\VS2022\\VC\\Redist\\MSVC\\14.38.33130\\debug_nonredist\\x64\\Microsoft.VC143.DebugCRT;C:\\Tools\\SDK\\10\\bin\\10.0.20348.0\\x64\\ucrt;%PATH% && ctest --test-dir build --output-on-failure'"
     - echo OK
 
 # use a custom script for running Realm tests with sanitizers
 .realm_sanitizer_tests: &realm_sanitizer_tests
   <<: *test_rules
   script:
-    - mkdir -p build
-    - cd build
-    - cmake -DCMAKE_BUILD_TYPE=${SANITIZER_TYPE} -DLegion_BUILD_REALM_ONLY=ON -DLegion_BUILD_REALM_TESTS=ON -DLegion_ENABLE_TESTING=ON -DLegion_BACKTRACE_USE_CPPTRACE=ON ..
-    - make -j8
-    - ctest --output-on-failure .
+    - |
+      REALM_CMAKE_ARGS="-DGASNET_ROOT_DIR="${GASNET_ROOT}" -DKokkos_ROOT="${Kokkos_DIR}" -DCPPTRACE_GET_SYMBOLS_WITH_NOTHING=ON -DREALM_BUILD_TESTS=ON -DREALM_BUILD_BENCHMARKS=ON -DHIP_PLATFORM=nvidia"
+      if [[ -z "${UCX_ROOT}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_UCX=OFF"; fi
+      if [[ -z "${GASNET_ROOT}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_GASNETEX=OFF"; fi
+      if [[ -z "${Kokkos_DIR}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_KOKKOS=OFF"; fi
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_CPPTRACE=${REALM_BACKTRACE_USE_CPPTRACE:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_PREALM=${USE_PROF:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_CUDA=${USE_CUDA:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_NVTX=${USE_NVTX:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_HIP=${USE_HIP:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_MPI=${USE_MPI:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_HDF5=${USE_HDF:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_OPENMP=${USE_OPENMP:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_PYTHON=${USE_PYTHON:-0}"
+      REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_MAX_DIM=${MAX_DIM:-3}"
+      export REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DCMAKE_BUILD_TYPE=Debug -DREALM_SANITIZER=${SANITIZER_TYPE}"
+    - bash -c "cmake -S realm -B build -DCMAKE_INSTALL_PREFIX=install $REALM_CMAKE_ARGS"
+    - cmake --build build -j$THREADS
+    - ctest --output-on-failure --test-dir build
     - echo OK
 
 .realm_clang_format: &realm_clang_format
