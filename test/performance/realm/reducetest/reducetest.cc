@@ -544,7 +544,8 @@ int main(int argc, char **argv)
   r.register_task(HIST_BATCH_REDFOLD_TASK, hist_batch_redfold_task<BucketReduction>);
   r.register_task(HIST_BATCH_REDLIST_TASK, hist_batch_redlist_task<BucketReduction>);
   r.register_task(HIST_BATCH_REDSINGLE_TASK, hist_batch_redsingle_task<BucketReduction>);
-  r.register_reduction(REDOP_BUCKET_ADD, ReductionOpUntyped::create_reduction_op<BucketReduction>());
+  ReductionOp<BucketReduction> bucket_redop;
+  r.register_reduction(REDOP_BUCKET_ADD, &bucket_redop);
 
   // Set the input args
   get_input_args().argv = argv;

@@ -209,12 +209,12 @@ typedef enum realm_status_enum
 typedef realm_status_t RealmStatus;
 
 // Callback function for processor query iteration.
-typedef realm_status_t (*REALM_FNPTR realm_processor_query_cb_t)(realm_processor_t /*p*/,
-                                                                 void * /*user_data*/);
+typedef realm_status_t(REALM_FNPTR *realm_processor_query_cb_t)(realm_processor_t /*p*/,
+                                                                void * /*user_data*/);
 
 // Callback function for memory query iteration.
-typedef realm_status_t (*REALM_FNPTR realm_memory_query_cb_t)(realm_memory_t /*m*/,
-                                                              void * /*user_data*/);
+typedef realm_status_t(REALM_FNPTR *realm_memory_query_cb_t)(realm_memory_t /*m*/,
+                                                             void * /*user_data*/);
 
 /*
  * @defgroup Runtime Runtime API
