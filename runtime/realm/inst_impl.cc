@@ -445,9 +445,7 @@ namespace Realm {
                                      const InstanceLayoutGeneric *layout,
                                      const ProfilingRequestSet &prs, Event wait_on)
     {
-      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
-      assert(mem_impl != nullptr && "invalid memory handle");
-      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(*this);
       return inst_impl->redistrict(&instance, &layout, 1, &prs, wait_on);
     }
 
@@ -456,9 +454,7 @@ namespace Realm {
                                      size_t num_layouts, const ProfilingRequestSet *prs,
                                      Event wait_on)
     {
-      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
-      assert(mem_impl != nullptr && "invalid memory handle");
-      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(*this);
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
     }
 
@@ -467,8 +463,8 @@ namespace Realm {
                                                      const ProfilingRequestSet &prs,
                                                      Event wait_on)
     {
-      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), 0, prs,
-                                                 wait_on);
+      return RegionInstanceImpl::create_instance(get_runtime(), inst, memory, ilg.clone(),
+                                                 0, prs, wait_on);
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
@@ -477,8 +473,8 @@ namespace Realm {
 						     const ProfilingRequestSet& prs,
 						     Event wait_on)
     {
-      return RegionInstanceImpl::create_instance(inst, memory, ilg, 0,
-						 prs, wait_on);
+      return RegionInstanceImpl::create_instance(get_runtime(), inst, memory, ilg, 0, prs,
+                                                 wait_on);
     }
 
     /*static*/ Event RegionInstance::create_external_instance(
@@ -486,8 +482,8 @@ namespace Realm {
         const ExternalInstanceResource &res, const ProfilingRequestSet &prs,
         Event wait_on)
     {
-      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), &res, prs,
-                                                 wait_on);
+      return RegionInstanceImpl::create_instance(get_runtime(), inst, memory, ilg.clone(),
+                                                 &res, prs, wait_on);
     }
 
     /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
@@ -497,8 +493,8 @@ namespace Realm {
 							      const ProfilingRequestSet& prs,
 							      Event wait_on)
     {
-      return RegionInstanceImpl::create_instance(inst, memory, ilg, &res,
-						 prs, wait_on);
+      return RegionInstanceImpl::create_instance(get_runtime(), inst, memory, ilg, &res,
+                                                 prs, wait_on);
     }
 
     void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
@@ -532,9 +528,10 @@ namespace Realm {
     //  re-registration
     ExternalInstanceResource *RegionInstance::generate_resource_info(bool read_only) const
     {
-      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      ID inst_id = ID(id);
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(inst_id);
       assert(mem_impl != nullptr && "invalid memory handle");
-      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(inst_id);
       return mem_impl->generate_resource_info(inst_impl,
 					      0, span<const FieldID>(),
 					      read_only);
@@ -544,9 +541,10 @@ namespace Realm {
 								     span<const FieldID> fields,
 								     bool read_only) const
     {
-      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      ID inst_id = ID(id);
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(inst_id);
       assert(mem_impl != nullptr && "invalid memory handle");
-      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(inst_id);
       return mem_impl->generate_resource_info(inst_impl,
 					      &space, fields,
 					      read_only);
@@ -563,15 +561,7 @@ namespace Realm {
     Event RegionInstance::fetch_metadata(Processor target) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-
-      NodeID target_node = ID(target).proc_owner_node();
-      if(target_node == Network::my_node_id) {
-        // local metadata request
-        return r_impl->request_metadata();
-      } else {
-        // prefetch on other node's behalf
-        return r_impl->prefetch_metadata(target_node);
-      }
+      return r_impl->fetch_metadata(target);
     }
 
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
@@ -591,28 +581,7 @@ namespace Realm {
 								       uintptr_t& field_offset)
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      std::map<FieldID, PieceLookup::CompiledProgram::PerField>::const_iterator it;
-      it = r_impl->metadata.lookup_program.fields.find(field_id);
-      assert(it != r_impl->metadata.lookup_program.fields.end());
-
-      // bail out if the program requires unsupported instructions
-      if((it->second.inst_usage_mask & ~allowed_mask) != 0)
-	return 0;
-
-      // the "field offset" picks up both the actual per-field offset but also
-      //  the base of the instance itself
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      void *ptr = mem->get_inst_ptr(r_impl, 0,
-				    r_impl->metadata.layout->bytes_used);
-      assert(ptr != 0);
-      field_offset = (reinterpret_cast<uintptr_t>(ptr) +
-		      it->second.field_offset);
-
-      return it->second.start_inst;
+      return r_impl->get_lookup_program<N, T>(field_id, allowed_mask, field_offset);
     }
 
     template <int N, typename T>
@@ -622,68 +591,20 @@ namespace Realm {
 								       size_t& field_offset)
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      std::map<FieldID, PieceLookup::CompiledProgram::PerField>::const_iterator it;
-      it = r_impl->metadata.lookup_program.fields.find(field_id);
-      assert(it != r_impl->metadata.lookup_program.fields.end());
-
-      // bail out if the program requires unsupported instructions
-      if((it->second.inst_usage_mask & ~allowed_mask) != 0)
-	return 0;
-
-      // the "field offset" picks up both the actual per-field offset but also
-      //  the base of the instance itself
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      void *ptr = mem->get_inst_ptr(r_impl, 0,
-				    r_impl->metadata.layout->bytes_used);
-      assert(ptr != 0);
-      field_offset = (reinterpret_cast<uintptr_t>(ptr) +
-		      it->second.field_offset);
-
-      // try to pre-execute part of the program based on the subrect given
-      const PieceLookup::Instruction *i = it->second.start_inst;
-      while(true) {
-	if(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1) {
-	  const PieceLookup::SplitPlane<N,T> *sp = static_cast<const PieceLookup::SplitPlane<N,T> *>(i);
-	  // if our subrect straddles the split plane, we have to stop here
-	  if(sp->splits_rect(subrect))
-	    break;
-
-	  // otherwise all points in the rect go the same way and we can do
-	  //  that now
-	  i = sp->next(subrect.lo);
-	} else
-	  break;
-      }
-
-      return i;
+      return r_impl->get_lookup_program<N, T>(field_id, subrect, allowed_mask,
+                                              field_offset);
     }
 
     void RegionInstance::read_untyped(size_t offset, void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(r_impl->metadata.layout);
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      mem->get_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
+      r_impl->read_untyped(offset, data, datalen);
     }
 
     void RegionInstance::write_untyped(size_t offset, const void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(r_impl->metadata.layout);
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      mem->put_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
+      r_impl->write_untyped(offset, data, datalen);
     }
 
     void RegionInstance::reduce_apply_untyped(size_t offset, ReductionOpID redop_id,
@@ -691,38 +612,7 @@ namespace Realm {
 					      bool exclusive /*= false*/) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(r_impl->metadata.layout);
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
-      if(redop == 0) {
-	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
-	abort();
-      }
-      // data should match RHS size
-      assert(datalen == redop->sizeof_rhs);
-      // can we run the reduction op directly on the memory location?
-      void *ptr = mem->get_inst_ptr(r_impl, offset,
-				    redop->sizeof_lhs);
-      if(ptr) {
-        if(exclusive)
-          (redop->cpu_apply_excl_fn)(ptr, 0, data, 0, 1, redop->userdata);
-        else
-          (redop->cpu_apply_nonexcl_fn)(ptr, 0, data, 0, 1, redop->userdata);
-      } else {
-	// we have to do separate get/put, which means we cannot supply
-	//  atomicity in the !exclusive case
-	assert(exclusive);
-	void *lhs_copy = alloca(redop->sizeof_lhs);
-	mem->get_bytes(r_impl->metadata.inst_offset + offset,
-		       lhs_copy, redop->sizeof_lhs);
-        (redop->cpu_apply_excl_fn)(lhs_copy, 0, data, 0, 1, redop->userdata);
-	mem->put_bytes(r_impl->metadata.inst_offset + offset,
-		       lhs_copy, redop->sizeof_lhs);
-      }
+      r_impl->reduce_apply_untyped(offset, redop_id, data, datalen, exclusive);
     }
 
     void RegionInstance::reduce_fold_untyped(size_t offset, ReductionOpID redop_id,
@@ -730,38 +620,7 @@ namespace Realm {
 					     bool exclusive /*= false*/) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(r_impl->metadata.layout);
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
-      if(redop == 0) {
-	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
-	abort();
-      }
-      // data should match RHS size
-      assert(datalen == redop->sizeof_rhs);
-      // can we run the reduction op directly on the memory location?
-      void *ptr = mem->get_inst_ptr(r_impl, offset,
-				    redop->sizeof_rhs);
-      if(ptr) {
-        if(exclusive)
-          (redop->cpu_fold_excl_fn)(ptr, 0, data, 0, 1, redop->userdata);
-        else
-          (redop->cpu_fold_nonexcl_fn)(ptr, 0, data, 0, 1, redop->userdata);
-      } else {
-	// we have to do separate get/put, which means we cannot supply
-	//  atomicity in the !exclusive case
-	assert(exclusive);
-	void *rhs1_copy = alloca(redop->sizeof_rhs);
-	mem->get_bytes(r_impl->metadata.inst_offset + offset,
-		       rhs1_copy, redop->sizeof_rhs);
-        (redop->cpu_fold_excl_fn)(rhs1_copy, 0, data, 0, 1, redop->userdata);
-	mem->put_bytes(r_impl->metadata.inst_offset + offset,
-		       rhs1_copy, redop->sizeof_rhs);
-      }
+      r_impl->reduce_fold_untyped(offset, redop_id, data, datalen, exclusive);
     }
 
     // returns a null pointer if the instance storage cannot be directly
@@ -769,14 +628,7 @@ namespace Realm {
     void *RegionInstance::pointer_untyped(size_t offset, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // metadata must already be available
-      assert(r_impl->metadata.is_valid() &&
-	     "instance metadata must be valid before accesses are performed");
-      assert(r_impl->metadata.layout);
-      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      assert(mem != nullptr && "invalid memory handle");
-      void *ptr = mem->get_inst_ptr(r_impl, offset, datalen);
-      return ptr;
+      return r_impl->pointer_untyped(offset, datalen);
     }
 
     void RegionInstance::get_strided_access_parameters(size_t start, size_t count,
@@ -808,8 +660,11 @@ namespace Realm {
   // class RegionInstanceImpl
   //
 
-    RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
-      : me(_me), memory(_memory) //, lis(0)
+    RegionInstanceImpl::RegionInstanceImpl(const RuntimeImpl *_runtime_impl,
+                                           RegionInstance _me, Memory _memory)
+      : me(_me)
+      , memory(_memory)
+      , runtime_impl(_runtime_impl)
     {
       lock.init(ID(me).convert<Reservation>(), ID(me).instance_creator_node());
       lock.in_use = true;
@@ -831,14 +686,12 @@ namespace Realm {
         metadata.initiate_cleanup(me.id, true /*local only*/);
     }
 
-    /*static*/ Event RegionInstanceImpl::create_instance(RegionInstance& inst,
-							 Memory memory,
-							 InstanceLayoutGeneric *ilg,
-							 const ExternalInstanceResource *res,
-							 const ProfilingRequestSet& prs,
-							 Event wait_on)
+    /*static*/ Event RegionInstanceImpl::create_instance(
+        const RuntimeImpl *runtime_impl, RegionInstance &inst, Memory memory,
+        InstanceLayoutGeneric *ilg, const ExternalInstanceResource *res,
+        const ProfilingRequestSet &prs, Event wait_on)
     {
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      MemoryImpl *m_impl = runtime_impl->get_memory_impl(memory);
       assert(m_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
@@ -978,7 +831,7 @@ namespace Realm {
       }
 
       std::vector<RegionInstanceImpl *> insts(num_layouts);
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      MemoryImpl *m_impl = runtime_impl->get_memory_impl(memory);
       assert(m_impl != nullptr && "invalid memory handle");
 
       // TODO(apryakhin): Handle redistricting from non-owner node
@@ -1423,6 +1276,18 @@ namespace Realm {
       m_impl->release_instance(me);
     }
 
+    Event RegionInstanceImpl::fetch_metadata(Processor target)
+    {
+      NodeID target_node = ID(target).proc_owner_node();
+      if(target_node == Network::my_node_id) {
+        // local metadata request
+        return request_metadata();
+      } else {
+        // prefetch on other node's behalf
+        return prefetch_metadata(target_node);
+      }
+    }
+
     Event RegionInstanceImpl::prefetch_metadata(NodeID target_node)
     {
       assert(target_node != Network::my_node_id);
@@ -1447,6 +1312,172 @@ namespace Realm {
       amsg.commit();
 
       return e;
+    }
+    template <int N, typename T>
+    const PieceLookup::Instruction *
+    RegionInstanceImpl::get_lookup_program(FieldID field_id, unsigned allowed_mask,
+                                           uintptr_t &field_offset)
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      std::map<FieldID, PieceLookup::CompiledProgram::PerField>::const_iterator it;
+      it = metadata.lookup_program.fields.find(field_id);
+      assert(it != metadata.lookup_program.fields.end());
+
+      // bail out if the program requires unsupported instructions
+      if((it->second.inst_usage_mask & ~allowed_mask) != 0)
+        return 0;
+
+      // the "field offset" picks up both the actual per-field offset but also
+      //  the base of the instance itself
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      void *ptr = mem->get_inst_ptr(this, 0, metadata.layout->bytes_used);
+      assert(ptr != 0);
+      field_offset = (reinterpret_cast<uintptr_t>(ptr) + it->second.field_offset);
+
+      return it->second.start_inst;
+    }
+
+    template <int N, typename T>
+    const PieceLookup::Instruction *
+    RegionInstanceImpl::get_lookup_program(FieldID field_id, const Rect<N, T> &subrect,
+                                           unsigned allowed_mask, size_t &field_offset)
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      std::map<FieldID, PieceLookup::CompiledProgram::PerField>::const_iterator it;
+      it = metadata.lookup_program.fields.find(field_id);
+      assert(it != metadata.lookup_program.fields.end());
+
+      // bail out if the program requires unsupported instructions
+      if((it->second.inst_usage_mask & ~allowed_mask) != 0)
+        return 0;
+
+      // the "field offset" picks up both the actual per-field offset but also
+      //  the base of the instance itself
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      void *ptr = mem->get_inst_ptr(this, 0, metadata.layout->bytes_used);
+      assert(ptr != 0);
+      field_offset = (reinterpret_cast<uintptr_t>(ptr) + it->second.field_offset);
+
+      // try to pre-execute part of the program based on the subrect given
+      const PieceLookup::Instruction *i = it->second.start_inst;
+      while(true) {
+        if(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1) {
+          const PieceLookup::SplitPlane<N, T> *sp =
+              static_cast<const PieceLookup::SplitPlane<N, T> *>(i);
+          // if our subrect straddles the split plane, we have to stop here
+          if(sp->splits_rect(subrect))
+            break;
+
+          // otherwise all points in the rect go the same way and we can do
+          //  that now
+          i = sp->next(subrect.lo);
+        } else
+          break;
+      }
+
+      return i;
+    }
+
+    void RegionInstanceImpl::read_untyped(size_t offset, void *data, size_t datalen) const
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(metadata.layout);
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      mem->get_bytes(metadata.inst_offset + offset, data, datalen);
+    }
+
+    void RegionInstanceImpl::write_untyped(size_t offset, const void *data,
+                                           size_t datalen)
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(metadata.layout);
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      mem->put_bytes(metadata.inst_offset + offset, data, datalen);
+    }
+
+    void RegionInstanceImpl::reduce_apply_untyped(size_t offset, ReductionOpID redop_id,
+                                                  const void *data, size_t datalen,
+                                                  bool exclusive /*= false*/)
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(metadata.layout);
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      const ReductionOpUntyped *redop = runtime_impl->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+        log_inst.fatal() << "no reduction op registered for ID " << redop_id;
+        abort();
+      }
+      // data should match RHS size
+      assert(datalen == redop->sizeof_rhs);
+      // can we run the reduction op directly on the memory location?
+      void *ptr = mem->get_inst_ptr(this, offset, redop->sizeof_lhs);
+      if(ptr) {
+        if(exclusive)
+          (redop->cpu_apply_excl_fn)(ptr, 0, data, 0, 1, redop->userdata);
+        else
+          (redop->cpu_apply_nonexcl_fn)(ptr, 0, data, 0, 1, redop->userdata);
+      } else {
+        // we have to do separate get/put, which means we cannot supply
+        //  atomicity in the !exclusive case
+        assert(exclusive);
+        void *lhs_copy = alloca(redop->sizeof_lhs);
+        mem->get_bytes(metadata.inst_offset + offset, lhs_copy, redop->sizeof_lhs);
+        (redop->cpu_apply_excl_fn)(lhs_copy, 0, data, 0, 1, redop->userdata);
+        mem->put_bytes(metadata.inst_offset + offset, lhs_copy, redop->sizeof_lhs);
+      }
+    }
+
+    void RegionInstanceImpl::reduce_fold_untyped(size_t offset, ReductionOpID redop_id,
+                                                 const void *data, size_t datalen,
+                                                 bool exclusive /*= false*/)
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(metadata.layout);
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      const ReductionOpUntyped *redop = runtime_impl->reduce_op_table.get(redop_id, 0);
+      if(redop == 0) {
+        log_inst.fatal() << "no reduction op registered for ID " << redop_id;
+        abort();
+      }
+      // data should match RHS size
+      assert(datalen == redop->sizeof_rhs);
+      // can we run the reduction op directly on the memory location?
+      void *ptr = mem->get_inst_ptr(this, offset, redop->sizeof_rhs);
+      if(ptr) {
+        if(exclusive)
+          (redop->cpu_fold_excl_fn)(ptr, 0, data, 0, 1, redop->userdata);
+        else
+          (redop->cpu_fold_nonexcl_fn)(ptr, 0, data, 0, 1, redop->userdata);
+      } else {
+        // we have to do separate get/put, which means we cannot supply
+        //  atomicity in the !exclusive case
+        assert(exclusive);
+        void *rhs1_copy = alloca(redop->sizeof_rhs);
+        mem->get_bytes(metadata.inst_offset + offset, rhs1_copy, redop->sizeof_rhs);
+        (redop->cpu_fold_excl_fn)(rhs1_copy, 0, data, 0, 1, redop->userdata);
+        mem->put_bytes(metadata.inst_offset + offset, rhs1_copy, redop->sizeof_rhs);
+      }
+    }
+    void *RegionInstanceImpl::pointer_untyped(size_t offset, size_t datalen)
+    {
+      // metadata must already be available
+      assert(metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(metadata.layout);
+      MemoryImpl *mem = runtime_impl->get_memory_impl(memory);
+      return mem->get_inst_ptr(this, offset, datalen);
     }
 
     /*static*/ void InstanceMetadataPrefetchRequest::handle_message(NodeID sender,
@@ -1475,7 +1506,7 @@ namespace Realm {
     ActiveMessageHandlerReg<InstanceMetadataPrefetchRequest> inst_prefetch_msg_handler;
 
     bool RegionInstanceImpl::get_strided_parameters(void *&base, size_t &stride,
-						      off_t field_offset)
+                                                    off_t field_offset) const
     {
       MemoryImpl *mem = get_runtime()->get_memory_impl(memory);
       assert(mem != nullptr && "invalid memory handle");

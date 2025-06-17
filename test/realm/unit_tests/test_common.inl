@@ -58,7 +58,7 @@ namespace Realm {
   {
     RegionInstance inst = ID::make_instance(0, 0, 0, 0).convert<RegionInstance>();
     InstanceLayout<N, T> *inst_layout = create_layout(bounds, field_ids, field_sizes);
-    RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
+    RegionInstanceImpl *impl = new RegionInstanceImpl(nullptr, inst, inst.get_location());
     impl->metadata.layout = inst_layout;
     impl->metadata.inst_offset = 0;
     return impl;

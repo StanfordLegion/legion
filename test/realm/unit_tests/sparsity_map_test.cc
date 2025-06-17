@@ -386,7 +386,7 @@ static RegionInstanceImpl *create_inst(Rect<N, T> bounds,
       ID::make_instance(/*owner=*/0, /*creator=*/0, /*idx=*/0, /*inst_idx=*/0)
           .convert<RegionInstance>();
   InstanceLayout<N, T> *inst_layout = create_layout(bounds, dim_order, bytes_per_element);
-  RegionInstanceImpl *impl = new RegionInstanceImpl(inst, inst.get_location());
+  RegionInstanceImpl *impl = new RegionInstanceImpl(nullptr, inst, inst.get_location());
   impl->metadata.layout = inst_layout;
   impl->metadata.inst_offset = 0;
   NodeSet ns;

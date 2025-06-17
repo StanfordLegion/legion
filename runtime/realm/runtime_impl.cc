@@ -3226,7 +3226,7 @@ namespace Realm {
       MemoryImpl *mem = get_memory_impl(id);
       assert(mem != nullptr && "invalid memory handle");
 
-      return mem->get_instance(id.convert<RegionInstance>());
+      return mem->get_instance(id);
 #if 0
       AutoLock<> al(mem->mutex);
 
