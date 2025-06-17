@@ -74,7 +74,7 @@ namespace Realm {
 
     // looks up an instance based on ID - creates a proxy object for
     //   unknown IDs (metadata must be requested explicitly)
-    RegionInstanceImpl *get_instance(RegionInstance i);
+    RegionInstanceImpl *get_instance(ID id);
 
     // adds a new instance to this memory, to be filled in by caller
     RegionInstanceImpl *new_instance(const ProfilingRequestSet &prs);

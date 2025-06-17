@@ -50,7 +50,8 @@ namespace Realm {
     class RegionInstanceImpl {
     public:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
-      RegionInstanceImpl(RegionInstance _me, Memory _memory);
+      RegionInstanceImpl(const RuntimeImpl *_runtime_impl, RegionInstance _me,
+                         Memory _memory);
       ~RegionInstanceImpl(void);
 
       class DeferredCreate : public EventWaiter {
@@ -87,12 +88,10 @@ namespace Realm {
 
     public:
       // entry point for both create_instance and create_external_instance
-      static Event create_instance(RegionInstance& inst,
-				   Memory memory,
-				   InstanceLayoutGeneric *ilg,
-				   const ExternalInstanceResource *res,
-				   const ProfilingRequestSet& prs,
-				   Event wait_on);
+      static Event create_instance(const RuntimeImpl *runtime_impl, RegionInstance &inst,
+                                   Memory memory, InstanceLayoutGeneric *ilg,
+                                   const ExternalInstanceResource *res,
+                                   const ProfilingRequestSet &prs, Event wait_on);
 
       Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
                        size_t num_layouts, const ProfilingRequestSet *prs,
@@ -105,8 +104,9 @@ namespace Realm {
 			     TimeLimit work_until);
       void notify_deallocation(void);
 
-      bool get_strided_parameters(void *&base, size_t &stride,
-				  off_t field_offset);
+      bool get_strided_parameters(void *&base, size_t &stride, off_t field_offset) const;
+
+      Event fetch_metadata(Processor target);
 
       Event request_metadata(void) { return metadata.request_data(int(ID(me).instance_creator_node()), me.id); }
 
@@ -115,6 +115,28 @@ namespace Realm {
 
       // called once storage has been released and all remote metadata is invalidated
       void recycle_instance(void);
+
+      template <int N, typename T>
+      const PieceLookup::Instruction *get_lookup_program(FieldID field_id,
+                                                         unsigned allowed_mask,
+                                                         uintptr_t &field_offset);
+
+      template <int N, typename T>
+      const PieceLookup::Instruction *
+      get_lookup_program(FieldID field_id, const Rect<N, T> &subrect,
+                         unsigned allowed_mask, size_t &field_offset);
+
+      void read_untyped(size_t offset, void *data, size_t datalen) const;
+
+      void write_untyped(size_t offset, const void *data, size_t datalen);
+
+      void reduce_apply_untyped(size_t offset, ReductionOpID redop_id, const void *data,
+                                size_t datalen, bool exclusive /*= false*/);
+
+      void reduce_fold_untyped(size_t offset, ReductionOpID redop_id, const void *data,
+                               size_t datalen, bool exclusive /*= false*/);
+
+      void *pointer_untyped(size_t offset, size_t datalen);
 
     public: //protected:
       void send_metadata(const NodeSet& early_reqs);
@@ -200,6 +222,9 @@ namespace Realm {
 
       // used for serialized application access to contents of instance
       ReservationImpl lock;
+
+    private:
+      const RuntimeImpl *runtime_impl{nullptr};
     };
 
     // active messages

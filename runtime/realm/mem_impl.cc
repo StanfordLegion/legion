@@ -482,9 +482,8 @@ namespace Realm {
       return lowlevel_kind;
     }
 
-    RegionInstanceImpl *MemoryImpl::get_instance(RegionInstance i)
+    RegionInstanceImpl *MemoryImpl::get_instance(ID id)
     {
-      ID id(i);
       assert(id.is_instance());
 
       NodeID cnode = id.instance_creator_node();
@@ -517,8 +516,9 @@ namespace Realm {
             ilist->instances.resize(idx + 1, 0);
 
           if(ilist->instances[idx] == 0) {
+            RegionInstance i = id.convert<RegionInstance>();
             log_inst.info() << "creating proxy for remotely-created instance: " << i;
-            ilist->instances[idx] = new RegionInstanceImpl(i, me);
+            ilist->instances[idx] = new RegionInstanceImpl(get_runtime(), i, me);
           }
 
           return ilist->instances[idx];
@@ -602,8 +602,8 @@ namespace Realm {
 					     mem_id.memory_mem_idx(),
 					     inst_idx).convert<RegionInstance>();
 	log_inst.info() << "creating new local instance: " << i;
-	inst_impl = new RegionInstanceImpl(i, me);
-	{
+        inst_impl = new RegionInstanceImpl(get_runtime(), i, me);
+        {
           RWLock::AutoWriterLock al(local_instances.mutex);
           local_instances.instances[inst_idx] = inst_impl;
         }
