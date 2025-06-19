@@ -29,12 +29,13 @@
 #include "realm/event_impl.h"
 #include "realm/profiling.h"
 #include "realm/mem_impl.h"
+#include "realm/repl_heap.h"
 
 namespace Realm {
 
     class CompiledInstanceLayout : public PieceLookup::CompiledProgram {
     public:
-      CompiledInstanceLayout();
+      CompiledInstanceLayout(ReplicatedHeap *_repl_heap);
       ~CompiledInstanceLayout();
 
       virtual void *allocate_memory(size_t bytes);
@@ -43,8 +44,9 @@ namespace Realm {
 
       void reset();
 
-      void *program_base;
-      size_t program_size;
+      void *program_base{nullptr};
+      size_t program_size{0};
+      ReplicatedHeap *repl_heap{nullptr};
     };
 
     class RegionInstanceImpl {
@@ -159,19 +161,18 @@ namespace Realm {
       static constexpr size_t INSTOFFSET_MAXVALID = size_t(-6);
       class Metadata : public MetadataBase {
       public:
-        Metadata();
+        Metadata(ReplicatedHeap *repl_heap);
 
-	void *serialize(size_t& out_size) const;
+        void *serialize(size_t &out_size) const;
 
-	template<typename T>
-	void serialize_msg(T &s) const
-	{
-	  bool ok = ((s << inst_offset) &&
-		     (s << *layout));
-	  assert(ok);
-	}
+        template <typename T>
+        void serialize_msg(T &s) const
+        {
+          bool ok = ((s << inst_offset) && (s << *layout));
+          assert(ok);
+        }
 
-	void deserialize(const void *in_data, size_t in_size);
+        void deserialize(const void *in_data, size_t in_size);
 
       protected:
 	virtual void do_invalidate(void);

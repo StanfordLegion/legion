@@ -115,34 +115,37 @@ namespace Realm {
   // class CompiledInstanceLayout
   //
 
-  CompiledInstanceLayout::CompiledInstanceLayout()
-    : program_base(0), program_size(0)
+  CompiledInstanceLayout::CompiledInstanceLayout(ReplicatedHeap *_repl_heap)
+    : repl_heap(_repl_heap)
   {}
 
   CompiledInstanceLayout::~CompiledInstanceLayout()
   {
-     reset();
+    reset();
+    // we could not reset repl_heap in reset because we reuse the object by calling reset
+    repl_heap = nullptr;
   }
 
   void *CompiledInstanceLayout::allocate_memory(size_t bytes)
   {
     program_size = bytes;
-    program_base = runtime_singleton->repl_heap.alloc_obj(bytes, 16);
+    program_base = repl_heap->alloc_obj(bytes, 16);
     assert(program_base != 0);
     return program_base;
   }
 
   void CompiledInstanceLayout::commit_updates()
   {
-    runtime_singleton->repl_heap.commit_writes(program_base, program_size);
+    repl_heap->commit_writes(program_base, program_size);
   }
 
   void CompiledInstanceLayout::reset()
   {
-    if(program_base)
-      runtime_singleton->repl_heap.free_obj(program_base);
+    if(program_base) {
+      repl_heap->free_obj(program_base);
+    }
 
-    program_base = 0;
+    program_base = nullptr;
     program_size = 0;
     fields.clear();
   }
@@ -664,6 +667,10 @@ namespace Realm {
                                            RegionInstance _me, Memory _memory)
       : me(_me)
       , memory(_memory)
+      , metadata((_runtime_impl != nullptr)
+                     ? const_cast<ReplicatedHeap *>(&_runtime_impl->repl_heap)
+                     : nullptr) // TODO: once we fix the C++ unit test by passing a mock
+                                // runtime, we do not need to check for nullptr
       , runtime_impl(_runtime_impl)
     {
       lock.init(ID(me).convert<Reservation>(), ID(me).instance_creator_node());
@@ -1564,12 +1571,13 @@ namespace Realm {
       return true;
     }
 
-    RegionInstanceImpl::Metadata::Metadata()
+    RegionInstanceImpl::Metadata::Metadata(ReplicatedHeap *repl_heap)
       : inst_offset(INSTOFFSET_UNALLOCATED)
       , ready_event(Event::NO_EVENT)
       , layout(0)
       , ext_resource(0)
       , mem_specific(0)
+      , lookup_program(repl_heap)
     {}
 
     void *RegionInstanceImpl::Metadata::serialize(size_t& out_size) const
