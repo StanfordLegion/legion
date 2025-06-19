@@ -268,6 +268,15 @@ def get_regent_perf_tests(nodes, cores_per_node):
           '-fvectorize-unsafe', '1']],
     ]
 
+def append_ld_lib(env, path):
+    # Be aware this doesn't really work on subprocessses on MacOS systems that have their system
+    # integrity protections enabled which will prevent this from having any effect
+    # https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
+    LD_LIB_ENVVAR = 'LD_LIBRARY_PATH'
+    if platform.system() == 'Darwin':
+        LD_LIB_ENVVAR = 'DYLD_LIBRARY_PATH'
+    env[LD_LIB_ENVVAR] = ':'.join(filter(None, [env.get(LD_LIB_ENVVAR), path]))
+
 class TestTimeoutException(Exception):
     pass
 
@@ -389,7 +398,7 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
         ('PYTHONPATH', ':'.join([env.get('PYTHONPATH'), python_dir])),
     ])
     if bin_dir is None:
-        env['LD_LIBRARY_PATH'] = python_dir
+        append_ld_lib(env, python_dir)
     # If we're not already using shared libraries, clean up because
     # we're going to force them
     if bin_dir is None and env['SHARED_OBJECTS'] != '1':
@@ -405,7 +414,7 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     python_dir = os.path.join(root_dir, 'bindings', 'python')
     env = env.copy()
     if bin_dir is None:
-        env['LD_LIBRARY_PATH'] = python_dir
+        append_ld_lib(env, python_dir)
     # If we're not already using shared libraries, clean up because
     # we're going to force them
     if bin_dir is None and env['SHARED_OBJECTS'] != '1':
@@ -530,12 +539,13 @@ def run_test_external2(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, 
     cmd(['git', 'clone', '-b', 'legion-ci', 'git@gitlab.com:insieme1/htr/htr-solver.git', htr_dir])
     htr_env = dict(list(env.items()) + [
         ('LEGION_DIR', root_dir),
-        ('LD_LIBRARY_PATH', '%s:%s' % (env.get('LD_LIBRARY_PATH', ''), os.path.join(root_dir, 'bindings', 'regent'))),
         ('HTR_DIR', htr_dir),
         ('CC', 'gcc'),
         ('CXX', 'g++'),
         ('DEBUG', '0'),
     ])
+
+    append_ld_lib(htr_env, os.path.join(root_dir, 'bindings', 'regent'))
 
     # Try to auto-detect the runner's GPU_ARCH for the test
     if env['USE_CUDA'] == '1' and 'GPU_ARCH' not in env:
@@ -979,15 +989,7 @@ def build_make(root_dir, tmp_dir, env, thread_count, networks):
     cmd([make_exe, '-C', build_dir, 'install', '-j', str(thread_count)], env=local_env)
     # Setup the LEGION_DIR for the Makefile to use that instead of building everything from source
     env['LG_INSTALL_DIR'] = install_dir
-    if platform.system() == 'Darwin':
-        # Be aware this doesn't really work on subprocessses on MacOS systems that have their system
-        # integrity protections enabled which will prevent this from having any effect
-        # https://stackoverflow.com/questions/35568122/why-isnt-dyld-library-path-being-propagated-here
-        ld_path = env.get('DYLD_LIBRARY_PATH', '')
-        env['DYLD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
-    else:
-        ld_path = env.get('LD_LIBRARY_PATH', '')
-        env['LD_LIBRARY_PATH'] = ld_path+':'+os.path.join(install_dir,'lib')
+    append_ld_lib(env, os.path.join(install_dir, 'lib'))
 
 def option_enabled(option, options, default, envprefix='', envname=None):
     if options is not None: return option in options
@@ -1260,6 +1262,12 @@ def run_tests(test_modules=None,
          ('LDFLAGS', (os.environ['LDFLAGS'] + gcov_flags
                        if 'LDFLAGS' in os.environ else gcov_flags)),
         ] if use_gcov else []))
+
+
+    # If Realm's root is set, add it to the library path, regardless of how we
+    # build or what tests we run
+    if 'Realm_ROOT' in env:
+        append_ld_lib(env, os.path.join(env['Realm_ROOT'], 'lib'))
 
     try:
         # Build tests.
