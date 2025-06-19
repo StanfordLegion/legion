@@ -301,7 +301,7 @@ if(REALM_ENABLE_HIP)
   endif()
 endif()
 
-if(REALM_ENABLE_CUDA)
+if(REALM_ENABLE_CUDA OR (hip_FOUND AND HIP_PLATFORM STREQUAL "nvidia"))
   find_package(CUDAToolkit 11.7)
   if(CUDAToolkit_FOUND)
     set(CMAKE_CUDA_COMPILER ${CUDAToolkit_NVCC_EXECUTABLE})

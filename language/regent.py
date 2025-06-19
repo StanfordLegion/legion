@@ -37,6 +37,8 @@ if 'LG_RT_DIR' in os.environ:
     runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 else:
     runtime_dir = os.path.join(os.path.dirname(regent_dir), 'runtime')
+# Find Realm (in the environment) or assume installed at root
+realm_root_dir = os.environ.get('Realm_ROOT')
 bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'regent')
 python_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'python')
 
@@ -81,6 +83,7 @@ include_path = (
     [bindings_dir,
      runtime_dir,
     ] +
+    ([os.path.join(realm_root_dir, 'include')] if realm_root_dir else []) +
     ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []) +
     ([os.path.join(legion_install_prefix, 'include')] if legion_install_prefix is not None else []))
 if cuda_include_dir is not None:
