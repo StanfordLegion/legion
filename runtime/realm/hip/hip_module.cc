@@ -1273,9 +1273,12 @@ namespace Realm {
     //
     // class GPUFBMemory
 
-    GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size)
-      : LocalManagedMemory(_me, _size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM, 0)
-      , gpu(_gpu), base(_base)
+    GPUFBMemory::GPUFBMemory(RuntimeImpl *_runtime_impl, Memory _me, GPU *_gpu,
+                             char *_base, size_t _size)
+      : LocalManagedMemory(_runtime_impl, _me, _size, MKIND_GPUFB, 512,
+                           Memory::GPU_FB_MEM, 0)
+      , gpu(_gpu)
+      , base(_base)
     {
      // advertise for potential gpudirect support
       local_segment.assign(NetworkSegmentInfo::HipDeviceMem,
@@ -1386,9 +1389,9 @@ namespace Realm {
     //
     // class GPUDynamicMemory
 
-    GPUDynamicFBMemory::GPUDynamicFBMemory(Memory _me, GPU *_gpu,
-                                           size_t _max_size)
-      : MemoryImpl(_me, _max_size, MKIND_GPUFB, Memory::GPU_DYNAMIC_MEM, 0)
+    GPUDynamicFBMemory::GPUDynamicFBMemory(RuntimeImpl *_runtime_impl, Memory _me,
+                                           GPU *_gpu, size_t _max_size)
+      : MemoryImpl(_runtime_impl, _me, _max_size, MKIND_GPUFB, Memory::GPU_DYNAMIC_MEM, 0)
       , gpu(_gpu)
       , cur_size(0)
     {
@@ -1614,11 +1617,12 @@ namespace Realm {
     //
     // class GPUZCMemory
 
-    GPUZCMemory::GPUZCMemory(Memory _me,
-                             char *_gpu_base, void *_cpu_base, size_t _size,
-                             MemoryKind _kind, Memory::Kind _lowlevel_kind)
-      : LocalManagedMemory(_me, _size, _kind, 256, _lowlevel_kind, 0)
-      , gpu_base(_gpu_base), cpu_base((char *)_cpu_base)
+    GPUZCMemory::GPUZCMemory(RuntimeImpl *_runtime_impl, Memory _me, char *_gpu_base,
+                             void *_cpu_base, size_t _size, MemoryKind _kind,
+                             Memory::Kind _lowlevel_kind)
+      : LocalManagedMemory(_runtime_impl, _me, _size, _kind, 256, _lowlevel_kind, 0)
+      , gpu_base(_gpu_base)
+      , cpu_base((char *)_cpu_base)
     {
       // advertise ourselves as a host or managed memory, as appropriate
       NetworkSegmentInfo::MemoryType mtype;
@@ -1717,9 +1721,9 @@ namespace Realm {
     //
     // class GPUFBIBMemory
 
-    GPUFBIBMemory::GPUFBIBMemory(Memory _me, GPU *_gpu,
+    GPUFBIBMemory::GPUFBIBMemory(RuntimeImpl *_runtime_impl, Memory _me, GPU *_gpu,
                                  char *_base, size_t _size)
-      : IBMemory(_me, _size, MKIND_GPUFB, Memory::GPU_FB_MEM,
+      : IBMemory(_runtime_impl, _me, _size, MKIND_GPUFB, Memory::GPU_FB_MEM,
                  reinterpret_cast<void *>(_base), 0)
       , gpu(_gpu)
       , base(_base)
@@ -2308,7 +2312,7 @@ namespace Realm {
       }
 
       Memory m = runtime->next_local_memory_id();
-      fbmem = new GPUFBMemory(m, this, static_cast<char*>(fbmem_base), size);
+      fbmem = new GPUFBMemory(runtime, m, this, static_cast<char *>(fbmem_base), size);
       runtime->add_memory(fbmem);
       
       // FB ibmem is a separate allocation for now (consider merging to make
@@ -2337,7 +2341,7 @@ namespace Realm {
         }
 
         Memory m = runtime->next_local_ib_memory_id();
-        fb_ibmem = new GPUFBIBMemory(m, this, fb_ibmem_base, ib_size);
+        fb_ibmem = new GPUFBIBMemory(runtime, m, this, fb_ibmem_base, ib_size);
         runtime->add_ib_memory(fb_ibmem);
       }
     }
@@ -2356,7 +2360,7 @@ namespace Realm {
       }
 
       Memory m = runtime->next_local_memory_id();
-      fb_dmem = new GPUDynamicFBMemory(m, this, max_size);
+      fb_dmem = new GPUDynamicFBMemory(runtime, m, this, max_size);
       runtime->add_memory(fb_dmem);
     }
 
@@ -2975,9 +2979,9 @@ namespace Realm {
         }
 
         Memory m = runtime->next_local_memory_id();
-        zcmem = new GPUZCMemory(m, zcmem_gpu_base, zcmem_cpu_base, 
-                                config->cfg_zc_mem_size,
-                                MemoryImpl::MKIND_ZEROCOPY, Memory::Kind::Z_COPY_MEM);
+        zcmem = new GPUZCMemory(runtime, m, zcmem_gpu_base, zcmem_cpu_base,
+                                config->cfg_zc_mem_size, MemoryImpl::MKIND_ZEROCOPY,
+                                Memory::Kind::Z_COPY_MEM);
         runtime->add_memory(zcmem);
 
         // add the ZC memory as a pinned memory to all GPUs
@@ -3012,9 +3016,9 @@ namespace Realm {
         }
         Memory m = runtime->next_local_ib_memory_id();
         IBMemory* ib_mem;
-        ib_mem = new IBMemory(m, config->cfg_zc_ib_size,
-			      MemoryImpl::MKIND_ZEROCOPY, Memory::Z_COPY_MEM,
-			      zcib_cpu_base, 0);
+        ib_mem =
+            new IBMemory(runtime, m, config->cfg_zc_ib_size, MemoryImpl::MKIND_ZEROCOPY,
+                         Memory::Z_COPY_MEM, zcib_cpu_base, 0);
         runtime->add_ib_memory(ib_mem);
         // add the ZC memory as a pinned memory to all GPUs
         for (unsigned i = 0; i < gpus.size(); i++) {
@@ -3059,7 +3063,7 @@ namespace Realm {
         uvm_base = reinterpret_cast<void *>(uvm_gpu_base);
         Memory m = runtime->next_local_memory_id();
         uvmmem =
-            new GPUZCMemory(m, uvm_gpu_base, uvm_base, config->cfg_uvm_mem_size,
+            new GPUZCMemory(runtime, m, uvm_gpu_base, uvm_base, config->cfg_uvm_mem_size,
                             MemoryImpl::MKIND_MANAGED, Memory::Kind::GPU_MANAGED_MEM);
         runtime->add_memory(uvmmem);
 

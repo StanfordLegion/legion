@@ -65,7 +65,8 @@ namespace Realm {
   public:
     static const size_t MEMORY_STRIDE = 1024;
 
-    GASNet1Memory(Memory _me, size_t size_per_node, NetworkModule *_gasnet);
+    GASNet1Memory(RuntimeImpl *_runtime_impl, Memory _me, size_t size_per_node,
+                  NetworkModule *_gasnet);
 
     virtual ~GASNet1Memory(void);
 
@@ -93,10 +94,10 @@ namespace Realm {
     NetworkModule *gasnet;
   };
 
-  GASNet1Memory::GASNet1Memory(Memory _me, size_t size_per_node,
-			       NetworkModule *_gasnet)
-    : LocalManagedMemory(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
-			 MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
+  GASNet1Memory::GASNet1Memory(RuntimeImpl *_runtime_impl, Memory _me,
+                               size_t size_per_node, NetworkModule *_gasnet)
+    : LocalManagedMemory(_runtime_impl, _me, 0 /* we'll calculate it below */,
+                         MKIND_GLOBAL, MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
     , gasnet(_gasnet)
   {
     num_nodes = Network::max_node_id + 1;
@@ -265,8 +266,8 @@ namespace Realm {
 
   class GASNet1RemoteMemory : public RemoteMemory {
   public:
-    GASNet1RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-			void *_regbase);
+    GASNet1RemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                        Memory::Kind k, void *_regbase);
 
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -277,10 +278,9 @@ namespace Realm {
     char *regbase;
   };
 
-  GASNet1RemoteMemory::GASNet1RemoteMemory(Memory _me, size_t _size,
-					   Memory::Kind k,
-					   void *_regbase)
-    : RemoteMemory(_me, _size, k, MKIND_RDMA)
+  GASNet1RemoteMemory::GASNet1RemoteMemory(RuntimeImpl *_runtime_impl, Memory _me,
+                                           size_t _size, Memory::Kind k, void *_regbase)
+    : RemoteMemory(_runtime_impl, _me, _size, k, MKIND_RDMA)
     , regbase(static_cast<char *>(_regbase))
   {}
   
@@ -311,7 +311,8 @@ namespace Realm {
 
   class GASNet1IBMemory : public IBMemory {
   public:
-    GASNet1IBMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
+    GASNet1IBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, Memory::Kind k,
+                    void *_regbase);
 
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
@@ -319,9 +320,9 @@ namespace Realm {
     char *regbase;
   };
 
-  GASNet1IBMemory::GASNet1IBMemory(Memory _me, size_t _size, Memory::Kind k,
-				   void *_regbase)
-    : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
+  GASNet1IBMemory::GASNet1IBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                                   Memory::Kind k, void *_regbase)
+    : IBMemory(_runtime_impl, _me, _size, MKIND_REMOTE, k, 0, 0)
     , regbase(static_cast<char *>(_regbase))
   {}
 
@@ -732,8 +733,8 @@ namespace Realm {
       // only node 0 creates the gasnet memory
       if(Network::my_node_id == 0) {
 	Memory m = runtime->next_local_memory_id();
-	GASNet1Memory *mem = new GASNet1Memory(m, gasnet_mem_size, this);
-	runtime->add_memory(mem);
+        GASNet1Memory *mem = new GASNet1Memory(runtime, m, gasnet_mem_size, this);
+        runtime->add_memory(mem);
       }
     }
   }
@@ -808,13 +809,14 @@ namespace Realm {
   }
 
   // used to create a remote proxy for a memory
-  MemoryImpl *GASNet1Module::create_remote_memory(Memory m, size_t size, Memory::Kind kind,
-						  const ByteArray& rdma_info)
+  MemoryImpl *GASNet1Module::create_remote_memory(RuntimeImpl *runtime, Memory m,
+                                                  size_t size, Memory::Kind kind,
+                                                  const ByteArray &rdma_info)
   {
     if(kind == Memory::GLOBAL_MEM) {
       // this is actually our gasnet memory - make an aspect of it here too
       assert(size == (gasnet_mem_size * (Network::max_node_id + 1)));
-      return new GASNet1Memory(m, gasnet_mem_size, this);
+      return new GASNet1Memory(runtime, m, gasnet_mem_size, this);
     } else {
       // otherwise it's some other kind of memory that we were able to register
       //  with gasnet
@@ -824,19 +826,20 @@ namespace Realm {
       void *regbase;
       memcpy(&regbase, rdma_info.base(), sizeof(void *));
 
-      return new GASNet1RemoteMemory(m, size, kind, regbase);
+      return new GASNet1RemoteMemory(runtime, m, size, kind, regbase);
     }
   }
-  
-  IBMemory *GASNet1Module::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
-						   const ByteArray& rdma_info)
+
+  IBMemory *GASNet1Module::create_remote_ib_memory(RuntimeImpl *runtime, Memory m,
+                                                   size_t size, Memory::Kind kind,
+                                                   const ByteArray &rdma_info)
   {
     // rdma info should be the pointer in the remote address space
     assert(rdma_info.size() == sizeof(void *));
     void *regbase;
     memcpy(&regbase, rdma_info.base(), sizeof(void *));
 
-    return new GASNet1IBMemory(m, size, kind, regbase);
+    return new GASNet1IBMemory(runtime, m, size, kind, regbase);
   }
 
   ActiveMessageImpl *GASNet1Module::create_active_message_impl(NodeID target,

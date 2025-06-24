@@ -56,8 +56,9 @@ public:
     // The processors are added to the machine model via add_proc_mem_affinity, so we need
     // a memory
     Memory mem = ID::make_memory(processor.address_space, 0).convert<Memory>();
-    MockMemoryImpl *mem_impl = new MockMemoryImpl(mem, 1024, MemoryImpl::MKIND_SYSMEM,
-                                                  Memory::Kind::SYSTEM_MEM, nullptr);
+    MockMemoryImpl *mem_impl =
+        new MockMemoryImpl(runtime_impl.get(), mem, 1024, MemoryImpl::MKIND_SYSMEM,
+                           Memory::Kind::SYSTEM_MEM, nullptr);
     runtime_impl->nodes[processor.address_space].memories.push_back(mem_impl);
 
     proc_impl =

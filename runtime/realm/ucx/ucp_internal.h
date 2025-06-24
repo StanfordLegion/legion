@@ -360,11 +360,8 @@ namespace UCP {
    */
   class UCPRemoteMemory : public UCPRemoteMemoryCommon, public RemoteMemory {
   public:
-    UCPRemoteMemory(Memory me,
-        size_t size,
-        Memory::Kind kind,
-        const ByteArray& rdma_info_ba,
-        UCPInternal *internal);
+    UCPRemoteMemory(RuntimeImpl *_runtime_impl, Memory me, size_t size, Memory::Kind kind,
+                    const ByteArray &rdma_info_ba, UCPInternal *internal);
 
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -374,11 +371,8 @@ namespace UCP {
   // Intermediate buffer memory
   class UCPIBMemory : public UCPRemoteMemoryCommon, public IBMemory {
   public:
-    UCPIBMemory(Memory me,
-        size_t size,
-        Memory::Kind kind,
-        const ByteArray& rdma_info_ba,
-        UCPInternal *internal);
+    UCPIBMemory(RuntimeImpl *_runtime_impl, Memory me, size_t size, Memory::Kind kind,
+                const ByteArray &rdma_info_ba, UCPInternal *internal);
 
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
   };

@@ -29,9 +29,9 @@ namespace Realm {
     //
     // class HDF5Memory
 
-    HDF5Memory::HDF5Memory(Memory _me)
-      : MemoryImpl(_me, 0 /*HDF doesn't have memory space*/, MKIND_HDF,
-		   Memory::HDF_MEM, 0)
+    HDF5Memory::HDF5Memory(RuntimeImpl *_runtime_impl, Memory _me)
+      : MemoryImpl(_runtime_impl, _me, 0 /*HDF doesn't have memory space*/, MKIND_HDF,
+                   Memory::HDF_MEM, 0)
     {
     }
 

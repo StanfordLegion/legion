@@ -47,7 +47,7 @@ void run_test_case(const TestCaseData<N> &test_case)
   std::vector<Point<N, T>> buffer = test_case.indirection;
 
   std::unique_ptr<LocalCPUMemory> input_mem = std::make_unique<LocalCPUMemory>(
-      Memory::NO_MEMORY, bytes, 0, Memory::SYSTEM_MEM, buffer.data());
+      nullptr, Memory::NO_MEMORY, bytes, 0, Memory::SYSTEM_MEM, buffer.data());
 
   std::unique_ptr<MemcpyXferDes> xd = std::make_unique<MemcpyXferDes>(
       /*addrs_mem=*/0, /*channel=*/nullptr,

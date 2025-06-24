@@ -61,7 +61,7 @@ namespace Realm {
     public:
       static const size_t ALIGNMENT = 256;
 
-      HDF5Memory(Memory _me);
+      HDF5Memory(RuntimeImpl *_runtime_impl, Memory _me);
 
       virtual ~HDF5Memory(void);
 

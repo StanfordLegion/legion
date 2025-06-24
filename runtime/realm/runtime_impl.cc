@@ -946,8 +946,9 @@ namespace Realm {
                          config->sysmem_size <= config->sysmem_ipc_limit);
       log_runtime.debug("core module sysmem ipc enabled %d", enable_ipc);
       Memory m = runtime->next_local_memory_id();
-      sysmem = new LocalCPUMemory(m, config->sysmem_size, -1 /*don't care numa domain*/,
-                                  Memory::SYSTEM_MEM, 0, 0, enable_ipc);
+      sysmem = new LocalCPUMemory(runtime, m, config->sysmem_size,
+                                  -1 /*don't care numa domain*/, Memory::SYSTEM_MEM, 0, 0,
+                                  enable_ipc);
       runtime->add_memory(sysmem);
     } else
       sysmem = 0;
@@ -957,8 +958,9 @@ namespace Realm {
     //  usually won't have those affinities)
     if(config->use_ext_sysmem || !sysmem) {
       Memory m = runtime->next_local_memory_id();
-      ext_sysmem = new LocalCPUMemory(m, 0 /*size*/, -1 /*don't care numa domain*/,
-                                      Memory::SYSTEM_MEM, 0, 0, false);
+      ext_sysmem =
+          new LocalCPUMemory(runtime, m, 0 /*size*/, -1 /*don't care numa domain*/,
+                             Memory::SYSTEM_MEM, 0, 0, false);
       runtime->add_memory(ext_sysmem);
     } else
       ext_sysmem = sysmem;
@@ -2037,13 +2039,10 @@ namespace Realm {
 	void *regmem_base = reg_mem_segment.base;
 	assert(regmem_base != 0);
 	Memory m = get_runtime()->next_local_memory_id();
-	regmem = new LocalCPUMemory(m,
-				    config->reg_mem_size,
-                                    -1/*don't care numa domain*/,
-                                    Memory::REGDMA_MEM,
-				    regmem_base,
-				    &reg_mem_segment);
-	get_runtime()->add_memory(regmem);
+        regmem = new LocalCPUMemory(this, m, config->reg_mem_size,
+                                    -1 /*don't care numa domain*/, Memory::REGDMA_MEM,
+                                    regmem_base, &reg_mem_segment);
+        get_runtime()->add_memory(regmem);
       } else
 	regmem = 0;
 
@@ -2057,13 +2056,10 @@ namespace Realm {
 	void *reg_ib_mem_base = reg_ib_mem_segment.base;
 	assert(reg_ib_mem_base != 0);
 	Memory m = get_runtime()->next_local_ib_memory_id();
-	reg_ib_mem = new IBMemory(m,
-				  config->reg_ib_mem_size,
-				  MemoryImpl::MKIND_SYSMEM,
-				  Memory::REGDMA_MEM,
-				  reg_ib_mem_base,
-				  &reg_ib_mem_segment);
-	get_runtime()->add_ib_memory(reg_ib_mem);
+        reg_ib_mem =
+            new IBMemory(this, m, config->reg_ib_mem_size, MemoryImpl::MKIND_SYSMEM,
+                         Memory::REGDMA_MEM, reg_ib_mem_base, &reg_ib_mem_segment);
+        get_runtime()->add_ib_memory(reg_ib_mem);
       } else
         reg_ib_mem = 0;
 
@@ -2076,13 +2072,13 @@ namespace Realm {
         std::filesystem::path disk_file = std::filesystem::temp_directory_path();
         disk_file /= file_name;
         Memory m = get_runtime()->next_local_memory_id();
-        diskmem = new DiskMemory(m, config->disk_mem_size, disk_file);
+        diskmem = new DiskMemory(this, m, config->disk_mem_size, disk_file);
         get_runtime()->add_memory(diskmem);
       } else
         diskmem = 0;
 
       FileMemory *filemem;
-      filemem = new FileMemory(get_runtime()->next_local_memory_id());
+      filemem = new FileMemory(this, get_runtime()->next_local_memory_id());
       get_runtime()->add_memory(filemem);
 
       for(std::vector<Module *>::const_iterator it = modules.begin();

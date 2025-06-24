@@ -69,7 +69,8 @@ namespace Realm {
     public:
         static const size_t MEMORY_STRIDE = 1024;
 
-        MPIMemory(Memory _me, size_t size_per_node, MPI_Win _win, NetworkModule *_network);
+        MPIMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t size_per_node,
+                  MPI_Win _win, NetworkModule *_network);
 
         virtual ~MPIMemory(void);
 
@@ -98,12 +99,12 @@ namespace Realm {
         NetworkModule *my_network;
     };
 
-    MPIMemory::MPIMemory(Memory _me, size_t size_per_node,
-                           MPI_Win _win, NetworkModule *_network)
-        : LocalManagedMemory(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
-			     MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
-        , win(_win)
-        , my_network(_network)
+    MPIMemory::MPIMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t size_per_node,
+                         MPI_Win _win, NetworkModule *_network)
+      : LocalManagedMemory(_runtime_impl, _me, 0 /* we'll calculate it below */,
+                           MKIND_GLOBAL, MEMORY_STRIDE, Memory::GLOBAL_MEM, 0)
+      , win(_win)
+      , my_network(_network)
     {
         num_nodes = Network::max_node_id + 1;
         memory_stride = MEMORY_STRIDE;
@@ -249,8 +250,8 @@ namespace Realm {
     */
     class MPIRemoteMemory : public RemoteMemory {
       public:
-        MPIRemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-    		    int _rank, MPI_Aint _base, MPI_Win _win);
+        MPIRemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                        Memory::Kind k, int _rank, MPI_Aint _base, MPI_Win _win);
 
         virtual void get_bytes(off_t offset, void *dst, size_t size);
         virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -263,13 +264,13 @@ namespace Realm {
         MPI_Win win;
     };
 
-    MPIRemoteMemory::MPIRemoteMemory(Memory _me, size_t _size,
-                                     Memory::Kind k,
-                                     int _rank, MPI_Aint _base, MPI_Win _win)
-        : RemoteMemory(_me, _size, k, MKIND_RDMA)
-        , rank(_rank)
-        , base(_base)
-        , win(_win)
+    MPIRemoteMemory::MPIRemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                                     Memory::Kind k, int _rank, MPI_Aint _base,
+                                     MPI_Win _win)
+      : RemoteMemory(_runtime_impl, _me, _size, k, MKIND_RDMA)
+      , rank(_rank)
+      , base(_base)
+      , win(_win)
     {
     }
 
@@ -299,7 +300,8 @@ namespace Realm {
 
     class MPIIBMemory : public IBMemory {
     public:
-      MPIIBMemory(Memory _me, size_t _size, Memory::Kind k, MPI_Aint _base);
+      MPIIBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, Memory::Kind k,
+                  MPI_Aint _base);
 
       virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
@@ -307,9 +309,9 @@ namespace Realm {
       MPI_Aint base;
     };
 
-    MPIIBMemory::MPIIBMemory(Memory _me, size_t _size, Memory::Kind k,
-			     MPI_Aint _base)
-      : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
+    MPIIBMemory::MPIIBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                             Memory::Kind k, MPI_Aint _base)
+      : IBMemory(_runtime_impl, _me, _size, MKIND_REMOTE, k, 0, 0)
       , base(_base)
     {}
 
@@ -768,8 +770,8 @@ namespace Realm {
       // only node 0 creates the global memory
       if(Network::my_node_id == 0) {
 	Memory m = runtime->next_local_memory_id();
-	MPIMemory *mem = new MPIMemory(m, global_mem_size, g_am_win, this);
-	runtime->add_memory(mem);
+        MPIMemory *mem = new MPIMemory(runtime, m, global_mem_size, g_am_win, this);
+        runtime->add_memory(mem);
       }
     }
   }
@@ -866,13 +868,14 @@ namespace Realm {
   }
 
   // used to create a remote proxy for a memory
-  MemoryImpl *MPIModule::create_remote_memory(Memory m, size_t size, Memory::Kind kind,
-					       const ByteArray& rdma_info)
+  MemoryImpl *MPIModule::create_remote_memory(RuntimeImpl *runtime, Memory m, size_t size,
+                                              Memory::Kind kind,
+                                              const ByteArray &rdma_info)
   {
     if(kind == Memory::GLOBAL_MEM) {
       // just create a new window
       size_t size_per_node = size / (Network::max_node_id + 1);
-      return new MPIMemory(m, size_per_node, g_am_win, this);
+      return new MPIMemory(runtime, m, size_per_node, g_am_win, this);
     } else {
       // it's some other kind of memory that we pre-registered
       // rdma info should be the pointer in the remote address space
@@ -883,12 +886,13 @@ namespace Realm {
       int rank = ID(m).memory_owner_node();
       MPI_Aint disp = (MPI_Aint) base - (MPI_Aint) g_am_bases[rank];
 
-      return new MPIRemoteMemory(m, size, kind, rank, disp, g_am_win);
+      return new MPIRemoteMemory(runtime, m, size, kind, rank, disp, g_am_win);
     }
   }
-  
-  IBMemory *MPIModule::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
-					       const ByteArray& rdma_info)
+
+  IBMemory *MPIModule::create_remote_ib_memory(RuntimeImpl *runtime, Memory m,
+                                               size_t size, Memory::Kind kind,
+                                               const ByteArray &rdma_info)
   {
     // rdma info should be the pointer in the remote address space
     assert(rdma_info.size() == sizeof(void *));
@@ -898,7 +902,7 @@ namespace Realm {
     int rank = ID(m).memory_owner_node();
     MPI_Aint disp = (MPI_Aint) base - (MPI_Aint) g_am_bases[rank];
 
-    return new MPIIBMemory(m, size, kind, disp);
+    return new MPIIBMemory(runtime, m, size, kind, disp);
   }
   
   ActiveMessageImpl *MPIModule::create_active_message_impl(NodeID target,

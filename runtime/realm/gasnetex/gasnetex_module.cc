@@ -56,8 +56,8 @@ namespace Realm {
 
   class GASNetEXRemoteMemory : public RemoteMemory {
   public:
-    GASNetEXRemoteMemory(Memory _me, size_t _size, Memory::Kind k, uintptr_t _regbase,
-                         gex_ep_index_t _ep_index);
+    GASNetEXRemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                         Memory::Kind k, uintptr_t _regbase, gex_ep_index_t _ep_index);
 
     virtual void get_bytes(off_t offset, void *dst, size_t size);
     virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -69,9 +69,10 @@ namespace Realm {
     gex_ep_index_t ep_index;
   };
 
-  GASNetEXRemoteMemory::GASNetEXRemoteMemory(Memory _me, size_t _size, Memory::Kind k,
+  GASNetEXRemoteMemory::GASNetEXRemoteMemory(RuntimeImpl *_runtime_impl, Memory _me,
+                                             size_t _size, Memory::Kind k,
                                              uintptr_t _regbase, gex_ep_index_t _ep_index)
-    : RemoteMemory(_me, _size, k, MKIND_RDMA)
+    : RemoteMemory(_runtime_impl, _me, _size, k, MKIND_RDMA)
     , regbase(_regbase)
     , ep_index(_ep_index)
   {}
@@ -104,8 +105,8 @@ namespace Realm {
 
   class GASNetEXIBMemory : public IBMemory {
   public:
-    GASNetEXIBMemory(Memory _me, size_t _size, Memory::Kind k, uintptr_t _regbase,
-                     gex_ep_index_t _ep_index);
+    GASNetEXIBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, Memory::Kind k,
+                     uintptr_t _regbase, gex_ep_index_t _ep_index);
 
     virtual bool get_remote_addr(off_t offset, RemoteAddress& remote_addr);
 
@@ -114,9 +115,10 @@ namespace Realm {
     gex_ep_index_t ep_index;
   };
 
-  GASNetEXIBMemory::GASNetEXIBMemory(Memory _me, size_t _size, Memory::Kind k,
-                                     uintptr_t _regbase, gex_ep_index_t _ep_index)
-    : IBMemory(_me, _size, MKIND_REMOTE, k, 0, 0)
+  GASNetEXIBMemory::GASNetEXIBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                                     Memory::Kind k, uintptr_t _regbase,
+                                     gex_ep_index_t _ep_index)
+    : IBMemory(_runtime_impl, _me, _size, MKIND_REMOTE, k, 0, 0)
     , regbase(_regbase)
     , ep_index(_ep_index)
   {}
@@ -620,8 +622,9 @@ namespace Realm {
   }
 
   // used to create a remote proxy for a memory
-  MemoryImpl *GASNetEXModule::create_remote_memory(Memory m, size_t size, Memory::Kind kind,
-						  const ByteArray& rdma_info)
+  MemoryImpl *GASNetEXModule::create_remote_memory(RuntimeImpl *runtime, Memory m,
+                                                   size_t size, Memory::Kind kind,
+                                                   const ByteArray &rdma_info)
   {
     assert(kind != Memory::GLOBAL_MEM);
 
@@ -629,17 +632,18 @@ namespace Realm {
     GASNetEXRDMAInfo info;
     memcpy(&info, rdma_info.base(), sizeof(GASNetEXRDMAInfo));
 
-    return new GASNetEXRemoteMemory(m, size, kind, info.base, info.ep_index);
+    return new GASNetEXRemoteMemory(runtime, m, size, kind, info.base, info.ep_index);
   }
 
-  IBMemory *GASNetEXModule::create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
-						   const ByteArray& rdma_info)
+  IBMemory *GASNetEXModule::create_remote_ib_memory(RuntimeImpl *runtime, Memory m,
+                                                    size_t size, Memory::Kind kind,
+                                                    const ByteArray &rdma_info)
   {
     assert(rdma_info.size() == sizeof(GASNetEXRDMAInfo));
     GASNetEXRDMAInfo info;
     memcpy(&info, rdma_info.base(), sizeof(GASNetEXRDMAInfo));
 
-    return new GASNetEXIBMemory(m, size, kind, info.base, info.ep_index);
+    return new GASNetEXIBMemory(runtime, m, size, kind, info.base, info.ep_index);
   }
 
   ActiveMessageImpl *GASNetEXModule::create_active_message_impl(NodeID target,

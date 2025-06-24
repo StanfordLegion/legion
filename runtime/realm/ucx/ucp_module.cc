@@ -227,20 +227,19 @@ err_del_mod:
     return internal->check_for_quiescence(sampled_receive_count);
   }
 
-  MemoryImpl* UCPModule::create_remote_memory(Memory me,
-      size_t size,
-      Memory::Kind kind,
-      const ByteArray& rdma_info_ba)
+  MemoryImpl *UCPModule::create_remote_memory(RuntimeImpl *runtime, Memory me,
+                                              size_t size, Memory::Kind kind,
+                                              const ByteArray &rdma_info_ba)
   {
-    return new Realm::UCP::UCPRemoteMemory(me, size, kind, rdma_info_ba, internal);
+    return new Realm::UCP::UCPRemoteMemory(runtime, me, size, kind, rdma_info_ba,
+                                           internal);
   }
 
-  IBMemory* UCPModule::create_remote_ib_memory(Memory me,
-      size_t size,
-      Memory::Kind kind,
-      const ByteArray& rdma_info_ba)
+  IBMemory *UCPModule::create_remote_ib_memory(RuntimeImpl *runtime, Memory me,
+                                               size_t size, Memory::Kind kind,
+                                               const ByteArray &rdma_info_ba)
   {
-    return new Realm::UCP::UCPIBMemory(me, size, kind, rdma_info_ba, internal);
+    return new Realm::UCP::UCPIBMemory(runtime, me, size, kind, rdma_info_ba, internal);
   }
 
   ActiveMessageImpl* UCPModule::create_active_message_impl(NodeID target,

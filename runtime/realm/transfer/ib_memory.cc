@@ -44,10 +44,10 @@ namespace Realm {
   // class IBMemory
   //
 
-  IBMemory::IBMemory(Memory _me, size_t _size,
-                     MemoryKind _kind, Memory::Kind _lowlevel_kind,
-                     void *prealloc_base, NetworkSegment *_segment)
-    : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
+  IBMemory::IBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                     MemoryKind _kind, Memory::Kind _lowlevel_kind, void *prealloc_base,
+                     NetworkSegment *_segment)
+    : MemoryImpl(_runtime_impl, _me, _size, _kind, _lowlevel_kind, _segment)
     , base(static_cast<char *>(prealloc_base))
     , ibreq_head(0)
     , ibreq_tail(&ibreq_head)

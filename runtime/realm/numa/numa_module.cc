@@ -278,13 +278,10 @@ namespace Realm {
 	assert(mem_size > 0);
 
 	Memory m = runtime->next_local_memory_id();
-	LocalCPUMemory *numamem = new LocalCPUMemory(m,
-						     mem_size,
-                                                     it->first/*numa node*/,
-                                                     Memory::SOCKET_MEM,
-						     base_ptr);
-	runtime->add_memory(numamem);
-	memories[mem_node] = numamem;
+        LocalCPUMemory *numamem = new LocalCPUMemory(
+            runtime, m, mem_size, it->first /*numa node*/, Memory::SOCKET_MEM, base_ptr);
+        runtime->add_memory(numamem);
+        memories[mem_node] = numamem;
       }
     }
 
