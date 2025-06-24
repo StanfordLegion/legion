@@ -71,10 +71,12 @@ namespace Realm {
     virtual bool check_for_quiescence(size_t sampled_receive_count);
 
     // used to create a remote proxy for a memory
-    virtual MemoryImpl *create_remote_memory(Memory m, size_t size, Memory::Kind kind,
-					     const ByteArray& rdma_info);
-    virtual IBMemory *create_remote_ib_memory(Memory m, size_t size, Memory::Kind kind,
-					      const ByteArray& rdma_info);
+    virtual MemoryImpl *create_remote_memory(RuntimeImpl *runtime, Memory m, size_t size,
+                                             Memory::Kind kind,
+                                             const ByteArray &rdma_info);
+    virtual IBMemory *create_remote_ib_memory(RuntimeImpl *runtime, Memory m, size_t size,
+                                              Memory::Kind kind,
+                                              const ByteArray &rdma_info);
 
     virtual ActiveMessageImpl *create_active_message_impl(NodeID target,
 							  unsigned short msgid,

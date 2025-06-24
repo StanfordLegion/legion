@@ -80,9 +80,9 @@ public:
 
 class MockMemoryImpl : public MemoryImpl {
 public:
-  MockMemoryImpl(Memory _me, size_t _size, MemoryKind _kind, Memory::Kind _lowlevel_kind,
-                 NetworkSegment *_segment)
-    : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
+  MockMemoryImpl(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, MemoryKind _kind,
+                 Memory::Kind _lowlevel_kind, NetworkSegment *_segment)
+    : MemoryImpl(_runtime_impl, _me, _size, _kind, _lowlevel_kind, _segment)
   {}
 
   ~MockMemoryImpl() {}
@@ -180,8 +180,9 @@ public:
     for(const MockMemoryInfo &mem_info : procs_mems.mem_infos) {
       Memory mem =
           ID::make_memory(mem_info.address_space, mem_info.idx).convert<Memory>();
-      MockMemoryImpl *mem_impl = new MockMemoryImpl(
-          mem, mem_info.size, get_memory_kind(mem_info.kind), mem_info.kind, nullptr);
+      MockMemoryImpl *mem_impl =
+          new MockMemoryImpl(this, mem, mem_info.size, get_memory_kind(mem_info.kind),
+                             mem_info.kind, nullptr);
       nodes[mem_info.address_space].memories.push_back(mem_impl);
       mems.push_back(mem);
     }

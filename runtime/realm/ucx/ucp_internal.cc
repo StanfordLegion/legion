@@ -2552,13 +2552,11 @@ err:
   // class UCPRemoteMemory
   //
 
-  UCPRemoteMemory::UCPRemoteMemory(Memory _me,
-      size_t _size,
-      Memory::Kind _kind,
-      const ByteArray& _rdma_info_ba,
-      UCPInternal *_internal)
-      : UCPRemoteMemoryCommon(_rdma_info_ba)
-      , RemoteMemory(_me, _size, _kind, MKIND_RDMA)
+  UCPRemoteMemory::UCPRemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                                   Memory::Kind _kind, const ByteArray &_rdma_info_ba,
+                                   UCPInternal *_internal)
+    : UCPRemoteMemoryCommon(_rdma_info_ba)
+    , RemoteMemory(_runtime_impl, _me, _size, _kind, MKIND_RDMA)
   {}
 
   void UCPRemoteMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -2587,13 +2585,11 @@ err:
   // class UCPIBMemory
   //
 
-  UCPIBMemory::UCPIBMemory(Memory _me,
-      size_t _size,
-      Memory::Kind _kind,
-      const ByteArray& _rdma_info_ba,
-      UCPInternal *_internal)
-      : UCPRemoteMemoryCommon(_rdma_info_ba)
-      , IBMemory(_me, _size, MKIND_REMOTE, _kind, 0, 0)
+  UCPIBMemory::UCPIBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                           Memory::Kind _kind, const ByteArray &_rdma_info_ba,
+                           UCPInternal *_internal)
+    : UCPRemoteMemoryCommon(_rdma_info_ba)
+    , IBMemory(_runtime_impl, _me, _size, MKIND_REMOTE, _kind, 0, 0)
   {}
 
   bool UCPIBMemory::get_remote_addr(off_t offset, RemoteAddress& remote_addr)

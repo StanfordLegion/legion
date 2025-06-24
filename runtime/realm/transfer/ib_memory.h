@@ -27,9 +27,8 @@ namespace Realm {
   // a simple memory used for intermediate buffers in dma system
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE IBMemory : public MemoryImpl {
   public:
-    IBMemory(Memory _me, size_t _size,
-	     MemoryKind _kind, Memory::Kind _lowlevel_kind,
-	     void *prealloc_base, NetworkSegment *_segment);
+    IBMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, MemoryKind _kind,
+             Memory::Kind _lowlevel_kind, void *prealloc_base, NetworkSegment *_segment);
 
     virtual ~IBMemory();
 

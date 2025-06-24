@@ -14,7 +14,7 @@ static inline Memory make_mem(int idx, int node_id)
 
 static inline IBMemory *make_ib_mem(Memory memory, size_t size = 16)
 {
-  return new IBMemory(memory, size, MemoryImpl::MKIND_SYSMEM, Memory::SYSTEM_MEM,
+  return new IBMemory(nullptr, memory, size, MemoryImpl::MKIND_SYSMEM, Memory::SYSTEM_MEM,
                       /*prealloc_base=*/0,
                       /*_segment=*/0);
 }

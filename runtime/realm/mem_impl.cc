@@ -81,12 +81,15 @@ namespace Realm {
     // class MemoryImpl
     //
 
-    MemoryImpl::MemoryImpl(Memory _me, size_t _size,
-			   MemoryKind _kind, Memory::Kind _lowlevel_kind,
-			   NetworkSegment *_segment)
-      : me(_me), size(_size), kind(_kind), lowlevel_kind(_lowlevel_kind)
+    MemoryImpl::MemoryImpl(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                           MemoryKind _kind, Memory::Kind _lowlevel_kind,
+                           NetworkSegment *_segment)
+      : me(_me)
+      , size(_size)
+      , kind(_kind)
+      , lowlevel_kind(_lowlevel_kind)
       , segment(_segment)
-      , module_specific(0)
+      , runtime_impl(_runtime_impl)
     {}
 
     MemoryImpl::~MemoryImpl(void)
@@ -518,7 +521,7 @@ namespace Realm {
           if(ilist->instances[idx] == 0) {
             RegionInstance i = id.convert<RegionInstance>();
             log_inst.info() << "creating proxy for remotely-created instance: " << i;
-            ilist->instances[idx] = new RegionInstanceImpl(get_runtime(), i, me);
+            ilist->instances[idx] = new RegionInstanceImpl(runtime_impl, i, me);
           }
 
           return ilist->instances[idx];
@@ -602,7 +605,7 @@ namespace Realm {
 					     mem_id.memory_mem_idx(),
 					     inst_idx).convert<RegionInstance>();
 	log_inst.info() << "creating new local instance: " << i;
-        inst_impl = new RegionInstanceImpl(get_runtime(), i, me);
+        inst_impl = new RegionInstanceImpl(runtime_impl, i, me);
         {
           RWLock::AutoWriterLock al(local_instances.mutex);
           local_instances.instances[inst_idx] = inst_impl;
@@ -677,19 +680,19 @@ namespace Realm {
   // class LocalManagedMemory
   //
 
-    LocalManagedMemory::LocalManagedMemory(Memory _me, size_t _size,
-					   MemoryKind _kind, size_t _alignment,
-					   Memory::Kind _lowlevel_kind,
-					   NetworkSegment *_segment)
-      : MemoryImpl(_me, _size, _kind, _lowlevel_kind, _segment)
-      , alignment(_alignment)
-      , cur_release_seqid(0)
-      , usage(stringbuilder() << "realm/mem " << _me << "/usage")
-      , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
-      , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
-    {
-      current_allocator.add_range(0, _size);
-    }
+  LocalManagedMemory::LocalManagedMemory(RuntimeImpl *_runtime_impl, Memory _me,
+                                         size_t _size, MemoryKind _kind,
+                                         size_t _alignment, Memory::Kind _lowlevel_kind,
+                                         NetworkSegment *_segment)
+    : MemoryImpl(_runtime_impl, _me, _size, _kind, _lowlevel_kind, _segment)
+    , alignment(_alignment)
+    , cur_release_seqid(0)
+    , usage(stringbuilder() << "realm/mem " << _me << "/usage")
+    , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
+    , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
+  {
+    current_allocator.add_range(0, _size);
+  }
 
     LocalManagedMemory::~LocalManagedMemory(void)
     {
@@ -1823,11 +1826,13 @@ namespace Realm {
   // class LocalCPUMemory
   //
 
-  LocalCPUMemory::LocalCPUMemory(Memory _me, size_t _size, int _numa_node,
-                                 Memory::Kind _lowlevel_kind, void *prealloc_base /*= 0*/,
+  LocalCPUMemory::LocalCPUMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                                 int _numa_node, Memory::Kind _lowlevel_kind,
+                                 void *prealloc_base /*= 0*/,
                                  NetworkSegment *_segment /*= 0*/,
                                  bool enable_ipc /*= true*/)
-    : LocalManagedMemory(_me, _size, MKIND_SYSMEM, ALIGNMENT, _lowlevel_kind, _segment)
+    : LocalManagedMemory(_runtime_impl, _me, _size, MKIND_SYSMEM, ALIGNMENT,
+                         _lowlevel_kind, _segment)
     , numa_node(_numa_node)
     , base(nullptr)
     , base_orig(nullptr)
@@ -1850,8 +1855,8 @@ namespace Realm {
 #endif
       {
         base = shared_memory.get_ptr<char>();
-        get_runtime()->local_shared_memory_mappings
-          .emplace(ID(me).id, std::move(shared_memory));
+        runtime_impl->local_shared_memory_mappings.emplace(ID(me).id,
+                                                           std::move(shared_memory));
       } else
 #endif
       {
@@ -1990,16 +1995,16 @@ namespace Realm {
   // class RemoteMemory
   //
 
-    RemoteMemory::RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-			       MemoryKind mk /*= MKIND_REMOTE */)
-      : MemoryImpl(_me, _size, mk, k, nullptr /*no segment*/)
-    {
-      std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
-          get_runtime()->remote_shared_memory_mappings.find(ID(me).id);
-      if(it != get_runtime()->remote_shared_memory_mappings.end()) {
-        base = it->second.get_ptr<void>();
-      }
+  RemoteMemory::RemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                             Memory::Kind k, MemoryKind mk /*= MKIND_REMOTE */)
+    : MemoryImpl(_runtime_impl, _me, _size, mk, k, nullptr /*no segment*/)
+  {
+    std::unordered_map<realm_id_t, SharedMemoryInfo>::iterator it =
+        runtime_impl->remote_shared_memory_mappings.find(ID(me).id);
+    if(it != runtime_impl->remote_shared_memory_mappings.end()) {
+      base = it->second.get_ptr<void>();
     }
+  }
 
     RemoteMemory::~RemoteMemory(void)
     {}

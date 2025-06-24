@@ -31,8 +31,8 @@ class SupportsPathTest : public ::testing::TestWithParam<SupportsPathTestCase> {
 protected:
   MemoryImpl *create_memory(int id, int node_id, std::vector<std::byte> buffer)
   {
-    return new LocalCPUMemory(make_mem(id, node_id), buffer.size(), 0, Memory::SYSTEM_MEM,
-                              buffer.data());
+    return new LocalCPUMemory(nullptr, make_mem(id, node_id), buffer.size(), 0,
+                              Memory::SYSTEM_MEM, buffer.data());
   }
 
   Node node;
@@ -205,9 +205,9 @@ void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
   XferDes::XferPort &input_port = xfer_desc->input_ports[0];
 
   std::vector<int> src_buffer = test_case.src_buffer;
-  std::unique_ptr<LocalCPUMemory> input_mem =
-      std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, src_buffer.size() * sizeof(int),
-                                       0, Memory::SYSTEM_MEM, src_buffer.data());
+  std::unique_ptr<LocalCPUMemory> input_mem = std::make_unique<LocalCPUMemory>(
+      nullptr, Memory::NO_MEMORY, src_buffer.size() * sizeof(int), 0, Memory::SYSTEM_MEM,
+      src_buffer.data());
   input_port.mem = input_mem.get();
   input_port.peer_port_idx = 0;
   input_port.iter = src_it;
@@ -223,9 +223,9 @@ void run_test_case(const MemcpyXferTestCaseData<N> &test_case)
   XferDes::XferPort &output_port = xfer_desc->output_ports[0];
   size_t total_dst_size = src_buffer.size();
   std::vector<int> dst_buffer(total_dst_size, 77);
-  std::unique_ptr<LocalCPUMemory> output_mem =
-      std::make_unique<LocalCPUMemory>(Memory::NO_MEMORY, total_dst_size * sizeof(int), 0,
-                                       Memory::SYSTEM_MEM, dst_buffer.data());
+  std::unique_ptr<LocalCPUMemory> output_mem = std::make_unique<LocalCPUMemory>(
+      nullptr, Memory::NO_MEMORY, total_dst_size * sizeof(int), 0, Memory::SYSTEM_MEM,
+      dst_buffer.data());
   output_port.mem = output_mem.get();
   output_port.peer_port_idx = 0;
   output_port.iter = dst_it;

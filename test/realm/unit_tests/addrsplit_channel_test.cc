@@ -182,8 +182,9 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
   size_t total_src_bytes = sizeof(Point<N, T>) * src_points;
   Point<N, T> *src_buffer = new Point<N, T>[src_points];
   std::memcpy(src_buffer, test_case.src_points.data(), total_src_bytes);
+  // TODO: use mock runtime
   std::unique_ptr<LocalCPUMemory> input_mem = std::make_unique<LocalCPUMemory>(
-      Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, src_buffer);
+      nullptr, Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, src_buffer);
   input_port.mem = input_mem.get();
   input_port.peer_port_idx = 0;
 
@@ -202,8 +203,10 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
     size_t total_dst_bytes = sizeof(Point<N, T>) * dst_points;
     Point<N, T> *dst_buffer_one = new Point<N, T>[dst_points];
 
-    buffs.emplace_back(std::make_unique<LocalCPUMemory>(
-        Memory::NO_MEMORY, total_dst_bytes, 0, Memory::SYSTEM_MEM, dst_buffer_one));
+    // TODO: use mock runtime
+    buffs.emplace_back(
+        std::make_unique<LocalCPUMemory>(nullptr, Memory::NO_MEMORY, total_dst_bytes, 0,
+                                         Memory::SYSTEM_MEM, dst_buffer_one));
 
     output_port.mem = buffs.back().get();
     output_port.peer_port_idx = 0;
@@ -214,8 +217,9 @@ void run_test_case(const AddressSplitXferDescTestCase<N, T> &test_case)
 
   XferDes::XferPort &output_port = xfer_des.output_ports[num_spaces];
   Point<N, T> *dst_buffer_two = new Point<N, T>[src_points];
+  // TODO: use mock runtime
   std::unique_ptr<LocalCPUMemory> output_mem_two = std::make_unique<LocalCPUMemory>(
-      Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, dst_buffer_two);
+      nullptr, Memory::NO_MEMORY, total_src_bytes, 0, Memory::SYSTEM_MEM, dst_buffer_two);
   output_port.mem = output_mem_two.get();
   output_port.peer_port_idx = 0;
   output_port.seq_remote.add_span(0, total_src_bytes);

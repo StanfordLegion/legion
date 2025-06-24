@@ -303,7 +303,7 @@ namespace Realm {
       Module::create_memories(runtime);
 
       Memory m = runtime->next_local_memory_id();
-      hdf5mem = new HDF5Memory(m);
+      hdf5mem = new HDF5Memory(runtime, m);
       runtime->add_memory(hdf5mem);
     }
 

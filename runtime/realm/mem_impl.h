@@ -66,9 +66,8 @@ namespace Realm {
 #endif
     };
 
-    MemoryImpl(Memory _me, size_t _size,
-	       MemoryKind _kind, Memory::Kind _lowlevel_kind,
-	       NetworkSegment *_segment);
+    MemoryImpl(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, MemoryKind _kind,
+               Memory::Kind _lowlevel_kind, NetworkSegment *_segment);
 
     virtual ~MemoryImpl(void);
 
@@ -190,12 +189,12 @@ namespace Realm {
     };
 
   public:
-    Memory me;
-    size_t size;
+    Memory me{REALM_NO_MEM};
+    size_t size{0};
     MemoryKind kind;
-    Memory::Kind lowlevel_kind;
-    NetworkSegment *segment;
-    ModuleSpecificInfo *module_specific;
+    Memory::Kind lowlevel_kind{Memory::Kind::NO_MEMKIND};
+    NetworkSegment *segment{nullptr};
+    ModuleSpecificInfo *module_specific{nullptr};
 
     // we keep a dedicated instance list for locally created
     //  instances, but we use a map indexed by creator node for others,
@@ -203,6 +202,9 @@ namespace Realm {
     std::map<NodeID, InstanceList *> instances_by_creator;
     Mutex instance_map_mutex;
     InstanceList local_instances;
+
+  protected:
+    RuntimeImpl *runtime_impl{nullptr};
   };
 
   class MemSpecificInfo {
@@ -292,9 +294,9 @@ namespace Realm {
     // a memory that manages its own allocations
     class LocalManagedMemory : public MemoryImpl {
     public:
-      LocalManagedMemory(Memory _me, size_t _size, MemoryKind _kind,
-			 size_t _alignment, Memory::Kind _lowlevel_kind,
-			 NetworkSegment *_segment);
+      LocalManagedMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                         MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind,
+                         NetworkSegment *_segment);
 
       virtual ~LocalManagedMemory(void);
 
@@ -384,9 +386,9 @@ namespace Realm {
     public:
       static const size_t ALIGNMENT = 256;
 
-      LocalCPUMemory(Memory _me, size_t _size, int numa_node, Memory::Kind _lowlevel_kind,
-                     void *prealloc_base = 0, NetworkSegment *_segment = 0,
-                     bool enable_ipc = true);
+      LocalCPUMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, int numa_node,
+                     Memory::Kind _lowlevel_kind, void *prealloc_base = 0,
+                     NetworkSegment *_segment = 0, bool enable_ipc = true);
 
       virtual ~LocalCPUMemory(void);
 
@@ -418,7 +420,8 @@ namespace Realm {
     public:
       static const size_t ALIGNMENT = 256;
 
-      DiskMemory(Memory _me, size_t _size, const std::filesystem::path &_file);
+      DiskMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                 const std::filesystem::path &_file);
 
       virtual ~DiskMemory(void);
 
@@ -443,7 +446,7 @@ namespace Realm {
 
     class FileMemory : public MemoryImpl {
     public:
-      FileMemory(Memory _me);
+      FileMemory(RuntimeImpl *_runtime_impl, Memory _me);
 
       virtual ~FileMemory(void);
 
@@ -482,8 +485,8 @@ namespace Realm {
 
     class REALM_INTERNAL_API_EXTERNAL_LINKAGE RemoteMemory : public MemoryImpl {
     public:
-      RemoteMemory(Memory _me, size_t _size, Memory::Kind k,
-		   MemoryKind mk = MKIND_REMOTE);
+      RemoteMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size, Memory::Kind k,
+                   MemoryKind mk = MKIND_REMOTE);
       virtual ~RemoteMemory(void);
 
       virtual AllocationResult allocate_storage_deferrable(RegionInstanceImpl *inst,

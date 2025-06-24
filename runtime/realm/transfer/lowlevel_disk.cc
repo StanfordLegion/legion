@@ -72,8 +72,10 @@ namespace Realm {
     extern Logger log_inst;
     Logger log_disk("disk");
 
-    DiskMemory::DiskMemory(Memory _me, size_t _size, const std::filesystem::path &_file)
-      : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM, 0)
+    DiskMemory::DiskMemory(RuntimeImpl *_runtime_impl, Memory _me, size_t _size,
+                           const std::filesystem::path &_file)
+      : LocalManagedMemory(_runtime_impl, _me, _size, MKIND_DISK, ALIGNMENT,
+                           Memory::DISK_MEM, 0)
       , file(_file)
     {
       // Allow overwriting of an existing file in case Realm crashed
@@ -176,8 +178,9 @@ namespace Realm {
       // Nothing to do here since we're just an offset of the disk memory
     }
 
-    FileMemory::FileMemory(Memory _me)
-      : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, Memory::FILE_MEM, 0)
+    FileMemory::FileMemory(RuntimeImpl *_runtime_impl, Memory _me)
+      : MemoryImpl(_runtime_impl, _me, 0 /*no memory space*/, MKIND_FILE,
+                   Memory::FILE_MEM, 0)
     {
     }
 

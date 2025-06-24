@@ -532,10 +532,10 @@ namespace Realm {
           if(remote) {
             MemoryImpl *mem;
             if(has_rdma_info) {
-              mem = Network::get_network(node_id)->create_remote_memory(m, size, kind,
-                                                                        rdma_info);
+              mem = Network::get_network(node_id)->create_remote_memory(
+                  runtime_impl, m, size, kind, rdma_info);
             } else {
-              mem = new RemoteMemory(m, size, kind);
+              mem = new RemoteMemory(runtime_impl, m, size, kind);
             }
             if(n.memories.size() >= ID(m).memory_mem_idx())
               n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
@@ -577,9 +577,10 @@ namespace Realm {
             IBMemory *ibmem;
             if(has_rdma_info) {
               ibmem = Network::get_network(node_id)->create_remote_ib_memory(
-                  m, size, kind, rdma_info);
+                  runtime_impl, m, size, kind, rdma_info);
             } else {
-              ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
+              ibmem = new IBMemory(runtime_impl, m, size, MemoryImpl::MKIND_REMOTE, kind,
+                                   0, 0);
             }
 
             if(n.ib_memories.size() >= ID(m).memory_mem_idx())

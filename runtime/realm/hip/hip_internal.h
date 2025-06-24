@@ -527,7 +527,8 @@ namespace Realm {
 
     class GPUFBMemory : public LocalManagedMemory {
     public:
-      GPUFBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size);
+      GPUFBMemory(RuntimeImpl *_runtime_impl, Memory _me, GPU *_gpu, char *_base,
+                  size_t _size);
 
       virtual ~GPUFBMemory(void);
 
@@ -558,7 +559,8 @@ namespace Realm {
 
     class GPUDynamicFBMemory : public MemoryImpl {
     public:
-      GPUDynamicFBMemory(Memory _me, GPU *_gpu, size_t _max_size);
+      GPUDynamicFBMemory(RuntimeImpl *_runtime_impl, Memory _me, GPU *_gpu,
+                         size_t _max_size);
 
       virtual ~GPUDynamicFBMemory(void);
       void cleanup(void);
@@ -601,9 +603,9 @@ namespace Realm {
 
     class GPUZCMemory : public LocalManagedMemory {
     public:
-      GPUZCMemory(Memory _me, char *_gpu_base, 
-                  void *_cpu_base, size_t _size,
-                  MemoryKind _kind, Memory::Kind _lowlevel_kind);
+      GPUZCMemory(RuntimeImpl *_runtime_impl, Memory _me, char *_gpu_base,
+                  void *_cpu_base, size_t _size, MemoryKind _kind,
+                  Memory::Kind _lowlevel_kind);
 
       virtual ~GPUZCMemory(void);
 
@@ -633,7 +635,8 @@ namespace Realm {
     
     class GPUFBIBMemory : public IBMemory {
     public:
-      GPUFBIBMemory(Memory _me, GPU *_gpu, char *_base, size_t _size);
+      GPUFBIBMemory(RuntimeImpl *_runtime_impl, Memory _me, GPU *_gpu, char *_base,
+                    size_t _size);
 
     public:
       GPU *gpu;
