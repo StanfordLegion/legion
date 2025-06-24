@@ -1,6 +1,12 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 25.06.0 (June 30, 2025)
+  * Build
+  * Legion
+  * Tools
+  * Realm
+
 Version 25.03.0 (March 28, 2025)
   * Build
     - Minimum required CMake version is now 3.22
