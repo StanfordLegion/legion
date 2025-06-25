@@ -25,11 +25,6 @@
 
 #define DISABLE_BARRIER_MIGRATION
 
-namespace BarrierConfig {
-  int max_notifies_payload = 256;
-  bool enable_broadcast = false;
-}; // namespace BarrierConfig
-
 namespace Realm {
 
   Logger log_barrier("barrier");
@@ -380,12 +375,9 @@ namespace Realm {
   {
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    if(BarrierConfig::enable_broadcast) {
-      assert(get_runtime()->get_module_config("core")->get_property(
-          "barrier_broadcast_radix", broadcast_radix));
-    } else {
-      broadcast_radix = Network::max_node_id + 1;
-    }
+
+    assert(get_runtime()->get_module_config("core")->get_property(
+        "barrier_broadcast_radix", broadcast_radix));
   }
 
   BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm, int _broadcast_radix)
@@ -578,7 +570,8 @@ namespace Realm {
 
       BarrierTriggerPayload payload;
 
-      if(BarrierConfig::enable_broadcast) {
+      if(broadcast_radix > 0) {
+        assert(0);
         payload.remotes = ordered_notifications;
       }
 
@@ -853,8 +846,10 @@ namespace Realm {
 
       NodeID node = (Network::my_node_id - owner + Network::max_node_id + 1) %
                     (Network::max_node_id + 1);
-      get_broadcast_targets(node, remote_notifications.size(), broadcast_radix,
-                            remote_broadcast_targets);
+      get_broadcast_targets(
+          node, remote_notifications.size(),
+          (broadcast_radix > 0 ? broadcast_radix : Network::max_node_id + 1),
+          remote_broadcast_targets);
     } while(0);
 
     if(forward_to_node != (NodeID)-1) {
@@ -1293,13 +1288,13 @@ namespace Realm {
     }
 
     if(!payload.remotes.empty()) {
-      if(BarrierConfig::enable_broadcast) {
-        assert(0);
-      }
+      assert(broadcast_radix >= 0);
       std::vector<RemoteNotification> ordered_notifications = payload.remotes;
       std::vector<NodeID> broadcast_targets;
-      get_broadcast_targets(broadcast_index, ordered_notifications.size(),
-                            broadcast_radix, broadcast_targets);
+      get_broadcast_targets(
+          broadcast_index, ordered_notifications.size(),
+          (broadcast_radix > 0 ? broadcast_radix : Network::max_node_id + 1),
+          broadcast_targets);
 
       const void *red_data =
           payload.reduction.empty() ? nullptr : payload.reduction.data();

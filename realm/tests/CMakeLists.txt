@@ -90,6 +90,7 @@ list(
   APPEND
   REALM_UNIT_TESTS
   auto_actmsg_test.cc
+  barrier_test.cc
   fragmented_message_test.cc
   incoming_message_manager_test.cc
   memcpy_channel_test.cc
