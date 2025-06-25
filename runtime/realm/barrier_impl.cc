@@ -27,6 +27,7 @@
 
 namespace BarrierConfig {
   int max_notifies_payload = 256;
+  bool enable_broadcast = false;
 }; // namespace BarrierConfig
 
 namespace Realm {
@@ -379,8 +380,12 @@ namespace Realm {
   {
     remote_subscribe_gens.clear();
     remote_trigger_gens.clear();
-    assert(get_runtime()->get_module_config("core")->get_property(
-        "barrier_broadcast_radix", broadcast_radix));
+    if(BarrierConfig::enable_broadcast) {
+      assert(get_runtime()->get_module_config("core")->get_property(
+          "barrier_broadcast_radix", broadcast_radix));
+    } else {
+      broadcast_radix = Network::max_node_id + 1;
+    }
   }
 
   BarrierImpl::BarrierImpl(BarrierCommunicator *_barrier_comm, int _broadcast_radix)
@@ -572,7 +577,10 @@ namespace Realm {
           sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t);
 
       BarrierTriggerPayload payload;
-      payload.remotes = ordered_notifications;
+
+      if(BarrierConfig::enable_broadcast) {
+        payload.remotes = ordered_notifications;
+      }
 
       if(remaining_data_size > 0) {
         payload.reduction.insert(payload.reduction.end(), reduce_data_ptr,
@@ -1285,6 +1293,9 @@ namespace Realm {
     }
 
     if(!payload.remotes.empty()) {
+      if(BarrierConfig::enable_broadcast) {
+        assert(0);
+      }
       std::vector<RemoteNotification> ordered_notifications = payload.remotes;
       std::vector<NodeID> broadcast_targets;
       get_broadcast_targets(broadcast_index, ordered_notifications.size(),
