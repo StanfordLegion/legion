@@ -177,7 +177,7 @@ namespace Realm {
       // barriers
       // TODO(apryakhin@): enable that back when barrier is fixed
       int barrier_broadcast_radix = 0;
-      //int barrier_broadcast_radix = 4;
+      // int barrier_broadcast_radix = 4;
 
       // topology of the host
       const HardwareTopology *host_topology = nullptr;
