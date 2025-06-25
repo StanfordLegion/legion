@@ -571,7 +571,6 @@ namespace Realm {
       BarrierTriggerPayload payload;
 
       if(broadcast_radix > 0) {
-        assert(0);
         payload.remotes = ordered_notifications;
       }
 
