@@ -51,7 +51,7 @@ list(APPEND REALM_TESTS
   extres_alias
   reservations
   multiaffine
-  machine_config
+  machine_config_test
   rsrv_acquire_poisoned
   refcount_image_test
   inst_chain_redistrict
@@ -126,8 +126,8 @@ if(Legion_USE_LIBDL)
 endif()
 
 if(REALM_LIMIT_SYMBOL_VISIBILITY)
-  set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
-  set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  set_target_properties(machine_config_test PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  set_target_properties(machine_config_test PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
 
 # some tests need test-specific arguments
@@ -147,35 +147,35 @@ set(TESTARGS_task_stream         -ll:gpu 1)
 set(TESTARGS_scatter_test        -ll:gpu 1)
 set(TESTARGS_transpose_test      -ll:gpu 1 -unit_test 1)
 set(TESTARGS_cuda_memcpy_test    -ll:gpu 1 -sparse 64 -gap 0 -chunks 32 -test-sparse -rects 8 -verify)
-set(TESTARGS_machine_config_args -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
+set(TESTARGS_machine_config_test_args -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin)
 set(TESTARGS_transpose_test_gpu -ll:gpu 1)
 set(TESTARGS_cuda_scatter_test   -ll:gpu 1)
 
 if(Legion_USE_CUDA)
-  list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
+  list(APPEND TESTARGS_machine_config_test_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
   list(APPEND TESTARGS_test_profiling -ll:gpu 1)
 endif()
 if(Legion_USE_HIP)
-  list(APPEND TESTARGS_machine_config_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
+  list(APPEND TESTARGS_machine_config_test_args -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2)
 endif()
 if(Legion_USE_OpenMP)
-  list(APPEND TESTARGS_machine_config_args -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4)
+  list(APPEND TESTARGS_machine_config_test_args -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4)
 endif()
 if(Legion_USE_Python)
-  list(APPEND TESTARGS_machine_config_args -ll:py 1 -ll:pystack 4)
+  list(APPEND TESTARGS_machine_config_test_args -ll:py 1 -ll:pystack 4)
 endif()
 
 
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
-    if (NOT test STREQUAL "machine_config")
+    if (NOT test STREQUAL "machine_config_test")
       add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
     endif()
   endforeach()
-  # test machine_config without any Legion_TEST_ARGS
-  add_test(NAME machine_config COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${TESTARGS_machine_config})
+  # test machine_config_test without any Legion_TEST_ARGS
+  add_test(NAME machine_config_test COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config_test> ${TESTARGS_machine_config})
   # test machine_config with -test_args 1
-  add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config> ${TESTARGS_machine_config_args})
+  add_test(NAME machine_config_args COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:machine_config_test> ${TESTARGS_machine_config_args})
 
   if(Legion_NETWORKS)
     # For verifying the -ll:networks arguments, try each network we've compiled with

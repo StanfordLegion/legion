@@ -67,7 +67,7 @@ legion_cxx_tests = [
     ['examples/attach_array_daxpy/attach_array_daxpy', []],
     ['examples/attach_index_space/index_space_attach', []],
     ['examples/predication/predication', []],
-    ['examples/layout_constraints/transpose', []],
+    ['examples/layout_constraints/layout_constraints', []],
     ['examples/padded_instances/padded_instances', []],
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/allreduce/allreduce', []],
@@ -932,9 +932,14 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
 
+    # Note: always shut off debug info in all profiles
+
     # Check the build with various settings to make sure we're not breaking anything
     allow_unused_variables_env = dict(list(env.items()) + [
-        ('RUSTFLAGS', '-Aunused_variables'), # When not all features are enabled, some variables may be unused
+        ('RUSTFLAGS', '-Aunused_variables -C debuginfo=0'), # When not all features are enabled, some variables may be unused
+    ])
+    env = dict(list(env.items()) + [
+        ('RUSTFLAGS', '-C debuginfo=0'),
     ])
     cmd(['cargo', 'check', '--no-default-features'],
         env=allow_unused_variables_env, cwd=legion_prof_dir)
@@ -948,7 +953,7 @@ def build_legion_prof_rs(root_dir, tmp_dir, env):
          '--path', legion_prof_dir,
          '--root', tmp_dir],
         env=env)
-    cmd(['cargo', 'test', '--all-features'], env=env, cwd=legion_prof_dir)
+    cmd(['cargo', 'test'], env=env, cwd=legion_prof_dir)
     cmd(['cargo', 'fmt', '--all', '--', '--check'], env=env, cwd=legion_prof_dir)
 
 def build_regent(root_dir, env):

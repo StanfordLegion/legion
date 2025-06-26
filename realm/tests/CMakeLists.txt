@@ -237,7 +237,7 @@ set(sparse_construct_ARGS -verbose)
 add_integration_test(sparse_construct "${REALM_TEST_DIR}/sparse_construct.cc")
 add_integration_test(extres_alias "${REALM_TEST_DIR}/extres_alias.cc")
 add_integration_test(reservations "${REALM_TEST_DIR}/reservations.cc")
-set(machine_config_ARGS
+set(machine_config_test_ARGS
     -test_args
     1
     -ll:cpu
@@ -267,7 +267,7 @@ set(machine_config_ARGS
 if(TEST_USE_GPU)
   list(
     APPEND
-    machine_config_ARGS
+    machine_config_test_ARGS
     -ll:gpu
     1
     -ll:fsize
@@ -286,16 +286,16 @@ if(TEST_USE_GPU)
     2
   )
   if(REALM_USE_CUDA)
-    list(APPEND machine_config_ARGS -cuda:dynfb 1 -cuda:dynfb_max 128)
+    list(APPEND machine_config_test_ARGS -cuda:dynfb 1 -cuda:dynfb_max 128)
   endif()
   if(REALM_USE_HIP)
-    list(APPEND machine_config_ARGS -hip:dynfb 1 -hip:dynfb_max 128)
+    list(APPEND machine_config_test_ARGS -hip:dynfb 1 -hip:dynfb_max 128)
   endif()
 endif()
 if(REALM_USE_OPENMP)
   list(
     APPEND
-    machine_config_ARGS
+    machine_config_test_ARGS
     -ll:ocpu
     1
     -ll:othr
@@ -307,9 +307,9 @@ if(REALM_USE_OPENMP)
   )
 endif()
 if(REALM_USE_PYTHON)
-  list(APPEND machine_config_ARGS -ll:py 1 -ll:pystack 4)
+  list(APPEND machine_config_test_ARGS -ll:py 1 -ll:pystack 4)
 endif()
-add_integration_test(machine_config "${REALM_TEST_DIR}/machine_config.cc")
+add_integration_test(machine_config_test "${REALM_TEST_DIR}/machine_config_test.cc")
 add_integration_test(rsrv_acquire_poisoned "${REALM_TEST_DIR}/rsrv_acquire_poisoned.cc")
 add_integration_test(refcount_image_test "${REALM_TEST_DIR}/refcount_image_test.cc")
 set(inst_chain_redistrict_ARGS -i 2)
@@ -380,7 +380,7 @@ if(TEST_USE_GPU)
 endif()
 
 target_link_libraries(
-  machine_config ${TEST_GPU_LIBS} $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>
+  machine_config_test ${TEST_GPU_LIBS} $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>
 )
 target_link_libraries(test_profiling ${TEST_GPU_LIBS})
 if(REALM_USE_LIBDL)
