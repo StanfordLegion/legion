@@ -73,7 +73,7 @@ TESTS += memmodel
 TESTS += extres_alias
 TESTS += reservations
 TESTS += multiaffine
-TESTS += machine_config
+TESTS += machine_config_test
 TESTS += rect_transform_test
 TESTS += rsrv_acquire_poisoned
 TESTS += sparsity_destroy
@@ -107,18 +107,18 @@ TESTARGS_scatter := -p1 2 -p2 2
 TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose
 TESTARGS_task_stream := -ll:gpu 1
-TESTARGS_machine_config_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin
+TESTARGS_machine_config_test_args := -test_args 1 -ll:cpu 4 -ll:util 2 -ll:io 1 -ll:csize 16 -ll:stacksize 4 -ll:pin_util 1 -ll:ext_sysmem 0 -ll:rsize 2 -ll:nsize 2 -ll:ncsize 1 -ll:ncpu 1 -numa:pin
 ifeq ($(strip $(USE_CUDA)),1)
-TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
+TESTARGS_machine_config_test_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -ll:msize 64 -cuda:dynfb 1 -cuda:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
 endif
 ifeq ($(strip $(USE_HIP)),1)
-TESTARGS_machine_config_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
+TESTARGS_machine_config_test_args += -ll:gpu 1 -ll:fsize 1024 -ll:zsize 8 -ll:ib_fsize 16 -ll:ib_zsize 32 -hip:dynfb 1 -hip:dynfb_max 128 -ll:streams 2 -ll:d2d_streams 2
 endif
 ifeq ($(strip $(USE_OPENMP)),1)
-TESTARGS_machine_config_args += -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4
+TESTARGS_machine_config_test_args += -ll:ocpu 1 -ll:othr 2 -ll:onuma 0 -ll:ostack 4
 endif
 ifeq ($(strip $(USE_PYTHON)),1)
-TESTARGS_machine_config_args += -ll:py 1 -ll:pystack 4
+TESTARGS_machine_config_test_args += -ll:py 1 -ll:pystack 4
 endif
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \
@@ -182,10 +182,10 @@ run_% : %
 	@echo $(LAUNCHER) ./$* $(TESTARGS_$*)
 	@$(LAUNCHER) ./$* $(TESTARGS_$*)
 
-run_machine_config_args : machine_config
+run_machine_config_args : machine_config_test
 	@# this echos exactly once, even if -s was specified
-	@echo $(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
-	@$(LAUNCHER) ./machine_config $(TESTARGS_machine_config_args)
+	@echo $(LAUNCHER) ./machine_config_test $(TESTARGS_machine_config_test_args)
+	@$(LAUNCHER) ./machine_config_test $(TESTARGS_machine_config_test_args)
 
 build : $(TESTS)
 
@@ -197,7 +197,7 @@ clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS) $(TEST_OBJS) $(REALM_FATBIN_SRC) $(REALM_FATBIN) $(SLIB_REALM_CUHOOK) $(REALM_CUHOOK_OBJS) $(REALM_GASNETEX_WRAPPER_OBJS) $(SLIB_REALM_GASNETEX_WRAPPER) $(REALM_GASNETEX_WRAPPER_EXPORT_HEADER)
 endif
 
-machine_config.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
+machine_config_test.o : CC_FLAGS += $(REALM_SYMBOL_VISIBILITY)
 
 $(TESTS) : % : %.o $(REALM_LIB) $(SLIB_REALM_CUHOOK) $(SLIB_REALM_GASNETEX_WRAPPER)
 	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. $(LD_FLAGS) $(REALM_LIBS) $(LEGION_LD_FLAGS) 

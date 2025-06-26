@@ -67,7 +67,7 @@ legion_cxx_tests = [
     ['examples/attach_array_daxpy/attach_array_daxpy', []],
     ['examples/attach_index_space/index_space_attach', []],
     ['examples/predication/predication', []],
-    ['examples/layout_constraints/transpose', []],
+    ['examples/layout_constraints/layout_constraints', []],
     ['examples/padded_instances/padded_instances', []],
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/allreduce/allreduce', []],
