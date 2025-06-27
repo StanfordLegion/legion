@@ -546,16 +546,25 @@ namespace Realm {
   {
     for(const NodeID target : broadcast_targets) {
       EventImpl::gen_t trigger_gen = ordered_notifications[target].trigger_gen;
+      EventImpl::gen_t previous_gen = ordered_notifications[target].previous_gen;
 
       const char *reduce_data_ptr = static_cast<const char *>(data);
       size_t remaining_data_size = datalen;
 
-      if(datalen == 0 && redopid != 0) {
-        reduce_data_ptr =
+      if(datalen == 0 && redopid != 0 && data) {
+        reduce_data_ptr = (data)
+                              ? static_cast<const char *>(data) +
+                                    ((previous_gen - oldest_previous) * redop->sizeof_lhs)
+                              : nullptr;
+        remaining_data_size = (trigger_gen - previous_gen) * redop->sizeof_lhs;
+
+        // TODO(apryakhin@): Enable that back when related bug is fixed
+        // https://github.com/StanfordLegion/legion/issues/1809
+        /*reduce_data_ptr =
             (data) ? static_cast<const char *>(data) +
                          ((broadcast_previous - oldest_previous) * redop->sizeof_lhs)
                    : nullptr;
-        remaining_data_size = (trigger_gen - broadcast_previous) * redop->sizeof_lhs;
+        remaining_data_size = (trigger_gen - broadcast_previous) * redop->sizeof_lhs;*/
       }
 
       BarrierTriggerMessageArgs trigger_args;
