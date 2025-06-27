@@ -261,7 +261,10 @@ namespace Realm {
       static void send_request(NodeID target, ID::IDType barrier_id, const void *data,
                                size_t datalen, size_t max_payload_size)
       {
-        ActiveMessageAuto<BarrierTriggerMessage> amsg(target, max_payload_size);
+        // TODO(apryakhin@): Enable that back when related bug is fixed
+        // https://github.com/StanfordLegion/legion/issues/1809
+        // ActiveMessageAuto<BarrierTriggerMessage> amsg(target, max_payload_size);
+        ActiveMessage<BarrierTriggerMessage> amsg(target, max_payload_size);
         amsg->barrier_id = barrier_id;
         amsg.add_payload(data, datalen);
         amsg.commit();
@@ -586,6 +589,7 @@ namespace Realm {
 
       size_t max_payload_size = barrier_comm->recommend_max_payload(
           ordered_notifications[target].node, sizeof(BarrierTriggerMessage));
+      assert(dbs_first.bytes_used() <= max_payload_size);
 
       barrier_comm->trigger(ordered_notifications[target].node, me.id,
                             dbs_first.get_buffer(), dbs_first.bytes_used(),
@@ -1404,7 +1408,10 @@ namespace Realm {
     return true;
   }
 
-  AutoMessageRegistrar<BarrierTriggerMessage> handler;
+  // TODO(apryakhin@): Enable that back when related bug is fixed
+  // https://github.com/StanfordLegion/legion/issues/1809
+  // AutoMessageRegistrar<BarrierTriggerMessage> handler;
+  ActiveMessageHandlerReg<BarrierTriggerMessage> barrier_handler_trigger;
   ActiveMessageHandlerReg<BarrierAdjustMessage> barrier_adjust_message_handler;
   ActiveMessageHandlerReg<BarrierSubscribeMessage> barrier_subscribe_message_handler;
   ActiveMessageHandlerReg<BarrierMigrationMessage> barrier_migration_message_handler;
