@@ -52,7 +52,7 @@ list(APPEND REALM_TESTS
   auto_actmsg_test.cc
   fragmented_message_test.cc
   incoming_message_manager_test.cc
-  barrier_test.cc
+  #barrier_test.cc
  )
 
 list(APPEND UCX_SOURCES
