@@ -174,7 +174,8 @@ namespace Realm {
       // sparstiy maps
       bool report_sparsity_leaks = false;
 
-      int barrier_broadcast_radix = 4;
+      // barriers
+      int barrier_broadcast_radix = 0;
 
       // topology of the host
       const HardwareTopology *host_topology = nullptr;
