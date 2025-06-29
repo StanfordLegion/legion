@@ -228,6 +228,52 @@ namespace Realm {
       }
     };
 
+#ifdef BARRIER_ENABLE_BROADCAST
+    struct BarrierTriggerMessage {
+      ID::IDType barrier_id;
+
+      static void handle_message(NodeID sender, const BarrierTriggerMessage &args,
+                                 const void *data, size_t datalen, TimeLimit work_until)
+      {
+        Serialization::FixedBufferDeserializer fbd(data, datalen);
+        BarrierTriggerMessageArgs trigger_args;
+        bool ok = fbd & trigger_args;
+        assert(ok);
+
+        data = (char *)data + (datalen - fbd.bytes_left());
+        datalen = fbd.bytes_left();
+
+        EventImpl::gen_t trigger_gen = trigger_args.internal.trigger_gen;
+
+        ID id(args.barrier_id);
+        id.barrier_generation() = trigger_gen;
+        Barrier b = id.convert<Barrier>();
+        BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
+
+        if(datalen > 0 && (trigger_args.internal.redop_id != 0)) {
+          impl->redop_id = trigger_args.internal.redop_id;
+          impl->redop =
+              get_runtime()->reduce_op_table.get(trigger_args.internal.redop_id, 0);
+        }
+
+        impl->handle_remote_trigger(
+            sender, args.barrier_id, trigger_gen, trigger_args.internal.previous_gen,
+            trigger_args.internal.first_generation, trigger_args.internal.redop_id,
+            trigger_args.internal.migration_target, trigger_args.internal.broadcast_index,
+            trigger_args.internal.base_arrival_count, data, datalen, work_until);
+      }
+
+      static void send_request(NodeID target, ID::IDType barrier_id, const void *data,
+                               size_t datalen, size_t max_payload_size)
+      {
+        ActiveMessageAuto<BarrierTriggerMessage> amsg(target, max_payload_size);
+        amsg->barrier_id = barrier_id;
+        amsg.add_payload(data, datalen);
+        amsg.commit();
+      }
+    };
+#endif
+
     struct BarrierAdjustMessage {
       NodeID sender;
       int forwarded;
@@ -289,51 +335,7 @@ namespace Realm {
     };
   } // namespace
 
-#ifdef BARRIER_ENABLE_BROADCAST
-  struct BarrierTriggerMessage {
-    ID::IDType barrier_id;
-
-    static void handle_message(NodeID sender, const BarrierTriggerMessage &args,
-                               const void *data, size_t datalen, TimeLimit work_until)
-    {
-      Serialization::FixedBufferDeserializer fbd(data, datalen);
-      BarrierTriggerMessageArgs trigger_args;
-      bool ok = fbd & trigger_args;
-      assert(ok);
-
-      data = (char *)data + (datalen - fbd.bytes_left());
-      datalen = fbd.bytes_left();
-
-      EventImpl::gen_t trigger_gen = trigger_args.internal.trigger_gen;
-
-      ID id(args.barrier_id);
-      id.barrier_generation() = trigger_gen;
-      Barrier b = id.convert<Barrier>();
-      BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
-
-      if(datalen > 0 && (trigger_args.internal.redop_id != 0)) {
-        impl->redop_id = trigger_args.internal.redop_id;
-        impl->redop =
-            get_runtime()->reduce_op_table.get(trigger_args.internal.redop_id, 0);
-      }
-
-      impl->handle_remote_trigger(
-          sender, args.barrier_id, trigger_gen, trigger_args.internal.previous_gen,
-          trigger_args.internal.first_generation, trigger_args.internal.redop_id,
-          trigger_args.internal.migration_target, trigger_args.internal.broadcast_index,
-          trigger_args.internal.base_arrival_count, data, datalen, work_until);
-    }
-
-    static void send_request(NodeID target, ID::IDType barrier_id, const void *data,
-                             size_t datalen, size_t max_payload_size)
-    {
-      ActiveMessageAuto<BarrierTriggerMessage> amsg(target, max_payload_size);
-      amsg->barrier_id = barrier_id;
-      amsg.add_payload(data, datalen);
-      amsg.commit();
-    }
-  };
-#else
+#ifndef BARRIER_ENABLE_BROADCAST
   /*static*/ void BarrierTriggerMessage::send_request(
       NodeID target, ID::IDType barrier_id, EventImpl::gen_t trigger_gen,
       EventImpl::gen_t previous_gen, EventImpl::gen_t first_generation,
