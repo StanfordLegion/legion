@@ -695,7 +695,7 @@ namespace Realm {
       const char *reduce_data_ptr = static_cast<const char *>(data);
       size_t remaining_data_size = datalen;
 
-      if(datalen == 0 && redopid != 0 && data) {
+      if(datalen == 0 && redopid != 0) {
         reduce_data_ptr =
             (data) ? static_cast<const char *>(data) +
                          ((broadcast_previous - oldest_previous) * redop->sizeof_lhs)
@@ -990,10 +990,8 @@ namespace Realm {
 #ifdef BARRIER_ENABLE_BROADCAST
       NodeID node = (Network::my_node_id - owner + Network::max_node_id + 1) %
                     (Network::max_node_id + 1);
-      get_broadcast_targets(
-          node, remote_notifications.size(),
-          (broadcast_radix > 0 ? broadcast_radix : Network::max_node_id + 1),
-          remote_broadcast_targets);
+      get_broadcast_targets(node, remote_notifications.size(), broadcast_radix,
+                            remote_broadcast_targets);
 #endif
     } while(0);
 
@@ -1048,7 +1046,7 @@ namespace Realm {
 
         broadcast_trigger(remote_notifications, remote_broadcast_targets, oldest_previous,
                           broadcast_previous, first_generation, migration_target,
-                          base_arrival_count, redop_id, final_values_copy, 0);
+                          base_arrival_count, redop_id, final_values_copy, /*datalen=*/0);
 #endif
       }
     }
