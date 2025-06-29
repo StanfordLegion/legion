@@ -1386,33 +1386,34 @@ namespace Realm {
           (NodeID)-1 /*no migration*/, 0 /*dummy arrival count*/, final_values_copy,
           final_values_size);
 #else
-    BarrierTriggerMessageArgs trigger_args;
-    trigger_args.internal.trigger_gen = trigger_gen;
-    trigger_args.internal.previous_gen = previous_gen;
-    trigger_args.internal.first_generation = first_generation;
-    trigger_args.internal.redop_id = redop_id;
-    trigger_args.internal.migration_target = (NodeID)-1;
-    trigger_args.internal.base_arrival_count = 0;
-    trigger_args.internal.broadcast_index = 0;
+      BarrierTriggerMessageArgs trigger_args;
+      trigger_args.internal.trigger_gen = trigger_gen;
+      trigger_args.internal.previous_gen = previous_gen;
+      trigger_args.internal.first_generation = first_generation;
+      trigger_args.internal.redop_id = redop_id;
+      trigger_args.internal.migration_target = (NodeID)-1;
+      trigger_args.internal.base_arrival_count = 0;
+      trigger_args.internal.broadcast_index = 0;
 
-    const size_t header_size = sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t);
-    Serialization::DynamicBufferSerializer dbs(header_size);
-    bool ok = dbs & trigger_args;
-    assert(ok);
-    if(final_values_size > 0) {
-      BarrierTriggerPayload payload;
-      payload.reduction.insert(
-          payload.reduction.end(), static_cast<const char *>(final_values_copy),
-          static_cast<const char *>(final_values_copy) + final_values_size);
-      ok = dbs & payload;
+      const size_t header_size =
+          sizeof(BarrierTriggerMessageArgsInternal) + sizeof(size_t);
+      Serialization::DynamicBufferSerializer dbs(header_size);
+      bool ok = dbs & trigger_args;
       assert(ok);
-    }
+      if(final_values_size > 0) {
+        BarrierTriggerPayload payload;
+        payload.reduction.insert(
+            payload.reduction.end(), static_cast<const char *>(final_values_copy),
+            static_cast<const char *>(final_values_copy) + final_values_size);
+        ok = dbs & payload;
+        assert(ok);
+      }
 
-    size_t max_payload_size = barrier_comm->recommend_max_payload(
-        forward_to_node, sizeof(BarrierTriggerMessage));
+      size_t max_payload_size = barrier_comm->recommend_max_payload(
+          forward_to_node, sizeof(BarrierTriggerMessage));
 
-    barrier_comm->trigger(subscriber, me.id, dbs.get_buffer(), dbs.bytes_used(),
-                          max_payload_size);
+      barrier_comm->trigger(subscriber, me.id, dbs.get_buffer(), dbs.bytes_used(),
+                            max_payload_size);
 #endif
     }
 
