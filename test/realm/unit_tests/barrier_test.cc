@@ -232,7 +232,7 @@ TEST_F(BarrierTest, LocalOutOfOrderArrive)
   EXPECT_EQ(barrier.generation.load(), arrival_gen);
 }
 
-TEST_F(BarrierTest, DISABLED_LocalArriveWithRemoteSubscribersRadix4SplitPayload)
+TEST_F(BarrierTest, LocalArriveWithRemoteSubscribersRadix4SplitPayload)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t subscribe_gen = 1;
@@ -586,7 +586,7 @@ public:
 
 const LargeReductionOpIntAdd::RHS LargeReductionOpIntAdd::identity = 0;
 
-TEST_F(BarrierRedopTest, DISABLED_LocalArriveWithRemoteSubscribersRadix4SplitPayload)
+TEST_F(BarrierRedopTest, LocalArriveWithRemoteSubscribersRadix4SplitPayload)
 {
   const NodeID owner = 0;
   const EventImpl::gen_t subscribe_gen = 1;

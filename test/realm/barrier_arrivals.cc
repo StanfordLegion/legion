@@ -46,7 +46,7 @@ struct TaskArgs {
 namespace TestConfig {
   int slice_arrival = -1;
   int ignore_subscriber = 0;
-  bool do_redop = true;
+  bool do_redop = false;
 }; // namespace TestConfig
 
 enum
