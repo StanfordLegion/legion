@@ -74,6 +74,27 @@ namespace Realm {
     EventImpl::gen_t trigger_gen, previous_gen;
   };
 
+#ifndef BARRIER_ENABLE_BROADCAST
+  struct BarrierTriggerMessage {
+    ID::IDType barrier_id;
+    EventImpl::gen_t trigger_gen;
+    EventImpl::gen_t previous_gen;
+    EventImpl::gen_t first_generation;
+    ReductionOpID redop_id;
+    NodeID migration_target;
+    unsigned base_arrival_count;
+
+    static void handle_message(NodeID sender, const BarrierTriggerMessage &msg,
+                               const void *data, size_t datalen, TimeLimit work_until);
+
+    static void send_request(NodeID target, ID::IDType barrier_id,
+                             EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+                             EventImpl::gen_t first_generation, ReductionOpID redop_id,
+                             NodeID migration_target, unsigned base_arrival_count,
+                             const void *data, size_t datalen);
+  };
+#endif
+
   class BarrierImpl : public EventImpl {
   public:
     static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;

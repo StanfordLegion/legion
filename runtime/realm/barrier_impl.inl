@@ -90,4 +90,3 @@ namespace Realm {
   }
 
 }; // namespace Realm
-
