@@ -1,9 +1,6 @@
 #include "common.h"
-
-#include "realm.h"
-
+#include "realm/realm_c.h"
 #include <stdio.h>
-#include <unistd.h>
 
 enum
 {

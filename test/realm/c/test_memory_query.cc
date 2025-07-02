@@ -1,10 +1,8 @@
 #include "common.h"
-
-#include "realm.h"
-
+#include "realm/realm_c.h"
+#include "realm/logging.h"
 #include <stdio.h>
-#include <unistd.h>
-#include <inttypes.h>
+#include <vector>
 
 Realm::Logger log_app("app");
 
@@ -52,9 +50,8 @@ void REALM_FNPTR top_level_task(const void *args, size_t arglen, const void *use
     uint64_t values[3];
     status = realm_memory_get_attributes(runtime, mem, attrs, values, 3);
     assert(status == REALM_SUCCESS);
-    log_app.info("Memory " IDFMT " kind: %" PRIu64 ", address space: %" PRIu64
-                 ", size: %" PRIu64,
-                 mem, values[0], values[1], values[2]);
+    log_app.info() << "Memory " << mem << " kind: " << values[0]
+                   << ", address_space: " << values[1] << ", size: " << values[2];
   }
   status = realm_memory_query_destroy(cpu_mem_query);
   assert(status == REALM_SUCCESS);
@@ -78,9 +75,8 @@ void REALM_FNPTR top_level_task(const void *args, size_t arglen, const void *use
     uint64_t values[3];
     status = realm_memory_get_attributes(runtime, mem, attrs, values, 3);
     assert(status == REALM_SUCCESS);
-    log_app.info("Memory " IDFMT " kind: %" PRIu64 ", address space: %" PRIu64
-                 ", size: %" PRIu64,
-                 mem, values[0], values[1], values[2]);
+    log_app.info() << "Memory " << mem << " kind: " << values[0]
+                   << ", address_space: " << values[1] << ", size: " << values[2];
   }
   status = realm_memory_query_destroy(gpu_mem_query);
   assert(status == REALM_SUCCESS);

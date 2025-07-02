@@ -1,9 +1,8 @@
 #include "common.h"
-
-#include "realm.h"
-
+#include "realm/realm_c.h"
+#include "realm/logging.h"
 #include <stdio.h>
-#include <unistd.h>
+#include <vector>
 
 Realm::Logger log_app("app");
 
@@ -28,7 +27,6 @@ void REALM_FNPTR hello_task(const void *args, size_t arglen, const void *userdat
                             size_t userlen, realm_processor_t proc)
 {
   log_app.info("hello_task on proc " IDFMT, proc);
-  sleep(1);
 }
 
 void REALM_FNPTR top_level_task(const void *args, size_t arglen, const void *userdata,
@@ -57,13 +55,13 @@ void REALM_FNPTR top_level_task(const void *args, size_t arglen, const void *use
   assert(status == REALM_SUCCESS);
   // spawn tasks on all cpu procs
   size_t num_cpus = cpu_proc_query_args.procs.size();
-  realm_event_t events[num_cpus];
+  std::vector<realm_event_t> events(num_cpus, REALM_NO_EVENT);
   for(size_t i = 0; i < num_cpus; i++) {
     status = realm_processor_spawn(runtime, cpu_proc_query_args.procs[i], HELLO_TASK, 0,
                                    0, NULL, 0, 0, &events[i]);
     assert(status == REALM_SUCCESS);
   }
-  status = realm_event_merge(runtime, events, num_cpus, &event);
+  status = realm_event_merge(runtime, events.data(), events.size(), &event);
   assert(status == REALM_SUCCESS);
   status = realm_event_wait(runtime, event);
   assert(status == REALM_SUCCESS);

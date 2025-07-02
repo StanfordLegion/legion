@@ -57,11 +57,6 @@ if(Legion_USE_LIBDL)
   target_link_libraries(taskreg ${CMAKE_DL_LIBS})
 endif()
 
-if(REALM_LIMIT_SYMBOL_VISIBILITY)
-  set_target_properties(machine_config PROPERTIES CXX_VISIBILITY_PRESET hidden)
-  set_target_properties(machine_config PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
-endif()
-
 if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_C_TESTS)
     add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})

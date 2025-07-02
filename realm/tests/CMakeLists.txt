@@ -115,18 +115,36 @@ list(
   topology_test.cc
 )
 list(TRANSFORM REALM_UNIT_TESTS PREPEND "${REALM_TEST_DIR}/unit_tests/")
-
 add_executable(realm_unit_tests ${REALM_UNIT_TESTS})
 # Needed for designated initializers
 # TODO(apriakhin): to be removed
 target_compile_features(realm_unit_tests PUBLIC cxx_std_20)
-target_link_libraries(realm_unit_tests PRIVATE realm_obj GTest::gmock_main)
+target_link_libraries(realm_unit_tests PRIVATE realm_obj GTest::gmock_main ${REALM_LIBRARIES})
+
+# TODO(wei): To be merged into realm_unit_tests once runtime singleton is
+# removed from all unit tests
+list(APPEND
+  REALM_C_UNIT_TESTS
+  c_processor_query.cc
+  c_memory_query.cc
+  c_processor_attr.cc
+  c_memory_attr.cc
+  c_processor_task.cc
+  c_event.cc)
+list(TRANSFORM REALM_C_UNIT_TESTS PREPEND "${REALM_TEST_DIR}/unit_tests/")
+add_executable(realm_c_unit_tests ${REALM_C_UNIT_TESTS})
+# Needed for designated initializers
+# TODO(apriakhin): to be removed
+target_compile_features(realm_c_unit_tests PUBLIC cxx_std_20)
+target_link_libraries(realm_c_unit_tests PRIVATE realm_obj GTest::gmock_main ${REALM_LIBRARIES})
 
 include(GoogleTest)
 if((NOT REALM_SANITIZER OR REALM_SANITIZER STREQUAL "NONE") AND NOT WIN32)
   gtest_discover_tests(realm_unit_tests NO_PRETTY_TYPES NO_PRETTY_VALUES PROPERTIES LABELS "unit")
+  gtest_discover_tests(realm_c_unit_tests NO_PRETTY_TYPES NO_PRETTY_VALUES PROPERTIES LABELS "unit")
 else()
   add_test(NAME realm_unit_tests COMMAND $<TARGET_FILE:realm_unit_tests>)
+  add_test(NAME realm_c_unit_tests COMMAND $<TARGET_FILE:realm_c_unit_tests>)
 endif()
 
 if(REALM_SANITIZER STREQUAL "ASAN")
@@ -148,7 +166,7 @@ if(REALM_ENABLE_COVERAGE)
         Coverage -L unit
       BYPRODUCTS coverage.xml
       WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-      DEPENDS realm_unit_tests VERBATIUM
+      DEPENDS realm_unit_tests realm_c_unit_tests VERBATIUM
       COMMENT "Running opencppcoverage to produce Cobertura coverage report"
     )
     # Show info where to find the report
@@ -379,6 +397,12 @@ if(TEST_USE_GPU)
   target_link_libraries(task_stream ${TEST_GPU_LIBS})
 endif()
 
+#### C API tests
+add_integration_test(c_runtime "${REALM_TEST_DIR}/c/test_runtime.cc")
+add_integration_test(c_processor_query "${REALM_TEST_DIR}/c/test_processor_query.cc")
+add_integration_test(c_memory_query "${REALM_TEST_DIR}/c/test_memory_query.cc")
+add_integration_test(c_event "${REALM_TEST_DIR}/c/test_event.cc")
+
 target_link_libraries(
   machine_config_test ${TEST_GPU_LIBS} $<TARGET_NAME_IF_EXISTS:CUDA::cuda_driver>
 )
@@ -421,6 +445,6 @@ endif()
 
 add_custom_target(
   check
-  DEPENDS ${_integ_list} realm_unit_tests
+  DEPENDS ${_integ_list} realm_unit_tests realm_c_unit_tests
   COMMAND ${CMAKE_CTEST_COMMAND} -j --output-on-failure
 )

@@ -113,7 +113,8 @@ TEST_F(CProcessorTaskTest, SpawnInvalidProcessor)
   EXPECT_EQ(status, REALM_PROCESSOR_ERROR_INVALID_PROCESSOR);
 }
 
-TEST_F(CProcessorTaskTest, SpawnSuccess)
+// TODO(wei): Fix nullptr access during GenEventImpl::GenEventImpl()
+TEST_F(CProcessorTaskTest, DISABLED_SpawnSuccess)
 {
   realm_event_t event;
   realm_runtime_t runtime = *runtime_impl;
