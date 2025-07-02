@@ -385,7 +385,7 @@ endif()
 #------------------------------------------------------------------------------#
 # rdtsc configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_RDTSC "Enable run-time support for dynamic shared objects" ON)
+option(Legion_USE_RDTSC "Enable run-time support for dynamic shared objects" OFF)
 if(Legion_USE_RDTSC AND NOT WIN32)
   # define variable for realm_defines.h
   set(REALM_TIMERS_USE_RDTSC ON)
