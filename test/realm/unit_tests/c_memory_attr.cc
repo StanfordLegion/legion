@@ -164,13 +164,12 @@ protected:
 
 TEST_P(CMemoryGetAttributesParamTest, AttributeRetrieval)
 {
-  size_t num_attrs = attrs_to_retrieve.size();
-  uint64_t values[num_attrs];
+  std::vector<uint64_t> values(attrs_to_retrieve.size());
   realm_runtime_t runtime = *runtime_impl;
   realm_status_t status = realm_memory_get_attributes(
-      runtime, mem, attrs_to_retrieve.data(), values, num_attrs);
+      runtime, mem, attrs_to_retrieve.data(), values.data(), attrs_to_retrieve.size());
   EXPECT_EQ(status, REALM_SUCCESS);
-  for(size_t i = 0; i < num_attrs; i++) {
+  for(size_t i = 0; i < attrs_to_retrieve.size(); i++) {
     EXPECT_EQ(values[i], expected_values[attrs_to_retrieve[i]]);
   }
 }

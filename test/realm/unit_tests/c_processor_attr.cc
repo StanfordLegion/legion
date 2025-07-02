@@ -166,13 +166,12 @@ protected:
 
 TEST_P(CProcessorGetAttributesParamTest, AttributeRetrieval)
 {
-  size_t num_attrs = attrs_to_retrieve.size();
-  uint64_t values[num_attrs];
+  std::vector<uint64_t> values(attrs_to_retrieve.size(), 0);
   realm_runtime_t runtime = *runtime_impl;
   realm_status_t status = realm_processor_get_attributes(
-      runtime, proc, attrs_to_retrieve.data(), values, num_attrs);
+      runtime, proc, attrs_to_retrieve.data(), values.data(), values.size());
   EXPECT_EQ(status, REALM_SUCCESS);
-  for(size_t i = 0; i < num_attrs; i++) {
+  for(size_t i = 0; i < values.size(); i++) {
     EXPECT_EQ(values[i], expected_values[attrs_to_retrieve[i]]);
   }
 }
