@@ -1,11 +1,22 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 25.06.0 (June 30, 2025)
+Version 25.06.0 (July 2, 2025)
   * Build
+    - Make UCX bootstrap module optional
   * Legion
+    - Bug fixes
   * Tools
+    - Minimum required Rust version is now 1.85
+    - Support for generating a DuckDB database from a profile via
+       `legion_prof duckdb` subcommand
+    - Allow searching inside of merged boxes in profiles
+    - Improved client-side error handling in profiler
+    - Improved client-side caching in profiler
+    - Support attaching to a local archive on disk
+    - Upgrade to egui 0.29
   * Realm
+    - Bug fixes
 
 Version 25.03.0 (March 28, 2025)
   * Build
