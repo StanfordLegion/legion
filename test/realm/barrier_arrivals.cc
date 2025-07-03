@@ -112,7 +112,7 @@ void arrival_task(const void *args, size_t arglen, const void *userdata, size_t 
   for(int i = 0; i < n; i++) {
     if(TestConfig::do_redop) {
       barrier.arrive(count, Event::NO_EVENT, reduce_value, sizeof(long long));
-      delete reduce_value;
+      free(reduce_value);
     } else {
       barrier.arrive(count, Event::NO_EVENT);
     }
