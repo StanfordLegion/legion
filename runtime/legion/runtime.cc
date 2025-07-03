@@ -3175,11 +3175,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
       assert(future != NULL);
+      // For debug mode add an actual reference to avoid overzealous assertions
+      future->add_base_gc_ref(RUNTIME_REF);
+      future->unpack_global_ref();
+      future->unpack_future_result(derez);
+      if (future->remove_base_gc_ref(RUNTIME_REF))
+        delete future;
 #else
       FutureImpl *future = static_cast<FutureImpl*>(dc);
-#endif
       future->unpack_future_result(derez);
       future->unpack_global_ref();
+#endif
     }
 
     //--------------------------------------------------------------------------
