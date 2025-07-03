@@ -16,6 +16,8 @@ Version 25.06.0 (July 2, 2025)
     - Support attaching to a local archive on disk
     - Upgrade to egui 0.29
   * Realm
+    - Improvements to new realm build system
+    - Added automatic payload fragmentation inside the active message layer
     - Bug fixes
 
 Version 25.03.0 (March 28, 2025)
