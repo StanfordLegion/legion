@@ -363,6 +363,10 @@ namespace Realm {
           return "PROC_GROUP";
         case PROC_SET:
           return "PROC_SET";
+        case OMP_PROC:
+          return "OMP_PROC";
+        case PY_PROC:
+          return "PY_PROC";
         default:
           assert(0);
       }
