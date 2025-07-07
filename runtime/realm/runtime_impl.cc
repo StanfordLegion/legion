@@ -30,6 +30,7 @@
 #include "realm/codedesc.h"
 
 #include "realm/utils.h"
+#include "realm/logging.h"
 
 // remote copy active messages from from lowlevel_dma.h for now
 #include "realm/transfer/lowlevel_dma.h"
@@ -380,6 +381,31 @@ namespace Realm {
 
     os << "DONE\n";
     os.flush();
+  }
+
+  static void realm_sigterm_handler(int signal)
+  {
+    // We are trying to prevent further signals while we are flushing
+    // This is not guaranteed to be async-signal-safe but it's better than nothing.
+    struct sigaction sa_dfl, sa_ign;
+    sa_dfl.sa_handler = SIG_DFL;
+    sigemptyset(&sa_dfl.sa_mask);
+    sa_dfl.sa_flags = 0;
+
+    sa_ign.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ign.sa_mask);
+    sa_ign.sa_flags = 0;
+
+    // Attempt to ignore further SIGTERMs while handling this one.
+    sigaction(SIGTERM, &sa_ign, NULL);
+
+    fprintf(stderr, "Realm caught SIGTERM, flushing logs...\n");
+    Realm::LoggerConfig::flush_all_streams();
+    fprintf(stderr, "Realm logs flushed. Re-raising SIGTERM.\n");
+
+    // Reset to default and re-raise
+    sigaction(SIGTERM, &sa_dfl, NULL);
+    raise(SIGTERM);
   }
 
   static void realm_show_events(int signal)
@@ -1985,6 +2011,15 @@ namespace Realm {
             ((legion_backtrace_env != NULL) && (atoi(legion_backtrace_env) != 0)))
           register_error_signal_handler(realm_backtrace);
       }
+
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+      // register SIGTERM handler
+      struct sigaction action;
+      action.sa_handler = realm_sigterm_handler;
+      sigemptyset(&action.sa_mask);
+      action.sa_flags = 0;  // Not using SA_ONSTACK for this handler
+      CHECK_LIBC( sigaction(SIGTERM, &action, 0) );
+#endif
 
       // debugging tool to dump realm event graphs after a fixed delay
       //  (easier than actually detecting a hang)
