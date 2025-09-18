@@ -5,21 +5,21 @@ use std::io::Read;
 use std::path::Path;
 
 use nom::{
+    IResult,
     branch::alt,
     bytes::complete::tag,
     character::complete::{digit1, hex_digit1, line_ending, none_of, not_line_ending, space0, u64},
     combinator::{all_consuming, map, opt, peek, value},
     multi::many1,
     sequence::preceded,
-    IResult,
 };
 
 use serde::{
-    de::{Error, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
+    de::{Error, SeqAccess, Visitor},
 };
 
-use crate::serde::ascii::{from_str, HexU64};
+use crate::serde::ascii::{HexU64, from_str};
 
 #[derive(Debug, Clone)]
 pub struct Prefix {
@@ -453,6 +453,65 @@ pub enum Record {
     CollectiveRendezvous { uid: UniqueID, req: u32, index: u32 },
 }
 
+fn parse_prefix(input: &str) -> IResult<&str, Prefix> {
+    // node and thread
+    let (input, _) = tag("[")(input)?;
+    let (input, node) = u64(input)?;
+    let (input, _) = tag(" - ")(input)?;
+    let (input, _) = hex_digit1(input)?;
+    let (input, _) = tag("]")(input)?;
+
+    // timestamp
+    let (input, _) = space0(input)?;
+    let (input, _) = digit1(input)?;
+    let (input, _) = tag(".")(input)?;
+    let (input, _) = digit1(input)?;
+    let (input, _) = space0(input)?;
+
+    // log level
+    let (input, _) = tag("{")(input)?;
+    let (input, _) = digit1(input)?;
+    let (input, _) = tag("}{")(input)?;
+    let (input, spy) = alt((
+        value(true, preceded(tag("legion_spy"), peek(tag("}")))),
+        value(false, many1(none_of("}"))),
+    ))(input)?;
+    let (input, _) = tag("}:")(input)?;
+    let (input, _) = space0(input)?;
+    Ok((input, Prefix { _node: node, spy }))
+}
+
+fn discard_rest_of_line(input: &str) -> IResult<&str, Option<Record>> {
+    let (input, _) = not_line_ending(input)?;
+    let (input, _) = line_ending(input)?;
+    Ok((input, None))
+}
+
+fn parse_record(input: &str) -> IResult<&str, Option<Record>> {
+    let (input, prefix) = opt(parse_prefix)(input)?;
+    if !prefix.is_some_and(|p| p.spy) {
+        return discard_rest_of_line(input);
+    }
+    let (input, record) = map(not_line_ending, |line| from_str(line).unwrap())(input)?;
+    let (input, _) = line_ending(input)?;
+    Ok((input, Some(record)))
+}
+
+fn parse(input: &str) -> IResult<&str, Vec<Record>> {
+    let (input, records) = all_consuming(many1(parse_record))(input)?;
+    Ok((input, records.into_iter().flatten().collect()))
+}
+
+pub fn deserialize<P: AsRef<Path>>(path: P) -> io::Result<Vec<Record>> {
+    let mut f = File::open(path)?;
+    let mut s = String::new();
+    f.read_to_string(&mut s)?;
+    // throw error here if parse failed
+    let (rest, records) = parse(&s).unwrap();
+    assert_eq!(rest.len(), 0);
+    Ok(records)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,63 +587,4 @@ mod tests {
         };
         assert_eq!(b, from_str(a).unwrap());
     }
-}
-
-fn parse_prefix(input: &str) -> IResult<&str, Prefix> {
-    // node and thread
-    let (input, _) = tag("[")(input)?;
-    let (input, node) = u64(input)?;
-    let (input, _) = tag(" - ")(input)?;
-    let (input, _) = hex_digit1(input)?;
-    let (input, _) = tag("]")(input)?;
-
-    // timestamp
-    let (input, _) = space0(input)?;
-    let (input, _) = digit1(input)?;
-    let (input, _) = tag(".")(input)?;
-    let (input, _) = digit1(input)?;
-    let (input, _) = space0(input)?;
-
-    // log level
-    let (input, _) = tag("{")(input)?;
-    let (input, _) = digit1(input)?;
-    let (input, _) = tag("}{")(input)?;
-    let (input, spy) = alt((
-        value(true, preceded(tag("legion_spy"), peek(tag("}")))),
-        value(false, many1(none_of("}"))),
-    ))(input)?;
-    let (input, _) = tag("}:")(input)?;
-    let (input, _) = space0(input)?;
-    Ok((input, Prefix { _node: node, spy }))
-}
-
-fn discard_rest_of_line(input: &str) -> IResult<&str, Option<Record>> {
-    let (input, _) = not_line_ending(input)?;
-    let (input, _) = line_ending(input)?;
-    Ok((input, None))
-}
-
-fn parse_record(input: &str) -> IResult<&str, Option<Record>> {
-    let (input, prefix) = opt(parse_prefix)(input)?;
-    if !prefix.map_or(false, |p| p.spy) {
-        return discard_rest_of_line(input);
-    }
-    let (input, record) = map(not_line_ending, |line| from_str(line).unwrap())(input)?;
-    let (input, _) = line_ending(input)?;
-    Ok((input, Some(record)))
-}
-
-fn parse(input: &str) -> IResult<&str, Vec<Record>> {
-    let (input, records) = all_consuming(many1(parse_record))(input)?;
-    Ok((input, records.into_iter().flatten().collect()))
-}
-
-pub fn deserialize<P: AsRef<Path>>(path: P) -> io::Result<Vec<Record>> {
-    let mut f = File::open(path)?;
-    let mut s = String::new();
-    f.read_to_string(&mut s)?;
-    // throw error here if parse failed
-    let (rest, records) = parse(&s).unwrap();
-    assert_eq!(rest.len(), 0);
-    Ok(records)
 }

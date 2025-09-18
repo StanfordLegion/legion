@@ -19,8 +19,9 @@
 #include <cassert>
 #include <cstring>
 #include <set>
-#include <time.h>
-#include <stdlib.h>
+#include <ctime>
+#include <cstdlib>
+#include <random>
 
 #include <realm.h>
 
@@ -98,18 +99,39 @@ Processor get_next_processor(Processor cur)
   return Processor::NO_PROC;
 }
 
+struct MakeLocksParams {
+  realm_id_t proc;
+  size_t locks_per_processor;
+};
+
+struct ReturnLocksParams {
+  size_t num_locks;
+  realm_id_t reservations[1];
+};
+
+struct LaunchChainParams {
+  realm_id_t proc;
+  realm_id_t start_event;
+  size_t chains_per_processor;
+  size_t chain_depth;
+  size_t lock_set_size;
+  realm_id_t reservations[1];
+};
+
 void top_level_task(const void *args, size_t arglen, 
                     const void *userdata, size_t userlen, Processor p)
 {
-  int locks_per_processor = 16;
-  int chains_per_processor = 32;
-  int chain_depth = 16;
+  size_t locks_per_processor = 16;
+  size_t chains_per_processor = 32;
+  size_t chain_depth = 16;
   // Parse the input arguments
-#define INT_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = atoi((argv)[++i]);		\
-          continue;					\
-        } } while(0)
+#define INT_ARG(argname, varname)                                                        \
+  do {                                                                                   \
+    if(!strcmp((argv)[i], argname)) {                                                    \
+      varname = static_cast<decltype(varname)>(atoi((argv)[++i]));                       \
+      continue;                                                                          \
+    }                                                                                    \
+  } while(0)
 
 #define BOOL_ARG(argname, varname) do { \
         if(!strcmp((argv)[i], argname)) {		\
@@ -138,56 +160,39 @@ void top_level_task(const void *args, size_t arglen,
   Machine::get_machine().get_all_processors(all_procs);
   // Send a request to each processor to make the given number of locks
   {
-    size_t buffer_size = sizeof(Processor) + sizeof(int);
-    void *buffer = malloc(buffer_size);
-    char *ptr = (char*)buffer;
-    *((Processor*)ptr) = p;
-    ptr += sizeof(Processor);
-    *((int*)ptr) = locks_per_processor;
-    for (std::set<Processor>::const_iterator it = all_procs.begin();
-          it != all_procs.end(); it++)
-    {
-      Processor copy = *it;
-      Event wait_event = copy.spawn(MAKE_LOCKS_TASK,buffer,buffer_size);
+    MakeLocksParams params;
+    params.proc = p.id;
+    params.locks_per_processor = locks_per_processor;
+    for(Processor copy : all_procs) {
+      Event wait_event = copy.spawn(MAKE_LOCKS_TASK, &params, sizeof(params));
       wait_event.wait();
     }
-    free(buffer);
   }
   // Send all the locks to each processor and tell them how many chains and what depth to make the chains
   {
-    fprintf(stdout,"Initializing lock chain experiment with %d locks per processor, %d chains per processor, and %d chain depth\n",
-            locks_per_processor,chains_per_processor,chain_depth);
+    fprintf(stdout,
+            "Initializing lock chain experiment with %zu locks per processor, %zu chains "
+            "per processor, and %zu chain depth\n",
+            locks_per_processor, chains_per_processor, chain_depth);
     std::set<Reservation> &lock_set = get_lock_set();
     // Package up all the locks and tell the processor how many tasks to register for each
-    size_t buffer_size = sizeof(Processor) + sizeof(Event) + 2*sizeof(int) + sizeof(size_t) + (lock_set.size() * sizeof(Reservation));
-    void *buffer = malloc(buffer_size);
-    char *ptr = (char*)buffer;
-    *((Processor*)ptr) = p;
-    ptr += sizeof(Processor);
-    *((Event*)ptr) = start_event;
-    ptr += sizeof(Event);
-    *((int*)ptr) = chains_per_processor;
-    ptr += sizeof(int);
-    *((int*)ptr) = chain_depth;
-    ptr += sizeof(int);
-    *((size_t*)ptr) = lock_set.size();
-    ptr += sizeof(size_t);
-    for (std::set<Reservation>::const_iterator it = lock_set.begin();
-          it != lock_set.end(); it++)
-    {
-      Reservation lock = *it;
-      *((Reservation*)ptr) = lock;
-      ptr += sizeof(Reservation);
+    size_t buffer_size =
+        sizeof(LaunchChainParams) + ((lock_set.size() - 1) * sizeof(Reservation));
+    LaunchChainParams *params = (LaunchChainParams *)malloc(buffer_size);
+    params->proc = p.id;
+    params->start_event = start_event.id;
+    params->chains_per_processor = chains_per_processor;
+    params->chain_depth = chain_depth;
+    params->lock_set_size = 0;
+    for(Reservation reservation : lock_set) {
+      params->reservations[params->lock_set_size++] = reservation.id;
     }
     // Send the message to all the processors
-    for (std::set<Processor>::const_iterator it = all_procs.begin();
-          it != all_procs.end(); it++)
-    {
-      Processor target = *it;
-      Event wait_event = target.spawn(LAUNCH_CHAIN_CREATION_TASK,buffer,buffer_size);
+    for(Processor target : all_procs) {
+      Event wait_event = target.spawn(LAUNCH_CHAIN_CREATION_TASK, params, buffer_size);
       wait_event.wait();
     }
-    free(buffer);
+    free(params);
   }
 
   Event final_event = Event::merge_events(get_final_events());
@@ -216,38 +221,34 @@ void top_level_task(const void *args, size_t arglen,
 void make_locks_task(const void *args, size_t arglen, 
                      const void *userdata, size_t userlen, Processor p)
 {
-  assert(arglen == (sizeof(Processor) + sizeof(int)));
-  char *ptr = (char*)args;
-  Processor orig = *((Processor*)ptr);
-  ptr += sizeof(Processor);
-  int num_locks = *((int*)ptr);
+  assert(arglen == sizeof(MakeLocksParams));
+  const MakeLocksParams *param = reinterpret_cast<const MakeLocksParams *>(args);
+  Processor orig;
+  orig.id = param->proc;
+  size_t num_locks = param->locks_per_processor;
 
-  size_t buffer_size = sizeof(int) + num_locks*sizeof(Reservation);
-  void * buffer = malloc(buffer_size);
-  ptr = (char*)buffer;
-  *((int*)ptr) = num_locks;
-  ptr += sizeof(int);
-  for (int idx = 0; idx < num_locks; idx++)
-  {
-    *((Reservation*)ptr) = Reservation::create_reservation();
-    ptr += sizeof(Reservation);
+  size_t buffer_size = sizeof(ReturnLocksParams) + (num_locks - 1) * sizeof(Reservation);
+  ReturnLocksParams *rparams = (ReturnLocksParams *)malloc(buffer_size);
+  rparams->num_locks = num_locks;
+  for(size_t idx = 0; idx < num_locks; idx++) {
+    Reservation res = Reservation::create_reservation();
+    rparams->reservations[idx] = res.id;
   }
-  Event wait_event = orig.spawn(RETURN_LOCKS_TASK,buffer,buffer_size);
-  free(buffer);
+  Event wait_event = orig.spawn(RETURN_LOCKS_TASK, rparams, buffer_size);
   wait_event.wait();
+  free(rparams);
 }
 
 void return_locks_task(const void *args, size_t arglen, 
                        const void *userdata, size_t userlen, Processor p)
 {
-  char *ptr = (char*)args;
-  int num_locks = *((int*)ptr);
-  ptr += sizeof(int);
+  assert(arglen >= sizeof(ReturnLocksParams));
+  const ReturnLocksParams *params = reinterpret_cast<const ReturnLocksParams *>(args);
+  size_t num_locks = params->num_locks;
   std::set<Reservation> &lockset = get_lock_set();
-  for (int idx = 0; idx < num_locks; idx++)
-  {
-    Reservation remote = *((Reservation*)ptr);
-    ptr += sizeof(Reservation);
+  for(size_t idx = 0; idx < num_locks; idx++) {
+    Reservation remote;
+    remote.id = params->reservations[idx];
     lockset.insert(remote);
   }
 }
@@ -255,34 +256,29 @@ void return_locks_task(const void *args, size_t arglen,
 void chain_creation_task(const void *args, size_t arglen, 
                          const void *userdata, size_t userlen, Processor p)
 {
-  char *ptr = (char*)args;
-  Processor orig = *((Processor*)ptr);
-  ptr += sizeof(Processor);
-  Event precondition = *((Event*)ptr);
-  ptr += sizeof(Event);
-  int chains_per_processor = *((int*)ptr);
-  ptr += sizeof(int);
-  int chain_depth = *((int*)ptr);
-  ptr += sizeof(int);
-  size_t num_locks = *((size_t*)ptr);
-  ptr += sizeof(size_t);
+  assert(arglen >= sizeof(LaunchChainParams));
+  const LaunchChainParams *params = reinterpret_cast<const LaunchChainParams *>(args);
+  Processor orig;
+  orig.id = params->proc;
+  Event precondition;
+  precondition.id = params->start_event;
+  const size_t chains_per_processor = params->chains_per_processor;
+  const size_t chain_depth = params->chain_depth;
+  const size_t num_locks = params->lock_set_size;
   std::vector<Reservation> lock_vector;
-  for (unsigned idx = 0; idx < num_locks; idx++)
-  {
-    Reservation lock = *((Reservation*)ptr);
-    ptr += sizeof(Reservation);
+  for(size_t idx = 0; idx < num_locks; idx++) {
+    Reservation lock;
+    lock.id = params->reservations[idx];
     lock_vector.push_back(lock);
   }
 
   // Seed the random number generator
-  srand48(p.id);
+  std::minstd_rand0 rng(p.id);
   std::set<Event> wait_for_events;
-  for (int chains = 0; chains < chains_per_processor; chains++)
-  {
+  for(size_t chains = 0; chains < chains_per_processor; chains++) {
     Event next_wait = precondition;
-    for (int idx = 0; idx < chain_depth; idx++)
-    {
-      Reservation next_lock = lock_vector[(lrand48() % lock_vector.size())];
+    for(size_t idx = 0; idx < chain_depth; idx++) {
+      Reservation next_lock = lock_vector[(rng() % lock_vector.size())];
       next_wait = next_lock.acquire(0,true,next_wait);
       next_lock.release(next_wait);
     }

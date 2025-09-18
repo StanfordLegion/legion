@@ -37,19 +37,19 @@ namespace Realm {
   // class Processor
   //
 
-  /*static*/ const Processor Processor::NO_PROC = {/* zero-initialization */};
+  /*static*/ const Processor Processor::NO_PROC{REALM_NO_PROC /* zero-initialization */};
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL Processor current_processor = {/* zero-initialization */};
+    thread_local Processor current_processor = {/* zero-initialization */};
 
     // if nonzero, prevents application thread from yielding execution
     //  resources on an Event wait
-    REALM_THREAD_LOCAL int scheduler_lock = 0;
+    thread_local int scheduler_lock = 0;
   };
 
     Processor::Kind Processor::kind(void) const
     {
-      return get_runtime()->get_processor_impl(*this)->kind;
+      return ProcessorImpl::get_processor_kind(get_runtime(), *this);
     }
 
     void Processor::get_group_members(Processor *members, size_t& num_members) const
@@ -73,7 +73,9 @@ namespace Realm {
 
     int Processor::get_num_cores(void) const
     {
-      return get_runtime()->get_processor_impl(*this)->num_cores;
+      ProcessorImpl *proc_impl = get_runtime()->get_processor_impl(*this);
+      assert(proc_impl != nullptr && "invalid processor handle");
+      return proc_impl->num_cores;
     }
 
     Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
@@ -81,6 +83,7 @@ namespace Realm {
 			   Event wait_on, int priority) const
     {
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
+      assert(p != nullptr && "invalid processor handle");
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
       Event e = finish_event->current_event();
@@ -95,6 +98,7 @@ namespace Realm {
 			   Event wait_on, int priority) const
     {
       ProcessorImpl *p = get_runtime()->get_processor_impl(*this);
+      assert(p != nullptr && "invalid processor handle");
 
       GenEventImpl *finish_event = GenEventImpl::create_genevent();
       Event e = finish_event->current_event();
@@ -196,9 +200,10 @@ namespace Realm {
 	    it != local_procs.end();
 	    it++) {
 	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	  bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
-	  assert(ok); // TODO: poison completion instead
-	}
+          assert(p != nullptr && "invalid processor handle");
+          bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
+          assert(ok); // TODO: poison completion instead
+        }
       }
 
       for(std::map<NodeID, std::vector<Processor> >::const_iterator it = remote_procs.begin();
@@ -266,9 +271,10 @@ namespace Realm {
 	    it != local_procs.end();
 	    it++) {
 	  ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	  bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
-	  assert(ok); // TODO: poison completion instead
-	}
+          assert(p != nullptr && "invalid processor handle");
+          bool ok = p->register_task(func_id, tro->codedesc, tro->userdata);
+          assert(ok); // TODO: poison completion instead
+        }
       }
 
       if(global) {
@@ -464,9 +470,13 @@ namespace Realm {
   // class ProcessorImpl
   //
 
-    ProcessorImpl::ProcessorImpl(Processor _me, Processor::Kind _kind,
-                                 int _num_cores)
-      : free_local_events(get_runtime()->local_events, Network::my_node_id, get_runtime()->local_event_free_list), me(_me), kind(_kind), num_cores(_num_cores)
+    ProcessorImpl::ProcessorImpl(RuntimeImpl *runtime_impl, Processor _me,
+                                 Processor::Kind _kind, int _num_cores)
+      : free_local_events(runtime_impl->local_events, Network::my_node_id,
+                          runtime_impl->local_event_free_list)
+      , me(_me)
+      , kind(_kind)
+      , num_cores(_num_cores)
     {
     }
 
@@ -651,8 +661,10 @@ namespace Realm {
   //
 
     ProcessorGroupImpl::ProcessorGroupImpl(void)
-      : ProcessorImpl(Processor::NO_PROC, Processor::PROC_GROUP),
-	members_valid(false), members_requested(false), next_free(0)
+      : ProcessorImpl(get_runtime(), Processor::NO_PROC, Processor::PROC_GROUP)
+      , members_valid(false)
+      , members_requested(false)
+      , next_free(0)
       , ready_task_count(0)
     {
       deferred_spawn_cache.clear();
@@ -681,10 +693,11 @@ namespace Realm {
 
       for(size_t i = 0; i < member_list.size(); i++) {
 	ProcessorImpl *m_impl = get_runtime()->get_processor_impl(member_list[i]);
-	members.push_back(m_impl);
-	// only the owner node actually connects up to the member processors
-	if(owner_node == Network::my_node_id)
-	  m_impl->add_to_group(this);
+        assert(m_impl != nullptr && "invalid processor handle");
+        members.push_back(m_impl);
+        // only the owner node actually connects up to the member processors
+        if(owner_node == Network::my_node_id)
+          m_impl->add_to_group(this);
       }
 
       members_requested = true;
@@ -885,16 +898,18 @@ namespace Realm {
 	  it != local_procs.end();
 	  it++) {
 	ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	bool ok = p->register_task(args.func_id, codedesc, userdata);
-	assert(ok); // TODO: poison completion instead
+        assert(p != nullptr && "invalid processor handle");
+        bool ok = p->register_task(args.func_id, codedesc, userdata);
+        assert(ok); // TODO: poison completion instead
       }
     } else {
       for(std::vector<Processor>::const_iterator it = procs.begin();
 	  it != procs.end();
 	  it++) {
 	ProcessorImpl *p = get_runtime()->get_processor_impl(*it);
-	bool ok = p->register_task(args.func_id, codedesc, userdata);
-	assert(ok); // TODO: poison completion instead
+        assert(p != nullptr && "invalid processor handle");
+        bool ok = p->register_task(args.func_id, codedesc, userdata);
+        assert(ok); // TODO: poison completion instead
       }
     }
 
@@ -922,21 +937,18 @@ namespace Realm {
   // class RemoteProcessor
   //
 
-    RemoteProcessor::RemoteProcessor(Processor _me, Processor::Kind _kind,
-                                     int _num_cores)
-      : ProcessorImpl(_me, _kind, _num_cores)
-    {
-    }
+  RemoteProcessor::RemoteProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                   Processor::Kind _kind, int _num_cores)
+    : ProcessorImpl(runtime_impl, _me, _kind, _num_cores)
+  {}
 
-    RemoteProcessor::~RemoteProcessor(void)
-    {
-    }
+  RemoteProcessor::~RemoteProcessor(void) {}
 
-    void RemoteProcessor::enqueue_task(Task *task)
-    {
-      // should never be called
-      assert(0);
-    }
+  void RemoteProcessor::enqueue_task(Task *task)
+  {
+    // should never be called
+    assert(0);
+  }
 
     void RemoteProcessor::enqueue_tasks(Task::TaskList& tasks, size_t num_tasks)
     {
@@ -1018,15 +1030,15 @@ namespace Realm {
   // class LocalTaskProcessor
   //
 
-  LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind,
-                                         int _num_cores)
-    : ProcessorImpl(_me, _kind, _num_cores)
-    , sched(0)
-    , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
-  {
-    task_queue.set_gauge(&ready_task_count);
-    deferred_spawn_cache.clear();
-  }
+    LocalTaskProcessor::LocalTaskProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                           Processor::Kind _kind, int _num_cores)
+      : ProcessorImpl(runtime_impl, _me, _kind, _num_cores)
+      , sched(0)
+      , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
+    {
+      task_queue.set_gauge(&ready_task_count);
+      deferred_spawn_cache.clear();
+    }
 
   LocalTaskProcessor::~LocalTaskProcessor(void)
   {
@@ -1219,11 +1231,12 @@ namespace Realm {
   // class LocalCPUProcessor
   //
 
-  LocalCPUProcessor::LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-				       size_t _stack_size, bool _force_kthreads,
-				       BackgroundWorkManager *bgwork,
-				       long long bgwork_timeslice)
-    : LocalTaskProcessor(_me, Processor::LOC_PROC)
+  LocalCPUProcessor::LocalCPUProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                       CoreReservationSet &crs, size_t _stack_size,
+                                       bool _force_kthreads,
+                                       BackgroundWorkManager *bgwork,
+                                       long long bgwork_timeslice)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::LOC_PROC)
   {
     CoreReservationParameters params;
     params.set_num_cores(1);
@@ -1266,11 +1279,13 @@ namespace Realm {
   // class LocalUtilityProcessor
   //
 
-  LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-					       size_t _stack_size, bool _force_kthreads, bool _pin_util_proc,
-					       BackgroundWorkManager *bgwork,
-					       long long bgwork_timeslice)
-    : LocalTaskProcessor(_me, Processor::UTIL_PROC)
+  LocalUtilityProcessor::LocalUtilityProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                               CoreReservationSet &crs,
+                                               size_t _stack_size, bool _force_kthreads,
+                                               bool _pin_util_proc,
+                                               BackgroundWorkManager *bgwork,
+                                               long long bgwork_timeslice)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
     params.set_num_cores(1);
@@ -1320,9 +1335,10 @@ namespace Realm {
   // class LocalIOProcessor
   //
 
-  LocalIOProcessor::LocalIOProcessor(Processor _me, CoreReservationSet& crs,
-				     size_t _stack_size, int _concurrent_io_threads)
-    : LocalTaskProcessor(_me, Processor::IO_PROC)
+  LocalIOProcessor::LocalIOProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                     CoreReservationSet &crs, size_t _stack_size,
+                                     int _concurrent_io_threads)
+    : LocalTaskProcessor(runtime_impl, _me, Processor::IO_PROC)
   {
     CoreReservationParameters params;
     params.set_alu_usage(params.CORE_USAGE_SHARED);
@@ -1416,6 +1432,7 @@ namespace Realm {
 						      size_t datalen)
   {
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
+    assert(p != nullptr && "invalid processor handle");
 
     log_task.debug() << "received remote spawn request:"
 		     << " func=" << args.func_id
@@ -1561,5 +1578,21 @@ namespace Realm {
   ActiveMessageHandlerReg<ProcGroupCreateMessage> proc_group_create_message_handler;
   ActiveMessageHandlerReg<ProcGroupDestroyMessage> proc_group_destroy_message_handler;
   ActiveMessageHandlerReg<ProcGroupDestroyAckMessage> proc_group_destroy_ack_message_handler;
+
+  /* static */ Processor::Kind
+  ProcessorImpl::get_processor_kind(RuntimeImpl *runtime_impl, Processor processor)
+  {
+    if(processor == Processor::NO_PROC) {
+      return Processor::NO_KIND;
+    }
+    if(runtime_impl == nullptr) {
+      return Processor::NO_KIND;
+    }
+    ProcessorImpl *proc_impl = runtime_impl->get_processor_impl(processor);
+    if(proc_impl == nullptr) {
+      return Processor::NO_KIND;
+    }
+    return proc_impl->kind;
+  }
 
 }; // namespace Realm

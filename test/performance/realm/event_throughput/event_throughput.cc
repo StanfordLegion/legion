@@ -56,42 +56,42 @@ EventSet& get_event_set(void)
   return event_set;
 }
 
-void send_level_commands(int fanout, Processor local, const EventSet &send_events, 
-			 const std::set<Processor> &all_procs, bool first)
+struct LevelCommand {
+  realm_id_t processor;
+  bool first;
+  size_t num_events;
+  realm_id_t events[1];
+};
+
+void send_level_commands(size_t fanout, Processor local, const EventSet &send_events,
+                         const std::set<Processor> &all_procs, bool first)
 {
   assert(!send_events.empty());
-  size_t buffer_size = sizeof(Processor) + sizeof(bool) + sizeof(size_t) + (send_events.size() * sizeof(Event));
-  void * buffer = malloc(buffer_size);
-  char *ptr = (char*)buffer;
-  *((Processor*)ptr) = local;
-  ptr += sizeof(Processor);
-  *((bool*)ptr) = first;
-  ptr += sizeof(bool);
-  size_t num_events = send_events.size();
-  *((size_t*)ptr) = num_events;
-  ptr += sizeof(size_t);
-  for (EventSet::const_iterator it = send_events.begin(); 
-       it != send_events.end(); it++)
-    {
-      *((Event*)ptr) = *it;
-      ptr += sizeof(Event);
-    }
+  const size_t buffer_size =
+      sizeof(LevelCommand) + (send_events.size() - 1) * sizeof(realm_id_t);
+  LevelCommand *buffer = (LevelCommand *)malloc(buffer_size);
+  buffer->processor = local.id;
+  buffer->first = first;
+  buffer->num_events = 0;
+
+  for(Event e : send_events) {
+    buffer->events[buffer->num_events++] = e.id;
+  }
   std::set<Processor>::const_iterator it = all_procs.begin();
-  for (int i = 0; i < fanout; i++)
-    {
-      Processor copy = *it;
-      // This was: Event wait_for = copy.spawn.builder(buffer,buffer_size);
-      // not sure how that ever worked -dpx
-      Event wait_for = copy.spawn(LEVEL_BUILDER, buffer, buffer_size);
-      // Update the iterator while we're waiting
-      it++;
-      if (it == all_procs.end()) // if we reach the end, reset
-	it = all_procs.begin();
-      // Wait for it to finish so we know when we're done
-      wait_for.wait();
-    }
+  for(size_t i = 0; i < fanout; i++) {
+    Processor copy = *it;
+    // This was: Event wait_for = copy.spawn.builder(buffer,buffer_size);
+    // not sure how that ever worked -dpx
+    Event wait_for = copy.spawn(LEVEL_BUILDER, buffer, buffer_size);
+    // Update the iterator while we're waiting
+    it++;
+    if(it == all_procs.end()) // if we reach the end, reset
+      it = all_procs.begin();
+    // Wait for it to finish so we know when we're done
+    wait_for.wait();
+  }
   free(buffer);
-  assert(int(get_event_set().size()) == fanout);
+  assert(get_event_set().size() == fanout);
 }
 
 void construct_track(int levels, int fanout, Processor local, Event precondition, EventSet &wait_for, const std::set<Processor> &all_procs)
@@ -217,21 +217,18 @@ void level_builder(const void *args, size_t arglen,
                    const void *userdata, size_t userlen, Processor p)
 {
   // Unpack everything
+  const LevelCommand *cmd = reinterpret_cast<const LevelCommand *>(args);
   std::set<Event> wait_for_events;
-  const char* ptr = (const char*)args;
-  Processor orig = *((Processor*)ptr);
-  ptr += sizeof(Processor);
-  bool first = *((bool*)ptr);
-  ptr += sizeof(bool);
-  size_t total_events = *((size_t*)ptr);
-  ptr += sizeof(size_t);
+  Processor orig;
+  orig.id = cmd->processor;
+  bool first = cmd->first;
+  size_t total_events = cmd->num_events;
 #ifdef DEBUG_PRINT
   fprintf(stdout,"Merging events ");
 #endif
-  for (unsigned i = 0; i < total_events; i++)
-  {
-    Event wait_event = *((Event*)ptr);
-    ptr += sizeof(Event);
+  for(size_t i = 0; i < total_events; i++) {
+    Event wait_event;
+    wait_event.id = cmd->events[i];
     wait_for_events.insert(wait_event);
 #ifdef DEBUG_PRINT
     fprintf(stdout,"%x ",wait_event.id);
@@ -259,13 +256,9 @@ void level_builder(const void *args, size_t arglen,
   fflush(stdout);
 #endif
   {
-    size_t buffer_size = sizeof(Event);
-    void * buffer = malloc(buffer_size);
-    char * ptr = (char*)buffer;
-    *((Event*)ptr) = finish_event;
     // Send it back, wait for it to finish
-    Event report_event = orig.spawn(SET_REMOTE_EVENT,buffer,buffer_size);
-    free(buffer);
+    Event report_event =
+        orig.spawn(SET_REMOTE_EVENT, &finish_event.id, sizeof(finish_event.id));
     report_event.wait();
   }
 }
@@ -273,9 +266,9 @@ void level_builder(const void *args, size_t arglen,
 void set_remote_event(const void *args, size_t arglen, 
                       const void *userdata, size_t userlen, Processor p)
 {
-  assert(arglen == (sizeof(Event))); 
-  const char* ptr = (const char*)args;
-  Event result = *((Event*)ptr);
+  assert(arglen == (sizeof(Event)));
+  Event result;
+  result.id = *reinterpret_cast<const realm_id_t *>(args);
   EventSet &event_set = get_event_set();
   event_set.insert(result);
 }

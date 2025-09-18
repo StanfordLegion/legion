@@ -155,7 +155,7 @@ namespace Realm {
   
   // allocation for thread-local error buffer for reporting error messages
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL char error_buffer[REALM_ERROR_BUFFER_SIZE];
+    thread_local char error_buffer[REALM_ERROR_BUFFER_SIZE];
   }
 
   const char* realm_strerror(int err)
@@ -360,4 +360,13 @@ namespace Realm {
 #endif
     }
   }
+
+  RealmEntryExitRAII::RealmEntryExitRAII(Logger &_logger, const char *_func)
+    : logger(_logger)
+    , func(_func)
+  {
+    logger.spew("%s entered", func);
+  }
+
+  RealmEntryExitRAII::~RealmEntryExitRAII() { logger.spew("%s exit", func); }
 };

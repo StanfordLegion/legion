@@ -269,11 +269,11 @@ protected:
 namespace Realm {
   namespace ThreadLocal {
     // certain threads are exempt from the max spillage due to deadlock concerns
-    REALM_THREAD_LOCAL bool always_allow_spilling = false;
+    thread_local bool always_allow_spilling = false;
 
     // we need to tunnel information through calls into GASNet that
     //  call GASNet active message handlers, so use TLS
-    REALM_THREAD_LOCAL TimeLimit *gasnet_work_until = 0;
+    thread_local TimeLimit *gasnet_work_until = 0;
   };
 };
 

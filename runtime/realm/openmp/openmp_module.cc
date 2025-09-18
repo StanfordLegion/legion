@@ -48,11 +48,12 @@ namespace Realm {
   //
   // class LocalOpenMPProcessor
 
-  LocalOpenMPProcessor::LocalOpenMPProcessor(Processor _me, int _numa_node,
-                                             int _num_threads, bool _fake_cpukind,
-                                             CoreReservationSet &crs, size_t _stack_size,
-                                             bool _force_kthreads)
-    : LocalTaskProcessor(_me, (_fake_cpukind ? Processor::LOC_PROC : Processor::OMP_PROC))
+  LocalOpenMPProcessor::LocalOpenMPProcessor(RuntimeImpl *runtime_impl, Processor _me,
+                                             int _numa_node, int _num_threads,
+                                             bool _fake_cpukind, CoreReservationSet &crs,
+                                             size_t _stack_size, bool _force_kthreads)
+    : LocalTaskProcessor(runtime_impl, _me,
+                         (_fake_cpukind ? Processor::LOC_PROC : Processor::OMP_PROC))
     , numa_node(_numa_node)
     , num_threads(_num_threads)
     , ctxmgr(this)
@@ -158,9 +159,9 @@ namespace Realm {
     }
     if(!proc->omp_threads_mapped) {
       if(!affinity_result) {
-        log_omp.warning(
-            "OMP Proc %llx failed setaffinity, which will lead to low performance.",
-            proc->me.id);
+        log_omp.warning("OMP Proc " IDFMT
+                        " failed setaffinity, which will lead to low performance.",
+                        proc->me.id);
       }
       proc->omp_threads_mapped = true;
     }
@@ -330,12 +331,10 @@ namespace Realm {
       for(int i = 0; i < config->cfg_num_openmp_cpus; i++) {
         int cpu_node = active_numa_domains[i % active_numa_domains.size()];
         Processor p = runtime->next_local_processor_id();
-        ProcessorImpl *pi = new LocalOpenMPProcessor(p, cpu_node,
-                                                     config->cfg_num_threads_per_cpu,
-                                                     config->cfg_fake_cpukind,
-                                                     runtime->core_reservation_set(),
-                                                     config->cfg_stack_size,
-                                                     Config::force_kernel_threads);
+        ProcessorImpl *pi = new LocalOpenMPProcessor(
+            runtime, p, cpu_node, config->cfg_num_threads_per_cpu,
+            config->cfg_fake_cpukind, runtime->core_reservation_set(),
+            config->cfg_stack_size, Config::force_kernel_threads);
         runtime->add_processor(pi);
 
         // FIXME: once the stuff in runtime_impl.cc is removed, remove

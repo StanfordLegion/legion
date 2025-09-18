@@ -81,7 +81,8 @@ namespace Realm {
       };
       DeferredDestroy deferred_destroy;
 
-      // Some help with deferred redistricting
+      // Some help for when a deferred redistrict is performed on
+      // an instance that hasn't even been allocated yet
       std::vector<RegionInstanceImpl *> deferred_redistrict;
 
     public:

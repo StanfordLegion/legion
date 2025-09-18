@@ -2016,6 +2016,18 @@ module legion_fortran_c_interface
       logical(c_bool), value, intent(in)                  :: column_major
     end subroutine legion_attach_launcher_add_cpu_soa_field_f
 
+    ! @see Legion::AttachLauncher::footprint
+    subroutine legion_attach_launcher_set_footprint_f(launcher, &
+        footprint) &
+        bind(C, name="legion_attach_launcher_set_footprint")
+      use iso_c_binding
+      import legion_attach_launcher_f_t
+      implicit none
+
+      type(legion_attach_launcher_f_t), value, intent(in) :: launcher
+      integer(c_size_t), value, intent(in)                :: footprint
+    end subroutine legion_attach_launcher_set_footprint_f
+
     ! @see Legion::Runtime::detach_external_resource()
     function legion_detach_external_resource_f(runtime, ctx, handle) &
         bind(C, name="legion_detach_external_resource")

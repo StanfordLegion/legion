@@ -28,7 +28,7 @@ namespace Realm {
     extern Logger log_stream;
     extern Logger log_gpudma;
     namespace ThreadLocal {
-      extern REALM_THREAD_LOCAL GPUStream *current_gpu_stream;
+      extern thread_local GPUStream *current_gpu_stream;
     }
 
     typedef int (*PFN_cudaLaunchKernel)(const void *func, dim3 gridDim,
@@ -1545,7 +1545,7 @@ namespace Realm {
               continue;
             default:
               add_path(local_gpu_mems, static_cast<Memory::Kind>(i), /*src_global=*/false,
-                       bw, latency, frag_overhead, XFER_GPU_TO_FB)
+                       bw, latency, frag_overhead, XFER_GPU_FROM_FB)
                   .set_max_dim(2);
               break;
             }

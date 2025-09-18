@@ -214,7 +214,7 @@ static void main_task(const void *data, size_t datalen, const void *userdata,
     ExternalCudaArrayResource cuda_array_external_resource(gpu_idx, array);
 
     array_ready_event = RegionInstance::create_external_instance(
-        array_instance, cuda_array_external_resource.suggested_memory(), layout.clone(),
+        array_instance, cuda_array_external_resource.suggested_memory(), layout,
         cuda_array_external_resource, ProfilingRequestSet());
   }
 

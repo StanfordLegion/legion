@@ -123,6 +123,7 @@ contains
     !print *, array
     
     attach_launcher = FAttachLauncher(EXTERNAL_INSTANCE, input_lr, input_lr)
+    call attach_launcher%set_footprint(c_sizeof(int_number) * 10 * 10)
     call attach_launcher%attach_array_soa(0, c_loc(array), .true.)
     pr = runtime%attach_external_resource(ctx, attach_launcher)
     

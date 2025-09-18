@@ -159,10 +159,10 @@ namespace Realm {
     static bool cuhook_enabled = false;
 
     namespace ThreadLocal {
-      REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams = 0;
-      static REALM_THREAD_LOCAL int context_sync_required = 0;
-      REALM_THREAD_LOCAL bool block_on_synchronize = false;
+      thread_local GPUStream *current_gpu_stream = 0;
+      thread_local std::set<GPUStream *> *created_gpu_streams = 0;
+      static thread_local int context_sync_required = 0;
+      thread_local bool block_on_synchronize = false;
     }; // namespace ThreadLocal
 
     ////////////////////////////////////////////////////////////////////////
@@ -375,33 +375,6 @@ namespace Realm {
       // if we get here, we ran out of events, but there might have been
       //  other kinds of work that we need to let the caller know about
       return work_left;
-    }
-
-    void GPU::create_dma_channels(Realm::RuntimeImpl *r)
-    {
-      // we used to skip gpu dma channels when there was no fbmem, but in
-      //  theory nvlink'd gpus can help move sysmem data even, so let's just
-      //  always create the channels
-
-      r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
-      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
-      r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
-      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
-
-      // treat managed mem like pinned sysmem on the assumption that most data
-      //  is usually in system memory
-      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
-        r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
-        r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
-      } else {
-        log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
-      }
-
-      // only create a p2p channel if we have peers (and an fb)
-      if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
-        r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
-        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
-      }
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -990,9 +963,9 @@ namespace Realm {
     //
     // class GPUProcessor
 
-    GPUProcessor::GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet &crs,
-                               size_t _stack_size)
-      : LocalTaskProcessor(_me, Processor::TOC_PROC)
+    GPUProcessor::GPUProcessor(RuntimeImpl *runtime_impl, GPU *_gpu, Processor _me,
+                               Realm::CoreReservationSet &crs, size_t _stack_size)
+      : LocalTaskProcessor(runtime_impl, _me, Processor::TOC_PROC)
       , gpu(_gpu)
     {
       Realm::CoreReservationParameters params;
@@ -2248,7 +2221,8 @@ namespace Realm {
     void GPU::create_processor(RuntimeImpl *runtime, size_t stack_size)
     {
       Processor p = runtime->next_local_processor_id();
-      proc = new GPUProcessor(this, p, runtime->core_reservation_set(), stack_size);
+      proc =
+          new GPUProcessor(runtime, this, p, runtime->core_reservation_set(), stack_size);
       runtime->add_processor(proc);
 
       // this processor is able to access its own FB and the ZC mem (if any)
@@ -2261,6 +2235,15 @@ namespace Realm {
         runtime->add_proc_mem_affinity(pma);
       }
 
+      if(fb_dmem) {
+        Machine::ProcessorMemoryAffinity pma;
+        pma.p = p;
+        pma.m = fb_dmem->me;
+        pma.bandwidth = info->logical_peer_bandwidth[info->index];
+        pma.latency = info->logical_peer_latency[info->index];
+        runtime->add_proc_mem_affinity(pma);
+      }
+
       for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
           it != pinned_sysmems.end(); ++it) {
         // no processor affinity to IB memories
@@ -2270,7 +2253,7 @@ namespace Realm {
         Machine::ProcessorMemoryAffinity pma;
         pma.p = p;
         pma.m = *it;
-        pma.bandwidth = info->pci_bandwidth;
+        pma.bandwidth = std::max(info->c2c_bandwidth, info->pci_bandwidth);
         pma.latency = 200; // "bad"
         runtime->add_proc_mem_affinity(pma);
       }
@@ -2344,7 +2327,8 @@ namespace Realm {
         CudaDeviceMemoryInfo *cdm = (*it)->find_module_specific<CudaDeviceMemoryInfo>();
         if(!cdm)
           continue;
-        if(cdm->gpu && (info->peers.count(cdm->gpu->info->index) > 0)) {
+        if(cdm->gpu && info->index != cdm->gpu->info->index &&
+           (info->peers.count(cdm->gpu->info->index) > 0)) {
           Machine::ProcessorMemoryAffinity pma;
           pma.p = p;
           pma.m = (*it)->me;
@@ -2456,6 +2440,53 @@ namespace Realm {
       // TODO(apryakhin@): Determine if we need to keep the pointer.
       fb_dmem = new GPUDynamicFBMemory(m, this, max_size);
       runtime->add_memory(fb_dmem);
+    }
+
+    void GPU::create_dma_channels(Realm::RuntimeImpl *r)
+    {
+      // we used to skip gpu dma channels when there was no fbmem, but in
+      //  theory nvlink'd gpus can help move sysmem data even, so let's just
+      //  always create the channels
+
+      r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
+      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
+      r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
+      r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
+
+      // treat managed mem like pinned sysmem on the assumption that most data
+      //  is usually in system memory
+      if(!pinned_sysmems.empty() || !managed_mems.empty()) {
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_TO_FB, &r->bgwork));
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_FROM_FB, &r->bgwork));
+      } else {
+        log_gpu.warning() << "GPU " << proc->me << " has no accessible system memories!?";
+      }
+
+      // only create a p2p channel if we have peers (and an fb)
+      if(!peer_fbs.empty() || !cudaipc_mappings.empty()) {
+        r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
+      }
+
+      // add processor memory affinity for pageable access host memory.
+      // this is done here because this is a place where all the local memories
+      //  for the other modules are known to have been created such that when
+      //  we iterate them, we are sure to iterate over all of them.
+      if(info->pageable_access_supported && (module->config->cfg_pageable_access != 0)) {
+        Node &n = r->nodes[Network::my_node_id];
+        for(MemoryImpl *mem : n.memories) {
+          if(mem->get_kind() == Memory::SOCKET_MEM ||
+             mem->get_kind() == Memory::SYSTEM_MEM ||
+             mem->get_kind() == Memory::FILE_MEM || mem->get_kind() == Memory::HDF_MEM) {
+            Machine::ProcessorMemoryAffinity pma;
+            pma.p = proc->me;
+            pma.m = mem->me;
+            pma.bandwidth = info->c2c_bandwidth;
+            pma.latency = 1000;
+            r->add_proc_mem_affinity(pma);
+          }
+        }
+      }
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -2681,7 +2712,7 @@ namespace Realm {
         return false;
       }
       // Use the symbol we get from the dynamically loaded library
-      cuGetProcAddress_fnptr = reinterpret_cast<decltype(cuGetProcAddress_fnptr)>(
+      cuGetProcAddress_fnptr = reinterpret_cast<PFN_cuGetProcAddress>(
           dlsym(libcuda, STRINGIFY(cuGetProcAddress)));
 #elif CUDA_VERSION >= 11030
       // Use the statically available symbol
@@ -2698,7 +2729,7 @@ namespace Realm {
       } else {
 #if defined(REALM_USE_LIBDL)
 #define DRIVER_GET_FNPTR(name, ver)                                                      \
-  if(CUDA_SUCCESS != (nullptr != (name##_fnptr = reinterpret_cast<decltype(&name)>(      \
+  if(CUDA_SUCCESS != (nullptr != (name##_fnptr = reinterpret_cast<PFN_##name>(           \
                                       dlsym(libcuda, STRINGIFY(name)))))) {              \
     log_gpu.info() << "Could not retrieve symbol " #name;                                \
   }
@@ -3226,8 +3257,8 @@ namespace Realm {
           }
 
           // For fast lookups, check if we actually have a numa preference
-          for(size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
-            if(info->numa_node_affinity[i] != (unsigned long)-1) {
+          for(size_t j = 0; j < info->MAX_NUMA_NODE_LEN; j++) {
+            if(info->numa_node_affinity[j] != (unsigned long)-1) {
               info->has_numa_preference = true;
               break;
             }
@@ -3762,9 +3793,24 @@ namespace Realm {
             // pageeable memory access that cuMemAdvise will work with pageeable memory.
             // It does on some systems, not on others.  Either way, make the attempt and
             // move on
+#if CUDA_VERSION < 12090
             (void)CUDA_DRIVER_FNPTR(cuMemAdvise)(
                 reinterpret_cast<CUdeviceptr>(ptr), mem->size,
                 CU_MEM_ADVISE_SET_PREFERRED_LOCATION, CU_DEVICE_CPU);
+#else
+            // In cuda 12.9, there's some confusion about what function type for the
+            // loader should be, which forces an early deprecation of the original
+            // cuMemAdvise.  Since we'll need to make this update for 13.0 anyway,
+            // implement a quick implementation for now.
+            // TODO(cperry): pick a numa node closest to the owning GPU instead of the
+            // calling numa node
+            CUmemLocation location;
+            location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA_CURRENT;
+            location.id = 0;
+            (void)CUDA_DRIVER_FNPTR(cuMemAdvise)(
+                reinterpret_cast<CUdeviceptr>(ptr), mem->size,
+                CU_MEM_ADVISE_SET_PREFERRED_LOCATION, location);
+#endif
           }
           break;
         }
@@ -4672,9 +4718,13 @@ namespace Realm {
       CUmemAllocationProp mem_prop{};
       CUmemAllocationHandleType handle_type = CU_MEM_HANDLE_TYPE_FABRIC;
 
-      CHECK_CU(CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(
+      CUresult res = CUDA_DRIVER_FNPTR(cuMemImportFromShareableHandle)(
           &cuda_hdl, const_cast<void *>(reinterpret_cast<const void *>(&hdl)),
-          handle_type));
+          handle_type);
+      if(res != CUDA_SUCCESS) {
+        REPORT_CU_ERROR(Logger::LEVEL_INFO, "cuMemImportFromShareableHandle", res);
+        return nullptr;
+      }
 
       CHECK_CU(
           CUDA_DRIVER_FNPTR(cuMemGetAllocationPropertiesFromHandle)(&mem_prop, cuda_hdl));

@@ -26,5 +26,6 @@ realm_defines.h
 .cache
 build
 tmp-build
+install
 compile_commands.json
 mem_trace_csv

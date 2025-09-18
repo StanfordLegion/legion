@@ -17,7 +17,7 @@ else()
 endif()
 
 install(
-  TARGETS realm realm_obj
+  TARGETS realm
   EXPORT Realm_targets
   RUNTIME COMPONENT Realm_runtime
   LIBRARY COMPONENT Realm_runtime
@@ -27,16 +27,42 @@ install(
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
 )
 
+# Install the realm_gex_wrapper as well if we have to link directly to it
+if(REALM_USE_GASNETEX
+   AND NOT REALM_USE_GASNETEX_WRAPPER
+   AND NOT BUILD_SHARED_LIBS
+)
+  install(
+    TARGETS realm_gex_wrapper realm_gex_wrapper_objs
+    EXPORT Realm_targets
+    RUNTIME COMPONENT Realm_runtime
+    LIBRARY COMPONENT Realm_runtime
+    ARCHIVE COMPONENT Realm_devel
+  )
+endif()
+
 # TODO(cperry): Separate out public headers from internal ones
 # Unfortunately public and internal headers are all mixed up, so we need to glob together
 # all the header files in the source directory and install them.  Ideally we would just
 # add the public headers to a cmake FILE_SET
 install(
-  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/"
+  FILES "${REALM_SOURCE_DIR}/../realm.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
+  COMPONENT Realm_devel
+)
+install(
+  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/realm/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
   COMPONENT Realm_devel
   FILES_MATCHING
   PATTERN "*.h"
+)
+install(
+  DIRECTORY "${REALM_SOURCE_DIR}/" "${CMAKE_CURRENT_BINARY_DIR}/include/realm/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
+  COMPONENT Realm_devel
+  FILES_MATCHING
+  PATTERN "*.inl"
 )
 
 install(
@@ -59,14 +85,23 @@ write_basic_package_version_file(
 )
 
 # Get a list of pkgconf dependencies
-list(TRANSFORM REALM_STATIC_DEPENDS TOLOWER OUTPUT_VARIABLE REALM_PKGCONF_REQUIRES)
-string(REPLACE ";" " " REALM_PKGCONF_REQUIRES "${REALM_PKGCONF_REQUIRES}")
+if(NOT BUILD_SHARED_LIBS)
+  list(
+    TRANSFORM REALM_STATIC_DEPENDS
+    TOLOWER
+    OUTPUT_VARIABLE REALM_PKGCONF_REQUIRES
+  )
+  string(REPLACE ";" " " REALM_PKGCONF_REQUIRES "${REALM_PKGCONF_REQUIRES}")
+endif()
+
+# Setup pkgconfig module
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/realm.pc.in realm.pc
   INSTALL_DESTINATION "${CMAKE_INSTALL_ROOTDATADIR}/pkgconfig"
   PATH_VARS CMAKE_INSTALL_PREFIX CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR
 )
 
+# Set up RealmConfig file.
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RealmConfig.cmake.in" "RealmConfig.cmake"
   INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
@@ -80,6 +115,16 @@ install(
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/RealmConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/RealmConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
+  COMPONENT Realm_devel
+)
+
+# Make sure to install all the find modules as a last resort for RealmConfig to find them
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindGASNet.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindHWLOC.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLLVM.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindPapi.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/realm"
   COMPONENT Realm_devel
 )
@@ -152,6 +197,13 @@ endif()
 
 # Snap the version for the source package and add it to the source package via the custom CPack script
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/version/VERSION" "${REALM_VERSION}")
+# Also add this to the installation package for systems that don't support either cmake nor pkg-config (like osx)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/version/VERSION"
+  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/realm"
+  COMPONENT Realm_devel
+)
+
 set(CPACK_INSTALL_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/CPack.cmake")
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPack.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/CPack.cmake"

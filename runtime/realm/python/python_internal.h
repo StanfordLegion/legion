@@ -128,13 +128,13 @@ namespace Realm {
   //  to run on the specified numa domain
   class LocalPythonProcessor : public ProcessorImpl {
   public:
-    LocalPythonProcessor(Processor _me, int _numa_node,
-                         CoreReservationSet& crs, size_t _stack_size,
+    LocalPythonProcessor(RuntimeImpl *runtime_impl, Processor _me, int _numa_node,
+                         CoreReservationSet &crs, size_t _stack_size,
 #ifdef REALM_USE_OPENMP
-			 int _omp_workers,
+                         int _omp_workers,
 #endif
-			 const std::vector<std::string>& _import_modules,
-			 const std::vector<std::string>& _init_scripts);
+                         const std::vector<std::string> &_import_modules,
+                         const std::vector<std::string> &_init_scripts);
     virtual ~LocalPythonProcessor(void);
 
     virtual void enqueue_task(Task *task);
@@ -216,6 +216,15 @@ namespace Realm {
   // based on KernelThreadTaskScheduler, deals with the python GIL and thread
   //  state changes as well
 
+  // Note! If you ever go to change the PythonThreadTaskScheduler to use the
+  // UserLevelTaskScheduler, you will need to update the implementation of
+  // how Python tasks are run. The CPython interpreter now has thread-local
+  // variables that track the PyThreadState object. It's not safe to use
+  // the same PyThreadState object across multiple live tasks running on
+  // the same kernel thread. Instead you'll need to modify the tasks running
+  // on the Python processor to each create their own PyThreadState object
+  // and then check that whenever they have been preempted (wait on an event)
+  // that this has been saved onto the stack and restored after the wait ends.
   class PythonThreadTaskScheduler : public KernelThreadTaskScheduler {
   public:
     PythonThreadTaskScheduler(LocalPythonProcessor *_pyproc,

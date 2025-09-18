@@ -28,7 +28,7 @@
 #error RADIUS must be defined
 #endif
 
-#include "prealm.h"
+#include "realm/prealm/prealm.h"
 
 #include "cpu_kernels.h" // for coord_t
 

@@ -407,6 +407,7 @@ namespace Legion {
         { return provenance; }
     public:
       uint64_t get_context_index(void) const;
+      std::optional<uint64_t> get_context_index(GenerationID gen) const;
       void set_context_index(uint64_t index);
     public:
       // Be careful using this call as it is only valid when the operation
@@ -3931,6 +3932,10 @@ namespace Legion {
                                               const FieldMask &external_mask);
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
+      ApEvent create_external(RegionNode *node, 
+          const std::vector<FieldID>& field_set,
+          const std::vector<size_t>& sizes, PhysicalInstance& instance,
+          LgEvent& unique_event, size_t& footprint);
       void check_privilege(void);
       void compute_parent_index(void);
       void log_requirement(void);

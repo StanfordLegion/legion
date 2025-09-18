@@ -195,7 +195,7 @@ namespace Realm {
 
   private:
     size_t sys_memory_size{0};                       ///< Total system memory size.
-    unsigned num_logical_cores_per_physical_core{0}; ///< Logical cores per physical core.
+    unsigned physical_cores{0};                      ///< Number of physical cores.
 
     typedef std::map<ProcID, Proc> ProcMap; ///< Map of processors by ID.
 

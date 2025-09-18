@@ -33,7 +33,7 @@ RUN pip3 install --upgrade 'pip>=22,<23' && \
     pip3 install --upgrade 'setuptools>=62,<63' 'setuptools_rust>=1.3,<1.4' && \
     pip3 install 'cffi>=1.16,<1.17' github3.py 'numpy>=1.22,<1.23' 'cryptography>=37,<38' 'pandas>=1.4,<1.5' 'h5py>=3.10,<3.11' 'notebook>=6.4,<6.5' 'mypy>=1.7,<1.8' joblib daff tabulate
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.84.0 -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.85.1 -y
 
 RUN wget https://github.com/Kitware/CMake/releases/download/v3.22.6/cmake-3.22.6-linux-x86_64.tar.gz && \
     echo "09e1b34026c406c5bf4d1b053eadb3a8519cb360e37547ebf4b70ab766d94fbc  cmake-3.22.6-linux-x86_64.tar.gz" | shasum --check && \

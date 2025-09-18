@@ -23,6 +23,7 @@ namespace Realm {
                                              const std::vector<size_t> &field_sizes)
   {
     InstanceLayout<N, T> *inst_layout = new InstanceLayout<N, T>();
+    assert(field_ids.size() == field_sizes.size() && "Given field ids and sizes must match");
 
     inst_layout->piece_lists.resize(field_ids.size());
 

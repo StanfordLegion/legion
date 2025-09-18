@@ -672,8 +672,7 @@ namespace Legion {
       FutureMapImpl(TaskContext *ctx, Operation *op, uint64_t blocking_index,
                     GenerationID gen, int depth, UniqueID uid,
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    Provenance *provenance, 
-                    const std::optional<uint64_t> &index);
+                    Provenance *provenance); 
       FutureMapImpl(const FutureMapImpl &rhs) = delete;
       virtual ~FutureMapImpl(void);
     public:
@@ -684,6 +683,7 @@ namespace Legion {
       virtual void notify_local(void);
     public:
       Domain get_domain(void) const;
+      std::optional<uint64_t> get_context_index(void) const;
       virtual Future get_future(const DomainPoint &point, 
                                 bool internal_only,
                                 RtEvent *wait_on = NULL); 
@@ -728,7 +728,11 @@ namespace Legion {
       const uint64_t blocking_index;
       Provenance *const provenance;
       IndexSpaceNode *const future_map_domain;
-      const std::optional<uint64_t> context_index;
+    private:
+      // This field is only set on remote nodes that are not the owner
+      // of the future map, invoke get_context_index to get the 
+      // right context index for the operation that produced this
+      const std::optional<uint64_t> remote_context_index;
     protected:
       mutable LocalLock future_map_lock;
       std::map<DomainPoint,FutureImpl*> futures;
@@ -1167,6 +1171,7 @@ namespace Legion {
       PhaseBarrier get_legion_wait_phase_barrier(void);
       PhaseBarrier get_legion_arrive_phase_barrier(void);
       void advance_legion_handshake(void);
+      void record_external_handshake(Provenance *provenance);
     private:
       const bool init_in_ext;
     private:
@@ -1178,6 +1183,13 @@ namespace Legion {
       ApBarrier legion_wait_barrier;
       ApBarrier legion_next_barrier; // one gen ahead of wait
       ApBarrier legion_arrive_barrier;
+    private:
+      // For profiling
+      std::optional<long long> previous_external_time;
+      static std::atomic<Provenance*> external_wait;
+      static std::atomic<Provenance*> external_handoff;
+      static constexpr std::string_view EXTERNAL_WAIT = "External Legion Handshake Wait on Legion";
+      static constexpr std::string_view EXTERNAL_HANDOFF = "External Legion Handshake Handoff to Legion";
     };
 
     class MPIRankTable {
@@ -1485,7 +1497,7 @@ namespace Legion {
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID creator) = 0;
       virtual void free_instance(PhysicalInstance instance,
-                                 RtEvent precondition) = 0;
+          RtEvent precondition, LgEvent unique_event) = 0;
       virtual bool is_released(void) const = 0;
       virtual void release_pool(UniqueID creator) = 0;
       virtual void finalize_pool(RtEvent done) = 0;
@@ -1517,7 +1529,7 @@ namespace Legion {
       };
     public:
       ConcretePool(PhysicalInstance instance, size_t size, size_t alignment, 
-          RtEvent use_event, MemoryManager *manager);
+          RtEvent use_event, LgEvent unique, MemoryManager *manager);
       virtual ~ConcretePool(void) override;
       virtual ApEvent get_ready_event(void) const override;
       virtual size_t query_memory_limit(void) override;
@@ -1534,7 +1546,7 @@ namespace Legion {
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance,
-                                 RtEvent precondition) override;
+          RtEvent precondition, LgEvent unique_event) override;
       virtual bool is_released(void) const override;
       virtual void release_pool(UniqueID creator) override;
       virtual void finalize_pool(RtEvent done) override;
@@ -1562,7 +1574,7 @@ namespace Legion {
       // Each external instance has a range that it corresponds to
       std::map<PhysicalInstance,unsigned> allocated;
       // Vector of backing instances with their ready events
-      std::map<PhysicalInstance,RtEvent> backing_instances;
+      std::map<PhysicalInstance,std::pair<RtEvent,LgEvent> > backing_instances;
       // Instances that are freed with event preconditions
       std::map<unsigned,RtEvent> pending_frees;
       // Free lists associated with a specific sizes by powers of 2
@@ -1608,17 +1620,22 @@ namespace Legion {
           LgEvent *unique_events,
           const Realm::InstanceLayoutGeneric **layouts, UniqueID uid) override;
       virtual void free_instance(PhysicalInstance instance,
-                                 RtEvent precondition) override;
+          RtEvent precondition, LgEvent unique_event) override;
       virtual bool is_released(void) const override;
       virtual void release_pool(UniqueID creator) override;
       virtual void finalize_pool(RtEvent done) override;
       virtual void serialize(Serializer &rez) override;
     private:
-      PhysicalInstance find_local_freed_hole(size_t size, size_t &prev_size);
+      PhysicalInstance find_local_freed_hole(size_t size,
+          size_t &prev_size, RtEvent &previous_done, LgEvent &prev_unique);
     private:
       TaskTreeCoordinates coordinates;
-      std::map<size_t,
-        std::list<std::pair<PhysicalInstance,RtEvent> > > freed_instances;
+      struct FreedInstance {
+        PhysicalInstance instance;
+        RtEvent precondition;
+        LgEvent unique_event;
+      };
+      std::map<size_t,std::list<FreedInstance> > freed_instances;
       MemoryManager *const manager;
       const size_t max_freed_bytes;
       size_t freed_bytes;
@@ -1682,11 +1699,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_MALLOC_INSTANCE_TASK_ID;
       public:
-        MallocInstanceArgs(MemoryManager *m, Realm::InstanceLayoutGeneric *l, 
+        MallocInstanceArgs(MemoryManager *m,
+                     const Realm::InstanceLayoutGeneric *l, 
                      const Realm::ProfilingRequestSet *r, PhysicalInstance *i,
                      LgEvent u)
           : LgTaskArgs<MallocInstanceArgs>(implicit_provenance), manager(m),
-            layout(l), requests(r), instance(i), unique_event(u) { }
+            layout(l->clone()), requests(r), instance(i), unique_event(u) { }
       public:
         MemoryManager *const manager;
         Realm::InstanceLayoutGeneric *const layout;
@@ -1904,7 +1922,8 @@ namespace Legion {
       void free_external_allocation(uintptr_t ptr, size_t size);
 #ifdef LEGION_MALLOC_INSTANCES
     public:
-      RtEvent allocate_legion_instance(Realm::InstanceLayoutGeneric *layout,
+      RtEvent allocate_legion_instance(
+                                     const Realm::InstanceLayoutGeneric *layout,
                                      const Realm::ProfilingRequestSet &requests,
                                      PhysicalInstance &inst,
                                      LgEvent unique_event,
@@ -2002,7 +2021,8 @@ namespace Legion {
       public:
         GarbageCollector& operator=(const GarbageCollector &rhs) = delete;
       public:
-        RtEvent perform_collection(PhysicalInstance &hole_instance);
+        RtEvent perform_collection(PhysicalInstance &hole_instance,
+                                   LgEvent &hole_unique);
         inline bool collection_complete(void) const 
           { return (current_priority == LEGION_GC_NEVER_PRIORITY); }
       protected:
@@ -2101,15 +2121,16 @@ namespace Legion {
       RtEvent last_message_event;
       MessageHeader header;
       unsigned packaged_messages;
+    public:
       // For unordered channels so we can group partial
       // messages from remote nodes
       unsigned partial_message_id;
       bool partial;
-    private:
       const bool ordered_channel;
       const bool profile_outgoing_messages;
       const LgPriority request_priority;
       const LgPriority response_priority;
+    private:
       static const unsigned MAX_UNORDERED_EVENTS = 32;
       std::set<RtEvent> unordered_events;
     private:
@@ -3032,7 +3053,7 @@ namespace Legion {
           size_t size, bool withargs, bool global, bool preregistered,
           bool deduplicate, size_t dedup_tag);
       void broadcast_startup_barrier(RtBarrier startup_barrier);
-      void finalize_runtime(std::vector<RtEvent> &shutdown_events);
+      void finalize_runtime(std::vector<Realm::Event> &shutdown_events);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, TaskID tid,
                                  const UntypedBuffer &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 

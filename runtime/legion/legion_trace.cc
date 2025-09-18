@@ -9732,7 +9732,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != collective_barriers.end());
 #endif
-          finder->second->set_managed_barrier(it->second);
+          finder->second->set_collective_barrier(it->second);
         }
         pending_collectives.clear();
       }

@@ -617,6 +617,12 @@ namespace Realm {
       alloc_chain_head = ptr[0];
       free(ptr);
     }
+
+    // reset the static variables
+    max_node_id = -1;
+    bitset_elements = 0;
+    bitsets_per_chunk = 0;
+    bitset_twolevel = 0;
     alloc_chain_head = 0;
     free_list_head = 0;
   }

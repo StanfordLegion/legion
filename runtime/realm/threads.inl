@@ -82,7 +82,7 @@ namespace Realm {
   // use compiler-provided TLS for quickly finding our thread - stick this in another
   //  namespace to make it obvious
   namespace ThreadLocal {
-    extern REALM_THREAD_LOCAL Thread *current_thread;
+    extern thread_local Thread *current_thread;
   };
   
   inline /*static*/ Thread *Thread::self(void)

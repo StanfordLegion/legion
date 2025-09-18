@@ -524,6 +524,7 @@ namespace Realm {
     // first convert the type name into a hash
     TypeHash h = 0;
     const char *name = typeid(T).name();
+
     while(*name)
       h = h * 73 + *name++;
 
@@ -540,6 +541,7 @@ namespace Realm {
       else
 	return mid;
     }
+
     assert(0);
     return 0;
   }
@@ -549,6 +551,14 @@ namespace Realm {
   //
   // class ActiveMessageHandlerReg<T, T2>
   //
+
+  template <typename, typename = void>
+  struct has_frag_info : std::false_type {};
+  template <typename T>
+  struct has_frag_info<T, std::void_t<decltype(std::declval<T>().frag_info)>>
+    : std::true_type {};
+  template <typename T>
+  constexpr inline bool has_frag_info_v = has_frag_info<T>::value;
 
   template <typename T, typename T2>
   ActiveMessageHandlerReg<T, T2>::ActiveMessageHandlerReg(void)
@@ -577,6 +587,12 @@ namespace Realm {
       must_free = false;
     }
 
+    if constexpr(has_frag_info_v<T>) {
+      extract_frag_info = [](const void *hdr) -> const FragmentInfo& {
+        return static_cast<const T *>(hdr)->frag_info;
+      };
+    }
+
     ActiveMessageHandlerTable::append_handler_reg(this);
   }
 
@@ -586,6 +602,80 @@ namespace Realm {
     if(must_free)
       free(const_cast<char *>(name));
   }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ActiveMessageAuto<UserHdr, Builder>
+  //
+
+  template <typename UserHdr, template <typename> class Builder>
+  ActiveMessageAuto<UserHdr, Builder>::ActiveMessageAuto(NodeID target,
+                                                         size_t max_payload_size)
+    : target_(target)
+    , max_payload_size_(max_payload_size)
+  {
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  UserHdr *ActiveMessageAuto<UserHdr, Builder>::operator->()
+  {
+    return &user_header_;
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  UserHdr &ActiveMessageAuto<UserHdr, Builder>::operator*()
+  {
+    return user_header_;
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  void ActiveMessageAuto<UserHdr, Builder>::add_payload(const void *data, size_t size)
+  {
+    payload_.insert(payload_.end(), static_cast<const char *>(data),
+                    static_cast<const char *>(data) + size);
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  void ActiveMessageAuto<UserHdr, Builder>::commit()
+  {
+    if(payload_.empty()) {
+      abort();
+    }
+
+    auto send_single = [&](uint32_t chunk_id, uint32_t total_chunks, uint64_t msg_id,
+                           const void *data, size_t size) {
+      Builder<UserHdr> msg(target_, size);
+      msg->frag_info = {chunk_id, total_chunks, msg_id};
+      msg->user = user_header_;
+      msg.add_payload(data, size);
+      msg.commit();
+    };
+
+    if(payload_.size() <= max_payload_size_) {
+      uint64_t msg_id = next_message_id(target_);
+      send_single(0, 1, msg_id, payload_.data(), payload_.size());
+      return;
+    }
+
+    uint64_t msg_id = next_message_id(target_);
+    size_t total_chunks = (payload_.size() + max_payload_size_ - 1) / max_payload_size_;
+    size_t offset = 0;
+    for(uint32_t chunk_id = 0; chunk_id < total_chunks; ++chunk_id) {
+      size_t chunk_size = std::min(max_payload_size_, payload_.size() - offset);
+      send_single(chunk_id, static_cast<uint32_t>(total_chunks), msg_id,
+                  payload_.data() + offset, chunk_size);
+      offset += chunk_size;
+    }
+  }
+
+  template <typename UserHdr, template <typename> class Builder>
+  uint64_t ActiveMessageAuto<UserHdr, Builder>::next_message_id(NodeID node_id)
+  {
+    static std::atomic<uint64_t> counter{0};
+    uint64_t local = counter.fetch_add(1, std::memory_order_relaxed);
+    return (static_cast<uint64_t>(node_id) << 48) | (local & ((1ULL << 48) - 1));
+  }
+
 
   namespace HandlerWrappers {
     // this type only exists if you can supply a value of the right type
@@ -615,6 +705,35 @@ namespace Realm {
     {
       return (*HANDLER)(sender, *reinterpret_cast<const T *>(header),
 			payload, payload_size, work_until);
+    }
+
+    template <typename UserHdr,
+              void (*HANDLER)(NodeID, const UserHdr&, const void *, size_t, TimeLimit)>
+    static void wrap_handler_unwrap(NodeID sender, const void *header,
+                                    const void *payload, size_t payload_size,
+                                    TimeLimit work_until)
+    {
+      const auto &inner = reinterpret_cast<const WrappedWithFragInfo<UserHdr> *>(header)->user;
+      (*HANDLER)(sender, inner, payload, payload_size, work_until);
+    }
+
+    template <typename UserHdr,
+              void (*HANDLER)(NodeID, const UserHdr&, const void *, size_t)>
+    static void wrap_handler_unwrap_notimeout(NodeID sender, const void *header,
+                                              const void *payload, size_t payload_size)
+    {
+      const auto &inner = reinterpret_cast<const WrappedWithFragInfo<UserHdr> *>(header)->user;
+      (*HANDLER)(sender, inner, payload, payload_size);
+    }
+
+    template <typename UserHdr,
+              bool (*HANDLER)(NodeID, const UserHdr&, const void *, size_t, TimeLimit)>
+    static bool wrap_handler_unwrap_inline(NodeID sender, const void *header,
+                                           const void *payload, size_t payload_size,
+                                           TimeLimit work_until)
+    {
+      const auto &inner = reinterpret_cast<const WrappedWithFragInfo<UserHdr> *>(header)->user;
+      return (*HANDLER)(sender, inner, payload, payload_size, work_until);
     }
 
     // thsee overloads only exist if we have a handle_message method and it
@@ -650,6 +769,33 @@ namespace Realm {
     ActiveMessageHandlerTable::MessageHandlerInline get_handler_inline(...)
     {
       return 0;
+    }
+
+    template <typename T, typename T2,
+              typename std::enable_if<std::is_same<T, WrappedWithFragInfo<T2>>::value>::type * = nullptr>
+    ActiveMessageHandlerTable::MessageHandler get_handler(
+        HasRightType<void (*)(NodeID, const T2&, const void *, size_t, TimeLimit),
+                     &T2::handle_message> *)
+    {
+      return &wrap_handler_unwrap<T2, &T2::handle_message>;
+    }
+
+    template <typename T, typename T2,
+              typename std::enable_if<std::is_same<T, WrappedWithFragInfo<T2>>::value>::type * = nullptr>
+    ActiveMessageHandlerTable::MessageHandlerNoTimeout get_handler_notimeout(
+        HasRightType<void (*)(NodeID, const T2&, const void *, size_t),
+                     &T2::handle_message> *)
+    {
+      return &wrap_handler_unwrap_notimeout<T2, &T2::handle_message>;
+    }
+
+    template <typename T, typename T2,
+              typename std::enable_if<std::is_same<T, WrappedWithFragInfo<T2>>::value>::type * = nullptr>
+    ActiveMessageHandlerTable::MessageHandlerInline get_handler_inline(
+        HasRightType<bool (*)(NodeID, const T2&, const void *, size_t, TimeLimit),
+                     &T2::handle_inline> *)
+    {
+      return &wrap_handler_unwrap_inline<T2, &T2::handle_inline>;
     }
 
   };

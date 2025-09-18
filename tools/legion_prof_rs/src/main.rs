@@ -1,21 +1,27 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io;
+#[cfg(feature = "client")]
+use std::path::Path;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
 use rayon::prelude::*;
 
+#[cfg(feature = "client")]
 use url::Url;
 
 #[cfg(feature = "client")]
 use legion_prof_viewer::{
-    app, deferred_data::DeferredDataSource, http::client::HTTPClientDataSource,
+    app, deferred_data::DeferredDataSource, file_data::FileDataSource,
+    http::client::HTTPClientDataSource, parallel_data::ParallelDeferredDataSource,
 };
 
 #[cfg(feature = "archiver")]
 use legion_prof::backend::archiver;
+#[cfg(feature = "duckdb")]
+use legion_prof::backend::duckdb;
 #[cfg(feature = "nvtxw")]
 use legion_prof::backend::nvtxw;
 #[cfg(feature = "server")]
@@ -88,7 +94,7 @@ struct OutputArgs {
 
 #[derive(Debug, Clone, Subcommand)]
 enum Commands {
-    #[command(about = "dump an archive of the profile for sharing")]
+    #[command(about = "save an archive of the profile for sharing")]
     Archive {
         #[command(flatten)]
         args: ParserArgs,
@@ -109,10 +115,18 @@ enum Commands {
         )]
         zstd_compression: i32,
     },
-    #[command(about = "connect viewer to the specified HTTP profile server")]
+    #[command(about = "connect viewer to an HTTP server or (local/remote) archive")]
     Attach {
-        #[arg(required = true, help = "URL(s) to attach to")]
-        urls: Vec<Url>,
+        #[arg(required = true, help = "URL(s) or path(s) to attach to")]
+        args: Vec<OsString>,
+    },
+    #[command(name = "duckdb", about = "save profile to DuckDB database")]
+    DuckDB {
+        #[command(flatten)]
+        args: ParserArgs,
+
+        #[command(flatten)]
+        out: OutputArgs,
     },
     #[command(about = "dump parsed log files in a JSON format")]
     Dump {
@@ -187,7 +201,8 @@ struct Cli {
 }
 
 fn main() -> io::Result<()> {
-    env_logger::init();
+    let env = env_logger::Env::default().filter_or("RUST_LOG", "info");
+    env_logger::init_from_env(env);
 
     let cli = Cli::parse();
 
@@ -204,6 +219,13 @@ fn main() -> io::Result<()> {
             panic!(
                 "Legion Prof was not built with the \"client\" feature. \
                  Rebuild with --features=client to enable."
+            );
+        }
+        Commands::DuckDB { .. } => {
+            #[cfg(not(feature = "duckdb"))]
+            panic!(
+                "Legion Prof was not built with the \"duckdb\" feature. \
+                 Rebuild with --features=duckdb to enable."
             );
         }
         Commands::NVTXW { .. } => {
@@ -231,15 +253,26 @@ fn main() -> io::Result<()> {
     }
 
     match cli.command {
-        Commands::Attach { urls } => {
+        Commands::Attach { args } => {
             #[cfg(feature = "client")]
             {
-                let data_sources: Vec<_> = urls
+                fn http_ds(url: Url) -> Box<dyn DeferredDataSource> {
+                    Box::new(HTTPClientDataSource::new(url))
+                }
+
+                fn file_ds(path: impl AsRef<Path>) -> Box<dyn DeferredDataSource> {
+                    Box::new(ParallelDeferredDataSource::new(FileDataSource::new(path)))
+                }
+
+                let data_sources: Vec<_> = args
                     .into_iter()
-                    .map(|url| {
-                        let data_source: Box<dyn DeferredDataSource> =
-                            Box::new(HTTPClientDataSource::new(url));
-                        data_source
+                    .map(|arg| {
+                        arg.into_string()
+                            .map(|s| Url::parse(&s).map(http_ds).unwrap_or_else(|_| {
+                                println!("The argument '{}' does not appear to be a valid URL. Attempting to open it as a local file...", &s);
+                                file_ds(&s)
+                            }))
+                            .unwrap_or_else(file_ds)
                     })
                     .collect();
                 app::start(data_sources);
@@ -253,6 +286,7 @@ fn main() -> io::Result<()> {
         Commands::Archive { ref args, .. }
         | Commands::Dump { ref args, .. }
         | Commands::Legacy { ref args, .. }
+        | Commands::DuckDB { ref args, .. }
         | Commands::NVTXW { ref args, .. }
         | Commands::View { ref args, .. }
         | Commands::Serve { ref args, .. }
@@ -335,13 +369,21 @@ fn main() -> io::Result<()> {
     // if number of files
     let num_nodes: usize = state.num_nodes.try_into().unwrap();
     if num_nodes > args.filenames.len() {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", num_nodes, args.filenames.len());
+        println!(
+            "Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.",
+            num_nodes,
+            args.filenames.len()
+        );
         have_alllogs = false;
     }
 
     // check if subnodes is enabled and filter input is true
     if state.visible_nodes.len() < num_nodes && filter_input {
-        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", num_nodes, state.visible_nodes.len());
+        println!(
+            "Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.",
+            num_nodes,
+            state.visible_nodes.len()
+        );
         have_alllogs = false;
     }
 
@@ -375,6 +417,14 @@ fn main() -> io::Result<()> {
                     out.force,
                     zstd_compression,
                 )?;
+            }
+        }
+        Commands::DuckDB { out, .. } => {
+            #[cfg(feature = "duckdb")]
+            {
+                state.stack_time_points();
+                state.assign_colors();
+                duckdb::write(state, out.output, out.force)?;
             }
         }
         Commands::Legacy { out, .. } => {

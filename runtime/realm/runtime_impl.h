@@ -106,36 +106,39 @@ namespace Realm {
     std::vector<atomic<DynamicTable<ProcessorGroupTableAllocator> *>> proc_groups;
   };
 
-    // the "core" module provides the basic memories and processors used by Realm
-    class CoreModuleConfig : public ModuleConfig {
-      friend class CoreModule;
-      friend class RuntimeImpl;
-    protected:
-      CoreModuleConfig(const HardwareTopology *topo);
+  std::ostream &operator<<(std::ostream &os, const Node &node);
 
-      bool discover_resource(void);
+  // the "core" module provides the basic memories and processors used by Realm
+  class CoreModuleConfig : public ModuleConfig {
+    friend class CoreModule;
+    friend class RuntimeImpl;
 
-    public:
-      virtual void configure_from_cmdline(std::vector<std::string>& cmdline);
+  protected:
+    CoreModuleConfig(const HardwareTopology *topo);
 
-    protected:
-      // configurations
-      // CoreModule
-      int num_cpu_procs = 1, num_util_procs = 1, num_io_procs = 0;
-      int concurrent_io_threads = 1; // Legion does not support values > 1 right now
-      size_t sysmem_size = 512 << 20;
-      size_t sysmem_ipc_limit = 0; // make the sysmem as shared only if share_sysmem_limit
-                                   // == 0 or sysmem_size <= share_sysmem_limit
-      size_t stack_size = 2 << 20;
-      bool pin_util_procs = false;
-      long long cpu_bgwork_timeslice = 0, util_bgwork_timeslice = 0;
-      bool use_ext_sysmem = true;
+    bool discover_resource(void);
 
-      // RuntimeImpl
-      size_t reg_ib_mem_size = 0;
-      size_t reg_mem_size = 0;
-      size_t disk_mem_size = 0;
-      unsigned dma_worker_threads = 0;  // unused - warning on application use
+  public:
+    virtual void configure_from_cmdline(std::vector<std::string> &cmdline);
+
+  protected:
+    // configurations
+    // CoreModule
+    int num_cpu_procs = 1, num_util_procs = 1, num_io_procs = 0;
+    int concurrent_io_threads = 1; // Legion does not support values > 1 right now
+    size_t sysmem_size = 512 << 20;
+    size_t sysmem_ipc_limit = 0; // make the sysmem as shared only if share_sysmem_limit
+                                 // == 0 or sysmem_size <= share_sysmem_limit
+    size_t stack_size = 2 << 20;
+    bool pin_util_procs = false;
+    long long cpu_bgwork_timeslice = 0, util_bgwork_timeslice = 0;
+    bool use_ext_sysmem = true;
+
+    // RuntimeImpl
+    size_t reg_ib_mem_size = 0;
+    size_t reg_mem_size = 0;
+    size_t disk_mem_size = 0;
+    unsigned dma_worker_threads = 0; // unused - warning on application use
 #ifdef EVENT_TRACING
       size_t event_trace_block_size = 1 << 20;
       double event_trace_exp_arrv_rate = 1e3;
@@ -176,7 +179,7 @@ namespace Realm {
 
       // topology of the host
       const HardwareTopology *host_topology = nullptr;
-    };
+  };
 
     class CoreModule : public Module {
     public:
@@ -291,13 +294,16 @@ namespace Realm {
       // indicates shutdown has been initiated, wakes up a waiter if already present
       void initiate_shutdown(void);
 
+      // shutdown the runtime
+      void shutdown(Event wait_on = Event::NO_EVENT, int result_code = 0);
+
       // returns value of result_code passed to shutdown()
       int wait_for_shutdown(void);
 
       bool create_configs(int argc, char **argv);
 
       // return the configuration of a specific module
-      ModuleConfig* get_module_config(const std::string name);
+      ModuleConfig *get_module_config(const std::string &name) const;
 
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things
@@ -307,9 +313,9 @@ namespace Realm {
       BarrierImpl *get_barrier_impl(Event e);
 
       ReservationImpl *get_lock_impl(ID id);
-      MemoryImpl *get_memory_impl(ID id);
-      IBMemory *get_ib_memory_impl(ID id);
-      ProcessorImpl *get_processor_impl(ID id);
+      MemoryImpl *get_memory_impl(ID id) const;
+      IBMemory *get_ib_memory_impl(ID id) const;
+      ProcessorImpl *get_processor_impl(ID id); // TODO: refactor it to const version
       ProcessorGroupImpl *get_procgroup_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
@@ -330,7 +336,8 @@ namespace Realm {
       LockedMap<CustomSerdezID, CustomSerdezUntyped *> custom_serdez_table;
 
       atomic<size_t> num_untriggered_events;
-      Node *nodes;
+      Node *nodes; // TODO: replace with std::vector<Node>
+      size_t num_nodes;
       DynamicTable<LocalEventTableAllocator> local_events;
       LocalEventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;

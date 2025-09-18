@@ -35,9 +35,9 @@ namespace Realm {
       CUstream stream;
     };
     namespace ThreadLocal {
-      extern REALM_THREAD_LOCAL GPUStream *current_gpu_stream;
-      extern REALM_THREAD_LOCAL bool block_on_synchronize;
-      extern REALM_THREAD_LOCAL std::set<GPUStream *> *created_gpu_streams;
+      extern thread_local GPUStream *current_gpu_stream;
+      extern thread_local bool block_on_synchronize;
+      extern thread_local std::set<GPUStream *> *created_gpu_streams;
       static thread_local std::vector<CallConfig> call_config_stack;
     } // namespace ThreadLocal
 

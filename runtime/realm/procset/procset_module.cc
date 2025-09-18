@@ -32,19 +32,17 @@ namespace Realm {
    //
    class LocalProcessorSet : public LocalTaskProcessor {
    public:
-     LocalProcessorSet(Processor _me, CoreReservationSet& crs,
-		       size_t _stack_size, int _num_cores,
-		       bool _force_kthreads);
+     LocalProcessorSet(RuntimeImpl *runtime_impl, Processor _me, CoreReservationSet &crs,
+                       size_t _stack_size, int _num_cores, bool _force_kthreads);
      virtual ~LocalProcessorSet(void);
    protected:
      CoreReservation *core_rsrv;
    };
 
-
-   LocalProcessorSet::LocalProcessorSet(Processor _me, CoreReservationSet& crs,
-					size_t _stack_size, int _num_cores,
-					bool _force_kthreads)
-     : LocalTaskProcessor(_me, Processor::PROC_SET, _num_cores)
+   LocalProcessorSet::LocalProcessorSet(RuntimeImpl *runtime_impl, Processor _me,
+                                        CoreReservationSet &crs, size_t _stack_size,
+                                        int _num_cores, bool _force_kthreads)
+     : LocalTaskProcessor(runtime_impl, _me, Processor::PROC_SET, _num_cores)
 
    {
      CoreReservationParameters params;
@@ -172,18 +170,18 @@ namespace Realm {
         // if num_mp_procs is not set then assume one procset on every node
         if (config->cfg_num_mp_procs == 0 || Network::my_node_id < config->cfg_num_mp_procs) { 
           Processor p = runtime->next_local_processor_id();
-          ProcessorImpl *pi = new LocalProcessorSet(p, runtime->core_reservation_set(),
-						    config->cfg_stack_size, config->cfg_num_mp_threads,
-						    Config::force_kernel_threads);
+          ProcessorImpl *pi = new LocalProcessorSet(
+              runtime, p, runtime->core_reservation_set(), config->cfg_stack_size,
+              config->cfg_num_mp_threads, Config::force_kernel_threads);
           runtime->add_processor(pi);
         // if there are not procSets on all nodes and cfg_num_mp_cpus is set
         // then add additional LocalCPUProcessors on these nodes
         } else if (config->cfg_num_mp_cpus) {
           for (int i = 0; i < config->cfg_num_mp_cpus; i++) {
             Processor p = runtime->next_local_processor_id();
-            ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						      config->cfg_stack_size,
-						      Config::force_kernel_threads, 0, 0);
+            ProcessorImpl *pi = new LocalCPUProcessor(
+                runtime, p, runtime->core_reservation_set(), config->cfg_stack_size,
+                Config::force_kernel_threads, 0, 0);
             runtime->add_processor(pi);
           }
         }      

@@ -121,7 +121,8 @@ namespace Realm {
   ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
   {}
 
-  ActiveMessageHandlerTable::HandlerEntry *ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
+  ActiveMessageHandlerTable::HandlerEntry *
+  ActiveMessageHandlerTable::lookup_message_handler(MessageID id)
   {
     assert(id < handlers.size());
     return &handlers[id];
@@ -187,6 +188,7 @@ namespace Realm {
       e.hash = nextreg->hash;
       e.name = nextreg->name;
       e.handler = nextreg->get_handler();
+      e.extract_frag_info = nextreg->extract_frag_info;
       e.handler_notimeout = nextreg->get_handler_notimeout();
       // at least one of the two above must be non-null
       assert((e.handler != 0) || (e.handler_notimeout != 0));
@@ -331,7 +333,7 @@ namespace Realm {
 
   namespace ThreadLocal {
     // this flag will be true when we are running a message handler
-    REALM_THREAD_LOCAL bool in_message_handler = false;
+    thread_local bool in_message_handler = false;
   };
 
   IncomingMessageManager::IncomingMessageManager(int _nodes,
@@ -403,6 +405,44 @@ namespace Realm {
 
     // look up which message this is
     ActiveMessageHandlerTable::HandlerEntry *handler = activemsg_handler_table.lookup_message_handler(msgid);
+
+    std::vector<char> message;
+
+    if(handler && handler->extract_frag_info.has_value()) {
+      AutoLock<> al(mutex);
+
+      const FragmentInfo &frag_info = handler->extract_frag_info.value()(hdr);
+
+      if(frag_info.total_chunks > 1) {
+        auto key = std::make_pair(sender, frag_info.msg_id);
+        auto it = frag_message.find(key);
+
+        if(it == frag_message.end()) {
+          it = frag_message
+                   .emplace(key,
+                            std::make_unique<FragmentedMessage>(frag_info.total_chunks))
+                   .first;
+        }
+
+        bool ok = it->second->add_chunk(frag_info.chunk_id, payload, payload_size);
+        assert(ok);
+
+        if(!it->second->is_complete()) {
+          total_messages_handled += 1;
+          return false;
+        }
+
+        message = it->second->reassemble();
+
+        frag_message.erase(it);
+      }
+    }
+
+    if(!message.empty()) {
+      payload = message.data();
+      payload_size = message.size();
+      payload_mode = PAYLOAD_COPY;
+    }
 
     // if we have an inline handler and enough time to run it, give it
     //  a go

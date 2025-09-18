@@ -17,7 +17,6 @@
 #endif
 #ifdef REALM_USE_HIP
 #include "hip_cuda_compat/hip_cuda.h"
-#include "realm/hip/hiphijack_api.h"
 #include "realm/hip/hip_module.h"
 #endif
 
@@ -348,8 +347,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_
     {
       InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
           src_is, ilc, perms[i].dim_order);
-      wait_for = RegionInstance::create_instance(src_inst, src_mem, ilg,
+      wait_for = RegionInstance::create_instance(src_inst, src_mem, *ilg,
                                                  ProfilingRequestSet(), wait_for);
+      delete ilg;
 
       int index = 0;
       auto src_lambda = [&](Point<N, T> p) -> FT {
@@ -367,8 +367,9 @@ void do_single_dim(Memory src_mem, Memory dst_mem, int log2_size, size_t narrow_
       {
         InstanceLayoutGeneric *ilg = InstanceLayoutGeneric::choose_instance_layout<N, T>(
             dst_is, dst_bounds, ilc, perms[j].dim_order);
-        wait_for = RegionInstance::create_instance(dst_inst, dst_mem, ilg,
+        wait_for = RegionInstance::create_instance(dst_inst, dst_mem, *ilg,
                                                    ProfilingRequestSet(), wait_for);
+        delete ilg;
       }
 
       wait_for.wait();

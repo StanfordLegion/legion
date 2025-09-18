@@ -159,8 +159,9 @@ namespace Realm {
 	log_kokkos.info() << "doing cuda init on proc " << p;
 
 	ProcessorImpl *impl = get_runtime()->get_processor_impl(p);
-	assert(impl->kind == Processor::TOC_PROC);
-	Cuda::GPUProcessor *gpu = checked_cast<Cuda::GPUProcessor *>(impl);
+        assert(impl != nullptr && "invalid processor handle");
+        assert(impl->kind == Processor::TOC_PROC);
+        Cuda::GPUProcessor *gpu = checked_cast<Cuda::GPUProcessor *>(impl);
 
 #ifdef REALM_USE_KOKKOS_INITIALIZATION_SETTINGS
         Kokkos::InitializationSettings init_settings;
@@ -214,8 +215,9 @@ namespace Realm {
 	log_kokkos.info() << "doing hip init on proc " << p;
 
 	ProcessorImpl *impl = get_runtime()->get_processor_impl(p);
-	assert(impl->kind == Processor::TOC_PROC);
-	Hip::GPUProcessor *gpu = checked_cast<Hip::GPUProcessor *>(impl);
+        assert(impl != nullptr && "invalid processor handle");
+        assert(impl->kind == Processor::TOC_PROC);
+        Hip::GPUProcessor *gpu = checked_cast<Hip::GPUProcessor *>(impl);
 
 #ifdef REALM_USE_KOKKOS_INITIALIZATION_SETTINGS
         Kokkos::InitializationSettings init_settings;
@@ -446,6 +448,7 @@ namespace Realm {
   {
 #ifdef REALM_USE_CUDA
     ProcessorImpl *impl = get_runtime()->get_processor_impl(p);
+    assert(impl != nullptr && "invalid processor handle");
     assert(impl->kind == Processor::TOC_PROC);
     Cuda::GPUProcessor *gpu = checked_cast<Cuda::GPUProcessor *>(impl);
     cudaStream_t stream = gpu->gpu->get_null_task_stream()->get_stream();
@@ -480,6 +483,7 @@ namespace Realm {
   {
 #ifdef REALM_USE_HIP
     ProcessorImpl *impl = get_runtime()->get_processor_impl(p);
+    assert(impl != nullptr && "invalid processor handle");
     assert(impl->kind == Processor::TOC_PROC);
     Hip::GPUProcessor *gpu = checked_cast<Hip::GPUProcessor *>(impl);
     hipStream_t stream = gpu->gpu->get_null_task_stream()->get_stream();

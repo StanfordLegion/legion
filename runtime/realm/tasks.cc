@@ -306,29 +306,32 @@ namespace Realm {
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  thread->start_perf_counters();
-	  get_runtime()->get_processor_impl(p)->execute_task(func_id,
-							     ByteArrayRef(argdata, arglen));
-	  thread->stop_perf_counters();
-	  thread->stop_operation(this);
-	  thread->record_perf_counters(measurements);
-	  mark_finished(true /*successful*/);
-	}
-	catch (const ExecutionException& e) {
-	  e.populate_profiling_measurements(measurements);
-	  thread->stop_operation(this);
-	  mark_terminated(e.error_code, e.details);
-	}
+          ProcessorImpl *proc_impl = get_runtime()->get_processor_impl(p);
+          assert(proc_impl != nullptr && "invalid processor handle");
+          proc_impl->execute_task(func_id, ByteArrayRef(argdata, arglen));
+          thread->stop_perf_counters();
+          thread->stop_operation(this);
+          thread->record_perf_counters(measurements);
+          mark_finished(true /*successful*/);
+        }
+        catch(const ExecutionException &e) {
+          thread->stop_perf_counters();
+          e.populate_profiling_measurements(measurements);
+          thread->stop_operation(this);
+          mark_terminated(e.error_code, e.details);
+        }
       } else
 #endif
       {
 	// just run the task - if it completes, we assume it was successful
 	thread->start_perf_counters();
-	get_runtime()->get_processor_impl(p)->execute_task(func_id,
-							   ByteArrayRef(argdata, arglen));
-	thread->stop_perf_counters();
-	thread->stop_operation(this);
-	thread->record_perf_counters(measurements);
-	mark_finished(true /*successful*/);
+        ProcessorImpl *proc_impl = get_runtime()->get_processor_impl(p);
+        assert(proc_impl != nullptr && "invalid processor handle");
+        proc_impl->execute_task(func_id, ByteArrayRef(argdata, arglen));
+        thread->stop_perf_counters();
+        thread->stop_operation(this);
+        thread->record_perf_counters(measurements);
+        mark_finished(true /*successful*/);
       }
 
       // and clear the TLS when we're done
@@ -1623,7 +1626,7 @@ namespace Realm {
   namespace ThreadLocal {
     // you can't delete a user thread until you've switched off of it, so
     //  use TLS to mark when that should happen
-    static REALM_THREAD_LOCAL Thread *terminated_user_thread = 0;
+    static thread_local Thread *terminated_user_thread = 0;
   };
 
   inline void UserThreadTaskScheduler::request_user_thread_cleanup(Thread *thread)

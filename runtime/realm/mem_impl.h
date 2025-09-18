@@ -30,6 +30,8 @@
 #include "realm/event_impl.h"
 #include "realm/rsrv_impl.h"
 
+#include <filesystem>
+
 namespace Realm {
 
   namespace Config {
@@ -127,6 +129,11 @@ namespace Realm {
 					   bool poisoned,
 					   TimeLimit work_until) = 0;
 
+    virtual AllocationResult
+    reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                            std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
+                            TimeLimit work_until);
+
     // helpers used by the above when an instance being allocated or released
     //  is using an external resource
     virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
@@ -162,6 +169,12 @@ namespace Realm {
 
     Memory::Kind get_kind(void) const;
 
+    // A helper function to get the kind of a memory when we only have the memory ID
+    static Memory::Kind get_memory_kind(const RuntimeImpl *runtime_impl, Memory memory);
+
+    // A helper function to get the size of a memory when we only have the memory ID
+    static size_t get_memory_size(const RuntimeImpl *runtime_impl, Memory memory);
+
     // TODO: lift into a helper superclass?
     template <typename T>
     T *find_module_specific();
@@ -173,7 +186,7 @@ namespace Realm {
     struct InstanceList {
       std::vector<RegionInstanceImpl *> instances;
       std::vector<size_t> free_list;
-      Mutex mutex;
+      RWLock mutex;
     };
 
   public:
@@ -262,7 +275,7 @@ namespace Realm {
     bool lookup(TT tag, RT& first, RT& size);
     size_t split_range(TT old_tag, const std::vector<TT> &new_tags,
                        const std::vector<RT> &sizes, const std::vector<RT> &alignment,
-                       std::vector<RT> &allocs_first);
+                       std::vector<RT> &allocs_first, bool missing_ok = false);
 
     // TODO(apryakhin@): consider ifdefing for debug builds only
     void dump_allocator_status();
@@ -306,6 +319,11 @@ namespace Realm {
 					     bool poisoned,
 					     TimeLimit work_until);
 
+      virtual AllocationResult
+      reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                              std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
+                              TimeLimit work_until);
+
     protected:
       // for internal use by allocation routines - must be called with
       //  allocator_mutex held!
@@ -318,6 +336,9 @@ namespace Realm {
       //  move the ready ones first - assumes 'release_allocator' has been
       //  properly maintained
       bool attempt_release_reordering(std::vector<std::pair<RegionInstanceImpl *, size_t> >& successful_allocs);
+
+      void remove_pending_release(RegionInstanceImpl *inst,
+                                  std::vector<RegionInstanceImpl *> &failed_allocs);
 
     public:
       size_t alignment;
@@ -351,6 +372,8 @@ namespace Realm {
         PendingRelease(RegionInstanceImpl *_inst, bool _ready, unsigned _seqid);
         void record_redistrict(const std::vector<RegionInstanceImpl *> &insts);
         void release(RangeAllocator &allocator, bool missing_ok = false);
+        size_t release(RangeAllocator &allocator, std::vector<size_t> &offsets,
+                       bool missing_ok = false);
       };
       std::deque<PendingAlloc> pending_allocs;
       std::deque<PendingRelease> pending_releases;
@@ -395,7 +418,7 @@ namespace Realm {
     public:
       static const size_t ALIGNMENT = 256;
 
-      DiskMemory(Memory _me, size_t _size, std::string _file);
+      DiskMemory(Memory _me, size_t _size, const std::filesystem::path &_file);
 
       virtual ~DiskMemory(void);
 
@@ -405,9 +428,17 @@ namespace Realm {
 
       virtual void *get_direct_ptr(off_t offset, size_t size);
 
+      virtual ExternalInstanceResource *
+      generate_resource_info(RegionInstanceImpl *inst, const IndexSpaceGeneric *subspace,
+                             span<const FieldID> fields, bool read_only);
+
+      virtual bool attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                      size_t &inst_offset);
+      virtual void unregister_external_resource(RegionInstanceImpl *inst);
+
     public:
       int fd; // file descriptor
-      std::string file;  // file name
+      std::filesystem::path file; // file name
     };
 
     class FileMemory : public MemoryImpl {
@@ -422,6 +453,10 @@ namespace Realm {
       virtual void put_bytes(off_t offset, const void *src, size_t size);
       void put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size);
       virtual void *get_direct_ptr(off_t offset, size_t size);
+
+      virtual ExternalInstanceResource *
+      generate_resource_info(RegionInstanceImpl *inst, const IndexSpaceGeneric *subspace,
+                             span<const FieldID> fields, bool read_only);
 
       virtual AllocationResult allocate_storage_immediate(RegionInstanceImpl *inst,
 							  bool need_alloc_result,
@@ -471,6 +506,11 @@ namespace Realm {
       virtual void release_storage_immediate(RegionInstanceImpl *inst,
 					     bool poisoned,
 					     TimeLimit work_until);
+
+      virtual AllocationResult
+      reuse_storage_immediate(RegionInstanceImpl *old_inst,
+                              std::vector<RegionInstanceImpl *> &new_insts, bool poisoned,
+                              TimeLimit work_until);
 
       // these are disallowed on a remote memory
       virtual off_t alloc_bytes_local(size_t size);

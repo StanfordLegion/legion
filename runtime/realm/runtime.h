@@ -137,7 +137,7 @@ namespace Realm {
       bool create_configs(int argc, char **argv);
 
       // return the configuration of a specific module
-      ModuleConfig* get_module_config(const std::string name);
+      ModuleConfig *get_module_config(const std::string &name) const;
       // modules in Realm may offer extra capabilities specific to certain kinds
       //  of hardware or software - to get access, you'll want to know the name
       //  of the module and it's C++ type (both should be found in the module's

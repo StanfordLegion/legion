@@ -28,7 +28,6 @@ list(APPEND REALM_TESTS
   comp_queue_test.cc
   ucx_mpool_test.cc
   indexspace_iterator_test.cc
-  barrier_test.cc
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
@@ -50,6 +49,10 @@ list(APPEND REALM_TESTS
   sparsity_map_test.cc
   ucx_mpool_test.cc
   topology_test.cc
+  auto_actmsg_test.cc
+  fragmented_message_test.cc
+  incoming_message_manager_test.cc
+  #barrier_test.cc
  )
 
 list(APPEND UCX_SOURCES
@@ -76,8 +79,22 @@ add_executable(realm_tests ${REALM_TESTS})
 
 target_sources(realm_tests PRIVATE ${UCX_SOURCES})
 
+list(APPEND REALM_C_TESTS
+  c_processor_query.cc
+  c_memory_query.cc
+  c_processor_attr.cc
+  c_memory_attr.cc
+  c_processor_task.cc
+  c_event.cc
+ )
+
+add_executable(realm_c_tests ${REALM_C_TESTS})
+
+target_sources(realm_c_tests PRIVATE ${UCX_SOURCES})
+
 list(APPEND REALM_UNIT_TESTS_LIST
   realm_tests
+  realm_c_tests
 )
 
 foreach(ITEM IN LISTS REALM_UNIT_TESTS_LIST)

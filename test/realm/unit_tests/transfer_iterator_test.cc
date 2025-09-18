@@ -121,8 +121,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*expected=*/{},
                 /*dim_order=*/{0},
                 /*field_ids=*/{0, 1},
-                /*field_offsets=*/{0},
-                /*field_sizes=*/{sizeof(int)},
+                /*field_offsets=*/{0, 0},
+                /*field_sizes=*/{sizeof(int), sizeof(int)},
             }),
 
         new WrappedTrasferItTestCaseData<1>(

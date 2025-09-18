@@ -22,5 +22,5 @@ Description: @CMAKE_PROJECT_DESCRIPTION@
 Version: @REALM_VERSION@
 URL: @CMAKE_PROJECT_HOMEPAGE_URL@
 Requires.private: @REALM_PKGCONF_REQUIRES@
-Cflags: -I${includedir} @GTEST_HAS_PTHREAD_MACRO@
+Cflags: -I${includedir} @REALM_COMPILE_DEFINITIONS@
 Libs: -L${libdir} -lrealm @CMAKE_THREAD_LIBS_INIT@

@@ -18,6 +18,7 @@
 // nop, but helps IDEs
 #include "realm/lists.h"
 
+#include <cassert>
 #include <iostream>
 
 namespace Realm {
@@ -179,6 +180,12 @@ namespace Realm {
     head.next = new_entry;
 
     lock.unlock();
+  }
+
+  template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>
+  inline T *IntrusiveList<T, LINK, LT>::front(void) const
+  {
+    return head.next;
   }
 
   template <typename T, REALM_PMTA_DECL(T,IntrusiveListLink<T>,LINK), typename LT>

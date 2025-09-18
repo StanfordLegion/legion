@@ -98,6 +98,8 @@ namespace Realm {
     ExternalCudaMemoryResource(int _cuda_device_id, const void *_base,
                                size_t _size_in_bytes);
 
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
+
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;
 
@@ -127,6 +129,8 @@ namespace Realm {
   public:
     ExternalCudaArrayResource(int _cuda_device_id, CUarray_st *_array);
     ExternalCudaArrayResource(int _cuda_device_id, cudaArray *_array);
+
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;

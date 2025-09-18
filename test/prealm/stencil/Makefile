@@ -28,11 +28,12 @@ HIP_TARGET      ?= ROCM
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
+USE_PREALM	:= 1
 
 # Put the binary file name here
 OUTFILE		?= prealm_stencil
 # List all the application source files here
-GEN_SRC		?= realm_stencil.cc cpu_kernels.cc prealm.cc # .cc files
+GEN_SRC		?= realm_stencil.cc cpu_kernels.cc # .cc files
 GEN_GPU_SRC	?= 	# .cu files
 
 

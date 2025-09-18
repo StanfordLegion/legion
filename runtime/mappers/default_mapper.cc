@@ -791,12 +791,6 @@ namespace Legion {
           // Go through the kinds in the rankings
           for (unsigned idx = 0; idx < ranking.size(); idx++)
           {
-            // See if we have any variants of this kind
-            runtime->find_valid_variants(ctx, task.task_id,
-                                          variants, ranking[idx]);
-	    if (variants.empty())
-	      continue;
-
             // Next see if we have any local processor of this kind
             switch (ranking[idx])
             {
@@ -845,6 +839,13 @@ namespace Legion {
               default:
                 assert(false); // unknown processor type
             }
+
+            // See if we have any variants of this kind
+            runtime->find_valid_variants(ctx, task.task_id,
+                                          variants, ranking[idx]);
+
+            if (variants.empty())
+	      continue;
 
             // If we have valid variants and we have processors we are
             // good to use this set of variants

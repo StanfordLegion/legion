@@ -33,6 +33,8 @@
 #define REALM_USE_PTHREADS
 #define REALM_USE_ALTSTACK
 #include <pthread.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #endif
 #ifdef REALM_ON_LINUX
   #define HAVE_CPUSET
@@ -119,24 +121,27 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #include <algorithm>
 
 #ifndef CHECK_LIBC
-#define CHECK_LIBC(cmd) do { \
-  errno = 0; \
-  int ret = (cmd); \
-  if(ret != 0) { \
-    std::cerr << "ERROR: " __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " (" << strerror(errno) << ")" << std::endl;	\
-    assert(0); \
-  } \
-} while(0)
+#define CHECK_LIBC(cmd)                                                                  \
+  do {                                                                                   \
+    errno = 0;                                                                           \
+    int ret = (cmd);                                                                     \
+    if(ret != 0) {                                                                       \
+      log_thread.error() << __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " ("   \
+                         << strerror(errno) << ")";                                      \
+      assert(0 && #cmd);                                                                 \
+    }                                                                                    \
+  } while(0)
 #endif
 
 #ifndef CHECK_PTHREAD
-#define CHECK_PTHREAD(cmd) do { \
-  int ret = (cmd); \
-  if(ret != 0) { \
-    std::cerr << "PTHREAD: " #cmd " = " << ret << " (" << strerror(ret) << ")" << std::endl;	\
-    assert(0); \
-  } \
-} while(0)
+#define CHECK_PTHREAD(cmd)                                                               \
+  do {                                                                                   \
+    int ret = (cmd);                                                                     \
+    if(ret != 0) {                                                                       \
+      log_thread.error() << #cmd " = " << ret << " (" << strerror(ret) << ")";           \
+      assert(0 && #cmd);                                                                 \
+    }                                                                                    \
+  } while(0)
 #endif
 
 namespace Realm {
@@ -151,7 +156,7 @@ namespace Realm {
 #endif
 
   namespace ThreadLocal {
-    /*extern*/ REALM_THREAD_LOCAL Thread *current_thread = 0;
+    /*extern*/ thread_local Thread *current_thread = 0;
   };
 
   ////////////////////////////////////////////////////////////////////////
@@ -1375,8 +1380,10 @@ namespace Realm {
     assert(!running);
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    if(stack_base != 0)
-      free(stack_base);
+    if(stack_base != nullptr) {
+      // Make sure to include the red-zone page at the end of the stack
+      munmap(stack_base, stack_size + sysconf(_SC_PAGESIZE));
+    }
 #endif
 #ifdef REALM_ON_WINDOWS
     DeleteFiber(fiber);
@@ -1385,15 +1392,15 @@ namespace Realm {
 
   namespace ThreadLocal {
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    REALM_THREAD_LOCAL ucontext_t *host_context = 0;
+    thread_local ucontext_t *host_context = 0;
 #endif
 #ifdef REALM_ON_WINDOWS
-    REALM_THREAD_LOCAL LPVOID host_context = 0;
+    thread_local LPVOID host_context = 0;
 #endif
     // current_user_thread is redundant with current_thread, but kept for debugging
     //  purposes for now
-    REALM_THREAD_LOCAL UserThread *current_user_thread = 0;
-    REALM_THREAD_LOCAL Thread *current_host_thread = 0;
+    thread_local UserThread *current_user_thread = 0;
+    thread_local Thread *current_host_thread = 0;
   };
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
@@ -1459,8 +1466,17 @@ namespace Realm {
     }
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
-    stack_base = malloc(stack_size);
-    assert(stack_base != 0);
+    long pg_size = sysconf(_SC_PAGESIZE);
+    // Round up to the next page, and add a page for a red zone to protect against stack
+    // overflows
+    stack_size = ((stack_size + pg_size - 1) & ~(pg_size - 1));
+    stack_base = mmap(nullptr, stack_size + pg_size, PROT_NONE,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if(stack_base == MAP_FAILED) {
+      log_thread.error() << "mmap failed: " << strerror(errno);
+    }
+    // Mark the stack as RW (leaving the last page as PROT_NONE for the red-zone)
+    CHECK_LIBC(mprotect(stack_base, stack_size, PROT_READ | PROT_WRITE));
 
     CHECK_LIBC( getcontext(&ctx) );
 
@@ -1766,22 +1782,28 @@ namespace Realm {
 
       int ret = PAPI_add_event(ctrs->papi_event_set, *it);
       if(ret == PAPI_OK) {
-	ctrs->event_codes[*it] = count;
-	ctrs->event_counts.push_back(0);
-	count++;
-	continue;
+        log_papi.debug() << "event " << std::showbase << std::hex << *it << std::dec
+                         << " added";
+        ctrs->event_codes[*it] = count;
+        ctrs->event_counts.push_back(0);
+        count++;
+        continue;
       }
       // two kinds of tolerable error
       if(ret == PAPI_ENOEVNT) {
-	log_papi.debug() << "event " << *it << " not available on hardware - skipping";
-	continue;
+        log_papi.debug() << "event " << std::showbase << std::hex << *it << std::dec
+                         << " not available on hardware - skipping";
+        continue;
       }
       if(ret == PAPI_ECNFLCT) {
-	log_papi.debug() << "event " << *it << " conflicts with previously added events - skipping";
-	continue;
+        log_papi.debug()
+            << "event " << std::showbase << std::hex << *it << std::dec
+            << " cannot be counted due to counter resource limitations - skipping";
+        continue;
       }
       // anything else is a real problem
-      log_papi.fatal() << "add event: " << PAPI_strerror(ret) << " (" << ret << ")";
+      log_papi.fatal() << "add event: " << std::showbase << std::hex << *it << std::dec
+                       << ", error: " << PAPI_strerror(ret) << " (" << ret << ")";
       assert(false);
     }
 
@@ -1932,14 +1954,17 @@ namespace Realm {
 	  } else {
 	    log_papi.warning() << "thread init error: " << PAPI_strerror(ret) << " (" << ret << ")";
 	  }
-	} else {
-	  // failure could be due to a version mismatch or some other error
-	  if(ret > 0) {
-	    log_papi.warning() << "version mismatch - wanted: " << PAPI_VER_CURRENT << ", got: " << ret;
-	  } else {
-	    log_papi.warning() << "initialization error: " << PAPI_strerror(ret) << " (" << ret << ")";
-	  }
-	}
+          // TODO: enable PAPI_multiplex_init if we see a lot of PAPI_ECNFLCT errors
+        } else {
+          // failure could be due to a version mismatch or some other error
+          if(ret > 0) {
+            log_papi.warning() << "version mismatch - wanted: " << PAPI_VER_CURRENT
+                               << ", got: " << ret;
+          } else {
+            log_papi.warning() << "initialization error: " << PAPI_strerror(ret) << " ("
+                               << ret << ")";
+          }
+        }
       }
 #endif
 

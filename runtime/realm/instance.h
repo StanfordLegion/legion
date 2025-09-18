@@ -40,7 +40,7 @@
 
 namespace Realm {
 
-  typedef int FieldID;
+  typedef realm_field_id_t FieldID;
 
   template <int N, typename T> struct Rect;
   template <int N, typename T> struct IndexSpace;
@@ -141,21 +141,26 @@ namespace Realm {
     T *pointer(size_t offset) const;
 
     /**
-     * Reuse an underlying memory of the instance to create the next
-     * set of instances.
+     * Reuse the underlying memory of an instance to create a new
+     * instance with a different layout. The new layout must fit
+     * within the footprint of the old instance or the new allocation
+     * will fail. The old instance is always destroyed in the process.
      * \param instance resulting instance
      * \param layout of a new instance to be created
      * \param prs profiling information
      * \param wait_on precondition to wait on
      * \return The event to wait on before using the new instance.
      */
-    // TODO(apryakhin@): Add deferred execution
     Event redistrict(RegionInstance &instance, const InstanceLayoutGeneric *layout,
                      const ProfilingRequestSet &prs, Event wait_on = Event::NO_EVENT);
 
     /**
-     * Reuse an underlying memory of the instance to create the next
-     * set of instances.
+     * Reuse the underlying memory of an instance to create a new
+     * set of instances with different layouts. Only as many of the
+     * new layouts as can fit in the footprint will be allocated. The 
+     * ordering of the new layouts is important as they will be allocated
+     * in this order (pay attention to alignments). The old instance will
+     * always be destroyed in the process.
      * \param instances instances to be redistricted
      * \param layouts layouts for new instances
      * \param num_layouts number of instances and instance layouts
@@ -163,7 +168,6 @@ namespace Realm {
      * \param wait_on precondition to wait on
      * \return The event to wait on before using the new instance.
      */
-    // TODO(apryakhin@): Add deferred execution
     Event redistrict(RegionInstance *instances, const InstanceLayoutGeneric **layouts,
                      size_t num_layouts, const ProfilingRequestSet *prs,
                      Event wait_on = Event::NO_EVENT);
@@ -179,11 +183,16 @@ namespace Realm {
      * \param wait_on The event to wait on before creating the instance.
      * \return The event to wait on before using the instance.
      */
-    static Event create_instance(RegionInstance& inst,
-				 Memory memory,
-				 InstanceLayoutGeneric *ilg,
-				 const ProfilingRequestSet& prs,
-				 Event wait_on = Event::NO_EVENT);
+    static Event create_instance(RegionInstance &inst, Memory memory,
+                                 const InstanceLayoutGeneric &ilg,
+                                 const ProfilingRequestSet &prs,
+                                 Event wait_on = Event::NO_EVENT);
+    REALM_ATTR_DEPRECATED(
+        "use RegionInstance::create_instance with layout reference instead",
+        static Event create_instance(RegionInstance &inst, Memory memory,
+                                     InstanceLayoutGeneric *ilg,
+                                     const ProfilingRequestSet &prs,
+                                     Event wait_on = Event::NO_EVENT));
 
     /**
      * Create a new region instance backed by an external resource.
@@ -197,12 +206,18 @@ namespace Realm {
      * \param wait_on The event to wait on before creating the instance.
      * \return The event to wait on before using the instance.
      */
-    static Event create_external_instance(RegionInstance& inst,
-					  Memory memory,
-					  InstanceLayoutGeneric *ilg,
-					  const ExternalInstanceResource& resource,
-					  const ProfilingRequestSet& prs,
-					  Event wait_on = Event::NO_EVENT);
+    static Event create_external_instance(RegionInstance &inst, Memory memory,
+                                          const InstanceLayoutGeneric &ilg,
+                                          const ExternalInstanceResource &resource,
+                                          const ProfilingRequestSet &prs,
+                                          Event wait_on = Event::NO_EVENT);
+    REALM_ATTR_DEPRECATED(
+        "use RegionInstance::create_external_instance with layout reference instead",
+        static Event create_external_instance(RegionInstance &inst, Memory memory,
+                                              InstanceLayoutGeneric *ilg,
+                                              const ExternalInstanceResource &resource,
+                                              const ProfilingRequestSet &prs,
+                                              Event wait_on = Event::NO_EVENT));
 
     ///@{
     /**
@@ -403,6 +418,9 @@ namespace Realm {
   public:
     virtual ~ExternalInstanceResource() {}
 
+    // check if this external resource can satisfy the instance layout
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const = 0;
+
     // returns the suggested memory in which this resource should be created
     virtual Memory suggested_memory() const = 0;
 
@@ -433,6 +451,8 @@ namespace Realm {
     ExternalMemoryResource(uintptr_t _base, size_t _size_in_bytes, bool _read_only);
     ExternalMemoryResource(void *_base, size_t _size_in_bytes);
     ExternalMemoryResource(const void *_base, size_t _size_in_bytes);
+
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;
@@ -465,6 +485,8 @@ namespace Realm {
   public:
     ExternalFileResource(const std::string& _filename, realm_file_mode_t _mode,
 			 size_t _offset = 0);
+
+    virtual bool satisfies(const InstanceLayoutGeneric &layout) const;
 
     // returns the suggested memory in which this resource should be created
     Memory suggested_memory() const;

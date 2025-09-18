@@ -10361,7 +10361,7 @@ namespace Legion {
         for (std::vector<FutureMap>::const_iterator it = 
               point_futures.begin(); it != point_futures.end(); it++)
         {
-          if (!it->impl->context_index)
+          if (it->impl->op == nullptr)
             continue;
           LegionSpy::log_future_dependence(
               parent_ctx->get_unique_id(), it->impl->op_uid,

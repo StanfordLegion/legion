@@ -54,6 +54,7 @@
 #include <sstream>
 #include <fstream>
 #include <csignal>
+#include <filesystem>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
 #include <unistd.h>
@@ -155,7 +156,8 @@ namespace Realm {
   Logger log_collective("collective");
   extern Logger log_task; // defined in proc_impl.cc
   extern Logger log_taskreg; // defined in proc_impl.cc
-  
+  extern Logger log_machine; // defined in machine_impl.cc
+
   ////////////////////////////////////////////////////////////////////////
   //
   // hacks to force linkage of things
@@ -172,7 +174,7 @@ namespace Realm {
   //
 
   namespace ThreadLocal {
-    static REALM_THREAD_LOCAL int error_signal_value = 0;
+    static thread_local int error_signal_value = 0;
   };
 
   static void register_error_signal_handler(void (*handler)(int))
@@ -755,37 +757,7 @@ namespace Realm {
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/,
 			   int result_code /*= 0*/)
     {
-      // if we're called from inside a task, automatically include the
-      //  task's finish event as well
-      if(Thread::self()) {
-	Operation *op = Thread::self()->get_operation();
-	if(op != 0) {
-	  log_runtime.debug() << "shutdown merging finish event=" << op->get_finish_event();
-	  wait_on = Event::merge_events(wait_on, op->get_finish_event());
-	}
-      }
-
-      log_runtime.info() << "shutdown requested - wait_on=" << wait_on
-			 << " code=" << result_code;
-
-      // send a message to the shutdown master if it's not us
-      NodeID shutdown_master_node = 0;
-      if(Network::my_node_id != shutdown_master_node) {
-	ActiveMessage<RuntimeShutdownRequest> amsg(shutdown_master_node);
-	amsg->wait_on = wait_on;
-	amsg->result_code = result_code;
-	amsg.commit();
-	return;
-      }
-
-      RuntimeImpl *r_impl = static_cast<RuntimeImpl *>(impl);
-      bool duplicate = r_impl->request_shutdown(wait_on, result_code);
-      if(!duplicate) {
-	if(wait_on.has_triggered())
-	  r_impl->initiate_shutdown();
-	else
-	  r_impl->deferred_shutdown.defer(r_impl, wait_on);
-      }
+      static_cast<RuntimeImpl *>(impl)->shutdown(wait_on, result_code);
     }
 
     int Runtime::wait_for_shutdown(void)
@@ -805,9 +777,9 @@ namespace Realm {
       return ((RuntimeImpl *)impl)->create_configs(argc, argv);
     }
 
-    ModuleConfig* Runtime::get_module_config(const std::string name)
+    ModuleConfig *Runtime::get_module_config(const std::string &name) const
     {
-      return ((RuntimeImpl *)impl)->get_module_config(name);
+      return (static_cast<const RuntimeImpl *>(impl))->get_module_config(name);
     }
 
     Module *Runtime::get_module_untyped(const char *name)
@@ -848,6 +820,7 @@ namespace Realm {
     config_map.insert({"regmem", &reg_mem_size});
     config_map.insert({"report_sparsity_leaks", &report_sparsity_leaks});
     config_map.insert({"barrier_broadcast_radix", &barrier_broadcast_radix});
+    config_map.insert({"diskmem", &disk_mem_size});
 
     resource_map.insert({"cpu", &res_num_cpus});
     resource_map.insert({"sysmem", &res_sysmem_size});
@@ -1026,30 +999,26 @@ namespace Realm {
 
     for(int i = 0; i < config->num_util_procs; i++) {
       Processor p = runtime->next_local_processor_id();
-      ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
-						    config->stack_size,
-						    Config::force_kernel_threads,
-                                                    config->pin_util_procs,
-						    &runtime->bgwork,
-						    config->util_bgwork_timeslice);
+      ProcessorImpl *pi = new LocalUtilityProcessor(
+          runtime, p, runtime->core_reservation_set(), config->stack_size,
+          Config::force_kernel_threads, config->pin_util_procs, &runtime->bgwork,
+          config->util_bgwork_timeslice);
       runtime->add_processor(pi);
     }
 
     for(int i = 0; i < config->num_io_procs; i++) {
       Processor p = runtime->next_local_processor_id();
-      ProcessorImpl *pi = new LocalIOProcessor(p, runtime->core_reservation_set(),
-					       config->stack_size,
-					       config->concurrent_io_threads);
+      ProcessorImpl *pi =
+          new LocalIOProcessor(runtime, p, runtime->core_reservation_set(),
+                               config->stack_size, config->concurrent_io_threads);
       runtime->add_processor(pi);
     }
 
     for(int i = 0; i < config->num_cpu_procs; i++) {
       Processor p = runtime->next_local_processor_id();
-      ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-						config->stack_size,
-						Config::force_kernel_threads,
-						&runtime->bgwork,
-						config->cpu_bgwork_timeslice);
+      ProcessorImpl *pi = new LocalCPUProcessor(
+          runtime, p, runtime->core_reservation_set(), config->stack_size,
+          Config::force_kernel_threads, &runtime->bgwork, config->cpu_bgwork_timeslice);
       runtime->add_processor(pi);
     }
   }
@@ -1101,36 +1070,37 @@ namespace Realm {
   // class RuntimeImpl
   //
 
-    RuntimeImpl *runtime_singleton = 0;
+  RuntimeImpl *runtime_singleton = nullptr;
 
-    RuntimeImpl::RuntimeImpl(void)
-      : machine(0)
-      , num_untriggered_events(0)
-      , nodes(0)
-      , local_event_free_list(0)
-      , local_barrier_free_list(0)
-      , local_reservation_free_list(0)
-      , local_compqueue_free_list(0)
-      ,
-      // local_sparsity_map_free_list(0),
-      run_method_called(false)
-      , shutdown_condvar(shutdown_mutex)
-      , shutdown_request_received(false)
-      , shutdown_result_code(0)
-      , shutdown_initiated(false)
-      , shutdown_in_progress(false)
-      , core_reservations(0)
-      , message_manager(0)
-      , sampling_profiler(true /*system default*/)
-      , num_local_memories(0)
-      , num_local_ib_memories(0)
-      , num_local_processors(0)
-      , module_registrar(this)
-      , modules_created(false)
-      , module_configs_created(false)
-    {
-      machine = new MachineImpl;
-    }
+  RuntimeImpl::RuntimeImpl(void)
+    : machine(0)
+    , num_untriggered_events(0)
+    , nodes(nullptr)
+    , num_nodes(0)
+    , local_event_free_list(0)
+    , local_barrier_free_list(0)
+    , local_reservation_free_list(0)
+    , local_compqueue_free_list(0)
+    ,
+    // local_sparsity_map_free_list(0),
+    run_method_called(false)
+    , shutdown_condvar(shutdown_mutex)
+    , shutdown_request_received(false)
+    , shutdown_result_code(0)
+    , shutdown_initiated(false)
+    , shutdown_in_progress(false)
+    , core_reservations(0)
+    , message_manager(0)
+    , sampling_profiler(true /*system default*/)
+    , num_local_memories(0)
+    , num_local_ib_memories(0)
+    , num_local_processors(0)
+    , module_registrar(this)
+    , modules_created(false)
+    , module_configs_created(false)
+  {
+    machine = new MachineImpl(this);
+  }
 
     RuntimeImpl::~RuntimeImpl(void)
     {
@@ -1552,7 +1522,7 @@ namespace Realm {
 
     void RuntimeImpl::create_shared_peers(void)
     {
-#if defined(REALM_USE_SHM) and defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
+#if defined(REALM_USE_SHM) && defined(REALM_USE_ANONYMOUS_SHARED_MEMORY)
       std::vector<OsHandle> handles;
       OsHandle all_node_mailbox =
           Realm::ipc_mailbox_create(get_mailbox_name(Network::my_node_id));
@@ -1889,6 +1859,7 @@ namespace Realm {
       BarrierImpl::barrier_adjustment_timestamp.store((((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1);
 
       nodes = new Node[Network::max_node_id + 1];
+      num_nodes = Network::max_node_id + 1;
 
       // configure the bit sets used by NodeSet
       {
@@ -2135,11 +2106,12 @@ namespace Realm {
       DiskMemory *diskmem;
       if(config->disk_mem_size > 0) {
         char file_name[30];
-        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "realm_disk_file%d.data",
+                 Network::my_node_id);
+        std::filesystem::path disk_file = std::filesystem::temp_directory_path();
+        disk_file /= file_name;
         Memory m = get_runtime()->next_local_memory_id();
-        diskmem = new DiskMemory(m,
-                                 config->disk_mem_size,
-                                 std::string(file_name));
+        diskmem = new DiskMemory(m, config->disk_mem_size, disk_file);
         get_runtime()->add_memory(diskmem);
       } else
         diskmem = 0;
@@ -2348,6 +2320,16 @@ namespace Realm {
       machine->update_kind_maps();
       // and the mem_mem affinities
       machine->enumerate_mem_mem_affinities();
+
+      if(log_machine.want_debug()) {
+        // Print the machine model
+        if(Network::my_node_id == 0) {
+          for(int i = 0; i < Network::max_node_id + 1; i++) {
+            const Node &node = nodes[i];
+            log_machine.debug() << "Node " << i << ":\n" << node;
+          }
+        }
+      }
 
       // Then update the path caches
       if (Config::path_cache_lru_size) {
@@ -2725,6 +2707,42 @@ namespace Realm {
       }
     }
 
+    void RuntimeImpl::shutdown(Event wait_on /*= Event::NO_EVENT*/,
+                               int result_code /*= 0*/)
+    {
+      // if we're called from inside a task, automatically include the
+      //  task's finish event as well
+      if(Thread::self()) {
+        Operation *op = Thread::self()->get_operation();
+        if(op != 0) {
+          log_runtime.debug() << "shutdown merging finish event="
+                              << op->get_finish_event();
+          wait_on = Event::merge_events(wait_on, op->get_finish_event());
+        }
+      }
+
+      log_runtime.info() << "shutdown requested - wait_on=" << wait_on
+                         << " code=" << result_code;
+
+      // send a message to the shutdown master if it's not us
+      NodeID shutdown_master_node = 0;
+      if(Network::my_node_id != shutdown_master_node) {
+        ActiveMessage<RuntimeShutdownRequest> amsg(shutdown_master_node);
+        amsg->wait_on = wait_on;
+        amsg->result_code = result_code;
+        amsg.commit();
+        return;
+      }
+
+      bool duplicate = request_shutdown(wait_on, result_code);
+      if(!duplicate) {
+        if(wait_on.has_triggered())
+          initiate_shutdown();
+        else
+          deferred_shutdown.defer(this, wait_on);
+      }
+    }
+
     int RuntimeImpl::wait_for_shutdown(void)
     {
       // sleep until shutdown has been requested by somebody
@@ -2961,9 +2979,9 @@ namespace Realm {
       return true;
     }
 
-    ModuleConfig* RuntimeImpl::get_module_config(const std::string name)
+    ModuleConfig *RuntimeImpl::get_module_config(const std::string &name) const
     {
-      std::map<std::string, ModuleConfig*>::iterator it;
+      std::map<std::string, ModuleConfig *>::const_iterator it;
       it = module_configs.find(name);
       if (it == module_configs.end()) {
         return NULL;
@@ -3124,46 +3142,58 @@ namespace Realm {
       return 0;
     }
 
-    template <class T>
-    inline T *null_check(T *ptr)
+    MemoryImpl *RuntimeImpl::get_memory_impl(ID id) const
     {
-      assert(ptr != 0);
-      return ptr;
-    }
-
-    MemoryImpl *RuntimeImpl::get_memory_impl(ID id)
-    {
+      size_t mem_idx;
       if(id.is_memory()) {
-	return null_check(nodes[id.memory_owner_node()].memories[id.memory_mem_idx()]);
+        size_t node_idx = id.memory_owner_node();
+        if(node_idx >= num_nodes) {
+          return nullptr;
+        }
+        mem_idx = id.memory_mem_idx();
+        if(mem_idx < nodes[node_idx].memories.size()) {
+          return nodes[node_idx].memories[mem_idx];
+        }
+      } else if(id.is_ib_memory()) {
+        size_t node_idx = id.memory_owner_node();
+        if(node_idx >= num_nodes) {
+          return nullptr;
+        }
+        mem_idx = id.memory_mem_idx();
+        if(mem_idx < nodes[node_idx].ib_memories.size()) {
+          return nodes[node_idx].ib_memories[mem_idx];
+        }
+      } else if(id.is_instance()) {
+        size_t node_idx = id.instance_owner_node();
+        if(node_idx >= num_nodes) {
+          return nullptr;
+        }
+        mem_idx = id.instance_mem_idx();
+        if(mem_idx < nodes[node_idx].memories.size()) {
+          return nodes[node_idx].memories[mem_idx];
+        }
       }
 
-      if(id.is_ib_memory()) {
-        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
-      }
-#ifdef TODO
-      if(id.is_allocator()) {
-	return null_check(nodes[id.allocator.owner_node].memories[id.allocator.mem_idx]);
-      }
-#endif
-
-      if(id.is_instance()) {
-	return null_check(nodes[id.instance_owner_node()].memories[id.instance_mem_idx()]);
-      }
-
-      log_runtime.fatal() << "invalid memory handle: id=" << id;
-      assert(0 && "invalid memory handle");
-      return 0;
+      return nullptr;
     }
 
-    IBMemory *RuntimeImpl::get_ib_memory_impl(ID id)
+    IBMemory *RuntimeImpl::get_ib_memory_impl(ID id) const
     {
-      if(id.is_ib_memory()) {
-        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
+      if(!id.is_ib_memory()) {
+        return nullptr;
       }
 
-      log_runtime.fatal() << "invalid ib memory handle: id=" << id;
-      assert(0 && "invalid ib memory handle");
-      return 0;
+      size_t node_idx = id.memory_owner_node();
+      if(node_idx >= num_nodes) {
+        return nullptr;
+      }
+
+      size_t mem_idx = id.memory_mem_idx();
+      if(mem_idx >= nodes[node_idx].ib_memories.size()) {
+        return nullptr;
+      }
+
+      return nodes[node_idx].ib_memories[mem_idx];
     }
 
     ProcessorImpl *RuntimeImpl::get_processor_impl(ID id)
@@ -3172,11 +3202,20 @@ namespace Realm {
 	return get_procgroup_impl(id);
 
       if(!id.is_processor()) {
-	log_runtime.fatal() << "invalid processor handle: id=" << id;
-	assert(0 && "invalid processor handle");
+        return nullptr;
       }
 
-      return null_check(nodes[id.proc_owner_node()].processors[id.proc_proc_idx()]);
+      size_t node_idx = id.proc_owner_node();
+      if(node_idx >= num_nodes) {
+        return nullptr;
+      }
+
+      size_t proc_idx = id.proc_proc_idx();
+      if(proc_idx >= nodes[node_idx].processors.size()) {
+        return nullptr;
+      }
+
+      return nodes[node_idx].processors[proc_idx];
     }
 
     ProcessorGroupImpl *RuntimeImpl::get_procgroup_impl(ID id)
@@ -3220,6 +3259,7 @@ namespace Realm {
       }
 
       MemoryImpl *mem = get_memory_impl(id);
+      assert(mem != nullptr && "invalid memory handle");
 
       return mem->get_instance(id.convert<RegionInstance>());
 #if 0
@@ -3415,6 +3455,28 @@ namespace Realm {
           proc_groups) {
         delete atomic_proc_group.load();
       }
+    }
+
+    std::ostream &operator<<(std::ostream &os, const Node &node)
+    {
+      for(const ProcessorImpl *processor : node.processors) {
+        os << "Processor:" << processor->me << ", " << processor->kind << std::endl;
+      }
+      for(const MemoryImpl *memory : node.memories) {
+        os << "Memory:" << memory->me << ", " << memory->me.kind()
+           << ", capacity: " << memory->size << std::endl;
+      }
+      for(const MemoryImpl *memory : node.ib_memories) {
+        os << "IB Memory:" << memory->me << ", " << memory->me.kind()
+           << ", capacity: " << memory->size << std::endl;
+      }
+      for(const Channel *channel : node.dma_channels) {
+        os << "Channel: " << channel->kind << std::endl;
+        for(const Channel::SupportedPath &path : channel->get_paths()) {
+          os << "-Supported Path: " << path << std::endl;
+        }
+      }
+      return os;
     }
 
   ////////////////////////////////////////////////////////////////////////

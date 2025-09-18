@@ -18,6 +18,7 @@
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
 #include "realm/mem_impl.h"
+#include "realm/idx_impl.h"
 #include "realm/inst_impl.h"
 
 #include <sys/types.h>
@@ -71,14 +72,14 @@ namespace Realm {
     extern Logger log_inst;
     Logger log_disk("disk");
 
-    DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
-      : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT,
-			   Memory::DISK_MEM, 0)
+    DiskMemory::DiskMemory(Memory _me, size_t _size, const std::filesystem::path &_file)
+      : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM, 0)
       , file(_file)
     {
-      printf("file = %s\n", _file.c_str());
-      // do not overwrite an existing file
-      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00666);
+      // Allow overwriting of an existing file in case Realm crashed
+      // before and we are running again and need to overwrite the
+      // file instead of crashing again because we can't open the file
+      fd = open((const char *)_file.c_str(), O_CREAT | O_RDWR, 00666);
       assert(fd != -1);
       // resize the file to what we want
       int ret =	ftruncate(fd, _size);
@@ -93,7 +94,7 @@ namespace Realm {
     {
       close(fd);
       // attempt to delete the file
-      unlink(file.c_str());
+      unlink((const char *)file.c_str());
     }
 
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
@@ -121,6 +122,58 @@ namespace Realm {
     void *DiskMemory::get_direct_ptr(off_t offset, size_t size)
     {
       return 0; // cannot provide a pointer for it.
+    }
+
+    ExternalInstanceResource *
+    DiskMemory::generate_resource_info(RegionInstanceImpl *inst,
+                                       const IndexSpaceGeneric *subspace,
+                                       span<const FieldID> fields, bool read_only)
+    {
+      // compute the bounds of the instance relative to our base
+      assert(inst->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(inst->metadata.layout);
+      InstanceLayoutGeneric *ilg = inst->metadata.layout;
+      uintptr_t rel_base;
+      if(subspace == 0) {
+        // want full instance
+        rel_base = 0;
+      } else {
+        assert(!fields.empty());
+        uintptr_t limit;
+        for(size_t i = 0; i < fields.size(); i++) {
+          uintptr_t f_base, f_limit;
+          if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+            return 0;
+          if(i == 0) {
+            rel_base = f_base;
+            limit = f_limit;
+          } else {
+            rel_base = std::min(rel_base, f_base);
+            limit = std::max(limit, f_limit);
+          }
+        }
+      }
+
+      return new ExternalFileResource(
+          file.string(), read_only ? REALM_FILE_READ_ONLY : REALM_FILE_READ_WRITE,
+          inst->metadata.inst_offset + rel_base);
+    }
+
+    bool DiskMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
+                                                        size_t &inst_offset)
+    {
+      ExternalFileResource *res =
+          dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
+      if((res == nullptr) || (res->filename != file))
+        return false;
+      inst_offset = res->offset;
+      return true;
+    }
+
+    void DiskMemory::unregister_external_resource(RegionInstanceImpl *inst)
+    {
+      // Nothing to do here since we're just an offset of the disk memory
     }
 
     FileMemory::FileMemory(Memory _me)
@@ -157,6 +210,47 @@ namespace Realm {
       return 0; // cannot provide a pointer for it;
     }
 
+    ExternalInstanceResource *
+    FileMemory::generate_resource_info(RegionInstanceImpl *inst,
+                                       const IndexSpaceGeneric *subspace,
+                                       span<const FieldID> fields, bool read_only)
+    {
+      // compute the bounds of the instance relative to our base
+      assert(inst->metadata.is_valid() &&
+             "instance metadata must be valid before accesses are performed");
+      assert(inst->metadata.layout);
+      InstanceLayoutGeneric *ilg = inst->metadata.layout;
+      uintptr_t rel_base;
+      if(subspace == 0) {
+        // want full instance
+        rel_base = 0;
+      } else {
+        assert(!fields.empty());
+        uintptr_t limit;
+        for(size_t i = 0; i < fields.size(); i++) {
+          uintptr_t f_base, f_limit;
+          if(!subspace->impl->compute_affine_bounds(ilg, fields[i], f_base, f_limit))
+            return 0;
+          if(i == 0) {
+            rel_base = f_base;
+            limit = f_limit;
+          } else {
+            rel_base = std::min(rel_base, f_base);
+            limit = std::max(limit, f_limit);
+          }
+        }
+      }
+
+      ExternalFileResource *res =
+          dynamic_cast<ExternalFileResource *>(inst->metadata.ext_resource);
+      assert(res != nullptr);
+      OpenFileInfo *info = inst->metadata.find_mem_specific<OpenFileInfo>();
+      assert(info != nullptr);
+      return new ExternalFileResource(
+          res->filename, read_only ? REALM_FILE_READ_ONLY : REALM_FILE_READ_WRITE,
+          info->offset + rel_base);
+    }
+
     // FileMemory supports ExternalFileResource
     bool FileMemory::attempt_register_external_resource(RegionInstanceImpl *inst,
                                                         size_t& inst_offset)
@@ -167,31 +261,33 @@ namespace Realm {
           // try to open the file
           int fd;
           switch(res->mode) {
-          case LEGION_FILE_READ_ONLY:
-            {
-              fd = open(res->filename.c_str(), O_RDONLY);
-              break;
+          case REALM_FILE_READ_ONLY:
+          {
+            fd = open(res->filename.c_str(), O_RDONLY);
+            break;
+          }
+          case REALM_FILE_READ_WRITE:
+          {
+            fd = open(res->filename.c_str(), O_RDWR);
+            break;
+          }
+          case REALM_FILE_CREATE:
+          {
+            fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
+            if(fd == -1) {
+              log_disk.fatal() << "unable to open file '" << res->filename
+                               << "': " << strerror(errno);
+              abort();
             }
-          case LEGION_FILE_READ_WRITE:
-            {
-              fd = open(res->filename.c_str(), O_RDWR);
-              break;
+            // resize the file to what we want
+            int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
+            if(ret == -1) {
+              log_disk.fatal() << "failed to truncate file '" << res->filename
+                               << "': " << strerror(errno);
+              abort();
             }
-          case LEGION_FILE_CREATE:
-            {
-              fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
-              if(fd == -1) {
-                log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
-                abort();
-              }
-              // resize the file to what we want
-              int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
-              if(ret == -1) {
-                log_disk.fatal() << "failed to truncate file '" << res->filename << "': " << strerror(errno);
-                abort();
-              }
-              break;
-            }
+            break;
+          }
           default:
             assert(0);
           }
@@ -261,7 +357,5 @@ namespace Realm {
       // shouldn't get here - no allocation
       assert(0);
     }
-
-
 }
 

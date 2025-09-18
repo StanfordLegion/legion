@@ -23,7 +23,7 @@ namespace Realm {
   extern Logger log_omp;
 
   namespace ThreadLocal {
-    extern REALM_THREAD_LOCAL ThreadPool::WorkerInfo *threadpool_workerinfo;
+    extern thread_local ThreadPool::WorkerInfo *threadpool_workerinfo;
   };
 
   ////////////////////////////////////////////////////////////////////////

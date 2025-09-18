@@ -26,10 +26,11 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 
 # Realm runtime
 list(APPEND REALM_SRC
-  realm/realm_c.h
+  realm/realm_c.h                          realm/realm_c.cc
   realm/transfer/lowlevel_disk.cc
   realm/transfer/address_list.h            realm/transfer/address_list.cc
   realm/transfer/addrsplit_channel.h       realm/transfer/addrsplit_channel.cc
+  realm/fragmented_message.h               realm/fragmented_message.cc
   realm/transfer/addrsplit_channel.inl
   realm/transfer/channel.h                 realm/transfer/channel.cc
   realm/transfer/channel_common.h          realm/transfer/channel_common.cc
@@ -214,6 +215,14 @@ if(REALM_USE_NVTX)
   )
 endif()
 
+if(REALM_USE_PREALM)
+  list(APPEND REALM_SRC
+    realm/prealm/prealm.h
+    realm/prealm/prealm.inl
+    realm/prealm/prealm.cc
+  )
+endif()
+
 if(REALM_USE_UCX)
   list(APPEND REALM_SRC
     realm/ucx/ucp_utils.h
@@ -248,7 +257,7 @@ list(APPEND REALM_SRC
   realm/bytearray.inl
   realm/circ_queue.h
   realm/circ_queue.inl
-  realm/cmdline.h          realm/cmdline.cc
+  realm/cmdline.h
   realm/cmdline.inl
   realm/codedesc.h         realm/codedesc.cc
   realm/codedesc.inl
@@ -414,6 +423,10 @@ if(Legion_USE_HWLOC)
   target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
+if(REALM_USE_PREALM)
+  target_link_libraries(RealmRuntime PRIVATE ZLIB::ZLIB)
+endif()
+
 if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
   if (REALM_USE_GASNET1 OR NOT REALM_USE_GASNETEX_WRAPPER)
     find_package(GASNet)
@@ -483,16 +496,18 @@ if(REALM_USE_UCX)
   target_include_directories(RealmRuntime PRIVATE ${UCC_INCLUDE_DIRS})
   target_link_libraries(RealmRuntime PRIVATE ucc::ucc)
 
-  # build the MPI bootstrap plugin
-  add_library(realm_ucp_bootstrap_mpi MODULE
-    realm/ucx/bootstrap/bootstrap_mpi.c)
-  target_include_directories(realm_ucp_bootstrap_mpi PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_BINARY_DIR}/runtime)
-  target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
-  set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
-  install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  if(Legion_UCX_MPI_BOOTSTRAP)
+    # build the MPI bootstrap plugin
+    add_library(realm_ucp_bootstrap_mpi MODULE
+      realm/ucx/bootstrap/bootstrap_mpi.c)
+    target_include_directories(realm_ucp_bootstrap_mpi PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_BINARY_DIR}/runtime)
+    target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
+    set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
+    install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
+      DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
   # build the P2P bootstrap plugin
   add_library(realm_ucp_bootstrap_p2p MODULE
     realm/ucx/bootstrap/bootstrap_p2p.cc
@@ -575,19 +590,22 @@ if(Legion_USE_CUDA)
   set_target_cuda_architectures(RealmStatic ARCHITECTURES ${Legion_CUDA_ARCH})
 
   # build cuda hook library
-  add_library(realm_cuhook SHARED
-    realm/cuda/cuda_hook.cc)
-  set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  if(REALM_LIMIT_SYMBOL_VISIBILITY)
-    set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
-    set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+  option(REALM_BUILD_CUHOOK "Build cuhook sanity checker injection library" OFF)
+  if (REALM_BUILD_CUHOOK)
+    add_library(realm_cuhook SHARED
+      realm/cuda/cuda_hook.cc)
+    set_target_properties(realm_cuhook PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(REALM_LIMIT_SYMBOL_VISIBILITY)
+      set_target_properties(realm_cuhook PROPERTIES CXX_VISIBILITY_PRESET hidden)
+      set_target_properties(realm_cuhook PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
+    endif()
+    target_include_directories(realm_cuhook PRIVATE
+                              ${CMAKE_CURRENT_SOURCE_DIR}
+                              ${PROJECT_BINARY_DIR}/runtime
+                              ${CUDAToolkit_CUPTI_INCLUDE_DIR})
+    target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
+    install(TARGETS realm_cuhook EXPORT LegionTargets)
   endif()
-  target_include_directories(realm_cuhook PRIVATE
-                            ${CMAKE_CURRENT_SOURCE_DIR}
-                            ${PROJECT_BINARY_DIR}/runtime
-                            ${CUDAToolkit_CUPTI_INCLUDE_DIR})
-  target_link_libraries(realm_cuhook PUBLIC CUDA::toolkit)
-  install(TARGETS realm_cuhook EXPORT LegionTargets)
 endif()
 
 if(Legion_USE_HIP)

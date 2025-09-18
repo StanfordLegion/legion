@@ -43,7 +43,7 @@ namespace Realm {
     static FastReservationDebugInfo *lookup_debuginfo(void);
   };
   namespace ThreadLocal {
-    extern REALM_THREAD_LOCAL FastReservationDebugInfo *frsv_debug;
+    extern thread_local FastReservationDebugInfo *frsv_debug;
   };
 #endif
 

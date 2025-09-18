@@ -128,6 +128,14 @@ namespace Realm {
     , read_only(true)
   {}
 
+  bool ExternalCudaMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    if(size_in_bytes < layout.bytes_used)
+      return false;
+    const size_t max_alignment = (base & -base);
+    return (layout.alignment_reqd <= max_alignment);
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalCudaMemoryResource::suggested_memory() const
   {
@@ -177,6 +185,17 @@ namespace Realm {
     , cuda_device_id(_cuda_device_id)
     , array(reinterpret_cast<CUarray_st *>(_array))
   {}
+
+  bool ExternalCudaArrayResource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    // TODO: check that all the pieces are CUDA array pieces, just assume it for now
+    log_gpu.warning()
+        << "Checking that layouts can be satisfied by an "
+        << "ExternalCudaArrayResource is currently unimplemented. Assuming that "
+        << "cudaArray " << array << " on device " << cuda_device_id
+        << "satisfies the corresponding layout.";
+    return true;
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalCudaArrayResource::suggested_memory() const

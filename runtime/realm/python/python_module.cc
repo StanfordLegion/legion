@@ -727,15 +727,15 @@ namespace Realm {
   //
   // class LocalPythonProcessor
 
-  LocalPythonProcessor::LocalPythonProcessor(Processor _me, int _numa_node,
-                                             CoreReservationSet& crs,
-                                             size_t _stack_size,
+  LocalPythonProcessor::LocalPythonProcessor(
+      RuntimeImpl *runtime_impl, Processor _me, int _numa_node, CoreReservationSet &crs,
+      size_t _stack_size,
 #ifdef REALM_USE_OPENMP
-					     int _omp_workers,
+      int _omp_workers,
 #endif
-					     const std::vector<std::string>& _import_modules,
-					     const std::vector<std::string>& _init_scripts)
-    : ProcessorImpl(_me, Processor::PY_PROC)
+      const std::vector<std::string> &_import_modules,
+      const std::vector<std::string> &_init_scripts)
+    : ProcessorImpl(runtime_impl, _me, Processor::PY_PROC)
     , numa_node(_numa_node)
     , import_modules(_import_modules)
     , init_scripts(_init_scripts)
@@ -1193,7 +1193,7 @@ namespace Realm {
       for(int i = 0; i < config->cfg_num_python_cpus; i++) {
         Processor proc = runtime->next_local_processor_id();
         ProcessorImpl *proc_impl = new LocalPythonProcessor(
-            proc, -1 /*numa node*/, runtime->core_reservation_set(),
+            runtime, proc, -1 /*numa node*/, runtime->core_reservation_set(),
             config->cfg_stack_size,
 #ifdef REALM_USE_OPENMP
             config->cfg_pyomp_threads,

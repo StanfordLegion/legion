@@ -17,8 +17,9 @@
 
 #include "realm/logging.h"
 
-#include <stdio.h>
-#include <stdint.h>
+#include <cstdio>
+#include <cstdint>
+#include <thread>
 
 namespace Realm {
   extern Logger log_omp;
@@ -173,8 +174,9 @@ extern "C" {
     // make sure all workers have finished
     if(work->remaining_workers.fetch_sub_acqrel(1) > 1) {
       log_omp.info() << "waiting for workers to complete";
-      while(work->remaining_workers.load_acquire() > 0)
-	sched_yield();
+      while(work->remaining_workers.load_acquire() > 0) {
+        std::this_thread::yield();
+      }
     }
     delete work;
   }
@@ -1243,8 +1245,9 @@ extern "C" {
     // make sure all workers have finished
     if(work->remaining_workers.fetch_sub_acqrel(1) > 1) {
       log_omp.info() << "waiting for workers to complete";
-      while(work->remaining_workers.load_acquire() > 0)
-	sched_yield();
+      while(work->remaining_workers.load_acquire() > 0) {
+        std::this_thread::yield();
+      }
     }
     delete work;
   }

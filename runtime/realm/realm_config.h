@@ -25,6 +25,8 @@
 // get macros that spell things the right way for each compiler
 #include "realm/compiler_support.h"
 
+#define REALM_EVENT_GENERATION_BITS 20
+
 // Control the maximum number of dimensions for Realm
 #ifndef REALM_MAX_DIM
 #define REALM_MAX_DIM 3

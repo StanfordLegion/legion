@@ -18,9 +18,8 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
+#include <ctime>
 #include <unistd.h>
-
-#include <time.h>
 
 #include "task_throughput.h"
 

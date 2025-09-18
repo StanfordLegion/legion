@@ -162,8 +162,8 @@ namespace Realm {
   };
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL Doorbell *my_doorbell = 0;
-    REALM_THREAD_LOCAL char doorbell_storage[sizeof(DoorbellImpl)];
+    thread_local Doorbell *my_doorbell = 0;
+    thread_local char doorbell_storage[sizeof(DoorbellImpl)];
   };
 
   Doorbell::Doorbell()

@@ -19,7 +19,7 @@
 
 #include <list>
 #include <algorithm>
-
+#include <unordered_set>
 #ifdef REALM_USE_HWLOC
 #include <hwloc.h>
 #endif
@@ -275,7 +275,9 @@ namespace Realm {
     int num_logical_cores = 0;
     sysctlbyname("hw.logicalcpu", &num_logical_cores, &buflen, NULL, 0);
     // we can only handle the case that there is no hyper threads
-    assert(num_physical_cores == num_logical_cores);
+    if(num_physical_cores != num_logical_cores) {
+      log_topo.warning("Hyperthreads are not supported on OSX, ignoring.");
+    }
     for(int i = 0; i < num_physical_cores; i++) {
       HardwareTopology::Proc &proc = logical_cores.emplace_back();
       // assume mac only have one numa
@@ -770,12 +772,15 @@ namespace Realm {
       by_domain[new_proc.domain].logical_cores.insert(new_proc.id);
     }
 
-    // ------ Step 4: num_logical_cores_per_physical_core
-    for(const auto &[_, proc] : all_procs) {
-      if(num_logical_cores_per_physical_core == 0) {
-        num_logical_cores_per_physical_core = proc.shares_fpu.size() + 1;
-      } else {
-        assert(num_logical_cores_per_physical_core == proc.shares_fpu.size() + 1);
+    // ------ Step 4: num_physical_cores
+    std::unordered_set<int> total_cores;
+    for(const auto &[proc_id, proc] : all_procs) {
+      if(total_cores.find(proc_id) == total_cores.end()) {
+        total_cores.insert(proc_id);
+        for(int shared_id : proc.shares_fpu) {
+          total_cores.insert(shared_id);
+        }
+        physical_cores++;
       }
     }
 
@@ -803,10 +808,7 @@ namespace Realm {
 
   unsigned HardwareTopology::num_logical_cores(void) const { return all_procs.size(); }
 
-  unsigned HardwareTopology::num_physical_cores(void) const
-  {
-    return all_procs.size() / num_logical_cores_per_physical_core;
-  }
+  unsigned HardwareTopology::num_physical_cores(void) const { return physical_cores; }
 
   unsigned HardwareTopology::num_numa_domains(void) const { return by_domain.size(); }
 

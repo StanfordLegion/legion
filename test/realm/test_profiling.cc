@@ -276,6 +276,76 @@ void response_task(const void *args, size_t arglen,
   } else
     printf("no instance timeline\n");
 
+#if defined(REALM_USE_PAPI)
+  if(pr.has_measurement<L1ICachePerfCounters>()) {
+    L1ICachePerfCounters *l1icache_counter = pr.get_measurement<L1ICachePerfCounters>();
+    printf("L1I Cache counter = accesses %lld, misses %lld\n", l1icache_counter->accesses,
+           l1icache_counter->misses);
+    delete l1icache_counter;
+  } else {
+    printf("no L1I Cache counter\n");
+  }
+
+  if(pr.has_measurement<L1DCachePerfCounters>()) {
+    L1DCachePerfCounters *l1dcache_counter = pr.get_measurement<L1DCachePerfCounters>();
+    printf("L1D Cache counter = accesses %lld, misses %lld\n", l1dcache_counter->accesses,
+           l1dcache_counter->misses);
+    delete l1dcache_counter;
+  } else {
+    printf("no L1D Cache counter\n");
+  }
+
+  if(pr.has_measurement<L2CachePerfCounters>()) {
+    L2CachePerfCounters *l2cache_counter = pr.get_measurement<L2CachePerfCounters>();
+    printf("L2 Cache counter = accesses %lld, misses %lld\n", l2cache_counter->accesses,
+           l2cache_counter->misses);
+    delete l2cache_counter;
+  } else {
+    printf("no L2 Cache counter\n");
+  }
+
+  if(pr.has_measurement<L3CachePerfCounters>()) {
+    L3CachePerfCounters *l3cache_counter = pr.get_measurement<L3CachePerfCounters>();
+    printf("L3 Cache counter = accesses %lld, misses %lld\n", l3cache_counter->accesses,
+           l3cache_counter->misses);
+    delete l3cache_counter;
+  } else {
+    printf("no L3 Cache counter\n");
+  }
+
+  if(pr.has_measurement<IPCPerfCounters>()) {
+    IPCPerfCounters *ipc_counter = pr.get_measurement<IPCPerfCounters>();
+    printf("IPC counter = total_insts %lld, total_cycles %lld, fp %lld, ld %lld, st "
+           "%lld, br %lld\n",
+           ipc_counter->total_insts, ipc_counter->total_cycles, ipc_counter->fp_insts,
+           ipc_counter->ld_insts, ipc_counter->st_insts, ipc_counter->br_insts);
+    delete ipc_counter;
+  } else {
+    printf("no IPC counter\n");
+  }
+
+  if(pr.has_measurement<TLBPerfCounters>()) {
+    TLBPerfCounters *tlb_counter = pr.get_measurement<TLBPerfCounters>();
+    printf("TLB counter = inst_misses %lld, data_misses %lld\n", tlb_counter->inst_misses,
+           tlb_counter->data_misses);
+    delete tlb_counter;
+  } else {
+    printf("no TLB counter\n");
+  }
+
+  if(pr.has_measurement<BranchPredictionPerfCounters>()) {
+    BranchPredictionPerfCounters *bp_counter =
+        pr.get_measurement<BranchPredictionPerfCounters>();
+    printf("Branch Prediction counter = total_branches %lld, taken_branches %lld, "
+           "mispredictions %lld\n",
+           bp_counter->total_branches, bp_counter->taken_branches,
+           bp_counter->mispredictions);
+    delete bp_counter;
+  } else {
+    printf("no Branch Prediction counter\n");
+  }
+#endif
+
   if(__sync_sub_and_fetch(&expected_responses_remaining, 1) < 0) {
     printf("HELP!  Too many responses received!\n");
     exit(1);
@@ -342,6 +412,16 @@ void top_level_task(const void *args, size_t arglen,
     .add_measurement<OperationBacktrace>();
   if(has_gpus)
     pr.add_measurement<OperationTimelineGPU>();
+
+#if defined(REALM_USE_PAPI)
+  pr.add_measurement<L1ICachePerfCounters>();
+  pr.add_measurement<L1DCachePerfCounters>();
+  pr.add_measurement<L2CachePerfCounters>();
+  pr.add_measurement<L3CachePerfCounters>();
+  pr.add_measurement<IPCPerfCounters>();
+  pr.add_measurement<TLBPerfCounters>();
+  pr.add_measurement<BranchPredictionPerfCounters>();
+#endif
 
   // we expect (exactly) 5 responses for tasks + 2 for instances
   // exception: gpu doesn't do the interrupt-during-wait task yet

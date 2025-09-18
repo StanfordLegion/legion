@@ -107,17 +107,25 @@ namespace Legion {
     const PredUserEvent PredUserEvent::NO_PRED_USER_EVENT = {};
 
     //--------------------------------------------------------------------------
-    void LgEvent::begin_context_wait(Context ctx, bool from_application) const
+    void LgEvent::begin_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      ctx->begin_wait(*this, from_application);
+      if (ctx != nullptr)
+        ctx->begin_wait(*this, from_application);
+      else if ((implicit_profiler != nullptr) && 
+          implicit_profiler->is_external_thread())
+        implicit_profiler->begin_external_wait(*this);
     }
 
     //--------------------------------------------------------------------------
-    void LgEvent::end_context_wait(Context ctx, bool from_application) const
+    void LgEvent::end_wait(Context ctx, bool from_application) const
     //--------------------------------------------------------------------------
     {
-      ctx->end_wait(*this, from_application);
+      if (ctx != nullptr)
+        ctx->end_wait(*this, from_application);
+      else if ((implicit_profiler != nullptr) &&
+          implicit_profiler->is_external_thread())
+        implicit_profiler->end_external_wait(*this);
     }
     
     //--------------------------------------------------------------------------
@@ -128,11 +136,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LgEvent::record_event_wait(LegionProfInstance *profiler,
-                                    Realm::Backtrace &bt) const
+    void LgEvent::record_event_wait(Realm::Backtrace &bt) const
     //--------------------------------------------------------------------------
     {
-      profiler->record_event_wait(*this, bt);
+#ifdef DEBUG_LEGION
+      assert(exists());
+      assert(implicit_profiler != NULL);
+#endif
+      implicit_profiler->record_event_wait(*this, bt);
     }
 
     //--------------------------------------------------------------------------
@@ -3770,6 +3781,8 @@ namespace Legion {
         Realm::InstanceLayoutGeneric *ilg =
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
+        const uintptr_t base = reinterpret_cast<uintptr_t>(get_data());
+        ilg->alignment_reqd = (base & -base); // maximum alignment
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
         const Realm::UserEvent temp_unique_event =
           Realm::UserEvent::create_user_event();
@@ -3787,8 +3800,9 @@ namespace Legion {
 #endif
         PhysicalInstance result;
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
-              result, alt_resource->suggested_memory(), ilg,
+              result, alt_resource->suggested_memory(), *ilg,
               *alt_resource, requests));
+        delete ilg;
         if (inst_ready.exists() && (implicit_profiler != NULL))
           implicit_profiler->record_instance_ready(inst_ready, unique_event);
 #ifndef LEGION_UNDO_FUTURE_INSTANCE_HACK
@@ -3821,6 +3835,8 @@ namespace Legion {
         Realm::InstanceLayoutGeneric *ilg =
           Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
               rect_space, constraints, dim_order);
+        const uintptr_t base = reinterpret_cast<uintptr_t>(get_data());
+        ilg->alignment_reqd = (base & -base); // alignment reqd
         Realm::ProfilingRequestSet requests;
         if (implicit_runtime->profiler != NULL)
         {
@@ -3834,7 +3850,8 @@ namespace Legion {
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
         use_event = RtEvent(PhysicalInstance::create_external_instance(instance,
-              resource->suggested_memory(), ilg, *resource, requests));
+              resource->suggested_memory(), *ilg, *resource, requests));
+        delete ilg;
         own_instance = true;
         if (use_event.exists() && (implicit_profiler != NULL))
           implicit_profiler->record_instance_ready(use_event, unique_event);
@@ -4139,8 +4156,7 @@ namespace Legion {
         context(ctx), op(o), op_gen(o->get_generation()),
         op_depth(o->get_context()->get_depth()), op_uid(o->get_unique_op_id()),
         blocking_index(o->get_context()->get_next_blocking_index()),
-        provenance(prov), future_map_domain(domain),
-        context_index(o->get_context_index())
+        provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4166,7 +4182,7 @@ namespace Legion {
           register_now, mapping),
         context(ctx), op(NULL), op_gen(0), op_depth(0), op_uid(0),
         blocking_index(blocking), provenance(prov), future_map_domain(d),
-        context_index(index)
+        remote_context_index(index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4185,13 +4201,11 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, uint64_t index,
                                  GenerationID gen, int depth, UniqueID uid,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, Provenance *prov,
-                                 const std::optional<uint64_t> &ctx_index)
+                                 DistributedID did, Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_gen(gen), op_depth(depth), op_uid(uid),
-        blocking_index(index), provenance(prov), future_map_domain(domain),
-        context_index(ctx_index)
+        blocking_index(index), provenance(prov), future_map_domain(domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4235,6 +4249,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return future_map_domain->get_tight_domain();
+    }
+
+    //--------------------------------------------------------------------------
+    std::optional<uint64_t> FutureMapImpl::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+        return remote_context_index;
+      if (op != nullptr)
+        return op->get_context_index(op_gen);
+      else
+        return std::optional<uint64_t>();
     }
 
     //--------------------------------------------------------------------------
@@ -4388,7 +4414,7 @@ namespace Legion {
         rez.serialize<bool>(true); // can create
         rez.serialize(future_map_domain->handle);
         rez.serialize(blocking_index);
-        rez.serialize(context_index);
+        rez.serialize(get_context_index());
         if (provenance != NULL)
           provenance->serialize(rez);
         else
@@ -4545,6 +4571,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(context_depth >= op_depth);
 #endif
+      const std::optional<uint64_t> context_index = get_context_index();
       if (!context_index || (context_depth != op_depth))
       {
         if (to_trigger.exists())
@@ -4711,7 +4738,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prov, prev->context_index),
+          prov),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
@@ -4726,7 +4753,7 @@ namespace Legion {
       : FutureMapImpl(prev->context, prev->op, prev->blocking_index,
           prev->op_gen, prev->op_depth, prev->op_uid,
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prov, prev->context_index),
+          prov),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
@@ -5236,6 +5263,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(context_depth >= op_depth);
 #endif
+      const std::optional<uint64_t> context_index = get_context_index();
       if (!context_index || (context_depth != op_depth))
       {
         if (to_trigger.exists())
@@ -6599,7 +6627,7 @@ namespace Legion {
             // We don't have an existing instance so we need to make one
             const RtEvent ready(
                 Realm::RegionInstance::create_instance(instance,
-                  manager->memory_manager->memory, layout, requests));
+                  manager->memory_manager->memory, *layout, requests));
             if (ready.exists() && (implicit_profiler != NULL))
               implicit_profiler->record_instance_ready(ready,
                   manager->get_unique_event());
@@ -6686,7 +6714,7 @@ namespace Legion {
             PhysicalInstance instance;
             const RtEvent ready(
               Realm::RegionInstance::create_instance(instance,
-                manager->memory_manager->memory, layout, requests));
+                manager->memory_manager->memory, *layout, requests));
             if (ready.exists() && (implicit_profiler != NULL))
               implicit_profiler->record_instance_ready(ready,
                   manager->get_unique_event());
@@ -6959,6 +6987,9 @@ namespace Legion {
     // Legion Handshake Impl 
     /////////////////////////////////////////////////////////////
 
+    /*static*/ std::atomic<Provenance*> LegionHandshakeImpl::external_wait = nullptr;
+    /*static*/ std::atomic<Provenance*> LegionHandshakeImpl::external_handoff = nullptr;
+
     //--------------------------------------------------------------------------
     LegionHandshakeImpl::LegionHandshakeImpl(bool init_ext)
       : init_in_ext(init_ext), split(false), runtime(NULL)
@@ -6998,13 +7029,17 @@ namespace Legion {
         // the external to the legion side will be the first ones to 
         // exhaust their generations and we know we need to generate
         // new barriers for both sides.
-        // Same trick as below for the profiler to tell it this is an 
-        // external handshake
-        const LgEvent previous_fevent = implicit_fevent;
-        implicit_fevent = ext_arrive_barrier;
         runtime->phase_barrier_arrive(ext_arrive_barrier, 1);
-        implicit_fevent = previous_fevent;
         Runtime::advance_barrier(ext_arrive_barrier);
+      }
+      if (runtime->profiler != nullptr)
+      {
+        if (external_wait.load() == nullptr)
+          external_wait.store(runtime->find_or_create_provenance(
+              EXTERNAL_WAIT.data(), EXTERNAL_WAIT.size()));
+        if (external_handoff.load() == nullptr)
+          external_handoff.store(runtime->find_or_create_provenance(
+                EXTERNAL_HANDOFF.data(), EXTERNAL_HANDOFF.size()));
       }
     }
 
@@ -7012,10 +7047,23 @@ namespace Legion {
     void LegionHandshakeImpl::ext_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
-      if (implicit_fevent.exists())
+      if (Processor::get_executing_processor().exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Illegal call to perform an external handshake hand-off to Legion "
+            "while on a Realm processor. All external calls must be done from "
+            "external threads.")
+      if (implicit_context != nullptr)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
             "Detected an illegal handshake calling 'ext_handoff_to_legion' "
             "from inside of a Legion task.")
+      if (runtime->profiler != nullptr)
+      {
+        if (implicit_profiler == nullptr)
+          implicit_profiler =
+            runtime->profiler->find_or_create_profiling_instance();
+        if (!previous_external_time)
+          previous_external_time = Realm::Clock::current_time_in_nanoseconds();
+      }
       // We need to detect the case where we are about to trigger the last
       // external barrier generation and update the legion side with new
       // barriers before we do that
@@ -7033,37 +7081,57 @@ namespace Legion {
         ext_arrive_barrier = legion_next_barrier;
         legion_arrive_barrier = ext_wait_barrier;
       }
-      // A little trick for profiling, nominally we don't have an fevent
-      // since we're external to Legion, but we need the profiling critical
-      // path logging to know this is an external handshake. We signal this
-      // by setting the implicit fevent to be the same as arrival barrier.
-      // The profiler will record this and recognize it as a handshake
-      implicit_fevent = to_arrive;
       runtime->phase_barrier_arrive(to_arrive, 1);
-      implicit_fevent = LgEvent::NO_LG_EVENT;
+      if (implicit_profiler != nullptr)
+        record_external_handshake(external_handoff.load());
     }
 
     //--------------------------------------------------------------------------
     void LegionHandshakeImpl::ext_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
-      if (implicit_fevent.exists())
+      if (Processor::get_executing_processor().exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
+            "Illegal call to perform an external handshake wait on Legion "
+            "while on a Realm processor. All external calls must be done from "
+            "external threads.")
+      if (implicit_context != nullptr)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
             "Detected an illegal handshake calling 'ext_wait_on_legion' "
             "from inside of a Legion task.")
+      if (runtime->profiler != nullptr)
+      {
+        if (implicit_profiler == nullptr)
+          implicit_profiler =
+            runtime->profiler->find_or_create_profiling_instance();
+        if (!previous_external_time)
+          previous_external_time = Realm::Clock::current_time_in_nanoseconds();
+      }
       // Wait for ext to be ready to run
-      // Note we use the external wait to be sure 
-      // we don't get drafted by the Realm runtime
-      ext_wait_barrier.external_wait();
+      // Use LgEvent::wait so we will profile this correctly
+      ext_wait_barrier.wait_faultignorant();
       // Now we can advance our wait barrier
       Runtime::advance_barrier(ext_wait_barrier);
+      if (implicit_profiler != nullptr)
+        record_external_handshake(external_wait.load());
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionHandshakeImpl::record_external_handshake(Provenance* provenance)
+    //--------------------------------------------------------------------------
+    {
+      const long long next_external_time =
+        Realm::Clock::current_time_in_nanoseconds();
+      implicit_profiler->record_application_range(provenance->pid, 
+          *previous_external_time, next_external_time);
+      previous_external_time = next_external_time;
     }
 
     //--------------------------------------------------------------------------
     void LegionHandshakeImpl::legion_handoff_to_ext(void)
     //--------------------------------------------------------------------------
     {
-      if (!implicit_fevent.exists())
+      if (implicit_context == nullptr)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
             "Detected an illegal handshake calling 'legion_handoff_to_ext' "
             "while not inside of a Legion task.")
@@ -7083,7 +7151,7 @@ namespace Legion {
     void LegionHandshakeImpl::legion_wait_on_ext(void)
     //--------------------------------------------------------------------------
     {
-      if (!implicit_fevent.exists())
+      if (implicit_context == nullptr)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
             "Detected an illegal handshake calling 'legion_wait_on_ext' "
             "while not inside of a Legion task.")
@@ -7121,7 +7189,7 @@ namespace Legion {
     void LegionHandshakeImpl::advance_legion_handshake(void)
     //--------------------------------------------------------------------------
     {
-      if (!implicit_fevent.exists())
+      if (implicit_context == nullptr)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_HANDSHAKE,
             "Detected an illegal handshake calling 'advance_legion_handshake ' "
             "while not inside of a Legion task.")
@@ -8804,7 +8872,10 @@ namespace Legion {
         derez.deserialize(instance);
         RtEvent use_event;
         derez.deserialize(use_event);
-        return new ConcretePool(instance, size, alignment, use_event, manager);
+        LgEvent unique_event;
+        derez.deserialize(unique_event);
+        return new ConcretePool(instance, size, alignment, use_event,
+            unique_event, manager);
       }
       else
       {
@@ -8843,7 +8914,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcretePool::ConcretePool(PhysicalInstance inst, size_t remain,
-        size_t alignment, RtEvent use, MemoryManager *man)
+        size_t alignment, RtEvent use, LgEvent unique, MemoryManager *man)
       : MemoryPool(alignment), manager(man), limit(remain),
         remaining_bytes(remain), first_unused_range(SENTINEL),
         ranges_initialized(false), released(false)
@@ -8855,7 +8926,8 @@ namespace Legion {
 #endif
       // Might not have an instance if this is a zero-sized pool
       if (inst.exists())
-        backing_instances.emplace(std::make_pair(inst, use));
+        backing_instances.emplace(std::make_pair(inst,
+              std::make_pair(use, unique)));
     }
 
     //--------------------------------------------------------------------------
@@ -8873,7 +8945,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(backing_instances.size() == 1);
 #endif
-      return ApEvent(backing_instances.begin()->second);
+      return ApEvent(backing_instances.begin()->second.first);
     }
 
     //--------------------------------------------------------------------------
@@ -8958,11 +9030,12 @@ namespace Legion {
       if (layout->bytes_used == 0)
       {
         // Special case for empty instances
-        Realm::InstanceLayoutGeneric *layout = create_layout(0, 1);
+        Realm::InstanceLayoutGeneric *empty_layout = create_layout(0, 1);
         PhysicalInstance instance;
         const Realm::ProfilingRequestSet empty_requests;
         use_event = RtEvent(PhysicalInstance::create_instance(
-              instance, manager->memory, layout->clone(), empty_requests));
+              instance, manager->memory, *empty_layout, empty_requests));
+        delete empty_layout;
 #ifdef DEBUG_LEGION
         assert(instance.exists());
         assert(allocated.find(instance) == allocated.end());
@@ -8995,8 +9068,8 @@ namespace Legion {
         // name the memory but since we know this pool is backed by
         // a normal Realm instance we can use that memory
         use_event = RtEvent(PhysicalInstance::create_external_instance(
-              instance, manager->memory, layout->clone(), *external_resource,
-              empty_requests, backing_instances[range.instance]));
+              instance, manager->memory, *layout, *external_resource,
+              empty_requests, backing_instances[range.instance].first));
 #ifdef DEBUG_LEGION
         assert(instance.exists());
         assert(allocated.find(instance) == allocated.end());
@@ -9049,17 +9122,15 @@ namespace Legion {
       RtEvent result;
       if (finder->second == SENTINEL)
       {
-        // This is a zero-sized range, so we can just redistrict it directly
-        // into the N instances that we need
-        std::vector<Realm::ProfilingRequestSet> requests(num_results);
+        // This is a zero-sized range, so we can just make new empty instances
+        std::vector<RtEvent> done_events;
+        const Realm::InstanceLayoutGeneric *layout = instance.get_layout();
 #ifdef DEBUG_LEGION
-        std::vector<MemoryManager::TaskLocalInstanceAllocator> allocators;
-        allocators.reserve(num_results);
-        std::vector<ProfilingResponseBase> bases;
-        bases.reserve(num_results);
+        assert(layout->bytes_used == 0);
 #endif
         for (unsigned idx = 0; idx < num_results; idx++)
         {
+          Realm::ProfilingRequestSet requests;
           if (manager->runtime->profiler != NULL)
           {
             if (!unique_events[idx].exists())
@@ -9069,33 +9140,23 @@ namespace Legion {
               unique.trigger();
               unique_events[idx] = LgEvent(unique);
             }
-            manager->runtime->profiler->add_inst_request(requests[idx],
+            manager->runtime->profiler->add_inst_request(requests,
                                       creator_uid, unique_events[idx]);
           }
-#ifdef DEBUG_LEGION
-          allocators.emplace_back(
-              MemoryManager::TaskLocalInstanceAllocator(unique_events[idx]));
-          bases.emplace_back(
-              ProfilingResponseBase(&allocators[idx], creator_uid, false));
-          Realm::ProfilingRequest &req = requests[idx].add_request(
-              manager->runtime->find_local_group(), LG_LEGION_PROFILING_ID,
-              &bases[idx], sizeof(bases[idx]), LG_RESOURCE_PRIORITY);
-          req.add_measurement<
-            Realm::ProfilingMeasurements::InstanceAllocResult>();
-#endif
+          // Don't even bother checking if this succeeded as we know that
+          // it is an empty sized layout so it should always succeed
+          result = RtEvent(PhysicalInstance::create_instance(
+                results[idx], manager->memory, *layout, requests));
+          if (result.exists())
+          {
+            if (implicit_profiler != NULL)
+              implicit_profiler->record_instance_ready(result,
+                  unique_events[idx]);
+            done_events.push_back(result);
+            result = RtEvent::NO_RT_EVENT;
+          }
         }
-        result = RtEvent(instance.redistrict(results, layouts,
-              num_results, &requests.front()));
-#ifdef DEBUG_LEGION
-        for (unsigned idx = 0; idx < allocators.size(); idx++)
-        {
-#ifndef NDEBUG
-          const bool success =
-#endif
-            allocators[idx].succeeded();
-          assert(success);
-        }
-#endif
+        result = Runtime::merge_events(done_events);
       }
       else // Non-zero-sized instance so can escape like normal
         result = escape_range(finder->second, num_results, results,
@@ -9109,7 +9170,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ConcretePool::free_instance(PhysicalInstance instance,
-                                     RtEvent precondition)
+                                     RtEvent precondition, LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9136,13 +9197,13 @@ namespace Legion {
         const Range &range = ranges[finder->second];
         // Free up the back instance since we know that we're not
         // going to bother recycling this memory since we're released
-        std::map<PhysicalInstance,RtEvent>::iterator backing_finder =
-          backing_instances.find(range.instance);
+        std::map<PhysicalInstance,std::pair<RtEvent,LgEvent> >::iterator
+          backing_finder = backing_instances.find(range.instance);
 #ifdef DEBUG_LEGION
         assert(backing_finder != backing_instances.end());
 #endif
         backing_finder->first.destroy(
-            Runtime::merge_events(backing_finder->second, precondition));
+            Runtime::merge_events(backing_finder->second.first, precondition));
         backing_instances.erase(backing_finder);
       }
       else if (finder->second != SENTINEL)
@@ -9175,10 +9236,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(backing_instances.size() == 1);
 #endif
-          std::map<PhysicalInstance,RtEvent>::const_iterator it =
-            backing_instances.begin();
+          std::map<PhysicalInstance,std::pair<RtEvent,LgEvent> >::const_iterator
+            it = backing_instances.begin();
 #ifdef DEBUG_LEGION
-          assert(it->second.has_triggered());
+          assert(it->second.first.has_triggered());
 #endif
           // If we're on the local node for the instance then set up the ranges
           const void *base = it->first.pointer_untyped(0, 0);
@@ -9546,7 +9607,7 @@ namespace Legion {
         current = current_range.next;
       }
       // Perform instance redistricting to create all the new instances
-      std::map<PhysicalInstance,RtEvent>::iterator
+      std::map<PhysicalInstance,std::pair<RtEvent,LgEvent> >::iterator
         finder = backing_instances.find(range->instance);
 #ifdef DEBUG_LEGION
       assert(finder != backing_instances.end());
@@ -9633,13 +9694,20 @@ namespace Legion {
         std::vector<PhysicalInstance> extra_instances(extra_layouts.size());
         result = RtEvent(range->instance.redistrict(&extra_instances.front(),
               &extra_layouts.front(), extra_layouts.size(),
-              &requests.front(), finder->second));
-
+              &requests.front(), finder->second.first));
+        // Report the profiling info if necessary
+        if (result.exists() && (implicit_profiler != NULL))
+        {
+          for (unsigned idx = 0; idx < extra_unique_events.size(); idx++)
+            implicit_profiler->record_instance_redistrict(result,
+                finder->second.second, extra_unique_events[idx],
+                finder->second.first);
+        }
         if (prev_index != index)
         {
           // Update all the previous ranges with the new backing instance
-          backing_instances.emplace(
-              std::make_pair(extra_instances.front(), result));
+          backing_instances.emplace(std::make_pair(extra_instances.front(),
+                std::make_pair(result, extra_unique_events.front())));
           while (prev_index != index)
           {
             Range &prev_range = ranges[prev_index];
@@ -9660,8 +9728,8 @@ namespace Legion {
         if (next_index != index)
         {
           // Update all the next ranges with the new backing instance
-          backing_instances.emplace(
-              std::make_pair(extra_instances.back(), result));
+          backing_instances.emplace(std::make_pair(extra_instances.back(),
+                std::make_pair(result, extra_unique_events.back())));
           while (next_index != index)
           {
             Range &next_range = ranges[next_index];
@@ -9703,7 +9771,14 @@ namespace Legion {
 #endif
         }
         result = RtEvent(range->instance.redistrict(results, layouts,
-              num_results, &requests.front(), finder->second));
+              num_results, &requests.front(), finder->second.first));
+        // Report the profiling info if necessary
+        if (result.exists() && (implicit_profiler != NULL))
+        {
+          for (unsigned idx = 0; idx < num_results; idx++)
+            implicit_profiler->record_instance_redistrict(result,
+              finder->second.second, unique_events[idx], finder->second.first);
+        }
         // Nothing to update here since we're just going to leave the
         // existing range in place as though it is allocated and it
         // will never be deallocated
@@ -9745,7 +9820,8 @@ namespace Legion {
         pending_frees.clear();
         // Iterate over all the existing allocations and escape their ranges
         // and replace their backing stores with the escaped instances
-        std::map<PhysicalInstance,RtEvent> new_backing_instances;
+        std::map<PhysicalInstance,std::pair<RtEvent,LgEvent> >
+          new_backing_instances;
         for (std::map<PhysicalInstance,unsigned>::const_iterator it =
               allocated.begin(); it != allocated.end(); it++)
         {
@@ -9758,17 +9834,19 @@ namespace Legion {
           const Realm::InstanceLayoutGeneric *layout = it->first.get_layout();
           const RtEvent ready = escape_range(it->second, 1/*num results*/,
               &backing_instance, &unique_event, &layout, creator);
-          new_backing_instances[backing_instance] = ready;
+          new_backing_instances.emplace(std::make_pair(backing_instance,
+                std::make_pair(ready, unique_event)));
           Range &range = ranges[it->second];
           range.instance = backing_instance;  
         }
         // Then go through and delete the remaining backing stores
-        for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
+        for (std::map<PhysicalInstance,
+              std::pair<RtEvent,LgEvent> >::const_iterator it =
               backing_instances.begin(); it != backing_instances.end(); it++)
         {
           manager->update_remaining_capacity(
               it->first.get_layout()->bytes_used);
-          it->first.destroy(it->second);
+          it->first.destroy(it->second.first);
         }
         // Now the only remaining backing instances are the ones we made
         backing_instances.swap(new_backing_instances);
@@ -9782,12 +9860,13 @@ namespace Legion {
     {
       // Iterate over all the remaining backing stores delete them
       // once the done event is triggered
-      for (std::map<PhysicalInstance,RtEvent>::const_iterator it =
+      for (std::map<PhysicalInstance,
+            std::pair<RtEvent,LgEvent> >::const_iterator it =
             backing_instances.begin(); it != backing_instances.end(); it++)
       {
         manager->update_remaining_capacity(
             it->first.get_layout()->bytes_used);
-        it->first.destroy(Runtime::merge_events(it->second, done));
+        it->first.destroy(Runtime::merge_events(it->second.first, done));
       }
     }
 
@@ -9954,15 +10033,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(backing_instances.size() == 1);
 #endif
-        std::map<PhysicalInstance,RtEvent>::const_iterator finder =
+        std::map<PhysicalInstance,
+          std::pair<RtEvent,LgEvent> >::const_iterator finder =
           backing_instances.begin();
         rez.serialize(finder->first);
-        rez.serialize(finder->second);
+        rez.serialize(finder->second.first);
+        rez.serialize(finder->second.second);
       }
       else
       {
         rez.serialize(PhysicalInstance::NO_INST);
         rez.serialize(RtEvent::NO_RT_EVENT); 
+        rez.serialize(LgEvent::NO_LG_EVENT);
       }
     } 
 
@@ -10031,8 +10113,11 @@ namespace Legion {
       if (!freed_instances.empty())
       {
         size_t previous_size = 0;
+        RtEvent previous_done;
+        LgEvent previous_unique;
         Realm::InstanceLayoutGeneric *layout = NULL;
-        PhysicalInstance previous = find_local_freed_hole(size, previous_size);
+        PhysicalInstance previous = find_local_freed_hole(size, previous_size,
+            previous_done, previous_unique);
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a future instance
@@ -10049,6 +10134,7 @@ namespace Legion {
             layout =
               Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                   rect_space, constraints, dim_order);
+            layout->alignment_reqd  = manager->compute_future_alignment(size);
           }
           LgEvent unique_event;
           if (manager->runtime->legion_spy_enabled || 
@@ -10072,9 +10158,13 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests, creator_uid,
                                                          unique_event);
           PhysicalInstance instance;
-          RtEvent use_event(previous.redistrict(instance, layout, requests));
+          RtEvent use_event(previous.redistrict(
+                instance, layout, requests, previous_done));
           if (allocator.succeeded())
           {
+            if (use_event.exists() && (implicit_profiler != NULL))
+              implicit_profiler->record_instance_redistrict(use_event,
+                  previous_unique, unique_event, previous_done);
             size_t bytes_used = instance.get_layout()->bytes_used;
 #ifdef DEBUG_LEGION
             assert(bytes_used <= previous_size);
@@ -10088,7 +10178,8 @@ namespace Legion {
           }
           else
             manager->update_remaining_capacity(previous_size);
-          previous = find_local_freed_hole(size, previous_size);
+          previous = find_local_freed_hole(size, previous_size,
+              previous_done, previous_unique);
         }
         if (layout != NULL)
           delete layout;
@@ -10100,12 +10191,11 @@ namespace Legion {
         // If it doesn't work, free all our freed instances (which are all
         // smaller than the size or we would have found a hole to use) and
         // then try again
-        for (std::map<size_t,
-             std::list<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
-             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
-                it = fit->second.begin(); it != fit->second.end(); it++)
-            manager->free_task_local_instance(it->first, it->second);
+        for (std::map<size_t,std::list<FreedInstance> >::const_iterator fit =
+              freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::list<FreedInstance>::const_iterator it =
+                fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->instance, it->precondition);
         freed_instances.clear();
         freed_bytes = 0;
       }
@@ -10130,14 +10220,16 @@ namespace Legion {
         PhysicalInstance instance;
         const Realm::ProfilingRequestSet empty_requests;
         use_event = RtEvent(PhysicalInstance::create_instance(
-              instance, manager->memory, layout->clone(), empty_requests));
+              instance, manager->memory, *layout, empty_requests));
         return instance;
       }
       if (!freed_instances.empty())
       {
         size_t previous_size = 0;
-        PhysicalInstance previous =
-          find_local_freed_hole(layout->bytes_used, previous_size);
+        RtEvent previous_done;
+        LgEvent previous_unique;
+        PhysicalInstance previous = find_local_freed_hole(layout->bytes_used,
+            previous_size, previous_done, previous_unique);
         while (previous.exists())
         {
           // Redistrict the previously freed instance into a new instance
@@ -10153,9 +10245,13 @@ namespace Legion {
             manager->runtime->profiler->add_inst_request(requests, creator_uid,
                                                          unique_event);
           PhysicalInstance instance;
-          use_event = RtEvent(previous.redistrict(instance, layout, requests));
+          use_event = RtEvent(previous.redistrict(
+                instance, layout, requests, previous_done));
           if (allocator.succeeded())
           {
+            if (use_event.exists() && (implicit_profiler != NULL))
+              implicit_profiler->record_instance_redistrict(use_event,
+                  previous_unique, unique_event, previous_done);
             size_t bytes_used = instance.get_layout()->bytes_used;
 #ifdef DEBUG_LEGION
             assert(bytes_used <= previous_size);
@@ -10166,7 +10262,8 @@ namespace Legion {
           }
           else
             manager->update_remaining_capacity(previous_size);
-          previous = find_local_freed_hole(layout->bytes_used, previous_size);
+          previous = find_local_freed_hole(layout->bytes_used, previous_size,
+              previous_done, previous_unique);
         }
         // Try to do the allocation the normal way
         PhysicalInstance instance = manager->create_task_local_instance(
@@ -10177,12 +10274,11 @@ namespace Legion {
         // If it doesn't work, free all our freed instances (which are all
         // smaller than the size or we would have found a hole to use) and
         // then try again
-        for (std::map<size_t,
-             std::list<std::pair<PhysicalInstance,RtEvent> > >::const_iterator
-             fit = freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
-                it = fit->second.begin(); it != fit->second.end(); it++)
-            manager->free_task_local_instance(it->first, it->second);
+        for (std::map<size_t,std::list<FreedInstance> >::const_iterator fit =
+              freed_instances.begin(); fit != freed_instances.end(); fit++)
+          for (std::list<FreedInstance>::const_iterator it =
+                fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->instance, it->precondition);
         freed_instances.clear();
         freed_bytes = 0;
       }
@@ -10193,26 +10289,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance UnboundPool::find_local_freed_hole(size_t size,
-                                                        size_t &previous_size)
+        size_t &previous_size, RtEvent &previous_done, LgEvent &previous_unique)
     //--------------------------------------------------------------------------
     {
-      for (std::map<size_t,std::list<std::pair<PhysicalInstance,RtEvent> > >
-            ::iterator sit = freed_instances.lower_bound(size);
-            sit != freed_instances.end(); sit++)
+      for (std::map<size_t,std::list<FreedInstance> >::iterator sit =
+            freed_instances.lower_bound(size); sit !=
+            freed_instances.end(); sit++)
       {
 #ifdef DEBUG_LEGION
         assert(!sit->second.empty());
         assert(sit->first <= freed_bytes);
 #endif
-        for (std::list<std::pair<PhysicalInstance,RtEvent> >::iterator it =
+        for (std::list<FreedInstance>::iterator it =
               sit->second.begin(); it != sit->second.end(); it++)
         {
           // If the event hasn't triggered then skip it
-          if (!it->second.has_triggered())
+          if (!it->precondition.has_triggered())
             continue;
-          PhysicalInstance result = it->first;
+          PhysicalInstance result = it->instance;
           freed_bytes -= sit->first;
           previous_size = sit->first;
+          previous_done = it->precondition;
+          previous_unique = it->unique_event;
           sit->second.erase(it);
           if (sit->second.empty())
             freed_instances.erase(sit);
@@ -10244,7 +10342,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void UnboundPool::free_instance(PhysicalInstance instance,
-                                    RtEvent precondition)
+                                    RtEvent precondition, LgEvent unique_event)
     //--------------------------------------------------------------------------
     {
       if (!released && (max_freed_bytes > 0))
@@ -10258,7 +10356,7 @@ namespace Legion {
           return;
         }
         freed_instances[size].emplace_back(
-            std::make_pair(instance, precondition));
+            FreedInstance{instance, precondition, unique_event});
         freed_bytes += size;
         if (max_freed_bytes < freed_bytes)
         {
@@ -10266,13 +10364,12 @@ namespace Legion {
           // until we're back under the limit of bytes we can buffer
           while (!freed_instances.empty())
           {
-            std::map<size_t,std::list<
-              std::pair<PhysicalInstance,RtEvent> > >::iterator it =
+            std::map<size_t,std::list<FreedInstance> >::iterator it =
                 freed_instances.begin();
             while (!it->second.empty())
             {
               manager->free_task_local_instance(
-                  it->second.back().first, it->second.back().second);
+                  it->second.back().instance, it->second.back().precondition);
               it->second.pop_back();
               freed_bytes -= it->first;
               if (freed_bytes <= max_freed_bytes)
@@ -10303,12 +10400,11 @@ namespace Legion {
     {
       if (!released)
       {
-        for (std::map<size_t,std::list<
-              std::pair<PhysicalInstance,RtEvent> > >::const_iterator fit =
+        for (std::map<size_t,std::list<FreedInstance> >::const_iterator fit =
               freed_instances.begin(); fit != freed_instances.end(); fit++)
-          for (std::list<std::pair<PhysicalInstance,RtEvent> >::const_iterator
-                it = fit->second.begin(); it != fit->second.end(); it++)
-            manager->free_task_local_instance(it->first, it->second);
+          for (std::list<FreedInstance>::const_iterator it =
+                fit->second.begin(); it != fit->second.end(); it++)
+            manager->free_task_local_instance(it->instance, it->precondition);
         manager->release_unbound_pool();
         freed_instances.clear();
         freed_bytes = 0;
@@ -11050,18 +11146,18 @@ namespace Legion {
           InstanceBuilder builder(regions,constraints,runtime,this,creator_id);
           builder.initialize(runtime->forest);
           size_t footprint = 0;
-          PhysicalManager *manager = builder.create_physical_instance(
+          PhysicalManager *new_manager = builder.create_physical_instance(
               runtime->forest, NULL/*unsat kind*/, NULL/*unset index*/,
-              &footprint, collected, hole);
-          if (manager != NULL)
+              &footprint, collected, hole, manager->get_unique_event());
+          if (new_manager != NULL)
           {
 #ifdef DEBUG_LEGION
             assert(footprint <= manager->instance_footprint);
 #endif
             if (runtime->legion_spy_enabled)
-              manager->log_instance_creation(creator_id, processor, regions);
-            instance = MappingInstance(manager);
-            record_created_instance(manager, acquire, priority);
+              new_manager->log_instance_creation(creator_id, processor,regions);
+            instance = MappingInstance(new_manager);
+            record_created_instance(new_manager, acquire, priority);
             // Update the footprint if necessary
             if (footprint < manager->instance_footprint)
             {
@@ -11164,18 +11260,18 @@ namespace Legion {
           InstanceBuilder builder(regions,*constraints,runtime,this,creator_id);
           builder.initialize(runtime->forest);
           size_t footprint = 0;
-          PhysicalManager *manager = builder.create_physical_instance(
+          PhysicalManager *new_manager = builder.create_physical_instance(
               runtime->forest, NULL/*unsat kind*/, NULL/*unset index*/,
-              &footprint, collected, hole);
-          if (manager != NULL)
+              &footprint, collected, hole, manager->get_unique_event());
+          if (new_manager != NULL)
           {
 #ifdef DEBUG_LEGION
             assert(footprint <= manager->instance_footprint);
 #endif
             if (runtime->legion_spy_enabled)
-              manager->log_instance_creation(creator_id, processor, regions);
-            instance = MappingInstance(manager);
-            record_created_instance(manager, acquire, priority);
+              new_manager->log_instance_creation(creator_id, processor, regions);
+            instance = MappingInstance(new_manager);
+            record_created_instance(new_manager, acquire, priority);
             // Update the footprint if necessary
             if (footprint < manager->instance_footprint)
             {
@@ -12919,7 +13015,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent MemoryManager::GarbageCollector::perform_collection(
-                                                PhysicalInstance &hole_instance)
+                          PhysicalInstance &hole_instance, LgEvent &hole_unique)
     //--------------------------------------------------------------------------
     {
       while (!collection_complete())
@@ -12940,6 +13036,8 @@ namespace Legion {
           RtEvent collected;
           if (manager->collect(collected, &hole_instance))
           {
+            if (hole_instance.exists())
+              hole_unique = manager->get_unique_event();
             update_capacity(manager->instance_footprint);
             if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
               delete manager;
@@ -12961,6 +13059,8 @@ namespace Legion {
             RtEvent collected;
             if (manager->collect(collected, &hole_instance))
             {
+              if (hole_instance.exists())
+                hole_unique = manager->get_unique_event();
               update_capacity(manager->instance_footprint);
               if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
                 delete manager;
@@ -13113,11 +13213,13 @@ namespace Legion {
                                  collectable_instances);
       while (!collector.collection_complete())
       {
+        LgEvent hole_unique;
         PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
         const RtEvent collection_done = 
-          collector.perform_collection(hole_instance); 
+          collector.perform_collection(hole_instance, hole_unique); 
         result = builder.create_physical_instance(runtime->forest,
-            unsat_kind, unsat_index, NULL, collection_done, hole_instance);
+            unsat_kind, unsat_index, NULL, collection_done,
+            hole_instance, hole_unique);
         if (result != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -13292,8 +13394,8 @@ namespace Legion {
       {
         // Zero-sized pools are easy to make
         if (bounds.size == 0)
-          return new ConcretePool(PhysicalInstance::NO_INST,
-              bounds.size, bounds.alignment, RtEvent::NO_RT_EVENT, this);
+          return new ConcretePool(PhysicalInstance::NO_INST, bounds.size,
+            bounds.alignment, RtEvent::NO_RT_EVENT, LgEvent::NO_LG_EVENT, this);
         // Creating a normal memory pool so create a task local instance
         // for the requested number of bytes and and then make a pool for it  
         Realm::InstanceLayoutGeneric *layout =
@@ -13313,7 +13415,7 @@ namespace Legion {
         if (!instance.exists())
           return NULL;
         return new ConcretePool(instance, bounds.size, bounds.alignment,
-                                use_event, this);
+                                use_event, unique_event, this);
       }
       else
       {
@@ -13793,10 +13895,12 @@ namespace Legion {
       if (wait_on.exists())
         wait_on.wait();
       do {
+        LgEvent hole_unique;
         RtEvent alloc_precondition;
         PhysicalInstance hole_instance = PhysicalInstance::NO_INST;
         if (collector != NULL)
-          alloc_precondition = collector->perform_collection(hole_instance);
+          alloc_precondition = collector->perform_collection(
+              hole_instance, hole_unique);
         Realm::ProfilingRequestSet requests;
 #ifdef DEBUG_LEGION
         assert(!instance.exists());
@@ -13818,13 +13922,19 @@ namespace Legion {
                 instance, layout, requests, alloc_precondition));
         else
           use_event = RtEvent(PhysicalInstance::create_instance(instance,
-                    memory, layout->clone(), requests, alloc_precondition));
+                    memory, *layout, requests, alloc_precondition));
         if (allocator.succeeded())
         {
           // Only record this if we succeeded in the allocation
           if (use_event.exists() && (implicit_profiler != NULL))
-            implicit_profiler->record_instance_ready(use_event, unique_event,
-                                                     alloc_precondition);
+          {
+            if (hole_instance.exists())
+              implicit_profiler->record_instance_redistrict(use_event,
+                  hole_unique, unique_event, alloc_precondition);
+            else
+              implicit_profiler->record_instance_ready(use_event, unique_event,
+                                                       alloc_precondition);
+          }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
           size_t previous =
@@ -13842,8 +13952,8 @@ namespace Legion {
           instance = PhysicalInstance::NO_INST;
         }
 #else
-        use_event = allocate_legion_instance(layout->clone(), 
-            requests, instance);
+        use_event = allocate_legion_instance(layout, 
+            requests, instance, unique_event);
         if (instance.exists())
         {
           // Only record this if we succeeded in the allocation
@@ -13856,7 +13966,7 @@ namespace Legion {
 #endif
 #endif
             remaining_capacity.fetch_sub(layout->bytes_used);
-#ifdef DEBUG_LEGIOn
+#ifdef DEBUG_LEGION
           assert(layout->bytes_used <= previous);
 #endif
           break;
@@ -14254,7 +14364,7 @@ namespace Legion {
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
     RtEvent MemoryManager::allocate_legion_instance(
-                                Realm::InstanceLayoutGeneric *layout,
+                                const Realm::InstanceLayoutGeneric *layout,
                                 const Realm::ProfilingRequestSet &requests,
                                 PhysicalInstance &instance,
                                 LgEvent unique_event, bool needs_deferral)
@@ -14280,7 +14390,7 @@ namespace Legion {
                 (uintptr_t)ptr, footprint, false/*read only*/);
             result = 
               RtEvent(PhysicalInstance::create_external_instance(instance,
-                  resource.suggested_memory(), layout, resource, requests));
+                  resource.suggested_memory(), *layout, resource, requests));
             break;
           }
         case Memory::REGDMA_MEM:
@@ -14296,7 +14406,7 @@ namespace Legion {
                 (uintptr_t)ptr, footprint, false/*read only*/);
             result = 
               RtEvent(PhysicalInstance::create_external_instance(instance,
-                  resource.suggested_memory(), layout, resource, requests));
+                  resource.suggested_memory(), *layout, resource, requests));
             break;
           }
 #ifdef LEGION_USE_CUDA
@@ -14330,7 +14440,7 @@ namespace Legion {
                     device, (uintptr_t)ptr, footprint, false/*read only*/);
                 result = 
                   RtEvent(PhysicalInstance::create_external_instance(instance,
-                    resource.suggested_memory(), layout, resource, requests));
+                    resource.suggested_memory(), *layout, resource, requests));
               }
               else
               {
@@ -14349,7 +14459,7 @@ namespace Legion {
                     (uintptr_t)ptr, footprint, false/*read only*/);
                 result =
                   RtEvent(PhysicalInstance::create_external_instance(instance,
-                    resource.suggested_memory(), layout, resource, requests));
+                    resource.suggested_memory(), *layout, resource, requests));
               }
             }
             break;
@@ -14386,7 +14496,7 @@ namespace Legion {
                     device, (uintptr_t)ptr, footprint, false/*read only*/);
                 result =
                   RtEvent(PhysicalInstance::create_external_instance(instance,
-                    resource.suggested_memory(), layout, resource, requests));
+                    resource.suggested_memory(), *layout, resource, requests));
               }
               else
               {
@@ -14405,7 +14515,7 @@ namespace Legion {
                     (uintptr_t)ptr, footprint, false/*read only*/);
                 result =
                   RtEvent(PhysicalInstance::create_external_instance(instance,
-                    resource.suggested_memory(), layout, resource, requests));
+                    resource.suggested_memory(), *layout, resource, requests));
               }
             }
             break;
@@ -14539,6 +14649,7 @@ namespace Legion {
       const RtEvent ready = margs->manager->allocate_legion_instance(
           margs->layout, *(margs->requests), *(margs->instance), 
           margs->unique_event, false/*needs defer*/);
+      delete margs->layout;
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
     }
@@ -16803,11 +16914,24 @@ namespace Legion {
     {
       // Pull the channel off to do the receiving
       const char *buffer = (const char*)args;
-      VirtualChannelKind channel = *((const VirtualChannelKind*)buffer);
-      buffer += sizeof(channel);
-      arglen -= sizeof(channel);
-      channels[channel].process_message(buffer, arglen, runtime, 
-                                        remote_address_space);
+      VirtualChannelKind kind = *((const VirtualChannelKind*)buffer);
+      buffer += sizeof(kind);
+      arglen -= sizeof(kind);
+      VirtualChannel& channel = channels[kind];
+      // If this is an ordered virtual channel hook up the implicit fevent
+      // that we made with the original fevent for critical path analysis.
+      // Note we can't do this for the profiling virtual channel or we would
+      // end up introducing an infinite loop and never complete
+      if (channel.profile_outgoing_messages)
+      {
+        const LgEvent original_fevent =
+          runtime->profiler->find_message_fevent(
+              implicit_fevent, false/*remove*/);
+        if (channel.ordered_channel && (kind != PROFILING_VIRTUAL_CHANNEL))
+          implicit_profiler->record_event_trigger(
+              original_fevent, implicit_fevent);
+      }
+      channel.process_message(buffer, arglen, runtime, remote_address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -21353,7 +21477,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_runtime(std::vector<RtEvent> &shutdown_preconditions)
+    void Runtime::finalize_runtime(
+                              std::vector<Realm::Event> &shutdown_preconditions)
     //--------------------------------------------------------------------------
     {
       if (!separate_runtime_instances)
@@ -21370,8 +21495,8 @@ namespace Legion {
           if (total_address_spaces <= next)
             break;
           MessageManager *messenger = find_messenger(next);
-          shutdown_preconditions.push_back(RtEvent(messenger->target.spawn(
-                  LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
+          shutdown_preconditions.push_back(messenger->target.spawn(
+                  LG_SHUTDOWN_TASK_ID, NULL, 0, empty_requests));
         }
       }
       // Have the memory managers for deletion of all their instances
@@ -34632,12 +34757,19 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
             "Implicit top-level tasks are not allowed to be started before "
             "the Legion runtime is started.")
+      if (Processor::get_executing_processor().exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+            "Attempted to start implicit top-level task %d on a Realm "
+            "processor. Implicit top-level tasks can only be run on "
+            "external threads not managed by Realm.", top_task_id)
       // Check that we're not inside a task
       if (implicit_context != NULL)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
             "Implicit top-level tasks are not allowed to be started inside "
             "of Legion tasks. Only external computations are permitted "
             "to create new implicit top-level tasks.")
+      if ((profiler != NULL) && (implicit_profiler == NULL))
+        implicit_profiler = profiler->find_or_create_profiling_instance();
       // Save the top-level task name if necessary
       // Record a fake variant if we're profiling
       if (task_name != NULL)
@@ -34718,10 +34850,21 @@ namespace Legion {
             "Illegal call to unbind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
-      ctx->begin_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
+      if (ctx != implicit_context)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Illegal call to unbind an implicit top-level task %s (UID %lld) "
+            "when it is not bound to the current external thread.",
+            ctx->get_task_name(), ctx->get_unique_id())
+      if (implicit_profiler != nullptr)
+      {
+        ctx->begin_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
+        implicit_fevent = implicit_profiler->external_fevent;
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Need support for profiling unbind implicit top-level tasks")
+      }
+      else
+        implicit_fevent = LgEvent::NO_LG_EVENT;
       implicit_context = NULL;
-      implicit_profiler = NULL;
-      implicit_fevent = LgEvent::NO_LG_EVENT;
       implicit_provenance = 0;
     }
 
@@ -34734,12 +34877,30 @@ namespace Legion {
             "Illegal call to bind a context for task %s (UID %lld) that "
             "is not an implicit top-level task",
             ctx->get_task_name(), ctx->get_unique_id())
+      if (Processor::get_executing_processor().exists())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_TOP_LEVEL_TASK,
+            "Attempted to bind an implicit top-level task %s on a Realm "
+            "processor. Implicit top-level tasks can only be run on "
+            "external threads not managed by Realm.",
+            ctx->get_task_name())
+      if (implicit_context != nullptr)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Illegal call to bind an implicit top-level task %s (UID %lld) "
+            "to an external thread that already has an implicit top-level "
+            "task associated with it. Only one implicit top-level task "
+            "can be associated with an external thread at a time.",
+            ctx->get_task_name(), ctx->get_unique_id())
       ctx->end_wait(LgEvent::NO_LG_EVENT, true/*from application*/);
       if (implicit_runtime == NULL)
         implicit_runtime = this;
       if ((profiler != NULL) && (implicit_profiler == NULL))
+      {
         implicit_profiler = profiler->find_or_create_profiling_instance();
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+            "Need support for profiling binding implicit top-level tasks")
+      }
       implicit_context = ctx;
+      implicit_fevent = ctx->owner_task->get_completion_event();
       implicit_provenance = ctx->owner_task->get_unique_op_id();
     }
 
@@ -34747,6 +34908,11 @@ namespace Legion {
     void Runtime::finish_implicit_task(TaskContext *ctx, ApEvent effects)
     //--------------------------------------------------------------------------
     {
+      if (implicit_context != ctx)
+        REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
+            "Illegal call to finish an implicit top-level  task %s (UID %lld) "
+            "which is not currently bound to the external thread.",
+            ctx->get_task_name(), ctx->get_unique_id())
       if (!ctx->implicit_task)
         REPORT_LEGION_ERROR(ERROR_CONFUSED_USER,
             "Illegal call to finish an implicit task for task %s (UID %lld) "
@@ -34756,9 +34922,11 @@ namespace Legion {
       ctx->end_task(NULL, 0, false/*owned*/, PhysicalInstance::NO_INST, 
           NULL/*callback functor*/, NULL/*resource*/,  NULL/*freefunc*/,
           NULL/*metadataptr*/, 0/*metadatasize*/, effects);
+      if (implicit_profiler != nullptr)
+        implicit_fevent = implicit_profiler->external_fevent;
+      else
+        implicit_fevent = LgEvent::NO_LG_EVENT;
       implicit_context = NULL;
-      implicit_profiler = NULL;
-      implicit_fevent = LgEvent::NO_LG_EVENT;
       implicit_provenance = 0;
     }
 
@@ -35974,16 +36142,13 @@ namespace Legion {
       implicit_profiler = NULL;
       implicit_fevent = LgEvent::NO_LG_EVENT;
       // Finalize the runtime and then delete it
-      std::vector<RtEvent> shutdown_events;
+      std::vector<Realm::Event> shutdown_events;
       runtime->finalize_runtime(shutdown_events);
       delete runtime;
       // If we have any shutdown events we need to wait for them to have
       // finished before we return and end up marking ourselves finished
       if (!shutdown_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(shutdown_events);
-        wait_on.wait();
-      }
+        Realm::Event::merge_events(shutdown_events).wait();
     }
 
     //--------------------------------------------------------------------------

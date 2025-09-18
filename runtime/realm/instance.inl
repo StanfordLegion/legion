@@ -130,7 +130,9 @@ namespace Realm {
     for (int i = 0; i < N; i++)
       dim_order[i] = i;
     InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(space, ilc, dim_order);
-    return create_instance(inst, memory, layout, reqs, wait_on);
+    Event result = create_instance(inst, memory, *layout, reqs, wait_on);
+    delete layout;
+    return result;
   }
 
   template <int N, typename T>
@@ -151,7 +153,9 @@ namespace Realm {
     for (int i = 0; i < N; i++)
       dim_order[i] = i;
     InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout<N,T>(space, ilc, dim_order);
-    return create_instance(inst, memory, layout, reqs, wait_on);
+    Event result = create_instance(inst, memory, *layout, reqs, wait_on);
+    delete layout;
+    return result;
   }
 
   // we'd like the methods above to accept a Rect<N,T> in place of the
@@ -204,7 +208,9 @@ namespace Realm {
     //  from the layout and assume it's read/write
     ExternalMemoryResource res(reinterpret_cast<void *>(base),
 			       ilg->bytes_used);
-    return create_external_instance(inst, memory, ilg, res, prs, wait_on);
+    Event result = create_external_instance(inst, memory, *ilg, res, prs, wait_on);
+    delete ilg;
+    return result;
   }
 
   template <int N, typename T>
@@ -227,9 +233,11 @@ namespace Realm {
     ilg = InstanceLayoutGeneric::choose_instance_layout(space, ilc, dim_order);
 
     ExternalFileResource res(file_name, file_mode);
-    return create_external_instance(inst,
+    Event result = create_external_instance(inst,
 				    res.suggested_memory(),
-				    ilg, res, prs, wait_on);
+				    *ilg, res, prs, wait_on);
+    delete ilg;
+    return result;
   }
 
 

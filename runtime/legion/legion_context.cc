@@ -885,6 +885,10 @@ namespace Legion {
 #endif
       std::map<PhysicalInstance,LgEvent>::iterator finder =
         task_local_instances.find(instance);
+#ifdef DEBUG_LEGION
+      assert(finder != task_local_instances.end());
+#endif
+      LgEvent old_unique_event;
       if (finder != task_local_instances.end())
       {
         // Special case where we can reuse the existing instance because
@@ -899,6 +903,7 @@ namespace Legion {
           return RtEvent::NO_RT_EVENT;
         }
         // Everything else falls through and we redistrict instance
+        old_unique_event = finder->second;
         task_local_instances.erase(finder);
       }
       std::vector<Realm::ProfilingRequestSet> requests(num_results);
@@ -964,6 +969,26 @@ namespace Legion {
         }
         ready = RtEvent(instance.redistrict(results, layouts,
             num_results, &requests.front()));
+      }
+      if (ready.exists() && (runtime->profiler != NULL))
+      {
+        if (old_unique_event.exists())
+        {
+          // This happens when the instance being escaped was
+          // one we made and should be the common case
+          for (unsigned idx = 0; idx < num_results; idx++)
+            implicit_profiler->record_instance_redistrict(
+                ready, old_unique_event, unique_events[idx]);
+        }
+        else
+        {
+          // This happens when the instance being escaped wasn't
+          // actually made by Legion, e.g. when the user passes
+          // in an external instance to an output region
+          for (unsigned idx = 0; idx < num_results; idx++)
+            implicit_profiler->record_instance_ready(
+                ready, unique_events[idx]);
+        }
       }
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < allocators.size(); idx++)
@@ -26025,7 +26050,6 @@ namespace Legion {
             "Detected double deletion of deferred buffer " IDFMT
             "in parent task %s (UID %lld).",
             instance.id, get_task_name(), get_unique_id())
-      task_local_instances.erase(finder);
       std::map<Memory,MemoryPool*>::const_iterator pool_finder =
         memory_pools.find(instance.get_location());
       if (pool_finder == memory_pools.end())
@@ -26038,7 +26062,9 @@ namespace Legion {
         manager->free_task_local_instance(instance, precondition);
       }
       else
-        pool_finder->second->free_instance(instance, precondition);
+        pool_finder->second->free_instance(instance, precondition,
+            finder->second);
+      task_local_instances.erase(finder);
     }
 
     //--------------------------------------------------------------------------

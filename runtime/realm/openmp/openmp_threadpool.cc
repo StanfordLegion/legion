@@ -14,6 +14,7 @@
  */
 
 // OpenMP (or similar) thread pool for Realm
+#include <thread>
 #include "realm/openmp/openmp_threadpool.h"
 
 #include "realm/logging.h"
@@ -24,7 +25,7 @@ namespace Realm {
   Logger log_pool("threadpool");
 
   namespace ThreadLocal {
-    REALM_THREAD_LOCAL ThreadPool::WorkerInfo *threadpool_workerinfo = 0;
+    thread_local ThreadPool::WorkerInfo *threadpool_workerinfo = 0;
   };
 
   ////////////////////////////////////////////////////////////////////////
@@ -382,9 +383,9 @@ namespace Realm {
       case WorkerInfo::WORKER_IDLE:
       case WorkerInfo::WORKER_CLAIMED:
 	{
-	  sched_yield();
-	  break;
-	}
+          std::this_thread::yield();
+          break;
+        }
 
       case WorkerInfo::WORKER_ACTIVE:
 	{

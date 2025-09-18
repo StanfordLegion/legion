@@ -45,6 +45,16 @@ namespace Realm {
     , read_only(_read_only)
   {}
 
+  bool ExternalHDF5Resource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    // TODO check that all the pieces are HDF5 pieces, just assume it for now
+    log_hdf5.warning()
+        << "Checking that layouts can be satisfied by an "
+        << "ExternalHDF5Resource is currently unimplemented. Assuming that " << filename
+        << " satisfies the corresponding layout.";
+    return true;
+  }
+
   // returns the suggested memory in which this resource should be created
   Memory ExternalHDF5Resource::suggested_memory() const
   {
@@ -104,18 +114,18 @@ namespace Realm {
 							Event wait_on /*= Event::NO_EVENT*/)
   {
     // construct an instance layout for the new instance
-    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
-    layout->bytes_used = 0;
-    layout->alignment_reqd = 0;  // no allocation being made
-    layout->space = space;
-    layout->piece_lists.resize(field_infos.size());
+    InstanceLayout<N, T> layout;
+    layout.bytes_used = 0;
+    layout.alignment_reqd = 0; // no allocation being made
+    layout.space = space;
+    layout.piece_lists.resize(field_infos.size());
 
     int idx = 0;
     for(typename std::vector<HDF5FieldInfo<N,T> >::const_iterator it = field_infos.begin();
 	it != field_infos.end();
 	++it) {
       FieldID id = it->field_id;
-      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
+      InstanceLayoutGeneric::FieldLayout &fl = layout.fields[id];
       fl.list_idx = idx;
       fl.rel_offset = 0;
       fl.size_in_bytes = it->field_size;
@@ -129,7 +139,7 @@ namespace Realm {
           hlp->offset[j] = it->offset[j];
 	for(int j = 0; j < N; j++)
 	  hlp->dim_order[j] = it->dim_order[j];
-	layout->piece_lists[idx].pieces.push_back(hlp);
+        layout.piece_lists[idx].pieces.push_back(hlp);
       }
       idx++;
     }

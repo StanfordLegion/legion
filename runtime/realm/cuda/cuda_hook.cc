@@ -214,10 +214,10 @@ namespace Realm {
     static const CUstream INVALID_STREAM = reinterpret_cast<CUstream>(-1);
 
     namespace ThreadLocal {
-      static REALM_THREAD_LOCAL CUstream current_stream = INVALID_STREAM;
-      static REALM_THREAD_LOCAL std::unordered_map<
-          CUstream, std::pair<CUHookSymbol, CUevent>> *cuhook_stream_status = nullptr;
-      static REALM_THREAD_LOCAL int nb_hooked_functions_per_task = 0;
+      static thread_local CUstream current_stream = INVALID_STREAM;
+      static thread_local std::unordered_map<CUstream, std::pair<CUHookSymbol, CUevent>>
+          *cuhook_stream_status = nullptr;
+      static thread_local int nb_hooked_functions_per_task = 0;
     }; // namespace ThreadLocal
 
     static bool fnptr_map_inited = false;

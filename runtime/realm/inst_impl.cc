@@ -21,6 +21,8 @@
 #include "realm/runtime_impl.h"
 #include "realm/deppart/inst_helper.h"
 
+#include <filesystem>
+
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
 namespace Realm {
@@ -80,10 +82,21 @@ namespace Realm {
   void RegionInstanceImpl::DeferredDestroy::event_triggered(bool poisoned,
 							    TimeLimit work_until)
   {
-    if(poisoned)
-      log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
-    
-    mem->release_storage_immediate(inst, poisoned, work_until);
+    if(inst->deferred_redistrict.empty()) {
+      if(poisoned) {
+        log_poison.info()
+            << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst="
+            << inst;
+      }
+      mem->release_storage_immediate(inst, poisoned, work_until);
+    } else {
+      if(poisoned) {
+        log_poison.info()
+            << "poisoned deferred instance redistrict skipped - POSSIBLE LEAK - inst="
+            << inst;
+      }
+      mem->reuse_storage_immediate(inst, inst->deferred_redistrict, poisoned, work_until);
+    }
   }
 
   void RegionInstanceImpl::DeferredDestroy::print(std::ostream& os) const
@@ -433,6 +446,7 @@ namespace Realm {
                                      const ProfilingRequestSet &prs, Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return inst_impl->redistrict(&instance, &layout, 1, &prs, wait_on);
     }
@@ -443,8 +457,18 @@ namespace Realm {
                                      Event wait_on)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return inst_impl->redistrict(instances, layouts, num_layouts, prs, wait_on);
+    }
+
+    /*static*/ Event RegionInstance::create_instance(RegionInstance &inst, Memory memory,
+                                                     const InstanceLayoutGeneric &ilg,
+                                                     const ProfilingRequestSet &prs,
+                                                     Event wait_on)
+    {
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), 0, prs,
+                                                 wait_on);
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
@@ -455,6 +479,15 @@ namespace Realm {
     {
       return RegionInstanceImpl::create_instance(inst, memory, ilg, 0,
 						 prs, wait_on);
+    }
+
+    /*static*/ Event RegionInstance::create_external_instance(
+        RegionInstance &inst, Memory memory, const InstanceLayoutGeneric &ilg,
+        const ExternalInstanceResource &res, const ProfilingRequestSet &prs,
+        Event wait_on)
+    {
+      return RegionInstanceImpl::create_instance(inst, memory, ilg.clone(), &res, prs,
+                                                 wait_on);
     }
 
     /*static*/ Event RegionInstance::create_external_instance(RegionInstance& inst,
@@ -476,6 +509,7 @@ namespace Realm {
       log_inst.info() << "instance destroyed: inst=" << *this << " wait_on=" << wait_on;
 
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       mem_impl->release_storage_deferrable(inst_impl, wait_on);
     }
@@ -499,6 +533,7 @@ namespace Realm {
     ExternalInstanceResource *RegionInstance::generate_resource_info(bool read_only) const
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return mem_impl->generate_resource_info(inst_impl,
 					      0, span<const FieldID>(),
@@ -510,6 +545,7 @@ namespace Realm {
 								     bool read_only) const
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      assert(mem_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
       return mem_impl->generate_resource_info(inst_impl,
 					      &space, fields,
@@ -569,6 +605,7 @@ namespace Realm {
       // the "field offset" picks up both the actual per-field offset but also
       //  the base of the instance itself
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       void *ptr = mem->get_inst_ptr(r_impl, 0,
 				    r_impl->metadata.layout->bytes_used);
       assert(ptr != 0);
@@ -599,6 +636,7 @@ namespace Realm {
       // the "field offset" picks up both the actual per-field offset but also
       //  the base of the instance itself
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       void *ptr = mem->get_inst_ptr(r_impl, 0,
 				    r_impl->metadata.layout->bytes_used);
       assert(ptr != 0);
@@ -632,6 +670,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       mem->get_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
     }
 
@@ -643,6 +682,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       mem->put_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
     }
 
@@ -656,6 +696,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
       if(redop == 0) {
 	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
@@ -694,6 +735,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table.get(redop_id, 0);
       if(redop == 0) {
 	log_inst.fatal() << "no reduction op registered for ID " << redop_id;
@@ -732,6 +774,7 @@ namespace Realm {
 	     "instance metadata must be valid before accesses are performed");
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      assert(mem != nullptr && "invalid memory handle");
       void *ptr = mem->get_inst_ptr(r_impl, offset, datalen);
       return ptr;
     }
@@ -796,10 +839,14 @@ namespace Realm {
 							 Event wait_on)
     {
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(m_impl != nullptr && "invalid memory handle");
       RegionInstanceImpl *impl = m_impl->new_instance(prs);
       // we can fail to get a valid pointer if we are out of instance slots
-      if(!impl) {
+      // we can also fail if there is not enough space for the instance
+      // or if the alignment is insufficient for external instance creation
+      if(!impl || ((res != nullptr) && !res->satisfies(*ilg))) {
         inst = RegionInstance::NO_INST;
+        delete ilg;
         // generate a poisoned event for completion
         GenEventImpl *ev = GenEventImpl::create_genevent();
         Event ready_event = ev->current_event();
@@ -811,6 +858,7 @@ namespace Realm {
       //  profiling callback containing this instance handle
       inst = impl->me;
 
+      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
       impl->metadata.layout = ilg;
       if(res)
 	impl->metadata.ext_resource = res->clone();
@@ -829,8 +877,6 @@ namespace Realm {
 
       impl->metadata.need_alloc_result = need_alloc_result;
       impl->metadata.need_notify_dealloc = false;
-
-      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
 
       // request allocation of storage - note that due to the asynchronous
       //  nature of any profiling responses, it is not safe to refer to the
@@ -933,6 +979,7 @@ namespace Realm {
 
       std::vector<RegionInstanceImpl *> insts(num_layouts);
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(m_impl != nullptr && "invalid memory handle");
 
       // TODO(apryakhin): Handle redistricting from non-owner node
       assert(NodeID(ID(me).instance_owner_node()) == Network::my_node_id);
@@ -977,15 +1024,15 @@ namespace Realm {
       //  instance metadata (whether the allocation succeeded or not) after
       //  this point)
       Event ready_event;
+      RegionInstanceImpl *last = insts.back();
       switch(m_impl->reuse_storage_deferrable(this, insts, wait_on)) {
       case MemoryImpl::ALLOC_INSTANT_SUCCESS:
       {
         ready_event = Event::NO_EVENT;
         break;
       }
-
-      case MemoryImpl::ALLOC_INSTANT_FAILURE:
       case MemoryImpl::ALLOC_CANCELLED:
+      case MemoryImpl::ALLOC_INSTANT_FAILURE:
       {
         // generate a poisoned event for completion
         // NOTE: it is unsafe to look at the impl->metadata or the
@@ -1000,10 +1047,51 @@ namespace Realm {
 
       case MemoryImpl::ALLOC_DEFERRED:
       {
-        // We've done all the work to make set up the new instances
-        // they will be ready the instant the deferral event triggers
-        // as that is when we'll switch from the old mode to the new mode
-        ready_event = wait_on;
+        // we will probably need an event to track when it is ready
+        GenEventImpl *ev = GenEventImpl::create_genevent();
+        ready_event = ev->current_event();
+        bool alloc_done, alloc_successful;
+        // use mutex to avoid race on allocation callback
+        {
+          // Whatever the ready event is for the last new instance
+          // will be the point where the deferred redistrict is done
+          // since we always notify instances in order
+          AutoLock<> al(last->mutex);
+          switch(last->metadata.inst_offset) {
+          case RegionInstanceImpl::INSTOFFSET_UNALLOCATED:
+          case RegionInstanceImpl::INSTOFFSET_DELAYEDALLOC:
+          case RegionInstanceImpl::INSTOFFSET_DELAYEDDESTROY:
+          {
+            alloc_done = false;
+            alloc_successful = false;
+            last->metadata.ready_event = ready_event;
+            break;
+          }
+          case RegionInstanceImpl::INSTOFFSET_FAILED:
+          {
+            alloc_done = true;
+            alloc_successful = false;
+            break;
+          }
+          default:
+          {
+            alloc_done = true;
+            alloc_successful = true;
+            break;
+          }
+          }
+        }
+        if(alloc_done) {
+          // lost the race to the notification callback, so we trigger the
+          //  ready event ourselves
+          if(alloc_successful) {
+            GenEventImpl::trigger(ready_event, false /*!poisoned*/);
+            ready_event = Event::NO_EVENT;
+          } else {
+            // poison the ready event and still return it
+            GenEventImpl::trigger(ready_event, true /*poisoned*/);
+          }
+        }
         break;
       }
 
@@ -1331,6 +1419,7 @@ namespace Realm {
       measurements.clear();
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      assert(m_impl != nullptr && "invalid memory handle");
       m_impl->release_instance(me);
     }
 
@@ -1375,9 +1464,9 @@ namespace Realm {
       if(e.exists()) {
 	GenEventImpl *e_impl = get_runtime()->get_genevent_impl(msg.valid_event);
 	EventMerger *m = &(e_impl->merger);
-	m->prepare_merger(msg.valid_event, false/*!ignore faults*/, 1);
-	m->add_precondition(e);
-	m->arm_merger();
+        m->prepare_merger(msg.valid_event, false /*!ignore faults*/, 1);
+        m->add_precondition(e);
+        m->arm_merger();
       } else {
 	GenEventImpl::trigger(msg.valid_event, false /*!poisoned*/, work_until);
       }	
@@ -1389,6 +1478,7 @@ namespace Realm {
 						      off_t field_offset)
     {
       MemoryImpl *mem = get_runtime()->get_memory_impl(memory);
+      assert(mem != nullptr && "invalid memory handle");
 
       // this exists for compatibility and assumes N=1, T=long long
       const InstanceLayout<1,long long> *inst_layout = dynamic_cast<const InstanceLayout<1,long long> *>(metadata.layout);
@@ -1537,6 +1627,14 @@ namespace Realm {
       , read_only(true)
     {}
 
+    bool ExternalMemoryResource::satisfies(const InstanceLayoutGeneric &layout) const
+    {
+      if(size_in_bytes < layout.bytes_used)
+        return false;
+      const size_t max_alignment = (base & -base);
+      return (layout.alignment_reqd <= max_alignment);
+    }
+
     // returns the suggested memory in which this resource should be created
     Memory ExternalMemoryResource::suggested_memory() const
     {
@@ -1579,6 +1677,15 @@ namespace Realm {
     , offset(_offset)
     , mode(_mode)
   {}
+
+  bool ExternalFileResource::satisfies(const InstanceLayoutGeneric &layout) const
+  {
+    // Good as long as the file is big enough
+    if(mode == REALM_FILE_CREATE)
+      return true;
+    else
+      return ((offset + layout.bytes_used) <= std::filesystem::file_size(filename));
+  }
 
   // returns the suggested memory in which this resource should be created
   Memory ExternalFileResource::suggested_memory() const

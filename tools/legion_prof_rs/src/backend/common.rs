@@ -1,4 +1,3 @@
-use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -27,10 +26,10 @@ pub trait StatePostprocess {
     fn proc_group_timepoints(
         &self,
         device: Option<DeviceKind>,
-        procs: &Vec<ProcID>,
+        procs: &[ProcID],
     ) -> Vec<&Vec<ProcPoint>>;
-    fn mem_group_timepoints(&self, mems: &Vec<MemID>) -> Vec<&Vec<MemPoint>>;
-    fn chan_group_timepoints(&self, chans: &Vec<ChanID>) -> Vec<&Vec<ChanPoint>>;
+    fn mem_group_timepoints(&self, mems: &[MemID]) -> Vec<&Vec<MemPoint>>;
+    fn chan_group_timepoints(&self, chans: &[ChanID]) -> Vec<&Vec<ChanPoint>>;
 
     fn group_node_proc_kind_timepoints(
         &self,
@@ -47,7 +46,7 @@ pub trait StatePostprocess {
 
     fn convert_points_to_utilization<Entry, Secondary>(
         &self,
-        points: &Vec<TimePoint<Entry, Secondary>>,
+        points: &[TimePoint<Entry, Secondary>],
         utilization: &mut Vec<TimePoint<Entry, Secondary>>,
     ) where
         Entry: Copy,
@@ -59,8 +58,6 @@ pub trait StatePostprocess {
         owners: BTreeSet<ProcID>,
         max_count: u64,
     ) -> Vec<(Timestamp, f64)>;
-
-    fn calculate_dynamic_memory_size(&self, points: &Vec<&MemPoint>) -> u64;
 
     fn calculate_mem_utilization_data(
         &self,
@@ -214,7 +211,7 @@ impl StatePostprocess for State {
     fn proc_group_timepoints(
         &self,
         device: Option<DeviceKind>,
-        procs: &Vec<ProcID>,
+        procs: &[ProcID],
     ) -> Vec<&Vec<ProcPoint>> {
         let mut timepoints = Vec::new();
         for proc_id in procs {
@@ -226,7 +223,7 @@ impl StatePostprocess for State {
         timepoints
     }
 
-    fn mem_group_timepoints(&self, mems: &Vec<MemID>) -> Vec<&Vec<MemPoint>> {
+    fn mem_group_timepoints(&self, mems: &[MemID]) -> Vec<&Vec<MemPoint>> {
         let mut timepoints = Vec::new();
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
@@ -237,7 +234,7 @@ impl StatePostprocess for State {
         timepoints
     }
 
-    fn chan_group_timepoints(&self, chans: &Vec<ChanID>) -> Vec<&Vec<ChanPoint>> {
+    fn chan_group_timepoints(&self, chans: &[ChanID]) -> Vec<&Vec<ChanPoint>> {
         let mut timepoints = Vec::new();
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
@@ -328,7 +325,7 @@ impl StatePostprocess for State {
                 }
                 nodes.dedup();
                 for node in nodes {
-                    if node.map_or(true, |n| State::is_on_visible_nodes(&self.visible_nodes, n)) {
+                    if node.is_none_or(|n| State::is_on_visible_nodes(&self.visible_nodes, n)) {
                         result
                             .entry(node)
                             .or_insert_with(Vec::new)
@@ -343,7 +340,7 @@ impl StatePostprocess for State {
 
     fn convert_points_to_utilization<Entry, Secondary>(
         &self,
-        points: &Vec<TimePoint<Entry, Secondary>>,
+        points: &[TimePoint<Entry, Secondary>],
         utilization: &mut Vec<TimePoint<Entry, Secondary>>,
     ) where
         Entry: Copy,
@@ -393,7 +390,7 @@ impl StatePostprocess for State {
 
             let ratio = count as f64 / max_count;
 
-            if last_time.map_or(false, |time| time == point.time) {
+            if last_time == Some(point.time) {
                 *utilization.last_mut().unwrap() = (point.time, ratio);
             } else {
                 utilization.push((point.time, ratio));
@@ -402,25 +399,6 @@ impl StatePostprocess for State {
         }
 
         utilization
-    }
-
-    fn calculate_dynamic_memory_size(&self, points: &Vec<&MemPoint>) -> u64 {
-        let mut max_count = 0;
-        let mut count = 0;
-
-        for point in points {
-            let inst = self.find_inst(point.entry).unwrap();
-            if point.first {
-                count += inst.size.unwrap();
-            } else {
-                count -= inst.size.unwrap();
-            }
-            if count > max_count {
-                max_count = count;
-            }
-        }
-
-        max(max_count, 1)
     }
 
     fn calculate_mem_utilization_data(
@@ -435,12 +413,10 @@ impl StatePostprocess for State {
         let mut max_count = 0;
         for mem_id in owners {
             let mem = self.mems.get(&mem_id).unwrap();
+            // should always be at least 1
+            // see Mem::calculate_dynamic_memory_size
+            assert!(mem.capacity > 0);
             max_count += mem.capacity;
-        }
-
-        if max_count == 0 {
-            // we are in external memory, so we need to calculate the max capacity
-            max_count = self.calculate_dynamic_memory_size(&points);
         }
 
         let max_count = max_count as f64;
@@ -456,7 +432,7 @@ impl StatePostprocess for State {
             }
 
             let ratio = count as f64 / max_count;
-            if last_time.map_or(false, |time| time == point.time) {
+            if last_time == Some(point.time) {
                 *result.last_mut().unwrap() = (point.time, ratio);
             } else {
                 result.push((point.time, ratio));
@@ -495,7 +471,7 @@ impl StatePostprocess for State {
 
             let count = count as f64;
             let max_count = max_count as f64;
-            if last_time.map_or(false, |time| time == point.time) {
+            if last_time == Some(point.time) {
                 if count > 0.0 {
                     *utilization.last_mut().unwrap() = (point.time, 1.0);
                 } else {
@@ -644,7 +620,7 @@ impl fmt::Display for FieldsPretty<'_> {
         let align_desc = inst.align_desc.get(&fspace.fspace_id).unwrap();
         let mut i = field_ids.iter().zip(align_desc.iter()).peekable();
         while let Some((field_id, align)) = i.next() {
-            write!(f, "{}", FieldPretty(&fspace, *field_id, align))?;
+            write!(f, "{}", FieldPretty(fspace, *field_id, align))?;
             if i.peek().is_some() {
                 write!(f, ", ")?;
             }
@@ -728,7 +704,7 @@ impl fmt::Display for DimOrderPretty<'_> {
                 if *dim_order == DimKind::try_from(dim.0).unwrap() {
                     column_major += 1;
                 }
-                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap() {
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0.0 - dim.0 - 1).unwrap() {
                     row_major += 1;
                 }
             }
@@ -739,7 +715,7 @@ impl fmt::Display for DimOrderPretty<'_> {
                 if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
                     column_major += 1;
                 }
-                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0.0 - dim.0).unwrap() {
                     row_major += 1;
                 }
             }
@@ -763,12 +739,12 @@ impl fmt::Display for DimOrderPretty<'_> {
 
         let mut previous = false;
 
-        if dim_last.map_or(false, |(d, _)| d.0 != 1) {
-            if column_major == dim_last.unwrap().0 .0 && !cmpx_order {
+        if dim_last.is_some_and(|(d, _)| d.0 != 1) {
+            if column_major == dim_last.unwrap().0.0 && !cmpx_order {
                 open(f, &mut previous)?;
                 write!(f, "Column Major")?;
                 close(f, &mut previous)?;
-            } else if row_major == dim_last.unwrap().0 .0 && !cmpx_order {
+            } else if row_major == dim_last.unwrap().0.0 && !cmpx_order {
                 open(f, &mut previous)?;
                 write!(f, "Row Major")?;
                 close(f, &mut previous)?;
@@ -830,7 +806,7 @@ impl fmt::Display for InstPretty<'_> {
                 write!(f, "$")?;
             }
         }
-        if inst.dim_order.len() > 0 {
+        if !inst.dim_order.is_empty() {
             write!(f, "$Layout Order: {} ", DimOrderPretty(inst, true))?;
         }
         write!(
@@ -919,21 +895,21 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
                 write!(
                     f,
                     "Scatter: dst_indirect_inst=0x{:x}, fid={}",
-                    dst_inst_id, self.5 .0
+                    dst_inst_id, self.5.0
                 )
             }
             (_, None) => {
                 write!(
                     f,
                     "Gather: src_indirect_inst=0x{:x}, fid={}",
-                    src_inst_id, self.4 .0
+                    src_inst_id, self.4.0
                 )
             }
             (_, _) => {
                 write!(
                     f,
                     "src_inst=0x{:x}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
-                    src_inst_id, self.4 .0, dst_inst_id, self.5 .0, self.6
+                    src_inst_id, self.4.0, dst_inst_id, self.5.0, self.6
                 )
             }
         }
@@ -1036,7 +1012,7 @@ impl fmt::Display for FillInstInfoDisplay<'_> {
         if let Some(inst) = self.0 {
             inst_id = inst.inst_id.unwrap().0;
         }
-        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1 .0)
+        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1.0)
     }
 }
 

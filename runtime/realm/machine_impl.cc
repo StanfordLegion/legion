@@ -187,9 +187,9 @@ namespace Realm {
   // class MachineNodeInfo
   //
 
-  MachineNodeInfo::MachineNodeInfo(int _node)
+  MachineNodeInfo::MachineNodeInfo(int _node, RuntimeImpl *_runtime_impl)
     : node(_node)
-    , process_info(nullptr)
+    , runtime_impl(_runtime_impl)
   {}
 
   MachineNodeInfo::~MachineNodeInfo(void)
@@ -200,6 +200,7 @@ namespace Realm {
     if(process_info) {
       delete process_info;
     }
+    runtime_impl = nullptr;
   }
 
   bool MachineNodeInfo::add_processor(Processor p)
@@ -281,19 +282,21 @@ namespace Realm {
     }
   }
 
-  void MachineNodeInfo::update_kind_maps()
+  void MachineNodeInfo::update_kind_maps(void)
   {
     proc_by_kind.clear();
     for(std::map<Processor, MachineProcInfo *>::const_iterator it = procs.begin();
-        it != procs.end();
-        ++it)
-      proc_by_kind[it->first.kind()][it->first] = it->second;
+        it != procs.end(); ++it) {
+      Processor::Kind proc_kind = runtime_impl->get_processor_impl(it->first)->kind;
+      proc_by_kind[proc_kind][it->first] = it->second;
+    }
 
     mem_by_kind.clear();
     for(std::map<Memory, MachineMemInfo *>::const_iterator it = mems.begin();
-        it != mems.end();
-        ++it)
-      mem_by_kind[it->first.kind()][it->first] = it->second;
+        it != mems.end(); ++it) {
+      Memory::Kind mem_kind = MemoryImpl::get_memory_kind(runtime_impl, it->first);
+      mem_by_kind[mem_kind][it->first] = it->second;
+    }
   }
 
 
@@ -412,11 +415,12 @@ namespace Realm {
 
     MachineImpl *machine_singleton = 0;
 
-  MachineImpl::MachineImpl(void)
-  {
-    assert(machine_singleton == 0);
-    machine_singleton = this;
-  }
+    MachineImpl::MachineImpl(RuntimeImpl *_runtime_impl)
+      : runtime_impl(_runtime_impl)
+    {
+      assert(machine_singleton == 0);
+      machine_singleton = this;
+    }
 
   MachineImpl::~MachineImpl(void)
   {
@@ -424,6 +428,8 @@ namespace Realm {
     machine_singleton = 0;
     delete_map_contents(nodeinfos);
   }
+
+  RuntimeImpl *MachineImpl::get_runtime_impl(void) const { return runtime_impl; }
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
   static bool allows_internode_copies(Memory::Kind kind,
@@ -469,72 +475,71 @@ namespace Realm {
   }
 #endif
 
-    void MachineImpl::parse_node_announce_data(int node_id,
-					       const void *args, size_t arglen,
-					       bool remote)
-    {
-      AutoLock<> al(mutex);
+  void MachineImpl::parse_node_announce_data(int node_id, const void *args, size_t arglen,
+                                             bool remote)
+  {
+    AutoLock<> al(mutex);
 
-      assert(node_id <= Network::max_node_id);
-      Node& n = get_runtime()->nodes[node_id];
+    assert(node_id <= Network::max_node_id);
+    Node &n = runtime_impl->nodes[node_id];
 
-      Serialization::FixedBufferDeserializer fbd(args, arglen);
-      bool ok = true;
-      while(ok && (fbd.bytes_left() > 0)) {
-	NodeAnnounceTag tag;
-	if(!(fbd >> tag)) {
-	  log_annc.fatal() << "unexpected end of input";
-	  assert(0);
-	}
+    Serialization::FixedBufferDeserializer fbd(args, arglen);
+    bool ok = true;
+    while(ok && (fbd.bytes_left() > 0)) {
+      NodeAnnounceTag tag;
+      if(!(fbd >> tag)) {
+        log_annc.fatal() << "unexpected end of input";
+        assert(0);
+      }
 
-	switch(tag) {
-        case NODE_ANNOUNCE_PROC:
-        {
-          Processor p;
-          Processor::Kind kind;
-          int num_cores;
-          ok = (ok && (fbd >> p) && (fbd >> kind) && (fbd >> num_cores));
-          if(ok) {
-            assert(NodeID(ID(p).proc_owner_node()) == node_id);
-            log_annc.debug() << "adding proc " << p << " (kind = " << kind
-                             << " num_cores = " << num_cores << ")";
-            if(remote) {
-              RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
-              if(n.processors.size() <= ID(p).proc_proc_idx())
-                n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
-              n.processors[ID(p).proc_proc_idx()] = proc;
-            }
+      switch(tag) {
+      case NODE_ANNOUNCE_PROC:
+      {
+        Processor p;
+        Processor::Kind kind;
+        int num_cores;
+        ok = (ok && (fbd >> p) && (fbd >> kind) && (fbd >> num_cores));
+        if(ok) {
+          assert(NodeID(ID(p).proc_owner_node()) == node_id);
+          log_annc.debug() << "adding proc " << p << " (kind = " << kind
+                           << " num_cores = " << num_cores << ")";
+          if(remote) {
+            RemoteProcessor *proc = new RemoteProcessor(runtime_impl, p, kind, num_cores);
+            if(n.processors.size() <= ID(p).proc_proc_idx())
+              n.processors.resize(ID(p).proc_proc_idx() + 1, 0);
+            n.processors[ID(p).proc_proc_idx()] = proc;
           }
-          break;
         }
+        break;
+      }
 
-        case NODE_ANNOUNCE_MEM:
-        {
-          Memory m;
-          Memory::Kind kind;
-          size_t size;
-          bool has_rdma_info = false;
-          ByteArray rdma_info;
-          ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
-                (fbd >> has_rdma_info));
-          if(has_rdma_info)
-            ok = ok && (fbd >> rdma_info);
-          if(ok) {
-            assert(NodeID(ID(m).memory_owner_node()) == node_id);
-            log_annc.debug() << "adding memory " << m << " (kind = " << kind
-                             << ", size = " << size << ", has_rdma = " << has_rdma_info
-                             << ")";
-            if(remote) {
-              MemoryImpl *mem;
-              if(has_rdma_info) {
-                mem = Network::get_network(node_id)->create_remote_memory(m, size, kind,
-                                                                          rdma_info);
-              } else {
-                mem = new RemoteMemory(m, size, kind);
-              }
-              if(n.memories.size() >= ID(m).memory_mem_idx())
-                n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
-              n.memories[ID(m).memory_mem_idx()] = mem;
+      case NODE_ANNOUNCE_MEM:
+      {
+        Memory m;
+        Memory::Kind kind;
+        size_t size;
+        bool has_rdma_info = false;
+        ByteArray rdma_info;
+        ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
+              (fbd >> has_rdma_info));
+        if(has_rdma_info)
+          ok = ok && (fbd >> rdma_info);
+        if(ok) {
+          assert(NodeID(ID(m).memory_owner_node()) == node_id);
+          log_annc.debug() << "adding memory " << m << " (kind = " << kind
+                           << ", size = " << size << ", has_rdma = " << has_rdma_info
+                           << ")";
+          if(remote) {
+            MemoryImpl *mem;
+            if(has_rdma_info) {
+              mem = Network::get_network(node_id)->create_remote_memory(m, size, kind,
+                                                                        rdma_info);
+            } else {
+              mem = new RemoteMemory(m, size, kind);
+            }
+            if(n.memories.size() >= ID(m).memory_mem_idx())
+              n.memories.resize(ID(m).memory_mem_idx() + 1, 0);
+            n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
 		{
@@ -547,107 +552,107 @@ namespace Realm {
 		    continue;
 		}
 #endif
-            }
           }
-          break;
         }
-
-        case NODE_ANNOUNCE_IB_MEM:
-        {
-          Memory m;
-          Memory::Kind kind;
-          size_t size;
-          bool has_rdma_info = false;
-          ByteArray rdma_info;
-          ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
-                (fbd >> has_rdma_info));
-          if(has_rdma_info)
-            ok = ok && (fbd >> rdma_info);
-          if(ok) {
-            assert(NodeID(ID(m).memory_owner_node()) == node_id);
-            log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
-                             << ", size = " << size << ", has_rdma = " << has_rdma_info
-                             << ")";
-            if(remote) {
-              IBMemory *ibmem;
-              if(has_rdma_info) {
-                ibmem = Network::get_network(node_id)->create_remote_ib_memory(
-                    m, size, kind, rdma_info);
-              } else {
-                ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
-              }
-
-              if(n.ib_memories.size() >= ID(m).memory_mem_idx())
-                n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
-              n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
-            }
-          }
-          break;
-        }
-
-        case NODE_ANNOUNCE_PMA:
-        {
-          Machine::ProcessorMemoryAffinity pma;
-          ok = (ok && (fbd >> pma));
-          if(ok) {
-            log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
-                             << " (bw = " << pma.bandwidth
-                             << ", latency = " << pma.latency << ")";
-
-            add_proc_mem_affinity(pma, true /*lock held*/);
-            // proc_mem_affinities.push_back(pma);
-          }
-          break;
-        }
-
-        case NODE_ANNOUNCE_DMA_CHANNEL:
-        {
-          RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
-          if(rci) {
-            size_t num_redops = 0;
-            RemoteChannel *rc = rci->create_remote_channel();
-            delete rci;
-
-            fbd >> num_redops;
-            for(size_t i = 0; i < num_redops; i++) {
-              ReductionOpID redop_id = 0;
-              fbd >> redop_id;
-              rc->register_redop(redop_id);
-            }
-
-            log_annc.debug() << "adding channel: " << *rc;
-            assert(rc->node == node_id);
-            if(remote)
-              get_runtime()->add_dma_channel(rc);
-            else
-              delete rc; // don't actually need it
-          }
-          break;
-        }
-
-        case NODE_ANNOUNCE_PROCESS_INFO:
-        {
-          Machine::ProcessInfo process_info;
-          ok = (ok && (fbd >> process_info));
-          if(ok) {
-            add_process_info(node_id, process_info, true);
-          }
-          break;
-        }
-
-        default:
-          log_annc.fatal() << "unknown tag: " << tag;
-          assert(0);
-        }
+        break;
       }
 
-      assert(ok && (fbd.bytes_left() == 0));
+      case NODE_ANNOUNCE_IB_MEM:
+      {
+        Memory m;
+        Memory::Kind kind;
+        size_t size;
+        bool has_rdma_info = false;
+        ByteArray rdma_info;
+        ok = (ok && (fbd >> m) && (fbd >> kind) && (fbd >> size) &&
+              (fbd >> has_rdma_info));
+        if(has_rdma_info)
+          ok = ok && (fbd >> rdma_info);
+        if(ok) {
+          assert(NodeID(ID(m).memory_owner_node()) == node_id);
+          log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
+                           << ", size = " << size << ", has_rdma = " << has_rdma_info
+                           << ")";
+          if(remote) {
+            IBMemory *ibmem;
+            if(has_rdma_info) {
+              ibmem = Network::get_network(node_id)->create_remote_ib_memory(
+                  m, size, kind, rdma_info);
+            } else {
+              ibmem = new IBMemory(m, size, MemoryImpl::MKIND_REMOTE, kind, 0, 0);
+            }
+
+            if(n.ib_memories.size() >= ID(m).memory_mem_idx())
+              n.ib_memories.resize(ID(m).memory_mem_idx() + 1, 0);
+            n.ib_memories[ID(m).memory_mem_idx()] = ibmem;
+          }
+        }
+        break;
+      }
+
+      case NODE_ANNOUNCE_PMA:
+      {
+        Machine::ProcessorMemoryAffinity pma;
+        ok = (ok && (fbd >> pma));
+        if(ok) {
+          log_annc.debug() << "adding affinity " << pma.p << " -> " << pma.m
+                           << " (bw = " << pma.bandwidth << ", latency = " << pma.latency
+                           << ")";
+
+          add_proc_mem_affinity(pma, true /*lock held*/);
+          // proc_mem_affinities.push_back(pma);
+        }
+        break;
+      }
+
+      case NODE_ANNOUNCE_DMA_CHANNEL:
+      {
+        RemoteChannelInfo *rci = RemoteChannelInfo::deserialize_new(fbd);
+        if(rci) {
+          size_t num_redops = 0;
+          RemoteChannel *rc = rci->create_remote_channel();
+          delete rci;
+
+          fbd >> num_redops;
+          for(size_t i = 0; i < num_redops; i++) {
+            ReductionOpID redop_id = 0;
+            fbd >> redop_id;
+            rc->register_redop(redop_id);
+          }
+
+          log_annc.debug() << "adding channel: " << *rc;
+          assert(rc->node == node_id);
+          if(remote)
+            runtime_impl->add_dma_channel(rc);
+          else
+            delete rc; // don't actually need it
+        }
+        break;
+      }
+
+      case NODE_ANNOUNCE_PROCESS_INFO:
+      {
+        Machine::ProcessInfo process_info;
+        ok = (ok && (fbd >> process_info));
+        if(ok) {
+          add_process_info(node_id, process_info, true);
+        }
+        break;
+      }
+
+      default:
+        log_annc.fatal() << "unknown tag: " << tag;
+        assert(0);
+      }
     }
 
-    void MachineImpl::get_all_memories(std::set<Memory>& mset) const
-    {
-      // TODO: consider using a reader/writer lock here instead
-      AutoLock<> al(mutex);
+    assert(ok && (fbd.bytes_left() == 0));
+  }
+
+  void MachineImpl::get_all_memories(std::set<Memory> &mset) const
+  {
+    // TODO: consider using a reader/writer lock here instead
+    AutoLock<> al(mutex);
 #ifdef USE_OLD_AFFINITIES
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
@@ -663,7 +668,7 @@ namespace Realm {
 	    ++it2)
 	  mset.insert(it2->first);
 #endif
-    }
+  }
 
     void MachineImpl::get_all_processors(std::set<Processor>& pset) const
     {
@@ -737,8 +742,10 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if((ID(p).proc_owner_node() == Network::my_node_id) && (p.kind() == kind))
-	  pset.insert(p);
+        Processor::Kind p_kind =
+            ProcessorImpl::get_processor_kind(machine->get_runtime_impl(), p);
+        if((ID(p).proc_owner_node() == Network::my_node_id) && (p_kind == kind))
+          pset.insert(p);
       }
 #else
       const MachineNodeInfo *mynode = get_nodeinfo(Network::my_node_id);
@@ -761,9 +768,9 @@ namespace Realm {
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
-	if((*it).p == p && (*it).m.capacity() > 0 &&
-	   (!local_only || is_local_affinity(*it)))
-	  mset.insert((*it).m);
+        size_t m_capacity = MemoryImpl::get_memory_size(runtime_impl, (*it).m);
+        if((*it).p == p && m_capacity > 0 && (!local_only || is_local_affinity(*it)))
+          mset.insert((*it).m);
       }
 #else
       const MachineNodeInfo *ni = get_nodeinfo(p);
@@ -792,11 +799,13 @@ namespace Realm {
 	  it++) {
 	if(local_only && !is_local_affinity(*it)) continue;
 
-	if((*it).m1 == m && (*it).m2.capacity() > 0)
-	  mset.insert((*it).m2);
-	
-	if((*it).m2 == m && (*it).m1.capacity() > 0)
-	  mset.insert((*it).m1);
+        size_t m2_capacity = MemoryImpl::get_memory_size(runtime_impl, (*it).m2);
+        if((*it).m1 == m && m2_capacity > 0)
+          mset.insert((*it).m2);
+
+        size_t m1_capacity = MemoryImpl::get_memory_size(runtime_impl, (*it).m1);
+        if((*it).m2 == m && m1_capacity > 0)
+          mset.insert((*it).m1);
       }
 #else
       const MachineNodeInfo *ni = get_nodeinfo(m);
@@ -1077,7 +1086,8 @@ namespace Realm {
     int mp = ID(pma.m).memory_owner_node();
     {
       MachineNodeInfo *& ptr = nodeinfos[np];
-      if(!ptr) ptr = new MachineNodeInfo(np);
+      if(!ptr)
+        ptr = new MachineNodeInfo(np, runtime_impl);
       ptr->add_processor(pma.p);
       if(np == mp)
 	ptr->add_memory(pma.m);
@@ -1085,7 +1095,8 @@ namespace Realm {
     }
     if(np != mp) {
       MachineNodeInfo *& ptr = nodeinfos[mp];
-      if(!ptr) ptr = new MachineNodeInfo(mp);
+      if(!ptr)
+        ptr = new MachineNodeInfo(mp, runtime_impl);
       ptr->add_memory(pma.m);
       ptr->add_proc_mem_affinity(pma);
     }
@@ -1105,16 +1116,16 @@ namespace Realm {
       subscribers.erase(subscriber);
     }
 
-    static bool get_memcpy_affinity(Machine::MemoryMemoryAffinity &affinity,
-                                    Realm::Memory src_mem,
-                                    Realm::Memory dst_mem) {
+    static bool get_memcpy_affinity(const RuntimeImpl *runtime_impl,
+                                    Machine::MemoryMemoryAffinity &affinity,
+                                    Realm::Memory src_mem, Realm::Memory dst_mem)
+    {
       bool found_channel = false;
       affinity.m1 = src_mem;
       affinity.m2 = dst_mem;
       affinity.bandwidth = 0;
       affinity.latency = UINT_MAX;
-      Realm::Node &src_node =
-          get_runtime()->nodes[ID(src_mem).memory_owner_node()];
+      Realm::Node &src_node = runtime_impl->nodes[ID(src_mem).memory_owner_node()];
       // Find the best channel to satisfy a basic copy and track it's bandwidth
       // and latency.
       for (Channel *channel : src_node.dma_channels) {
@@ -1143,28 +1154,28 @@ namespace Realm {
       // memory affinities to save on cache space
       Realm::MachineNodeInfo *src_nodeInfo = nodeinfos[Network::my_node_id];
       if (src_nodeInfo == nullptr) {
-        src_nodeInfo = new Realm::MachineNodeInfo(Network::my_node_id);
+        src_nodeInfo = new Realm::MachineNodeInfo(Network::my_node_id, runtime_impl);
         nodeinfos[Network::my_node_id] = src_nodeInfo;
       }
-      for (MemoryImpl *src_mem : get_runtime()->nodes[Network::my_node_id].memories) {
+      for(MemoryImpl *src_mem : runtime_impl->nodes[Network::my_node_id].memories) {
         src_nodeInfo->add_memory(src_mem->me);
         Realm::MachineMemInfo *src_memInfo = src_nodeInfo->mems[src_mem->me];
         for (Realm::NodeID dst_idx = 0; dst_idx <= Network::max_node_id; dst_idx++) {
           Realm::MachineNodeInfo *dst_nodeInfo = nodeinfos[dst_idx];
           if (dst_nodeInfo == nullptr) {
-            dst_nodeInfo = new Realm::MachineNodeInfo(dst_idx);
+            dst_nodeInfo = new Realm::MachineNodeInfo(dst_idx, runtime_impl);
             nodeinfos[dst_idx] = dst_nodeInfo;
           }
-          for (MemoryImpl *dst_mem : get_runtime()->nodes[dst_idx].memories) {
+          for(MemoryImpl *dst_mem : runtime_impl->nodes[dst_idx].memories) {
             Machine::MemoryMemoryAffinity affinity;
             dst_nodeInfo->add_memory(dst_mem->me);
             Realm::MachineMemInfo* dst_memInfo = dst_nodeInfo->mems[dst_mem->me];
             // Add the in and out edges for both the source and destination meminfos
-            if (get_memcpy_affinity(affinity, src_mem->me, dst_mem->me)) {
+            if(get_memcpy_affinity(runtime_impl, affinity, src_mem->me, dst_mem->me)) {
               src_memInfo->add_mem_mem_affinity(affinity);
               dst_memInfo->add_mem_mem_affinity(affinity);
             }
-            if (get_memcpy_affinity(affinity, dst_mem->me, src_mem->me)) {
+            if(get_memcpy_affinity(runtime_impl, affinity, dst_mem->me, src_mem->me)) {
               src_memInfo->add_mem_mem_affinity(affinity);
               dst_memInfo->add_mem_mem_affinity(affinity);
             }
@@ -1183,7 +1194,7 @@ namespace Realm {
       }
       MachineNodeInfo *&ptr = nodeinfos[node_id];
       if(!ptr) {
-        ptr = new MachineNodeInfo(node_id);
+        ptr = new MachineNodeInfo(node_id, runtime_impl);
       }
       assert(ptr->add_process_info(process_info));
       if(!lock_held) {
@@ -1467,8 +1478,9 @@ namespace Realm {
     return new ProcessorHasAffinityPredicate(memory, min_bandwidth, max_latency);
   }
 
-  bool ProcessorHasAffinityPredicate::matches_predicate(MachineImpl *machine, Processor thing,
-							const MachineProcInfo *info) const
+  bool ProcessorHasAffinityPredicate::matches_predicate(const MachineImpl *machine,
+                                                        Processor thing,
+                                                        const MachineProcInfo *info) const
   {
 #ifdef USE_OLD_AFFINITIES
     Machine::AffinityDetails details;
@@ -1505,8 +1517,8 @@ namespace Realm {
     return new ProcessorBestAffinityPredicate(memory, bandwidth_weight, latency_weight);
   }
 
-  bool ProcessorBestAffinityPredicate::matches_predicate(MachineImpl *machine, Processor thing,
-							 const MachineProcInfo *info) const
+  bool ProcessorBestAffinityPredicate::matches_predicate(
+      const MachineImpl *machine, Processor thing, const MachineProcInfo *info) const
   {
 #ifndef USE_OLD_AFFINITIES
     if((bandwidth_weight == 1) && (latency_weight == 0)) {
@@ -1546,18 +1558,21 @@ namespace Realm {
   std::map<Processor::Kind, std::vector<Processor> > ProcessorQueryImpl::_proc_cache;
   std::map<Processor::Kind, std::map<Memory, std::vector<Processor> > > ProcessorQueryImpl::_proc_cache_affinity;
 
-  ProcessorQueryImpl::ProcessorQueryImpl(const Machine& _machine)
+  ProcessorQueryImpl::ProcessorQueryImpl(const Machine &_machine)
+    : ProcessorQueryImpl(static_cast<const MachineImpl *>(_machine.impl))
+  {}
+
+  ProcessorQueryImpl::ProcessorQueryImpl(const MachineImpl *_machine_impl)
     : references(1)
-    , machine((MachineImpl *)_machine.impl)
+    , machine(_machine_impl)
     , is_restricted_node(false)
     , is_restricted_kind(false)
     , cached_mem(Memory::NO_MEMORY)
     , is_cached_mem(false)
     , shared_cached_list(false)
     , valid_cache(false)
-    , cur_cached_list(NULL)
+    , cur_cached_list(nullptr)
     , invalid_count(cache_invalid_count)
-
   {}
 
   ProcessorQueryImpl::ProcessorQueryImpl(const ProcessorQueryImpl& copy_from)
@@ -1735,8 +1750,10 @@ namespace Realm {
           machine->get_proc_mem_affinity(proc_mem_affinities);
           for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
             Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
-            _proc_cache_affinity[affinity.p.kind()][affinity.m].push_back(affinity.p);
-            if (affinity.p.kind() == restricted_kind)
+            Processor::Kind p_kind = ProcessorImpl::get_processor_kind(
+                machine->get_runtime_impl(), affinity.p);
+            _proc_cache_affinity[p_kind][affinity.m].push_back(affinity.p);
+            if(p_kind == restricted_kind)
               found = true;
           }
         }
@@ -1946,15 +1963,16 @@ namespace Realm {
 	Processor p =(*it).p;
 	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (p.kind() != restricted_kind))
-	  continue;
-	bool ok = true;
-	for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
-	    ok && (it2 != predicates.end());
-	    it2++)
-	  ok &= (*it2)->matches_predicate(machine, p);
-	if(ok && (!lowest.exists() || (p.id < lowest.id)))
-	  lowest = p;
+        Processor::Kind p_kind =
+            ProcessorImpl::get_processor_kind(machine->get_runtime_impl(), p);
+        if(is_restricted_kind && (p_kind != restricted_kind))
+          continue;
+        bool ok = true;
+        for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
+            ok && (it2 != predicates.end()); it2++)
+          ok &= (*it2)->matches_predicate(machine, p);
+        if(ok && (!lowest.exists() || (p.id < lowest.id)))
+          lowest = p;
       }
     }
     return lowest;
@@ -2028,15 +2046,16 @@ namespace Realm {
 	if(p.id <= after.id) continue;
 	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (p.kind() != restricted_kind))
-	  continue;
-	bool ok = true;
-	for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
-	    ok && (it2 != predicates.end());
-	    it2++)
-	  ok &= (*it2)->matches_predicate(machine, p);
-	if(ok && (!lowest.exists() || (p.id < lowest.id)))
-	  lowest = p;
+        Processor::Kind p_kind =
+            ProcessorImpl::get_processor_kind(machine->get_runtime_impl(), p);
+        if(is_restricted_kind && (p_kind != restricted_kind))
+          continue;
+        bool ok = true;
+        for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
+            ok && (it2 != predicates.end()); it2++)
+          ok &= (*it2)->matches_predicate(machine, p);
+        if(ok && (!lowest.exists() || (p.id < lowest.id)))
+          lowest = p;
       }
     }
     return lowest;
@@ -2113,15 +2132,16 @@ namespace Realm {
 	Processor p =(*it).p;
 	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (p.kind() != restricted_kind))
-	  continue;
-	bool ok = true;
-	for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
-	    ok && (it2 != predicates.end());
-	    it2++)
-	  ok &= (*it2)->matches_predicate(machine, p);
-	if(ok)
-	  pset.insert((*it).p);
+        Processor::Kind p_kind =
+            ProcessorImpl::get_processor_kind(machine->get_runtime_impl(), p);
+        if(is_restricted_kind && (p_kind != restricted_kind))
+          continue;
+        bool ok = true;
+        for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
+            ok && (it2 != predicates.end()); it2++)
+          ok &= (*it2)->matches_predicate(machine, p);
+        if(ok)
+          pset.insert((*it).p);
       }
     }
     return pset.size();
@@ -2193,18 +2213,19 @@ namespace Realm {
 	Processor p =(*it).p;
 	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (p.kind() != restricted_kind))
-	  continue;
-	bool ok = true;
-	for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
-	    ok && (it2 != predicates.end());
-	    it2++)
-	  ok &= (*it2)->matches_predicate(machine, p);
-	if(ok) {
-	  count++;
-	  if((count == 1) || ((lrand48() % count) == 0))
-	    chosen = p;
-	}
+        Processor::Kind p_kind =
+            ProcessorImpl::get_processor_kind(machine->get_runtime_impl(), p);
+        if(is_restricted_kind && (p_kind != restricted_kind))
+          continue;
+        bool ok = true;
+        for(std::vector<ProcQueryPredicate *>::const_iterator it2 = predicates.begin();
+            ok && (it2 != predicates.end()); it2++)
+          ok &= (*it2)->matches_predicate(machine, p);
+        if(ok) {
+          count++;
+          if((count == 1) || ((lrand48() % count) == 0))
+            chosen = p;
+        }
       }
     }
 #else
@@ -2276,8 +2297,9 @@ namespace Realm {
     return new MemoryHasProcAffinityPredicate(proc, min_bandwidth, max_latency);
   }
 
-  bool MemoryHasProcAffinityPredicate::matches_predicate(MachineImpl *machine, Memory thing,
-					      const MachineMemInfo *info) const
+  bool MemoryHasProcAffinityPredicate::matches_predicate(const MachineImpl *machine,
+                                                         Memory thing,
+                                                         const MachineMemInfo *info) const
   {
 #ifdef USE_OLD_AFFINITIES
     Machine::AffinityDetails details;
@@ -2314,8 +2336,9 @@ namespace Realm {
     return new MemoryHasMemAffinityPredicate(memory, min_bandwidth, max_latency);
   }
 
-  bool MemoryHasMemAffinityPredicate::matches_predicate(MachineImpl *machine, Memory thing,
-							const MachineMemInfo *info) const
+  bool MemoryHasMemAffinityPredicate::matches_predicate(const MachineImpl *machine,
+                                                        Memory thing,
+                                                        const MachineMemInfo *info) const
   {
 #ifdef USE_OLD_AFFINITIES
     Machine::AffinityDetails details;
@@ -2352,8 +2375,8 @@ namespace Realm {
     return new MemoryBestProcAffinityPredicate(proc, bandwidth_weight, latency_weight);
   }
 
-  bool MemoryBestProcAffinityPredicate::matches_predicate(MachineImpl *machine, Memory thing,
-					      const MachineMemInfo *info) const
+  bool MemoryBestProcAffinityPredicate::matches_predicate(
+      const MachineImpl *machine, Memory thing, const MachineMemInfo *info) const
   {
 #ifndef USE_OLD_AFFINITIES
     if((bandwidth_weight == 1) && (latency_weight == 0)) {
@@ -2399,8 +2422,9 @@ namespace Realm {
     return new MemoryBestMemAffinityPredicate(memory, bandwidth_weight, latency_weight);
   }
 
-  bool MemoryBestMemAffinityPredicate::matches_predicate(MachineImpl *machine, Memory thing,
-					      const MachineMemInfo *info) const
+  bool MemoryBestMemAffinityPredicate::matches_predicate(const MachineImpl *machine,
+                                                         Memory thing,
+                                                         const MachineMemInfo *info) const
   {
 #ifndef USE_OLD_AFFINITIES
     if((bandwidth_weight == 1) && (latency_weight == 0)) {
@@ -2438,9 +2462,13 @@ namespace Realm {
 
   std::map<Memory::Kind, std::vector<Memory> > MemoryQueryImpl::_mem_cache;
 
-  MemoryQueryImpl::MemoryQueryImpl(const Machine& _machine)
+  MemoryQueryImpl::MemoryQueryImpl(const Machine &_machine)
+    : MemoryQueryImpl(static_cast<const MachineImpl *>(_machine.impl))
+  {}
+
+  MemoryQueryImpl::MemoryQueryImpl(const MachineImpl *_machine_impl)
     : references(1)
-    , machine((MachineImpl *)_machine.impl)
+    , machine(_machine_impl)
     , is_restricted_node(false)
     , is_restricted_kind(false)
     , restricted_min_capacity(0)
@@ -2448,11 +2476,10 @@ namespace Realm {
     , valid_cache(false)
     , cur_cached_list(NULL)
     , invalid_count(cache_invalid_count)
-
   {
   }
 
-  MemoryQueryImpl::MemoryQueryImpl(const MemoryQueryImpl& copy_from)
+  MemoryQueryImpl::MemoryQueryImpl(const MemoryQueryImpl &copy_from)
     : references(1)
     , machine(copy_from.machine)
     , is_restricted_node(copy_from.is_restricted_node)
@@ -2464,7 +2491,6 @@ namespace Realm {
     , valid_cache(copy_from.valid_cache)
     , cur_cached_list(copy_from.cur_cached_list)
     , invalid_count(cache_invalid_count)
-
   {
     predicates.reserve(copy_from.predicates.size());
     for(std::vector<MemoryQueryPredicate *>::const_iterator it = copy_from.predicates.begin();
@@ -2752,8 +2778,10 @@ namespace Realm {
         else
           it2 = plist->begin();
         while(it2 != plist->end()) {
+          size_t it2_capacity =
+              MemoryImpl::get_memory_size(machine->get_runtime_impl(), it2->first);
           bool ok = ((restricted_min_capacity == 0) ||
-                     (it2->first.capacity() >= restricted_min_capacity));
+                     (it2_capacity >= restricted_min_capacity));
           for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
               ok && (it3 != predicates.end());
               it3++)
@@ -2789,9 +2817,11 @@ namespace Realm {
 	Memory m =(*it).m;
 	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (m.kind() != restricted_kind))
-	  continue;
-        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+        Memory::Kind m_kind = MemoryImpl::get_memory_kind(machine->get_runtime_impl(), m);
+        if(is_restricted_kind && (m_kind != restricted_kind))
+          continue;
+        size_t m_capacity = MemoryImpl::get_memory_size(machine->get_runtime_impl(), m);
+        if((restricted_min_capacity > 0) && (m_capacity < restricted_min_capacity))
           continue;
         bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
@@ -2834,18 +2864,20 @@ namespace Realm {
 
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
 	while(it2 != plist->end()) {
+          size_t it2_capacity =
+              MemoryImpl::get_memory_size(machine->get_runtime_impl(), it2->first);
           bool ok = ((restricted_min_capacity == 0) ||
-                     (it2->first.capacity() >= restricted_min_capacity));
-	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
-	      ok && (it3 != predicates.end());
-	      it3++)
-	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if(ok)
-	    return it2->first;
+                     (it2_capacity >= restricted_min_capacity));
+          for(std::vector<MemoryQueryPredicate *>::const_iterator it3 =
+                  predicates.begin();
+              ok && (it3 != predicates.end()); it3++)
+            ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
+          if(ok)
+            return it2->first;
 
-	  // try next memory (if it exists)
-	  ++it2;
-	}
+          // try next memory (if it exists)
+          ++it2;
+        }
       }
 
       // try the next node (if it exists)
@@ -2871,9 +2903,11 @@ namespace Realm {
 	if(m.id <= after.id) continue;
 	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (m.kind() != restricted_kind))
-	  continue;
-        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+        Memory::Kind m_kind = MemoryImpl::get_memory_kind(machine->get_runtime_impl(), m);
+        if(is_restricted_kind && (m_kind != restricted_kind))
+          continue;
+        size_t m_capacity = MemoryImpl::get_memory_size(machine->get_runtime_impl(), m);
+        if((restricted_min_capacity > 0) && (m_capacity < restricted_min_capacity))
           continue;
 	bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
@@ -2911,18 +2945,20 @@ namespace Realm {
 	else
 	  it2 = plist->begin();
 	while(it2 != plist->end()) {
+          size_t it2_capacity =
+              MemoryImpl::get_memory_size(machine->get_runtime_impl(), it2->first);
           bool ok = ((restricted_min_capacity == 0) ||
-                     (it2->first.capacity() >= restricted_min_capacity));
-	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
-	      ok && (it3 != predicates.end());
-	      it3++)
-	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if(ok)
-	    return it2->first;
+                     (it2_capacity >= restricted_min_capacity));
+          for(std::vector<MemoryQueryPredicate *>::const_iterator it3 =
+                  predicates.begin();
+              ok && (it3 != predicates.end()); it3++)
+            ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
+          if(ok)
+            return it2->first;
 
-	  // try next memory (if it exists)
-	  ++it2;
-	}
+          // try next memory (if it exists)
+          ++it2;
+        }
       }
 
       // try the next node (if it exists)
@@ -2969,9 +3005,11 @@ namespace Realm {
 	Memory m =(*it).m;
 	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (m.kind() != restricted_kind))
-	  continue;
-        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+        Memory::Kind m_kind = MemoryImpl::get_memory_kind(machine->get_runtime_impl(), m);
+        if(is_restricted_kind && (m_kind != restricted_kind))
+          continue;
+        size_t m_capacity = MemoryImpl::get_memory_size(machine->get_runtime_impl(), m);
+        if((restricted_min_capacity > 0) && (m_capacity < restricted_min_capacity))
           continue;
 	bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
@@ -3015,8 +3053,10 @@ namespace Realm {
         else {
           std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
           while(it2 != plist->end()) {
+            size_t it2_capacity =
+                MemoryImpl::get_memory_size(machine->get_runtime_impl(), it2->first);
             bool ok = ((restricted_min_capacity == 0) ||
-                       (it2->first.capacity() >= restricted_min_capacity));
+                       (it2_capacity >= restricted_min_capacity));
             for(std::vector<MemoryQueryPredicate *>::const_iterator it3 =
                     predicates.begin();
                 ok && (it3 != predicates.end()); it3++)
@@ -3052,9 +3092,11 @@ namespace Realm {
 	Memory m =(*it).m;
 	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
-	if(is_restricted_kind && (m.kind() != restricted_kind))
-	  continue;
-        if((restricted_min_capacity > 0) && (m.capacity() < restricted_min_capacity))
+        Memory::Kind m_kind = MemoryImpl::get_memory_kind(machine->get_runtime_impl(), m);
+        if(is_restricted_kind && (m_kind != restricted_kind))
+          continue;
+        size_t m_capacity = MemoryImpl::get_memory_size(machine->get_runtime_impl(), m);
+        if((restricted_min_capacity > 0) && (m_capacity < restricted_min_capacity))
           continue;
 	bool ok = true;
 	for(std::vector<MemoryQueryPredicate *>::const_iterator it2 = predicates.begin();
@@ -3097,21 +3139,23 @@ namespace Realm {
       if(plist) {
 	std::map<Memory, MachineMemInfo *>::const_iterator it2 = plist->begin();
 	while(it2 != plist->end()) {
+          size_t it2_capacity =
+              MemoryImpl::get_memory_size(machine->get_runtime_impl(), it2->first);
           bool ok = ((restricted_min_capacity == 0) ||
-                     (it2->first.capacity() >= restricted_min_capacity));
-	  for(std::vector<MemoryQueryPredicate *>::const_iterator it3 = predicates.begin();
-	      ok && (it3 != predicates.end());
-	      it3++)
-	    ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
-	  if(ok) {
-	    count++;
-	    if((count == 1) || ((lrand48() % count) == 0))
-	      chosen = it2->first;
-	  }
+                     (it2_capacity >= restricted_min_capacity));
+          for(std::vector<MemoryQueryPredicate *>::const_iterator it3 =
+                  predicates.begin();
+              ok && (it3 != predicates.end()); it3++)
+            ok = (*it3)->matches_predicate(machine, it2->first, it2->second);
+          if(ok) {
+            count++;
+            if((count == 1) || ((lrand48() % count) == 0))
+              chosen = it2->first;
+          }
 
-	  // continue to next memory (if it exists)
-	  ++it2;
-	}
+          // continue to next memory (if it exists)
+          ++it2;
+        }
       }
 
       // continue to the next node (if it exists)

@@ -30,6 +30,7 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 USE_SPY		?= 0		# Enable support for detailed Legion Spy logging
 USE_HALF	?= 0		# Include support for half-precision reductions
 USE_COMPLEX	?= 0		# Include support for complex type reductions
+USE_CUDART_HIJACK ?= 0		# Include support for cuda runtime hijack (not recommended)
 SHARED_OBJECTS	?= 1		# Generate shared objects for Legion and Realm
 BOUNDS_CHECKS	?= 0		# Enable runtime bounds checks
 PRIVILEGE_CHECKS ?= 0		# Enable runtime privilege checks

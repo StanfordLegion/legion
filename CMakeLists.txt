@@ -383,6 +383,16 @@ if(Legion_USE_LIBDL)
 endif()
 
 #------------------------------------------------------------------------------#
+# rdtsc configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_RDTSC "Enable run-time support for dynamic shared objects" OFF)
+if(Legion_USE_RDTSC AND NOT WIN32)
+  # define variable for realm_defines.h
+  set(REALM_TIMERS_USE_RDTSC ON)
+endif()
+
+
+#------------------------------------------------------------------------------#
 # network interface configuration
 #------------------------------------------------------------------------------#
 set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
@@ -469,15 +479,18 @@ endif()
 # UCX configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES .*ucx.*)
+  option(Legion_UCX_MPI_BOOTSTRAP "Use MPI bootstrap plugin for UCX" ON)
   if (NOT REALM_USE_LIBDL)
     message(FATAL_ERROR "UCX backend requires run-time support for dynamic shared objects")
   endif()
   find_package(ucx 1.14.0 REQUIRED CONFIG)
   message(STATUS "Found UCX: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES})")
-  find_package(MPI REQUIRED) # for MPI bootstrap plugin
+  if (Legion_UCX_MPI_BOOTSTRAP)
+    find_package(MPI REQUIRED) # for MPI bootstrap plugin
+    set(Legion_MPI_INTEROP ON)
+  endif()
   # define variable for realm_defines.h
   set(REALM_USE_UCX ON)
-  set(Legion_MPI_INTEROP ON)
   option(Legion_UCX_DYNAMIC_LOAD "Load ucx libraries at runtime" OFF)
   if(Legion_UCX_DYNAMIC_LOAD)
     set(REALM_UCX_DYNAMIC_LOAD ON)
@@ -618,7 +631,7 @@ if(Legion_USE_HIP)
     )
   endif()
 
-  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
+  option(Legion_HIJACK_HIP "Enable HIJACK HIP" OFF)
 
   # define variable for legion_defines.h
   set(LEGION_USE_HIP ON)
@@ -761,6 +774,11 @@ set(Legion_MAX_NUM_NODES 1024 CACHE STRING
     "Maximum number of nodes supported by the runtime -- MUST be a power of two.")
 set(Legion_MAX_NUM_PROCS 64 CACHE STRING
     "Maximum number of processors (per node) supported by the runtime -- MUST be a power of two.")
+
+  option(Legion_USE_PREALM "Build Realm with support for PRealm" OFF)
+if(Legion_USE_PREALM)
+  set(REALM_USE_PREALM ON)
+endif()
 
 # check that they're all powers of two
 

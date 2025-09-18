@@ -671,10 +671,10 @@ namespace Realm {
     }
 
     namespace ThreadLocal {
-      static REALM_THREAD_LOCAL GPUProcessor *current_gpu_proc = 0;
-      static REALM_THREAD_LOCAL GPUStream *current_gpu_stream = 0;
-      static REALM_THREAD_LOCAL std::set<GPUStream*> *created_gpu_streams = 0;
-      static REALM_THREAD_LOCAL int context_sync_required = 0;
+      static thread_local GPUProcessor *current_gpu_proc = 0;
+      static thread_local GPUStream *current_gpu_stream = 0;
+      static thread_local std::set<GPUStream *> *created_gpu_streams = 0;
+      static thread_local int context_sync_required = 0;
     };
 
 #ifdef REALM_USE_HIP_HIJACK
@@ -847,9 +847,9 @@ namespace Realm {
     //
     // class GPUProcessor
 
-    GPUProcessor::GPUProcessor(GPU *_gpu, Processor _me, Realm::CoreReservationSet& crs,
-                               size_t _stack_size)
-      : LocalTaskProcessor(_me, Processor::TOC_PROC)
+    GPUProcessor::GPUProcessor(RuntimeImpl *runtime_impl, GPU *_gpu, Processor _me,
+                               Realm::CoreReservationSet &crs, size_t _stack_size)
+      : LocalTaskProcessor(runtime_impl, _me, Processor::TOC_PROC)
       , gpu(_gpu)
       , block_on_synchronize(false)
       , ctxsync(_gpu, _gpu->device_id, crs, _gpu->module->config->cfg_max_ctxsync_threads)
@@ -2169,9 +2169,8 @@ namespace Realm {
     void GPU::create_processor(RuntimeImpl *runtime, size_t stack_size)
     {
       Processor p = runtime->next_local_processor_id();
-      proc = new GPUProcessor(this, p,
-			      runtime->core_reservation_set(),
-			      stack_size);
+      proc =
+          new GPUProcessor(runtime, this, p, runtime->core_reservation_set(), stack_size);
       runtime->add_processor(proc);
 
       // this processor is able to access its own FB and the ZC mem (if any)
@@ -2527,10 +2526,6 @@ namespace Realm {
           hipDeviceProp_t dev_prop;
           CHECK_HIP( hipGetDeviceProperties(&dev_prop, i) );
           res_fbmem_sizes[i] = dev_prop.totalGlobalMem;
-          if (i > 0) {
-            // currently, we assume all gpus are identical
-            assert(res_fbmem_sizes[i] == res_fbmem_sizes[i-1]);
-          }
         }
         res_min_fbmem_size =
             *std::min_element(res_fbmem_sizes.begin(), res_fbmem_sizes.end());

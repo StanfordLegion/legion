@@ -16,6 +16,7 @@ variables:
   CCACHE_DIR: $CI_PROJECT_DIR/.cache/ccache
   USE_CCACHE: "1"
   CPM_SOURCE_CACHE: $CI_PROJECT_DIR/.cache/cpm_src
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
   REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
   GASNET_SHA256: "f3b379b2c650b8deb24e33ca101303c1af2482e996e603291ebf16c02a708da1"
   GASNET_COMMIT: "3db4ea2f92ea6bfba6fe9538cb001b6a34b2f373"
@@ -30,7 +31,13 @@ cache: &global_cache
   - key: "external-deps"
     paths:
       - $DEP_CACHE
-
+  - key:
+      files:
+        - tools/legion_prof_rs/Cargo.lock
+      prefix: cargo
+    paths:
+      - $CARGO_HOME
+      - tools/legion_prof_rs/target/
 
 # Local variables (included on a case-by-case basis in each job):
 .no_ccache: &no_ccache
@@ -397,6 +404,10 @@ before_script:
       ccache --show-stats
     fi
   - |
+    (find $CARGO_HOME -type f -print0 | perl -0ne 'END {print $.}') || true
+  - |
+    (find $CI_PROJECT_DIR/tools/legion_prof_rs/target -type f -print0 | perl -0ne 'END {print $.}') || true
+  - |
     if [[ "$USE_CUDA" -eq 1 ]]; then
       # make sure dynamic loading finds the right libcudart.so
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
@@ -566,15 +577,15 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:250225
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:250509
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:250225
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:250509
 .image_2404: &image_2404
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-24.04:250225
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-24.04:250509
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:250225
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:250509
 .image_icc: &image_icc
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:250225
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc:250509
 .image_msvc178: &image_msvc178
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-msvc:250206
 

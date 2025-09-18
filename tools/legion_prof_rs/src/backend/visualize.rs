@@ -1,7 +1,7 @@
 use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs::{create_dir, remove_dir_all, File};
+use std::fs::{File, create_dir, remove_dir_all};
 use std::io;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};

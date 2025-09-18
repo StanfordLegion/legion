@@ -328,8 +328,9 @@ Event DistributedData<N, T>::create_instances(const FieldMap &fields, LAMBDA mem
           pieces[i].space, pieces[i].subrects, ilc, dim_order);
 
       Event e =
-          RegionInstance::create_instance(pieces[i].inst, m, ilg, ProfilingRequestSet());
+          RegionInstance::create_instance(pieces[i].inst, m, *ilg, ProfilingRequestSet());
       events.push_back(e);
+      delete ilg;
     }
 
     if(cpu_mem.exists()) {

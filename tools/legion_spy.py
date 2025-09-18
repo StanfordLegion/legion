@@ -102,6 +102,7 @@ TUNABLE_OP_KIND = 26
 REFINEMENT_OP_KIND = 27
 ADVISEMENT_OP_KIND = 28
 DISCARD_OP_KIND = 29
+RESET_OP_KIND = 30
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -8963,6 +8964,7 @@ class Operation(object):
             ADVISEMENT_OP_KIND : "magenta",
             TUNABLE_OP_KIND : "lightcoral",
             DISCARD_OP_KIND : "peachpuff",
+            RESET_OP_KIND : "lightseagreen",
             }[self.kind]
 
     @property
@@ -12471,6 +12473,8 @@ close_pat                = re.compile(
     prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
 refinement_pat           = re.compile(
     prefix+"Refinement Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+reset_pat                = re.compile(
+    prefix+"Reset Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(
@@ -13165,6 +13169,14 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(REFINEMENT_OP_KIND)
         op.set_name("Refinement Op")
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = reset_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(RESET_OP_KIND)
+        op.set_name("Reset Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
