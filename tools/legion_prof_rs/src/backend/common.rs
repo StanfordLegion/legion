@@ -1,5 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 use crate::geometry::{Bounds, ISpaceID};
 use crate::state::{
@@ -10,19 +11,19 @@ use crate::state::{
 
 use crate::conditional_assert;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProcGroup(pub Option<NodeID>, pub ProcKind, pub Option<DeviceKind>);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MemGroup(pub Option<NodeID>, pub MemKind);
 
 pub trait StatePostprocess {
     fn has_multiple_nodes(&self) -> bool;
 
-    fn group_procs(&self) -> BTreeMap<ProcGroup, Vec<ProcID>>;
-    fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>>;
-    fn group_chans(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
-    fn group_depparts(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>>;
+    fn group_procs(&self) -> HashMap<ProcGroup, Vec<ProcID>>;
+    fn group_mems(&self) -> HashMap<MemGroup, Vec<MemID>>;
+    fn group_chans(&self) -> HashMap<Option<NodeID>, Vec<ChanID>>;
+    fn group_depparts(&self) -> HashMap<Option<NodeID>, Vec<ChanID>>;
 
     fn proc_group_timepoints(
         &self,
@@ -35,15 +36,15 @@ pub trait StatePostprocess {
     fn group_node_proc_kind_timepoints(
         &self,
     ) -> (
-        BTreeMap<ProcGroup, Vec<(ProcID, &Vec<ProcPoint>)>>,
-        BTreeMap<ProcGroup, u64>,
+        HashMap<ProcGroup, Vec<(ProcID, &Vec<ProcPoint>)>>,
+        HashMap<ProcGroup, u64>,
     );
 
-    fn group_node_mem_kind_timepoints(&self) -> BTreeMap<MemGroup, Vec<(MemID, &Vec<MemPoint>)>>;
+    fn group_node_mem_kind_timepoints(&self) -> HashMap<MemGroup, Vec<(MemID, &Vec<MemPoint>)>>;
 
     fn group_node_chan_kind_timepoints(
         &self,
-    ) -> BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>>;
+    ) -> HashMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>>;
 
     fn convert_points_to_utilization<Entry, Secondary>(
         &self,
@@ -56,20 +57,20 @@ pub trait StatePostprocess {
     fn calculate_proc_utilization_data(
         &self,
         points: Vec<ProcPoint>,
-        owners: BTreeSet<ProcID>,
+        owners: HashSet<ProcID>,
         max_count: u64,
     ) -> Vec<(Timestamp, f64)>;
 
     fn calculate_mem_utilization_data(
         &self,
         points: Vec<&MemPoint>,
-        owners: BTreeSet<MemID>,
+        owners: HashSet<MemID>,
     ) -> Vec<(Timestamp, f64)>;
 
     fn calculate_chan_utilization_data(
         &self,
         points: Vec<ChanPoint>,
-        owners: BTreeSet<ChanID>,
+        owners: HashSet<ChanID>,
     ) -> Vec<(Timestamp, f64)>;
 }
 
@@ -94,8 +95,8 @@ impl StatePostprocess for State {
         false
     }
 
-    fn group_procs(&self) -> BTreeMap<ProcGroup, Vec<ProcID>> {
-        let mut groups = BTreeMap::new();
+    fn group_procs(&self) -> HashMap<ProcGroup, Vec<ProcID>> {
+        let mut groups = HashMap::new();
         for proc in self.procs.values() {
             if !proc.is_visible() {
                 continue;
@@ -121,8 +122,8 @@ impl StatePostprocess for State {
         groups
     }
 
-    fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>> {
-        let mut groups = BTreeMap::new();
+    fn group_mems(&self) -> HashMap<MemGroup, Vec<MemID>> {
+        let mut groups = HashMap::new();
         for mem in self.mems.values() {
             if !mem.is_visible() {
                 continue;
@@ -141,8 +142,8 @@ impl StatePostprocess for State {
         groups
     }
 
-    fn group_chans(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>> {
-        let mut groups = BTreeMap::new();
+    fn group_chans(&self) -> HashMap<Option<NodeID>, Vec<ChanID>> {
+        let mut groups = HashMap::new();
 
         for (chan_id, chan) in &self.chans {
             match *chan_id {
@@ -181,8 +182,8 @@ impl StatePostprocess for State {
         groups
     }
 
-    fn group_depparts(&self) -> BTreeMap<Option<NodeID>, Vec<ChanID>> {
-        let mut groups = BTreeMap::new();
+    fn group_depparts(&self) -> HashMap<Option<NodeID>, Vec<ChanID>> {
+        let mut groups = HashMap::new();
 
         for (chan_id, chan) in &self.chans {
             match *chan_id {
@@ -250,11 +251,11 @@ impl StatePostprocess for State {
     fn group_node_proc_kind_timepoints(
         &self,
     ) -> (
-        BTreeMap<ProcGroup, Vec<(ProcID, &Vec<ProcPoint>)>>,
-        BTreeMap<ProcGroup, u64>,
+        HashMap<ProcGroup, Vec<(ProcID, &Vec<ProcPoint>)>>,
+        HashMap<ProcGroup, u64>,
     ) {
-        let mut timepoint = BTreeMap::new();
-        let mut proc_count = BTreeMap::new();
+        let mut timepoint = HashMap::new();
+        let mut proc_count = HashMap::new();
 
         for proc in self.procs.values() {
             if !proc.is_visible() {
@@ -282,8 +283,8 @@ impl StatePostprocess for State {
         (timepoint, proc_count)
     }
 
-    fn group_node_mem_kind_timepoints(&self) -> BTreeMap<MemGroup, Vec<(MemID, &Vec<MemPoint>)>> {
-        let mut result = BTreeMap::new();
+    fn group_node_mem_kind_timepoints(&self) -> HashMap<MemGroup, Vec<(MemID, &Vec<MemPoint>)>> {
+        let mut result = HashMap::new();
         for mem in self.mems.values() {
             if !mem.is_visible() {
                 continue;
@@ -305,8 +306,8 @@ impl StatePostprocess for State {
 
     fn group_node_chan_kind_timepoints(
         &self,
-    ) -> BTreeMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>> {
-        let mut result = BTreeMap::new();
+    ) -> HashMap<Option<NodeID>, Vec<(ChanID, &Vec<ChanPoint>)>> {
+        let mut result = HashMap::new();
 
         for (chan_id, chan) in &self.chans {
             if !chan.is_visible() {
@@ -367,7 +368,7 @@ impl StatePostprocess for State {
     fn calculate_proc_utilization_data(
         &self,
         points: Vec<ProcPoint>,
-        owners: BTreeSet<ProcID>,
+        owners: HashSet<ProcID>,
         max_count: u64,
     ) -> Vec<(Timestamp, f64)> {
         // we assume that the timepoints are sorted before this step
@@ -406,7 +407,7 @@ impl StatePostprocess for State {
     fn calculate_mem_utilization_data(
         &self,
         points: Vec<&MemPoint>,
-        owners: BTreeSet<MemID>,
+        owners: HashSet<MemID>,
     ) -> Vec<(Timestamp, f64)> {
         assert!(!owners.is_empty());
 
@@ -448,7 +449,7 @@ impl StatePostprocess for State {
     fn calculate_chan_utilization_data(
         &self,
         points: Vec<ChanPoint>,
-        owners: BTreeSet<ChanID>,
+        owners: HashSet<ChanID>,
     ) -> Vec<(Timestamp, f64)> {
         // we assume that the timepoints are sorted before this step
 
@@ -960,7 +961,7 @@ pub struct CopyInstInfoDumpInstVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State)
 impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // remove duplications
-        let mut insts_set = BTreeSet::new();
+        let mut insts_set = HashSet::new();
         for elt in self.0.iter() {
             // src_inst_uid = None means scatter (indirection inst)
             if let Some(src_inst_uid) = elt.src_inst_uid {
@@ -1038,7 +1039,7 @@ pub struct FillInstInfoDumpInstVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State)
 impl fmt::Display for FillInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // remove duplications
-        let mut insts_set = BTreeSet::new();
+        let mut insts_set = HashSet::new();
         for elt in self.0.iter() {
             if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
                 insts_set.insert(dst_inst);

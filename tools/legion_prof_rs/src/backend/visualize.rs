@@ -1,10 +1,10 @@
 use std::cmp::max;
-use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{File, create_dir, remove_dir_all};
-use std::io;
-use std::io::{Cursor, Write};
+use std::io::{self, Cursor, Write};
 use std::path::{Path, PathBuf};
+
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 use serde::{Serialize, Serializer};
 
@@ -112,14 +112,14 @@ struct ScaleRecord {
 
 #[derive(Debug)]
 pub struct OperationInstInfoDumpInstVec<'a>(
-    pub &'a BTreeMap<Option<u32>, Vec<OperationInstInfo>>,
+    pub &'a HashMap<Option<u32>, Vec<OperationInstInfo>>,
     pub &'a State,
 );
 
 impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // remove duplications
-        let mut insts_set = BTreeSet::new();
+        let mut insts_set = HashSet::new();
         for (_, elmts) in self.0.iter() {
             for elt in elmts.iter() {
                 if let Some(inst) = self.1.find_inst(elt.inst_uid) {
@@ -668,9 +668,9 @@ impl State {
         path: P,
         group: ProcGroup,
         points: Vec<(ProcID, &Vec<ProcPoint>)>,
-        proc_count: &BTreeMap<ProcGroup, u64>,
+        proc_count: &HashMap<ProcGroup, u64>,
     ) -> io::Result<()> {
-        let owners: BTreeSet<_> = points
+        let owners: HashSet<_> = points
             .iter()
             .filter(|(_, tp)| !tp.is_empty())
             .map(|(proc_id, _)| *proc_id)
@@ -728,7 +728,7 @@ impl State {
         group: MemGroup,
         points: Vec<(MemID, &Vec<MemPoint>)>,
     ) -> io::Result<()> {
-        let owners: BTreeSet<_> = points
+        let owners: HashSet<_> = points
             .iter()
             .filter(|(_, tp)| !tp.is_empty())
             .map(|(mem_id, _)| *mem_id)
@@ -779,7 +779,7 @@ impl State {
         node_id: Option<NodeID>,
         points: Vec<(ChanID, &Vec<ChanPoint>)>,
     ) -> io::Result<()> {
-        let owners: BTreeSet<_> = points
+        let owners: HashSet<_> = points
             .iter()
             .filter(|(_, tp)| !tp.is_empty())
             .map(|(chan_id, _)| *chan_id)
@@ -830,7 +830,7 @@ impl State {
         let timepoint_mem = self.group_node_mem_kind_timepoints();
         let timepoint_chan = self.group_node_chan_kind_timepoints();
 
-        let mut stats = BTreeMap::new();
+        let mut stats = HashMap::new();
 
         let multinode = self.has_multiple_nodes();
         for group in timepoint_proc.keys() {
@@ -980,7 +980,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     // generate tsv data
     let procs = state.procs.values().collect::<Vec<_>>();
-    let proc_records: BTreeMap<_, _> = procs
+    let proc_records: HashMap<_, _> = procs
         .par_iter()
         .filter(|proc| !proc.is_empty() && proc.is_visible())
         .flat_map(|proc| match proc.kind.unwrap() {
@@ -1002,7 +1002,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     }
 
     let chans = state.chans.values().collect::<Vec<_>>();
-    let chan_records: BTreeMap<_, _> = chans
+    let chan_records: HashMap<_, _> = chans
         .par_iter()
         .filter(|chan| !chan.is_empty() && chan.is_visible())
         .map(|chan| {
@@ -1016,7 +1016,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     }
 
     let mems = state.mems.values().collect::<Vec<_>>();
-    let mem_records: BTreeMap<_, _> = mems
+    let mem_records: HashMap<_, _> = mems
         .par_iter()
         .filter(|mem| !mem.is_empty() && mem.is_visible())
         .map(|mem| {

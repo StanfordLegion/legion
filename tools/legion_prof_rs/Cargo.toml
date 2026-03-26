@@ -27,6 +27,7 @@ nvtxw = ["dep:legion_prof_viewer", "legion_prof_viewer?/nvtxw"]
 clap = { version = "4", features = ["cargo", "derive"] }
 csv = "1.1"
 derive_more = { version = "2", default-features = false, features = ["add", "display", "from"] }
+foldhash = "0.2"
 flate2 = "1"
 nom = "7"
 num_enum = "0.7"

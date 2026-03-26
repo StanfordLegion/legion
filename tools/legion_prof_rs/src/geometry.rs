@@ -7,7 +7,7 @@ use crate::state::{IPartID, NodeID};
 
 pub type Coord = i64;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Point {
     pub values: Vec<Coord>,
 }
@@ -22,7 +22,7 @@ impl Point {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rect {
     pub lo: Point,
     pub hi: Point,
@@ -128,7 +128,7 @@ pub struct ISpaceSize {
     pub is_sparse: bool,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ISpaceID(pub NonZeroU64);
 
 #[derive(Debug)]

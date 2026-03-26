@@ -1,6 +1,7 @@
 use std::cmp::max;
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
+
+use foldhash::{HashMap, HashMapExt, HashSet};
 
 use legion_prof_viewer::{
     data::{
@@ -122,15 +123,15 @@ pub struct StateDataSource {
     field_schema: FieldSchema,
     fields: Fields,
     info: EntryInfo,
-    entry_map: BTreeMap<EntryID, EntryKind>,
-    proc_entries: BTreeMap<ProcID, EntryID>,
-    proc_groups: BTreeMap<ProcGroup, Vec<ProcID>>,
-    mem_entries: BTreeMap<MemID, EntryID>,
-    mem_groups: BTreeMap<MemGroup, Vec<MemID>>,
-    chan_entries: BTreeMap<ChanID, EntryID>,
-    chan_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
-    deppart_groups: BTreeMap<Option<NodeID>, Vec<ChanID>>,
-    step_utilization_cache: Mutex<BTreeMap<EntryID, Arc<Vec<UtilPoint>>>>,
+    entry_map: HashMap<EntryID, EntryKind>,
+    proc_entries: HashMap<ProcID, EntryID>,
+    proc_groups: HashMap<ProcGroup, Vec<ProcID>>,
+    mem_entries: HashMap<MemID, EntryID>,
+    mem_groups: HashMap<MemGroup, Vec<MemID>>,
+    chan_entries: HashMap<ChanID, EntryID>,
+    chan_groups: HashMap<Option<NodeID>, Vec<ChanID>>,
+    deppart_groups: HashMap<Option<NodeID>, Vec<ChanID>>,
+    step_utilization_cache: Mutex<HashMap<EntryID, Arc<Vec<UtilPoint>>>>,
 }
 
 impl StateDataSource {
@@ -171,22 +172,22 @@ impl StateDataSource {
             reduction_op: field_schema.insert("Reduction Operator".to_owned(), true),
         };
 
-        let mut entry_map = BTreeMap::<EntryID, EntryKind>::new();
-        let mut proc_entries = BTreeMap::new();
-        let mut chan_entries = BTreeMap::new();
-        let mut mem_entries = BTreeMap::new();
+        let mut entry_map = HashMap::<EntryID, EntryKind>::new();
+        let mut proc_entries = HashMap::new();
+        let mut chan_entries = HashMap::new();
+        let mut mem_entries = HashMap::new();
 
         let mut proc_groups = state.group_procs();
         let mem_groups = state.group_mems();
         let chan_groups = state.group_chans();
         let deppart_groups = state.group_depparts();
 
-        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
-        let proc_kinds: BTreeSet<_> = proc_groups
+        let mut nodes: HashSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
+        let proc_kinds: HashSet<_> = proc_groups
             .keys()
             .map(|ProcGroup(_, k, d)| (*k, *d))
             .collect();
-        let mem_kinds: BTreeSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
+        let mem_kinds: HashSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
 
         if !state.has_multiple_nodes() {
             nodes.remove(&None);
@@ -588,7 +589,7 @@ impl StateDataSource {
             chan_entries,
             chan_groups,
             deppart_groups,
-            step_utilization_cache: Mutex::new(BTreeMap::new()),
+            step_utilization_cache: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -707,7 +708,7 @@ impl StateDataSource {
                 let procs = self.proc_groups.get(group).unwrap();
                 let points = self.state.proc_group_timepoints(device, procs);
                 let count = procs.len() as u64;
-                let owners: BTreeSet<_> = procs
+                let owners: HashSet<_> = procs
                     .iter()
                     .zip(points.iter())
                     .filter(|(_, tp)| !tp.is_empty())
@@ -732,7 +733,7 @@ impl StateDataSource {
             EntryKind::MemKind(group) => {
                 let mems = self.mem_groups.get(group).unwrap();
                 let points = self.state.mem_group_timepoints(mems);
-                let owners: BTreeSet<_> = mems
+                let owners: HashSet<_> = mems
                     .iter()
                     .zip(points.iter())
                     .filter(|(_, tp)| !tp.is_empty())
@@ -759,7 +760,7 @@ impl StateDataSource {
                     _ => unreachable!(),
                 };
                 let points = self.state.chan_group_timepoints(chans);
-                let owners: BTreeSet<_> = chans
+                let owners: HashSet<_> = chans
                     .iter()
                     .zip(points.iter())
                     .filter(|(_, tp)| !tp.is_empty())
@@ -2070,7 +2071,7 @@ impl StateDataSource {
                     // for each instance-expr-privilege pair find all the fields
                     // this is effectively a group-by but rust's implementation
                     // is too stupid to do this on an unsorted vector
-                    let mut inst_fields = BTreeMap::new();
+                    let mut inst_fields = HashMap::new();
                     for info in uses {
                         let key = (info.inst_uid, info.index_expr, info.privilege);
                         inst_fields
