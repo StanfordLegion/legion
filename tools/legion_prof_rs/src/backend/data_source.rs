@@ -14,7 +14,7 @@ use legion_prof_viewer::{
 };
 
 #[cfg(debug_assertions)]
-use log_once::info_once;
+use log_once::warn_once;
 
 use slice_group_by::GroupBy;
 
@@ -831,7 +831,7 @@ impl StateDataSource {
 
             #[cfg(debug_assertions)]
             {
-                info_once!(
+                warn_once!(
                     "Debug assertions enabled: checking point overlap. This can be expensive."
                 );
                 for point in &points[..first_index] {
