@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use log::info;
+
 use rayon::prelude::*;
 
 #[cfg(feature = "client")]
@@ -207,7 +209,33 @@ struct Cli {
     command: Commands,
 }
 
+struct Timer {
+    time: std::time::Instant,
+}
+
+impl Timer {
+    fn new() -> Self {
+        Self {
+            time: std::time::Instant::now(),
+        }
+    }
+
+    fn duration_since_last(&mut self) -> std::time::Duration {
+        let next = std::time::Instant::now();
+        let result = next.duration_since(self.time);
+        self.time = next;
+        result
+    }
+
+    fn report_timing(&mut self, label: &str) {
+        let duration = self.duration_since_last().as_secs_f64();
+        info!("timing [{}]: {} seconds", label, duration);
+    }
+}
+
 fn main() -> io::Result<()> {
+    let mut timer = Timer::new();
+
     let env = env_logger::Env::default().filter_or("RUST_LOG", "info");
     env_logger::init_from_env(env);
 
@@ -327,6 +355,8 @@ fn main() -> io::Result<()> {
         filter_input = !args.no_filter_input;
     }
 
+    timer.report_timing("startup time");
+
     let records: Result<Vec<_>, _> = args
         .filenames
         .par_iter()
@@ -362,10 +392,16 @@ fn main() -> io::Result<()> {
     if filter_input {
         println!("Filtering profiles to nodes: {:?}", state.visible_nodes);
     }
+    let mut first = true;
     for record in records? {
+        if first {
+            timer.report_timing("parse");
+            first = false;
+        }
         println!("Matched {} objects", record.len());
         state.process_records(&record, Timestamp::from_us(args.call_threshold));
     }
+    timer.report_timing("state construction");
 
     if !state.complete_parse() {
         println!("Nothing to do");
@@ -397,12 +433,17 @@ fn main() -> io::Result<()> {
     Config::set_config(filter_input, args.verbose, have_alllogs);
 
     state.trim_time_range(start_trim, stop_trim);
+    timer.report_timing("trim time ranges");
     println!("Sorting time ranges");
     state.sort_time_range();
+    timer.report_timing("sort time ranges");
     state.check_message_latencies(message_threshold, message_percentage);
+    timer.report_timing("check message latencies");
     state.filter_output();
+    timer.report_timing("filter output");
     println!("Calculating critical paths");
     state.compute_critical_paths();
+    timer.report_timing("critical paths");
 
     match cli.command {
         Commands::Archive {
@@ -416,7 +457,9 @@ fn main() -> io::Result<()> {
             #[cfg(feature = "archiver")]
             {
                 state.stack_time_points();
+                timer.report_timing("stack time points");
                 state.assign_colors();
+                timer.report_timing("assign colors");
                 archiver::write(
                     state,
                     levels,
@@ -426,14 +469,18 @@ fn main() -> io::Result<()> {
                     out.force,
                     zstd_compression,
                 )?;
+                timer.report_timing("write archive");
             }
         }
         Commands::DuckDB { out, .. } => {
             #[cfg(feature = "duckdb")]
             {
                 state.stack_time_points();
+                timer.report_timing("stack time points");
                 state.assign_colors();
+                timer.report_timing("assign colors");
                 duckdb::write(state, out.output, out.force)?;
+                timer.report_timing("write archive");
             }
         }
         Commands::Legacy { out, .. } => {
@@ -450,7 +497,9 @@ fn main() -> io::Result<()> {
             #[cfg(feature = "nvtxw")]
             {
                 state.stack_time_points();
+                timer.report_timing("stack time points");
                 state.assign_colors();
+                timer.report_timing("assign colors");
                 let zero_time = state.zero_time;
                 nvtxw::write(state, backend, output, force, merge, zero_time)?;
             }
@@ -459,7 +508,9 @@ fn main() -> io::Result<()> {
             #[cfg(feature = "viewer")]
             {
                 state.stack_time_points();
+                timer.report_timing("stack time points");
                 state.assign_colors();
+                timer.report_timing("assign colors");
                 viewer::start(state);
             }
         }
@@ -467,7 +518,9 @@ fn main() -> io::Result<()> {
             #[cfg(feature = "server")]
             {
                 state.stack_time_points();
+                timer.report_timing("stack time points");
                 state.assign_colors();
+                timer.report_timing("assign colors");
                 server::start(state, &host, port);
             }
         }
