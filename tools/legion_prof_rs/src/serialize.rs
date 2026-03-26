@@ -349,7 +349,7 @@ fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
     map(le_u64, |x| InstID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_ipart_id(input: &[u8]) -> IResult<&[u8], IPartID> {
-    map(le_u64, IPartID)(input)
+    map(le_u64, |x| IPartID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_ispace_id(input: &[u8]) -> IResult<&[u8], ISpaceID> {
     map(le_u64, |x| ISpaceID(NonZeroU64::new(x).unwrap()))(input)
@@ -358,13 +358,13 @@ fn parse_option_ispace_id(input: &[u8]) -> IResult<&[u8], Option<ISpaceID>> {
     map(le_u64, |x| NonZeroU64::new(x).map(ISpaceID))(input)
 }
 fn parse_fspace_id(input: &[u8]) -> IResult<&[u8], FSpaceID> {
-    map(le_u64, FSpaceID)(input)
+    map(le_u64, |x| FSpaceID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_field_id(input: &[u8]) -> IResult<&[u8], FieldID> {
     map(le_u32, FieldID)(input)
 }
 fn parse_tree_id(input: &[u8]) -> IResult<&[u8], TreeID> {
-    map(le_u32, TreeID)(input)
+    map(le_u32, |x| TreeID(NonZeroU32::new(x).unwrap()))(input)
 }
 fn parse_mapper_id(input: &[u8]) -> IResult<&[u8], MapperID> {
     map(le_u32, MapperID)(input)
@@ -415,7 +415,7 @@ fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
     map(le_u32, VariantID)(input)
 }
 fn parse_backtrace_id(input: &[u8]) -> IResult<&[u8], BacktraceID> {
-    map(le_u64, BacktraceID)(input)
+    map(le_u64, |x| BacktraceID(NonZeroU64::new(x).unwrap()))(input)
 }
 
 //

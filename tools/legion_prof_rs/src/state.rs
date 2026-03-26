@@ -1936,7 +1936,7 @@ impl Container for Chan {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct IPartID(pub u64);
+pub struct IPartID(pub NonZeroU64);
 
 #[derive(Debug)]
 pub struct IPart {
@@ -1980,7 +1980,7 @@ impl IPart {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct FSpaceID(pub u64);
+pub struct FSpaceID(pub NonZeroU64);
 
 #[derive(Debug)]
 pub struct FSpace {
@@ -2027,7 +2027,7 @@ impl Field {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct TreeID(pub u32);
+pub struct TreeID(pub NonZeroU32);
 
 #[derive(Debug)]
 pub struct Region {
@@ -3388,7 +3388,7 @@ impl fmt::Display for RuntimeConfig {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct BacktraceID(pub u64);
+pub struct BacktraceID(pub NonZeroU64);
 
 // Enum for describing the kinds of event nodes the graph
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
