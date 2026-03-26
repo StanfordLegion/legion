@@ -656,7 +656,7 @@ impl ContainerEntry for ProcEntry {
 pub type ProcPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, LowerHex)]
-pub struct ProcID(pub u64);
+pub struct ProcID(pub NonZeroU64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct NodeID(pub u64);
@@ -667,13 +667,13 @@ impl ProcID {
     // owner_node = proc_id[55:40]
     // proc_idx = proc_id[11:0]
     pub fn node_id(&self) -> NodeID {
-        NodeID((self.0 >> 40) & ((1 << 16) - 1))
+        NodeID((self.0.get() >> 40) & ((1 << 16) - 1))
     }
     // You probably don't want to use this function since we try to render
     // by relative processor IDs for each kind now, but it's still here
     // for backwards compatibility on older backends
     pub fn proc_in_node(&self) -> u64 {
-        (self.0) & ((1 << 12) - 1)
+        (self.0.get()) & ((1 << 12) - 1)
     }
 }
 
@@ -1351,20 +1351,20 @@ pub type MemEntry = Inst;
 pub type MemPoint = TimePoint<ProfUID, Timestamp>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, LowerHex)]
-pub struct MemID(pub u64);
+pub struct MemID(pub NonZeroU64);
 
 impl MemID {
     // Important: keep this in sync with realm/id.h
     // MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
     // owner_node = mem_id[55:40]
     pub fn node_id(&self) -> NodeID {
-        NodeID((self.0 >> 40) & ((1 << 16) - 1))
+        NodeID((self.0.get() >> 40) & ((1 << 16) - 1))
     }
     // You probably don't want to use this function since we try to render
     // by relative memory IDs for each kind now, but it's still here
     // for backwards compatibility on older backends
     pub fn mem_in_node(&self) -> u64 {
-        (self.0) & ((1 << 8) - 1)
+        (self.0.get()) & ((1 << 8) - 1)
     }
 }
 
@@ -2068,14 +2068,20 @@ impl Align {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct InstID(pub u64);
+pub struct InstID(pub NonZeroU64);
 
 impl InstID {
     // Important: keep this in sync with realm/id.h
     // MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
     // INSTANCE:    tag:2 = 0b01, owner_node:16,   creator_node:16, mem_idx: 8, inst_idx: 22
     pub fn mem_id(&self) -> MemID {
-        MemID((0x1e << 56) | ((self.0 & (0xffff << 46)) >> 6) | ((self.0 & (0xff << 22)) >> 22))
+        MemID(
+            ((0x1e << 56)
+                | ((self.0.get() & (0xffff << 46)) >> 6)
+                | ((self.0.get() & (0xff << 22)) >> 22))
+                .try_into()
+                .unwrap(),
+        )
     }
 }
 
@@ -5254,19 +5260,11 @@ fn process_record(
             indirect,
         } => {
             let copy = copies.get_mut(fevent).unwrap();
-            let mut src_mem = None;
-            if *src != MemID(0) {
-                src_mem = Some(*src);
-            }
-            let mut dst_mem = None;
-            if *dst != MemID(0) {
-                dst_mem = Some(*dst);
-            }
             let src_uid = src_inst.map(|i| state.create_fevent_reference(i));
             let dst_uid = dst_inst.map(|i| state.create_fevent_reference(i));
             let copy_inst_info = CopyInstInfo::new(
-                src_mem, dst_mem, *src_fid, *dst_fid, src_uid, dst_uid, *src_expr, *dst_expr,
-                *num_hops, *indirect,
+                *src, *dst, *src_fid, *dst_fid, src_uid, dst_uid, *src_expr, *dst_expr, *num_hops,
+                *indirect,
             );
             copy.add_copy_inst_info(copy_inst_info);
         }

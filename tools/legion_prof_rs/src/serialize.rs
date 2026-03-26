@@ -137,7 +137,7 @@ pub enum Record {
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
     MessageInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, spawn: Timestamp, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID },
     CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID, collective: u32, redop: Option<ReductionID>, copy_expr: Option<ISpaceID> },
-    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: Option<EventID>, dst_inst: Option<EventID>, src_expr: Option<ISpaceID>, dst_expr: Option<ISpaceID>, fevent: EventID, num_hops: u32, indirect: bool },
+    CopyInstInfo { src: Option<MemID>, dst: Option<MemID>, src_fid: FieldID, dst_fid: FieldID, src_inst: Option<EventID>, dst_inst: Option<EventID>, src_expr: Option<ISpaceID>, dst_expr: Option<ISpaceID>, fevent: EventID, num_hops: u32, indirect: bool },
     FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, creator: Option<EventID>, critical: Option<EventID>, fevent: EventID, collective: u32, fill_expr: Option<ISpaceID> },
     FillInstInfo { dst: MemID, fid: FieldID, dst_inst: EventID, fevent: EventID },
     InstTimelineInfo { fevent: EventID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp, creator: EventID },
@@ -346,7 +346,7 @@ fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
     map(le_u64, |x| EventID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
-    map(le_u64, InstID)(input)
+    map(le_u64, |x| InstID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_ipart_id(input: &[u8]) -> IResult<&[u8], IPartID> {
     map(le_u64, IPartID)(input)
@@ -373,7 +373,10 @@ fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
     map(le_u32, MapperCallKindID)(input)
 }
 fn parse_mem_id(input: &[u8]) -> IResult<&[u8], MemID> {
-    map(le_u64, MemID)(input)
+    map(le_u64, |x| MemID(NonZeroU64::new(x).unwrap()))(input)
+}
+fn parse_option_mem_id(input: &[u8]) -> IResult<&[u8], Option<MemID>> {
+    map(le_u64, |x| NonZeroU64::new(x).map(MemID))(input)
 }
 fn parse_redop_id(input: &[u8]) -> IResult<&[u8], ReductionID> {
     map(le_u32, |x| ReductionID(NonZeroU32::new(x).unwrap()))(input)
@@ -388,7 +391,7 @@ fn parse_op_id(input: &[u8]) -> IResult<&[u8], OpID> {
     map(le_u64, |x| OpID(NonMaxU64::new(x).unwrap()))(input)
 }
 fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
-    map(le_u64, ProcID)(input)
+    map(le_u64, |x| ProcID(NonZeroU64::new(x).unwrap()))(input)
 }
 fn parse_runtime_call_kind_id(input: &[u8]) -> IResult<&[u8], RuntimeCallKindID> {
     map(le_u32, RuntimeCallKindID)(input)
@@ -1023,8 +1026,8 @@ fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     ))
 }
 fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, src) = parse_mem_id(input)?;
-    let (input, dst) = parse_mem_id(input)?;
+    let (input, src) = parse_option_mem_id(input)?;
+    let (input, dst) = parse_option_mem_id(input)?;
     let (input, src_fid) = parse_field_id(input)?;
     let (input, dst_fid) = parse_field_id(input)?;
     let (input, src_inst) = parse_option_event_id(input)?;
@@ -1533,8 +1536,8 @@ fn filter_record<'a>(
         }
         Record::CopyInfo { .. } => true,
         Record::CopyInstInfo { src, dst, .. } => {
-            State::is_on_visible_nodes(visible_nodes, src.node_id())
-                || State::is_on_visible_nodes(visible_nodes, dst.node_id())
+            src.is_none_or(|m| State::is_on_visible_nodes(visible_nodes, m.node_id()))
+                || dst.is_none_or(|m| State::is_on_visible_nodes(visible_nodes, m.node_id()))
         }
         Record::FillInfo { .. } => true,
         Record::FillInstInfo { dst, .. } => {
