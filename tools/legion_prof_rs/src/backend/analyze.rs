@@ -1,6 +1,8 @@
 use std::cmp::{Reverse, max, min};
 use std::collections::BTreeMap;
 
+use foldhash::{HashMap, HashMapExt};
+
 use crate::state::{Container, Proc, ProcEntry, ProcEntryKind, State, Timestamp};
 
 #[derive(Debug, Copy, Clone)]
@@ -34,9 +36,9 @@ impl ProcEntryStats {
 
 fn accumulate_statistics(
     proc: &Proc,
-    task_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
-    runtime_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
-    mapper_stats: &mut BTreeMap<ProcEntryKind, ProcEntryStats>,
+    task_stats: &mut HashMap<ProcEntryKind, ProcEntryStats>,
+    runtime_stats: &mut HashMap<ProcEntryKind, ProcEntryStats>,
+    mapper_stats: &mut HashMap<ProcEntryKind, ProcEntryStats>,
 ) {
     fn update_stats(entry: &ProcEntry, stats: &mut ProcEntryStats) {
         stats.invocations += 1;
@@ -94,7 +96,7 @@ fn accumulate_statistics(
 
 fn print_statistics(
     state: &State,
-    statistics: &BTreeMap<ProcEntryKind, ProcEntryStats>,
+    statistics: &HashMap<ProcEntryKind, ProcEntryStats>,
     category: &str,
 ) {
     // Find the order to output these statistics in,
@@ -138,7 +140,7 @@ fn print_statistics(
                     );
                 }
                 ProcEntryKind::MapperCall(mapper_id, proc_id, call_kind) => {
-                    let proc_name = if let Some(proc) = state.procs.get(&proc_id) {
+                    let proc_name = if let Some(proc) = state.procs.get(proc_id) {
                         &proc.name(state)
                     } else {
                         "NO_PROC"
@@ -236,9 +238,9 @@ fn print_statistics(
 }
 
 pub fn analyze_statistics(state: &State) {
-    let mut task_stats = BTreeMap::new();
-    let mut runtime_stats = BTreeMap::new();
-    let mut mapper_stats = BTreeMap::new();
+    let mut task_stats = HashMap::new();
+    let mut runtime_stats = HashMap::new();
+    let mut mapper_stats = HashMap::new();
     for proc in state.procs.values() {
         accumulate_statistics(proc, &mut task_stats, &mut runtime_stats, &mut mapper_stats);
     }

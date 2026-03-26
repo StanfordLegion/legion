@@ -1,9 +1,11 @@
 use std::cmp::{Ordering, Reverse, max};
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::OnceLock;
+
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 use derive_more::{Add, From, LowerHex, Sub};
 use nonmax::NonMaxU64;
@@ -26,7 +28,7 @@ use crate::num_util::Postincrement;
 use crate::serialize::Record;
 
 // Make sure this is up to date with realm_c.h
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, TryFromPrimitive)]
 #[repr(i32)]
 pub enum ProcKind {
     External = 0, // This is technically a NO_PROC, but we've repurposed it
@@ -57,7 +59,7 @@ impl ProcKind {
 }
 
 // Make sure this is up to date with lowlevel.h
-#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, TryFromPrimitive)]
 #[repr(i32)]
 pub enum MemKind {
     NoMemKind = 0,
@@ -149,7 +151,7 @@ impl fmt::Display for DepPartKind {
 }
 
 // Make sure this is up to date with lowlevel.h
-#[derive(Debug, Copy, Clone, Eq, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, TryFromPrimitive)]
 #[repr(u32)]
 pub enum DimKind {
     DimX = 0,
@@ -218,16 +220,16 @@ impl fmt::Display for DimKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DeviceKind {
     Device,
     Host,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ReductionID(pub NonZeroU32);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum PrivilegeMode {
     NoAccess,
     ReadOnly,
@@ -292,7 +294,7 @@ macro_rules! conditional_assert {
     )
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, From)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, From)]
 pub struct Timestamp(NonMaxU64 /* ns */);
 
 impl Timestamp {
@@ -355,7 +357,7 @@ impl fmt::Display for Timestamp {
 }
 
 #[derive(
-    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Add, Sub, From,
+    Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Add, Sub, From,
 )]
 pub struct TimestampDelta(pub i64 /* ns */);
 
@@ -455,7 +457,7 @@ pub trait ContainerEntry {
     fn provenance<'a>(&self, state: &'a State) -> Option<&'a str>;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ProcEntryKind {
     Task(TaskID, VariantID),
     MetaTask(VariantID),
@@ -653,10 +655,10 @@ impl ContainerEntry for ProcEntry {
 
 pub type ProcPoint = TimePoint<ProfUID, Timestamp>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, LowerHex)]
 pub struct ProcID(pub u64);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct NodeID(pub u64);
 
 impl ProcID {
@@ -679,11 +681,11 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: Option<ProcKind>,
-    entries: BTreeMap<ProfUID, ProcEntry>,
-    tasks: BTreeMap<OpID, ProfUID>,
-    message_tasks: BTreeSet<ProfUID>,
-    meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
-    event_waits: BTreeMap<ProfUID, BTreeMap<EventID, (BacktraceID, Option<ProvenanceID>)>>,
+    entries: HashMap<ProfUID, ProcEntry>,
+    tasks: HashMap<OpID, ProfUID>,
+    message_tasks: HashSet<ProfUID>,
+    meta_tasks: HashMap<(OpID, VariantID), Vec<ProfUID>>,
+    event_waits: HashMap<ProfUID, HashMap<EventID, (BacktraceID, Option<ProvenanceID>)>>,
     max_levels: u32,
     time_points: Vec<ProcPoint>,
     time_points_stacked: Vec<Vec<ProcPoint>>,
@@ -700,11 +702,11 @@ impl Proc {
         Proc {
             proc_id,
             kind: None,
-            entries: BTreeMap::new(),
-            tasks: BTreeMap::new(),
-            message_tasks: BTreeSet::new(),
-            meta_tasks: BTreeMap::new(),
-            event_waits: BTreeMap::new(),
+            entries: HashMap::new(),
+            tasks: HashMap::new(),
+            message_tasks: HashSet::new(),
+            meta_tasks: HashMap::new(),
+            event_waits: HashMap::new(),
             max_levels: 0,
             time_points: Vec::new(),
             time_points_stacked: Vec::new(),
@@ -726,8 +728,8 @@ impl Proc {
         time_range: TimeRange,
         creator: Option<ProfUID>,
         critical: Option<EventID>,
-        op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
-        prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
+        op_prof_uid: &mut HashMap<OpID, ProfUID>,
+        prof_uid_proc: &mut HashMap<ProfUID, ProcID>,
     ) -> &mut ProcEntry {
         if let Some(op_id) = op {
             op_prof_uid.insert(op_id, base.prof_uid);
@@ -760,7 +762,7 @@ impl Proc {
     ) {
         self.event_waits
             .entry(task_uid)
-            .or_insert_with(BTreeMap::new)
+            .or_insert_with(HashMap::new)
             .insert(event, (backtrace, provenance));
     }
 
@@ -837,7 +839,7 @@ impl Proc {
         // Before we sort things, we need to rearrange the waiters from
         // any tasks into the appropriate runtime/mapper calls and make the
         // runtime/mapper calls appear as waiters in the original tasks
-        let mut subcalls = BTreeMap::new();
+        let mut subcalls = HashMap::new();
         for (uid, entry) in self.entries.iter() {
             match entry.kind {
                 ProcEntryKind::MapperCall(..)
@@ -1348,7 +1350,7 @@ pub type MemEntry = Inst;
 
 pub type MemPoint = TimePoint<ProfUID, Timestamp>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, LowerHex)]
 pub struct MemID(pub u64);
 
 impl MemID {
@@ -1371,7 +1373,7 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<ProfUID, Inst>,
+    pub insts: HashMap<ProfUID, Inst>,
     time_points: Vec<MemPoint>,
     time_points_stacked: Vec<Vec<MemPoint>>,
     util_time_points: Vec<MemPoint>,
@@ -1385,7 +1387,7 @@ impl Mem {
             mem_id,
             kind,
             capacity,
-            insts: BTreeMap::new(),
+            insts: HashMap::new(),
             time_points: Vec::new(),
             time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
@@ -1721,7 +1723,7 @@ impl ContainerEntry for ChanEntry {
 
 pub type ChanPoint = TimePoint<ProfUID, Timestamp>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChanID {
     Copy { src: MemID, dst: MemID },
     Fill { dst: MemID },
@@ -1751,8 +1753,8 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub chan_id: ChanID,
-    entries: BTreeMap<ProfUID, ChanEntry>,
-    depparts: BTreeMap<OpID, Vec<ProfUID>>,
+    entries: HashMap<ProfUID, ChanEntry>,
+    depparts: HashMap<OpID, Vec<ProfUID>>,
     time_points: Vec<ChanPoint>,
     time_points_stacked: Vec<Vec<ChanPoint>>,
     util_time_points: Vec<ChanPoint>,
@@ -1764,8 +1766,8 @@ impl Chan {
     fn new(chan_id: ChanID) -> Self {
         Chan {
             chan_id,
-            entries: BTreeMap::new(),
-            depparts: BTreeMap::new(),
+            entries: HashMap::new(),
+            depparts: HashMap::new(),
             time_points: Vec::new(),
             time_points_stacked: Vec::new(),
             util_time_points: Vec::new(),
@@ -1933,7 +1935,7 @@ impl Container for Chan {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct IPartID(pub u64);
 
 #[derive(Debug)]
@@ -1977,14 +1979,14 @@ impl IPart {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct FSpaceID(pub u64);
 
 #[derive(Debug)]
 pub struct FSpace {
     pub fspace_id: FSpaceID,
     pub name: Option<String>,
-    pub fields: BTreeMap<FieldID, Field>,
+    pub fields: HashMap<FieldID, Field>,
 }
 
 impl FSpace {
@@ -1992,7 +1994,7 @@ impl FSpace {
         FSpace {
             fspace_id,
             name: None,
-            fields: BTreeMap::new(),
+            fields: HashMap::new(),
         }
     }
     fn set_name(&mut self, name: &str) -> &mut Self {
@@ -2002,7 +2004,7 @@ impl FSpace {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct FieldID(pub u32);
 
 #[derive(Debug)]
@@ -2024,7 +2026,7 @@ impl Field {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct TreeID(pub u32);
 
 #[derive(Debug)]
@@ -2046,7 +2048,7 @@ impl Region {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct Align {
     _field_id: FieldID,
     _eqk: u32,
@@ -2065,7 +2067,7 @@ impl Align {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct InstID(pub u64);
 
 impl InstID {
@@ -2077,10 +2079,10 @@ impl InstID {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct Dim(pub u32);
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct Inst {
     pub base: Base,
     pub inst_id: Option<InstID>,
@@ -2338,7 +2340,7 @@ impl ContainerEntry for Inst {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, LowerHex)]
 pub struct Color(pub u32);
 
 impl Color {
@@ -2363,7 +2365,7 @@ impl Color {
     pub const GRAY: Color = Color(0x808080);
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct MapperID(pub u32);
 
 #[derive(Debug)]
@@ -2383,7 +2385,7 @@ impl Mapper {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -2407,7 +2409,7 @@ impl MapperCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
@@ -2431,7 +2433,7 @@ impl RuntimeCallKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ProvenanceID(pub NonZeroU64);
 
 #[derive(Debug)]
@@ -2453,7 +2455,7 @@ impl Provenance {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct TaskID(pub u32);
 
 #[derive(Debug)]
@@ -2476,7 +2478,7 @@ impl TaskKind {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct VariantID(pub u32);
 
 #[derive(Debug)]
@@ -2510,10 +2512,10 @@ impl Variant {
         self
     }
 }
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ProfUID(pub u64);
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct Base {
     pub prof_uid: ProfUID,
     pub level: Option<u32>,
@@ -2539,7 +2541,7 @@ impl Base {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TimeRange {
     // Unlike other TimeRange components, spawn is measured on the node that
     // spawns a (meta-)task, and therefore can potentially skew relative to the
@@ -2689,7 +2691,7 @@ impl Waiters {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct OpID(pub NonMaxU64);
 
 impl OpID {
@@ -2708,7 +2710,7 @@ impl MultiTask {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OpKindID(u32);
 
 #[derive(Debug)]
@@ -2773,7 +2775,7 @@ pub struct Operation {
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<ProvenanceID>,
-    pub operation_inst_infos: BTreeMap<Option<u32>, Vec<OperationInstInfo>>,
+    pub operation_inst_infos: HashMap<Option<u32>, Vec<OperationInstInfo>>,
 }
 
 impl Operation {
@@ -2782,7 +2784,7 @@ impl Operation {
             parent_id: None,
             kind: None,
             provenance: None,
-            operation_inst_infos: BTreeMap::new(),
+            operation_inst_infos: HashMap::new(),
         }
     }
     fn set_parent_id(&mut self, parent_id: Option<OpID>) -> &mut Self {
@@ -2802,7 +2804,7 @@ impl Operation {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct EventID(pub NonZeroU64);
 
 impl EventID {
@@ -2834,7 +2836,7 @@ impl EventID {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, TryFromPrimitive)]
 #[repr(u32)]
 pub enum CopyKind {
     Copy = 0,
@@ -2942,7 +2944,7 @@ impl Copy {
     fn split_by_channel(
         self,
         allocator: &mut ProfUIDAllocator,
-        event_lookup: &BTreeMap<EventID, CriticalPathVertex>,
+        event_lookup: &HashMap<EventID, CriticalPathVertex>,
         event_graph: &mut CriticalPathGraph,
         fevent: EventID,
     ) -> Vec<Self> {
@@ -3271,9 +3273,9 @@ impl Lfsr {
 #[derive(Debug, Default)]
 struct ProfUIDAllocator {
     next_prof_uid: ProfUID,
-    fevents: BTreeMap<EventID, ProfUID>,
-    used_fevents: BTreeSet<EventID>,
-    reverse_lookup: BTreeMap<ProfUID, EventID>,
+    fevents: HashMap<EventID, ProfUID>,
+    used_fevents: HashSet<EventID>,
+    reverse_lookup: HashMap<ProfUID, EventID>,
 }
 
 impl ProfUIDAllocator {
@@ -3361,11 +3363,11 @@ impl fmt::Display for RuntimeConfig {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct BacktraceID(pub u64);
 
 // Enum for describing the kinds of event nodes the graph
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventEntryKind {
     // We don't know who produced this event yet
     UnknownEvent,
@@ -3426,37 +3428,37 @@ pub struct State {
     pub runtime_config: RuntimeConfig,
     pub zero_time: TimestampDelta,
     pub _calibration_err: i64,
-    pub procs: BTreeMap<ProcID, Proc>,
-    pub mems: BTreeMap<MemID, Mem>,
-    pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
-    pub chans: BTreeMap<ChanID, Chan>,
-    pub task_kinds: BTreeMap<TaskID, TaskKind>,
-    pub variants: BTreeMap<(TaskID, VariantID), Variant>,
-    pub meta_variants: BTreeMap<VariantID, Variant>,
-    meta_tasks: BTreeMap<(OpID, VariantID), ProcID>,
-    pub op_kinds: BTreeMap<OpKindID, OpKind>,
-    pub operations: BTreeMap<OpID, Operation>,
-    op_prof_uid: BTreeMap<OpID, ProfUID>,
-    pub prof_uid_proc: BTreeMap<ProfUID, ProcID>,
-    pub prof_uid_chan: BTreeMap<ProfUID, ChanID>,
-    pub tasks: BTreeMap<OpID, ProcID>,
-    pub multi_tasks: BTreeMap<OpID, MultiTask>,
+    pub procs: HashMap<ProcID, Proc>,
+    pub mems: HashMap<MemID, Mem>,
+    pub mem_proc_affinity: HashMap<MemID, MemProcAffinity>,
+    pub chans: HashMap<ChanID, Chan>,
+    pub task_kinds: HashMap<TaskID, TaskKind>,
+    pub variants: HashMap<(TaskID, VariantID), Variant>,
+    pub meta_variants: HashMap<VariantID, Variant>,
+    meta_tasks: HashMap<(OpID, VariantID), ProcID>,
+    pub op_kinds: HashMap<OpKindID, OpKind>,
+    pub operations: HashMap<OpID, Operation>,
+    op_prof_uid: HashMap<OpID, ProfUID>,
+    pub prof_uid_proc: HashMap<ProfUID, ProcID>,
+    pub prof_uid_chan: HashMap<ProfUID, ChanID>,
+    pub tasks: HashMap<OpID, ProcID>,
+    pub multi_tasks: HashMap<OpID, MultiTask>,
     pub last_time: Timestamp,
-    pub mappers: BTreeMap<(MapperID, ProcID), Mapper>,
-    pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
-    pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<ProfUID, MemID>,
-    pub index_spaces: BTreeMap<ISpaceID, ISpace>,
-    pub index_partitions: BTreeMap<IPartID, IPart>,
-    logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
-    pub field_spaces: BTreeMap<FSpaceID, FSpace>,
+    pub mappers: HashMap<(MapperID, ProcID), Mapper>,
+    pub mapper_call_kinds: HashMap<MapperCallKindID, MapperCallKind>,
+    pub runtime_call_kinds: HashMap<RuntimeCallKindID, RuntimeCallKind>,
+    pub insts: HashMap<ProfUID, MemID>,
+    pub index_spaces: HashMap<ISpaceID, ISpace>,
+    pub index_partitions: HashMap<IPartID, IPart>,
+    logical_regions: HashMap<(ISpaceID, FSpaceID, TreeID), Region>,
+    pub field_spaces: HashMap<FSpaceID, FSpace>,
     has_prof_data: bool,
     pub visible_nodes: Vec<NodeID>,
     pub source_locator: Vec<String>,
-    pub provenances: BTreeMap<ProvenanceID, Provenance>,
-    pub backtraces: BTreeMap<BacktraceID, String>,
+    pub provenances: HashMap<ProvenanceID, Provenance>,
+    pub backtraces: HashMap<BacktraceID, String>,
     pub event_graph: CriticalPathGraph,
-    pub event_lookup: BTreeMap<EventID, CriticalPathVertex>,
+    pub event_lookup: HashMap<EventID, CriticalPathVertex>,
 }
 
 impl State {
@@ -3911,7 +3913,7 @@ impl State {
         collective: u32,
         redop: Option<ReductionID>,
         copy_expr: Option<ISpaceID>,
-        copies: &'a mut BTreeMap<EventID, Copy>,
+        copies: &'a mut HashMap<EventID, Copy>,
     ) -> &'a mut Copy {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
@@ -3951,7 +3953,7 @@ impl State {
         fevent: EventID,
         collective: u32,
         fill_expr: Option<ISpaceID>,
-        fills: &'a mut BTreeMap<EventID, Fill>,
+        fills: &'a mut HashMap<EventID, Fill>,
     ) -> &'a mut Fill {
         let alloc = &mut self.prof_uid_allocator;
         let creator_uid = creator.map(|e| alloc.create_reference(e));
@@ -3989,7 +3991,7 @@ impl State {
         creator: Option<EventID>,
         critical: Option<EventID>,
         fevent: EventID,
-        depparts: &'a mut BTreeMap<EventID, DepPart>,
+        depparts: &'a mut HashMap<EventID, DepPart>,
     ) {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
@@ -4021,7 +4023,7 @@ impl State {
     fn create_inst<'a>(
         &'a mut self,
         fevent: EventID,
-        insts: &'a mut BTreeMap<ProfUID, Inst>,
+        insts: &'a mut HashMap<ProfUID, Inst>,
     ) -> &'a mut Inst {
         let prof_uid = self.prof_uid_allocator.create_reference(fevent);
         insts
@@ -4067,11 +4069,11 @@ impl State {
         // logs. Therefore we defer this process until all records
         // have been processed.
         let mut node = None;
-        let mut insts = BTreeMap::new();
-        let mut copies = BTreeMap::new();
-        let mut fills = BTreeMap::new();
-        let mut depparts = BTreeMap::new();
-        let mut profs = BTreeMap::new();
+        let mut insts = HashMap::new();
+        let mut copies = HashMap::new();
+        let mut fills = HashMap::new();
+        let mut depparts = HashMap::new();
+        let mut profs = HashMap::new();
         for record in records {
             process_record(
                 record,
@@ -4157,7 +4159,7 @@ impl State {
 
     fn find_prof_task_times(
         &self,
-        copies: &BTreeMap<EventID, Copy>,
+        copies: &HashMap<EventID, Copy>,
         creator: EventID,
         creator_uid: ProfUID,
         completion: bool,
@@ -4244,7 +4246,7 @@ impl State {
         let mut skew_messages = 0;
         let mut total_messages = 0;
         let mut total_skew = Timestamp::ZERO;
-        let mut skew_nodes = BTreeMap::new();
+        let mut skew_nodes = HashMap::new();
         let mut check_for_skew = |proc: &Proc, prof_uid: ProfUID| {
             let entry = proc.entry(prof_uid);
             // Check for the presence of skew
@@ -4482,7 +4484,7 @@ impl State {
             }
         }
 
-        let mut memid_to_be_deleted = BTreeSet::new();
+        let mut memid_to_be_deleted = HashSet::new();
         for (mem_id, mem) in self.mems.iter_mut() {
             let node_id = mem.mem_id.node_id();
             if !self.visible_nodes.contains(&node_id) {
@@ -4674,7 +4676,7 @@ trait CreateProc {
     fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc;
 }
 
-impl CreateProc for BTreeMap<ProcID, Proc> {
+impl CreateProc for HashMap<ProcID, Proc> {
     fn create_proc(&mut self, proc_id: ProcID) -> &mut Proc {
         self.entry(proc_id).or_insert_with(|| Proc::new(proc_id))
     }
@@ -4684,11 +4686,11 @@ fn process_record(
     record: &Record,
     state: &mut State,
     node: &mut Option<NodeID>,
-    insts: &mut BTreeMap<ProfUID, Inst>,
-    copies: &mut BTreeMap<EventID, Copy>,
-    fills: &mut BTreeMap<EventID, Fill>,
-    depparts: &mut BTreeMap<EventID, DepPart>,
-    profs: &mut BTreeMap<ProfUID, (EventID, ProfUID, bool)>,
+    insts: &mut HashMap<ProfUID, Inst>,
+    copies: &mut HashMap<EventID, Copy>,
+    fills: &mut HashMap<EventID, Fill>,
+    depparts: &mut HashMap<EventID, DepPart>,
+    profs: &mut HashMap<ProfUID, (EventID, ProfUID, bool)>,
     call_threshold: Timestamp,
 ) {
     match record {
