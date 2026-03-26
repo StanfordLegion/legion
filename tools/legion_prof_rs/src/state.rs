@@ -2512,8 +2512,8 @@ impl Variant {
         self
     }
 }
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct ProfUID(pub u64);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProfUID(pub NonZeroU64);
 
 #[derive(Debug, Hash)]
 pub struct Base {
@@ -3270,7 +3270,7 @@ impl Lfsr {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ProfUIDAllocator {
     next_prof_uid: ProfUID,
     fevents: HashMap<EventID, ProfUID>,
@@ -3279,15 +3279,27 @@ struct ProfUIDAllocator {
 }
 
 impl ProfUIDAllocator {
+    fn new() -> Self {
+        Self {
+            next_prof_uid: ProfUID(NonZeroU64::new(1).unwrap()),
+            fevents: Default::default(),
+            used_fevents: Default::default(),
+            reverse_lookup: Default::default(),
+        }
+    }
+    fn alloc(next_prof_uid: &mut ProfUID) -> ProfUID {
+        let result = *next_prof_uid;
+        next_prof_uid.0 = next_prof_uid.0.checked_add(1).unwrap();
+        result
+    }
     fn create_fresh(&mut self) -> ProfUID {
-        self.next_prof_uid.0 += 1;
-        self.next_prof_uid
+        Self::alloc(&mut self.next_prof_uid)
     }
     fn create_reference(&mut self, fevent: EventID) -> ProfUID {
-        *self.fevents.entry(fevent).or_insert_with(|| {
-            self.next_prof_uid.0 += 1;
-            self.next_prof_uid
-        })
+        *self
+            .fevents
+            .entry(fevent)
+            .or_insert_with(|| Self::alloc(&mut self.next_prof_uid))
     }
     fn create_object(&mut self, fevent: EventID) -> ProfUID {
         assert!(!self.used_fevents.contains(&fevent));
@@ -3304,6 +3316,12 @@ impl ProfUIDAllocator {
     }
     fn find_fevent(&self, prof_uid: ProfUID) -> EventID {
         *self.reverse_lookup.get(&prof_uid).unwrap()
+    }
+}
+
+impl Default for ProfUIDAllocator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
