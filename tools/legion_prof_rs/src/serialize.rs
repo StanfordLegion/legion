@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Seek};
@@ -7,6 +6,8 @@ use std::path::Path;
 use std::str;
 
 use flate2::read::GzDecoder;
+
+use foldhash::{HashMap, HashMapExt};
 
 use nonmax::NonMaxU64;
 
@@ -1562,7 +1563,7 @@ fn check_version(prof_version: u32, legion_version: String) {
 
 fn parse_record<'a>(
     input: &'a [u8],
-    parsers: &BTreeMap<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>,
+    parsers: &HashMap<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>,
     max_dim: i32,
 ) -> IResult<&'a [u8], Record> {
     let (input, id) = le_u32(input)?;
@@ -1584,13 +1585,13 @@ fn parse<'a>(
     };
     check_version(prof_version, legion_version);
     let (input, record_formats) = many1(parse_record_format)(input)?;
-    let mut ids = BTreeMap::new();
+    let mut ids = HashMap::new();
     for record_format in record_formats {
         ids.insert(record_format.name, record_format.id);
     }
     let (input, _) = newline(input)?;
 
-    let mut parsers = BTreeMap::<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>::new();
+    let mut parsers = HashMap::<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>::new();
     let mut insert = |name, parser| {
         if let Some(id) = ids.get(name) {
             parsers.insert(*id, parser);
