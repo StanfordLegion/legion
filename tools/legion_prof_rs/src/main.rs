@@ -229,14 +229,14 @@ impl Timer {
 
     fn report_timing(&mut self, label: &str) {
         let duration = self.duration_since_last().as_secs_f64();
-        info!("timing [{}]: {} seconds", label, duration);
+        info!(target: "timing", "{},{}", label, duration);
     }
 }
 
 fn main() -> io::Result<()> {
     let mut timer = Timer::new();
 
-    let env = env_logger::Env::default().filter_or("RUST_LOG", "info");
+    let env = env_logger::Env::default().filter_or("RUST_LOG", "warn");
     env_logger::init_from_env(env);
 
     let cli = Cli::parse();
