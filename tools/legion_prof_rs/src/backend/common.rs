@@ -119,6 +119,10 @@ impl StatePostprocess for State {
                 }
             }
         }
+        // We're going to binary search on this later so make sure it's sorted.
+        for procs in groups.values_mut() {
+            procs.sort();
+        }
         groups
     }
 
@@ -138,6 +142,10 @@ impl StatePostprocess for State {
                         .push(mem.mem_id);
                 }
             }
+        }
+        // We're going to binary search on this later so make sure it's sorted.
+        for mems in groups.values_mut() {
+            mems.sort();
         }
         groups
     }
@@ -179,6 +187,11 @@ impl StatePostprocess for State {
             }
         }
 
+        // We're going to binary search on this later so make sure it's sorted.
+        for chans in groups.values_mut() {
+            chans.sort();
+        }
+
         groups
     }
 
@@ -206,6 +219,11 @@ impl StatePostprocess for State {
                     groups.entry(node).or_insert_with(Vec::new).push(*chan_id);
                 }
             }
+        }
+
+        // We're going to binary search on this later so make sure it's sorted.
+        for chans in groups.values_mut() {
+            chans.sort();
         }
 
         groups
