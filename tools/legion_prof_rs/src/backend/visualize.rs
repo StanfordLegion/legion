@@ -140,7 +140,7 @@ impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
                 f,
                 "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
-                inst.base.prof_uid.0
+                inst.base.prof_uid.0,
             )?;
             if i < insts_set.len() - 1 {
                 write!(f, ",")?;
@@ -210,7 +210,7 @@ impl Proc {
             out: "",
             children: "",
             parents: "",
-            prof_uid: base.prof_uid.0,
+            prof_uid: base.prof_uid.0.into(),
             op_id,
             instances: &instances,
         };
@@ -445,7 +445,7 @@ impl Chan {
             out: "",
             children: "",
             parents: "",
-            prof_uid: base.prof_uid.0,
+            prof_uid: base.prof_uid.0.into(),
             op_id: None,
             instances: &instances,
         })?;
@@ -596,7 +596,7 @@ impl Mem {
             out: "",
             children: "",
             parents: "",
-            prof_uid: base.prof_uid.0,
+            prof_uid: base.prof_uid.0.into(),
             op_id: None,
             instances: "",
         })?;
@@ -615,7 +615,7 @@ impl Mem {
             out: "",
             children: "",
             parents: "",
-            prof_uid: base.prof_uid.0,
+            prof_uid: base.prof_uid.0.into(),
             op_id: None,
             instances: "",
         })?;

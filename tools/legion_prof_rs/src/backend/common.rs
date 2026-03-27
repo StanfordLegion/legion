@@ -906,10 +906,10 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
         let mut src_inst_id = 0;
         let mut dst_inst_id = 0;
         if let Some(src_inst) = self.0 {
-            src_inst_id = src_inst.inst_id.unwrap().0;
+            src_inst_id = src_inst.inst_id.unwrap().0.get();
         }
         if let Some(dst_inst) = self.1 {
-            dst_inst_id = dst_inst.inst_id.unwrap().0;
+            dst_inst_id = dst_inst.inst_id.unwrap().0.get();
         }
         match (self.2, self.3) {
             (None, None) => unreachable!(),
@@ -1032,7 +1032,7 @@ impl fmt::Display for FillInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut inst_id = 0;
         if let Some(inst) = self.0 {
-            inst_id = inst.inst_id.unwrap().0;
+            inst_id = inst.inst_id.unwrap().0.get();
         }
         write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1.0)
     }

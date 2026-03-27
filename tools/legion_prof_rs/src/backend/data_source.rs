@@ -51,7 +51,7 @@ impl Into<ts::Interval> for TimeRange {
 
 impl Into<ItemUID> for ProfUID {
     fn into(self) -> ItemUID {
-        ItemUID(self.0)
+        ItemUID(self.0.into())
     }
 }
 
