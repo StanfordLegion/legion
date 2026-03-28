@@ -24,6 +24,7 @@ viewer = ["dep:legion_prof_viewer"]
 nvtxw = ["dep:legion_prof_viewer", "legion_prof_viewer?/nvtxw"]
 
 [dependencies]
+buffer-redux = { version = "1.1", features = ["slice-deque"] }
 clap = { version = "4", features = ["cargo", "derive"] }
 csv = "1.1"
 derive_more = { version = "2", default-features = false, features = ["add", "display", "from"] }
