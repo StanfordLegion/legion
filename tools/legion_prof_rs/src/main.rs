@@ -76,6 +76,9 @@ struct ParserArgs {
     )]
     no_filter_input: bool,
 
+    #[arg(long, help = "disable computation of critical paths")]
+    no_critical_paths: bool,
+
     #[arg(short, long, help = "print verbose profiling information")]
     verbose: bool,
 }
@@ -368,7 +371,7 @@ fn main() -> io::Result<()> {
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
-            deserialize(filename, &node_list, filter_input)
+            deserialize(filename, &node_list, filter_input, args.no_critical_paths)
         })
         .collect();
     match cli.command {
