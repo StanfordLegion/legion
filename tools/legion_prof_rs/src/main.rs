@@ -450,8 +450,10 @@ fn main() -> io::Result<()> {
     timer.report_timing("check message latencies");
     state.filter_output();
     timer.report_timing("filter output");
-    println!("Calculating critical paths");
-    state.compute_critical_paths();
+    if !args.no_critical_paths {
+        println!("Calculating critical paths");
+        state.compute_critical_paths();
+    }
     timer.report_timing("critical paths");
 
     match cli.command {
