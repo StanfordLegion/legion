@@ -1496,16 +1496,11 @@ fn parse_spawn_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     Ok((input, Record::SpawnInfo { fevent, spawn }))
 }
 
-fn filter_record<'a>(
-    record: &'a Record,
-    visible_nodes: &'a [NodeID],
-    node_id: Option<NodeID>,
-) -> bool {
-    assert!(!visible_nodes.is_empty());
+fn filter_nodes(record: &Record, visible_nodes: &[NodeID], node_id: Option<NodeID>) -> bool {
     let Some(node_id) = node_id else {
         return true;
     };
-    if visible_nodes.contains(&node_id) {
+    if State::is_on_visible_nodes(visible_nodes, node_id) {
         return true;
     }
 
@@ -1746,7 +1741,7 @@ fn parse(
         if let Record::MachineDesc { node_id: d, .. } = record {
             node_id = Some(d);
         }
-        if !filter_input || filter_record(&record, visible_nodes, node_id) {
+        if !filter_input || filter_nodes(&record, visible_nodes, node_id) {
             records.push(record);
         }
     }

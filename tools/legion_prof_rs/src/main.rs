@@ -233,6 +233,26 @@ impl Timer {
     }
 }
 
+fn parse_node_list(nodes_str: &str) -> Vec<NodeID> {
+    let mut result: Vec<_> = nodes_str
+        .split(",")
+        .flat_map(|x| {
+            let splits: Vec<_> = x
+                .splitn(2, "-")
+                .map(|x| x.parse::<u64>().unwrap())
+                .collect();
+            if splits.len() == 2 {
+                (splits[0]..=splits[1]).into_iter().map(NodeID)
+            } else {
+                (splits[0]..=splits[0]).into_iter().map(NodeID)
+            }
+        })
+        .collect();
+    // Sort now so we can rely on it being sorted
+    result.sort();
+    result
+}
+
 fn main() -> io::Result<()> {
     let mut timer = Timer::new();
 
@@ -335,25 +355,11 @@ fn main() -> io::Result<()> {
     let message_threshold = args.message_threshold;
     let message_percentage = args.message_percentage;
 
-    let mut node_list: Vec<NodeID> = Vec::new();
-    let mut filter_input = false;
-    if let Some(nodes_str) = &args.nodes {
-        node_list = nodes_str
-            .split(",")
-            .flat_map(|x| {
-                let splits: Vec<_> = x
-                    .splitn(2, "-")
-                    .map(|x| x.parse::<u64>().unwrap())
-                    .collect();
-                if splits.len() == 2 {
-                    (splits[0]..=splits[1]).into_iter().map(NodeID)
-                } else {
-                    (splits[0]..=splits[0]).into_iter().map(NodeID)
-                }
-            })
-            .collect();
-        filter_input = !args.no_filter_input;
-    }
+    let (node_list, filter_input) = if let Some(nodes_str) = &args.nodes {
+        (parse_node_list(nodes_str), !args.no_filter_input)
+    } else {
+        (Vec::new(), false)
+    };
 
     timer.report_timing("startup time");
 
