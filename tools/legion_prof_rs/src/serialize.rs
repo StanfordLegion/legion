@@ -1496,16 +1496,28 @@ fn parse_spawn_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     Ok((input, Record::SpawnInfo { fevent, spawn }))
 }
 
-fn filter_record<'a>(
-    record: &'a Record,
-    visible_nodes: &'a [NodeID],
-    node_id: Option<NodeID>,
-) -> bool {
-    assert!(!visible_nodes.is_empty());
+fn filter_critical_path(record: &Record, no_critical_paths: bool) -> bool {
+    match record {
+        Record::EventMergerInfo { .. }
+        | Record::EventTriggerInfo { .. }
+        | Record::EventPoisonInfo { .. }
+        | Record::ExternalEventInfo { .. }
+        | Record::BarrierArrivalInfo { .. }
+        | Record::ReservationAcquireInfo { .. }
+        | Record::CompletionQueueInfo { .. }
+        | Record::InstanceReadyInfo { .. }
+        | Record::InstanceRedistrictInfo { .. }
+        | Record::MakeValidInfo { .. }
+        | Record::FetchMetadataInfo { .. } => !no_critical_paths,
+        _ => true,
+    }
+}
+
+fn filter_nodes(record: &Record, visible_nodes: &[NodeID], node_id: Option<NodeID>) -> bool {
     let Some(node_id) = node_id else {
         return true;
     };
-    if visible_nodes.contains(&node_id) {
+    if State::is_on_visible_nodes(visible_nodes, node_id) {
         return true;
     }
 
@@ -1631,6 +1643,7 @@ fn parse(
     path: &Path,
     visible_nodes: &[NodeID],
     filter_input: bool,
+    no_critical_paths: bool,
 ) -> io::Result<Vec<Record>> {
     let Ok((prof_version, legion_version)) = must_parse(reader, parse_filetype) else {
         panic!(
@@ -1746,7 +1759,9 @@ fn parse(
         if let Record::MachineDesc { node_id: d, .. } = record {
             node_id = Some(d);
         }
-        if !filter_input || filter_record(&record, visible_nodes, node_id) {
+        if filter_critical_path(&record, no_critical_paths)
+            && (!filter_input || filter_nodes(&record, visible_nodes, node_id))
+        {
             records.push(record);
         }
     }
@@ -1788,8 +1803,15 @@ pub fn deserialize<P: AsRef<Path>>(
     path: P,
     visible_nodes: &[NodeID],
     filter_input: bool,
+    no_critical_paths: bool,
 ) -> io::Result<Vec<Record>> {
     let path = path.as_ref();
     let mut reader = make_file_reader(path)?;
-    parse(&mut reader, path, visible_nodes, filter_input)
+    parse(
+        &mut reader,
+        path,
+        visible_nodes,
+        filter_input,
+        no_critical_paths,
+    )
 }

@@ -3596,6 +3596,11 @@ impl State {
     }
 
     pub fn find_critical_entry(&self, event: EventID) -> Option<&EventEntry> {
+        // If we filtered critical path data then this is always None
+        // even if we might have some partial entries from tasks/copies
+        if !self.has_critical_path_data() {
+            return None;
+        }
         let node_id = self.event_lookup.get(&event)?;
         let node_entry = self.event_graph.node_weight(*node_id)?;
         if let Some(critical_id) = node_entry.critical {
