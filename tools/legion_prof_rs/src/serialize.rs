@@ -1532,7 +1532,12 @@ fn filter_nodes(record: &Record, visible_nodes: &[NodeID], node_id: Option<NodeI
         | Record::ZeroTime { .. }
         | Record::ProcDesc { .. }
         | Record::MemDesc { .. }
-        | Record::ProcMDesc { .. } => true,
+        | Record::ProcMDesc { .. }
+        | Record::IndexSpaceDesc { .. }
+        | Record::IndexSpaceSizeDesc { .. }
+        | Record::IndexSpacePointDesc { .. }
+        | Record::IndexSpaceRectDesc { .. }
+        | Record::IndexSpaceEmptyDesc { .. } => true,
         Record::TaskInfo { proc_id, .. } => {
             State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
         }

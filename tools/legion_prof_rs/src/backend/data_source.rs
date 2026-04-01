@@ -1173,9 +1173,16 @@ impl StateDataSource {
         expr: Option<ISpaceID>,
         privilege: PrivilegeMode,
     ) -> Field {
-        let Some(inst) = instance else {
-            return Field::String(format!("{}<unknown instance>", prefix));
-        };
+        // We should always have an instance here, but it might not be complete so
+        // check if we actually have all its metadata
+        let inst = instance.unwrap();
+        if !inst.is_logged() {
+            return Field::String(format!(
+                "{}<unknown instance> from node {}, please load the logfile from that node to see it",
+                prefix,
+                inst.node_id().0
+            ));
+        }
 
         let privilege_string = match privilege {
             PrivilegeMode::NoAccess => "No-Access",
@@ -1827,10 +1834,10 @@ impl StateDataSource {
                         if let Some(inst_id) = inst.inst_id {
                             format!("inst:{:#x}", inst_id.0)
                         } else {
-                            format!("inst_uid:{}", inst_uid.0)
+                            format!("unknown instance from node {}", inst.node_id().0)
                         }
                     } else {
-                        format!("inst_uid:{}", inst_uid.0)
+                        format!("unknown instance inst_uid:{}", inst_uid.0)
                     };
                     if creation_time < trigger_time {
                         // Had to wait for it to trigger so the fetching of metadata was the
@@ -2759,7 +2766,6 @@ impl StateDataSource {
                 "Fields: {}",
                 ChanEntryFieldsPretty(src_inst, &src_fids, &self.state)
             );
-
             let dst_fids = group.iter().map(|x| x.dst_fid).collect();
             let dst_fields = format!(
                 "Fields: {}",
@@ -2813,49 +2819,52 @@ impl StateDataSource {
                     result_reqs.push(Field::String(dst_fields));
                     match (src_inst, dst_inst) {
                         (Some(src_inst), Some(dst_inst)) => {
-                            // If we know about both the instances, do some analysis
-                            // to determine if we're transposing dimensions or fields
-                            // Should have the same number of dimensions
-                            assert!(src_inst.dim_order.len() == dst_inst.dim_order.len());
-                            let mut transpose_fields = None;
-                            let mut transpose_dimensions = None;
-                            for ((k1, v1), (k2, v2)) in
-                                src_inst.dim_order.iter().zip(dst_inst.dim_order.iter())
-                            {
-                                // Key should always be the same
-                                assert!(*k1 == *k2);
-                                // Check to see if the dimensions are the same
-                                if *v1 == *v2 {
-                                    continue;
+                            // Check to make sure we logged both instances
+                            if src_inst.is_logged() && dst_inst.is_logged() {
+                                // If we know about both the instances, do some analysis
+                                // to determine if we're transposing dimensions or fields
+                                // Should have the same number of dimensions
+                                assert!(src_inst.dim_order.len() == dst_inst.dim_order.len());
+                                let mut transpose_fields = None;
+                                let mut transpose_dimensions = None;
+                                for ((k1, v1), (k2, v2)) in
+                                    src_inst.dim_order.iter().zip(dst_inst.dim_order.iter())
+                                {
+                                    // Key should always be the same
+                                    assert!(*k1 == *k2);
+                                    // Check to see if the dimensions are the same
+                                    if *v1 == *v2 {
+                                        continue;
+                                    }
+                                    if *v1 == DimKind::DimF || *v2 == DimKind::DimF {
+                                        // Transposing fields with dimensions
+                                        transpose_fields = Some(*v2);
+                                    } else if *v2 == DimKind::DimF {
+                                        transpose_fields = Some(*v1);
+                                    } else {
+                                        transpose_dimensions = Some((*v1, *v2));
+                                    }
                                 }
-                                if *v1 == DimKind::DimF || *v2 == DimKind::DimF {
-                                    // Transposing fields with dimensions
-                                    transpose_fields = Some(*v2);
-                                } else if *v2 == DimKind::DimF {
-                                    transpose_fields = Some(*v1);
-                                } else {
-                                    transpose_dimensions = Some((*v1, *v2));
-                                }
-                            }
-                            match (transpose_fields, transpose_dimensions) {
-                                (None, None) => {}
-                                (Some(df), None) => {
-                                    color = Some(Color32::GOLD);
-                                    result_reqs.push(Field::String(format!(
-                                        "Transposing fields with spatial dimension {}!",
-                                        df
-                                    )));
-                                }
-                                (None, Some((d1, d2))) => {
-                                    color = Some(Color32::GOLD);
-                                    result_reqs.push(Field::String(format!(
-                                        "Transposing spatial dimensions {} and {}!",
-                                        d1, d2
-                                    )))
-                                }
-                                (Some(df), Some((d1, d2))) => {
-                                    color = Some(Color32::GOLD);
-                                    result_reqs.push(Field::String(format!("Transposing fields with spatial dimension {} as well as transposing spatial dimensions {} and {}!", df, d1, d2)));
+                                match (transpose_fields, transpose_dimensions) {
+                                    (None, None) => {}
+                                    (Some(df), None) => {
+                                        color = Some(Color32::GOLD);
+                                        result_reqs.push(Field::String(format!(
+                                            "Transposing fields with spatial dimension {}!",
+                                            df
+                                        )));
+                                    }
+                                    (None, Some((d1, d2))) => {
+                                        color = Some(Color32::GOLD);
+                                        result_reqs.push(Field::String(format!(
+                                            "Transposing spatial dimensions {} and {}!",
+                                            d1, d2
+                                        )))
+                                    }
+                                    (Some(df), Some((d1, d2))) => {
+                                        color = Some(Color32::GOLD);
+                                        result_reqs.push(Field::String(format!("Transposing fields with spatial dimension {} as well as transposing spatial dimensions {} and {}!", df, d1, d2)));
+                                    }
                                 }
                             }
                         }

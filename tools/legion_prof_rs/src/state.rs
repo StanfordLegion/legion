@@ -1429,6 +1429,9 @@ impl Mem {
         let mut time_points = Vec::new();
 
         for (key, inst) in &self.insts {
+            if !inst.is_logged() {
+                continue;
+            }
             time_points.push(MemPoint::new(
                 inst.time_range.ready.unwrap(),
                 *key,
@@ -2091,6 +2094,11 @@ pub struct Dim(pub u32);
 #[derive(Debug, Hash)]
 pub struct Inst {
     pub base: Base,
+    // Technically we should only need inst_id since that will also encode
+    // both the memory id and the node_id, but the way we are logging
+    // things right now is not the best so we might situations where we
+    // only know the memory and not the instance, we should
+    // clean this up later but it will involve a new logging format
     pub inst_id: Option<InstID>,
     pub op_id: Option<OpID>,
     pub mem_id: Option<MemID>,
@@ -2137,6 +2145,15 @@ impl Inst {
             critical: None,
             previous: None,
         }
+    }
+    pub fn is_logged(&self) -> bool {
+        // The sign that we are logged is that we know our
+        // instance ID which implies we loaded the logfile
+        // that contained the logging statements for this instance
+        self.inst_id.is_some()
+    }
+    pub fn node_id(&self) -> NodeID {
+        self.mem_id.unwrap().node_id()
     }
     fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
         assert!(self.inst_id.is_none_or(|i| i == inst_id));
@@ -2859,8 +2876,8 @@ impl fmt::Display for CopyKind {
 
 #[derive(Debug, Copy, Clone)]
 pub struct CopyInstInfo {
-    src: Option<MemID>,
-    dst: Option<MemID>,
+    src_mem: Option<MemID>,
+    dst_mem: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
     pub src_inst_uid: Option<ProfUID>,
@@ -2873,8 +2890,8 @@ pub struct CopyInstInfo {
 
 impl CopyInstInfo {
     fn new(
-        src: Option<MemID>,
-        dst: Option<MemID>,
+        src_mem: Option<MemID>,
+        dst_mem: Option<MemID>,
         src_fid: FieldID,
         dst_fid: FieldID,
         src_inst_uid: Option<ProfUID>,
@@ -2885,8 +2902,8 @@ impl CopyInstInfo {
         indirect: bool,
     ) -> Self {
         CopyInstInfo {
-            src,
-            dst,
+            src_mem,
+            dst_mem,
             src_fid,
             dst_fid,
             src_inst_uid,
@@ -2999,8 +3016,8 @@ impl Copy {
             let rest = &indirect_group[(if indirect.is_some() { 1 } else { 0 })..];
 
             // Figure out which side we're indirect on, if any.
-            let indirect_src = indirect.is_some_and(|i| i.src.is_some());
-            let indirect_dst = indirect.is_some_and(|i| i.dst.is_some());
+            let indirect_src = indirect.is_some_and(|i| i.src_mem.is_some());
+            let indirect_dst = indirect.is_some_and(|i| i.dst_mem.is_some());
 
             let copy_kind = match (indirect_src, indirect_dst) {
                 (false, false) => CopyKind::Copy,
@@ -3009,11 +3026,12 @@ impl Copy {
                 (true, true) => CopyKind::GatherScatter,
             };
 
-            let mem_groups = rest.linear_group_by(|a, b| a.src == b.src && a.dst == b.dst);
+            let mem_groups =
+                rest.linear_group_by(|a, b| a.src_mem == b.src_mem && a.dst_mem == b.dst_mem);
             for mem_group in mem_groups {
                 let info = mem_group[0];
 
-                let chan_id = match (indirect_src, indirect_dst, info.src, info.dst) {
+                let chan_id = match (indirect_src, indirect_dst, info.src_mem, info.dst_mem) {
                     (false, false, Some(src), Some(dst)) => ChanID::new_copy(src, dst),
                     (true, false, _, Some(dst)) => ChanID::new_gather(dst),
                     (false, true, Some(src), _) => ChanID::new_scatter(src),
@@ -3051,7 +3069,7 @@ impl Copy {
 
 #[derive(Debug, Copy, Clone)]
 pub struct FillInstInfo {
-    _dst: MemID,
+    dst_mem: MemID,
     pub fid: FieldID,
     pub dst_inst_uid: ProfUID,
 }
@@ -3059,7 +3077,7 @@ pub struct FillInstInfo {
 impl FillInstInfo {
     fn new(dst: MemID, fid: FieldID, dst_inst_uid: ProfUID) -> Self {
         FillInstInfo {
-            _dst: dst,
+            dst_mem: dst,
             fid,
             dst_inst_uid,
         }
@@ -3112,9 +3130,9 @@ impl Fill {
     fn add_channel(&mut self) {
         assert!(self.chan_id.is_none());
         assert!(!self.fill_inst_infos.is_empty());
-        let chan_dst = self.fill_inst_infos[0]._dst;
+        let chan_dst = self.fill_inst_infos[0].dst_mem;
         for fill_inst_info in &self.fill_inst_infos {
-            assert!(fill_inst_info._dst == chan_dst);
+            assert!(fill_inst_info.dst_mem == chan_dst);
         }
         let chan_id = ChanID::new_fill(chan_dst);
         self.chan_id = Some(chan_id);
@@ -3123,7 +3141,7 @@ impl Fill {
 
 #[derive(Debug, Copy, Clone)]
 pub struct DepPartInstInfo {
-    _src: MemID,
+    _src_mem: MemID,
     pub fid: FieldID,
     pub src_inst_uid: ProfUID,
     pub src_expr: Option<ISpaceID>,
@@ -3132,7 +3150,7 @@ pub struct DepPartInstInfo {
 impl DepPartInstInfo {
     fn new(src: MemID, fid: FieldID, src_inst_uid: ProfUID, src_expr: Option<ISpaceID>) -> Self {
         DepPartInstInfo {
-            _src: src,
+            _src_mem: src,
             fid,
             src_inst_uid,
             src_expr,
@@ -4054,10 +4072,16 @@ impl State {
         fevent: EventID,
         insts: &'a mut HashMap<ProfUID, Inst>,
     ) -> &'a mut Inst {
-        let prof_uid = self.prof_uid_allocator.create_reference(fevent);
-        insts
-            .entry(prof_uid)
-            .or_insert_with(|| Inst::new(Base::from_fevent(&mut self.prof_uid_allocator, fevent)))
+        let inst_uid = self.prof_uid_allocator.create_reference(fevent);
+        // Check to see if we already have it from another node
+        if let Some(mem_id) = self.insts.get(&inst_uid) {
+            let mem = self.mems.get_mut(&mem_id).unwrap();
+            mem.insts.get_mut(&inst_uid).unwrap()
+        } else {
+            insts.entry(inst_uid).or_insert_with(|| {
+                Inst::new(Base::from_fevent(&mut self.prof_uid_allocator, fevent))
+            })
+        }
     }
 
     pub fn find_inst(&self, inst_uid: ProfUID) -> Option<&Inst> {
@@ -4120,9 +4144,17 @@ impl State {
         // put inst into memories
         for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
+                // Update the lookup data structure (each inst should be unique)
+                assert!(self.insts.insert(inst.base.prof_uid, mem_id).is_none());
                 let mem = self.mems.get_mut(&mem_id).unwrap();
                 mem.add_inst(inst);
             } else {
+                // If you ever hit this then the most likely cause
+                // is that you've stumbled over the fact that
+                // OperationInstInfo does not currently log the
+                // memory of an instance and the task/operation
+                // used an instance on a remote node but did not
+                // set the memory associated with it
                 unreachable!();
             }
         }
@@ -4987,7 +5019,7 @@ fn process_record(
             index,
         } => {
             state.create_op(*op_id);
-            let inst_uid = state.create_fevent_reference(*inst_event);
+            let inst_uid = state.create_inst(*inst_event, insts).base.prof_uid;
             let operation_inst_info = OperationInstInfo::new(
                 inst_uid,
                 *index_expr,
@@ -5265,8 +5297,20 @@ fn process_record(
             indirect,
         } => {
             let copy = copies.get_mut(fevent).unwrap();
-            let src_uid = src_inst.map(|i| state.create_fevent_reference(i));
-            let dst_uid = dst_inst.map(|i| state.create_fevent_reference(i));
+            let src_uid = src_inst.map(|i| {
+                state
+                    .create_inst(i, insts)
+                    .set_mem(src.unwrap())
+                    .base
+                    .prof_uid
+            });
+            let dst_uid = dst_inst.map(|i| {
+                state
+                    .create_inst(i, insts)
+                    .set_mem(dst.unwrap())
+                    .base
+                    .prof_uid
+            });
             let copy_inst_info = CopyInstInfo::new(
                 *src, *dst, *src_fid, *dst_fid, src_uid, dst_uid, *src_expr, *dst_expr, *num_hops,
                 *indirect,
@@ -5307,7 +5351,11 @@ fn process_record(
             dst_inst,
             fevent,
         } => {
-            let dst_uid = state.create_fevent_reference(*dst_inst);
+            let dst_uid = state
+                .create_inst(*dst_inst, insts)
+                .set_mem(*dst)
+                .base
+                .prof_uid;
             let fill_inst_info = FillInstInfo::new(*dst, *fid, dst_uid);
             let fill = fills.get_mut(fevent).unwrap();
             fill.add_fill_inst_info(fill_inst_info);
@@ -5325,16 +5373,16 @@ fn process_record(
         } => {
             state.create_op(*op_id);
             let creator_uid = state.create_fevent_reference(*creator);
-            let inst_uid = state.create_fevent_reference(*fevent);
-            state.insts.entry(inst_uid).or_insert_with(|| *mem_id);
-            state
+            let inst_uid = state
                 .create_inst(*fevent, insts)
                 .set_inst_id(*inst_id)
                 .set_op_id(*op_id)
                 .set_start_stop(*create, *ready, *destroy)
                 .set_mem(*mem_id)
                 .set_size(*size)
-                .set_creator(creator_uid);
+                .set_creator(creator_uid)
+                .base
+                .prof_uid;
             state.record_event_node(
                 *fevent,
                 EventEntryKind::InstanceDeletion,
@@ -5380,7 +5428,11 @@ fn process_record(
             src_expr,
             fevent,
         } => {
-            let src_uid = state.create_fevent_reference(*src_inst);
+            let src_uid = state
+                .create_inst(*src_inst, insts)
+                .set_mem(*src)
+                .base
+                .prof_uid;
             let part_inst_info = DepPartInstInfo::new(*src, *fid, src_uid, *src_expr);
             let part = depparts.get_mut(fevent).unwrap();
             part.add_deppart_inst_info(part_inst_info);
