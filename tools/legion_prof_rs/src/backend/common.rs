@@ -862,7 +862,12 @@ impl fmt::Display for ChanEntryFieldsPretty<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ChanEntryFieldsPretty(inst, field_ids, state) = self;
 
-        if let Some(fspace_id) = &inst.unwrap().fspace_id {
+        // It's possible we don't have an instance here in the case
+        // of indirections so we still need to handle that
+        let Some(instance) = inst else {
+            return Ok(());
+        };
+        if let Some(fspace_id) = &instance.fspace_id {
             let fspace = state.field_spaces.get(fspace_id);
 
             let mut i = field_ids.iter().peekable();
@@ -903,36 +908,85 @@ pub struct CopyInstInfoDisplay<'a>(
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut src_inst_id = 0;
-        let mut dst_inst_id = 0;
-        if let Some(src_inst) = self.0 {
-            src_inst_id = src_inst.inst_id.unwrap().0.get();
-        }
-        if let Some(dst_inst) = self.1 {
-            dst_inst_id = dst_inst.inst_id.unwrap().0.get();
-        }
         match (self.2, self.3) {
             (None, None) => unreachable!(),
             (None, _) => {
-                write!(
-                    f,
-                    "Scatter: dst_indirect_inst=0x{:x}, fid={}",
-                    dst_inst_id, self.5.0
-                )
+                let dst_inst = self.1.unwrap();
+                if let Some(dst_inst_id) = dst_inst.inst_id {
+                    write!(
+                        f,
+                        "Scatter: dst_indirect_inst=0x{:x}, fid={}",
+                        dst_inst_id.0.get(),
+                        self.5.0
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Scatter: unknown dst_indirect_inst from node {}, fid={}",
+                        dst_inst.node_id().0,
+                        self.5.0
+                    )
+                }
             }
             (_, None) => {
-                write!(
-                    f,
-                    "Gather: src_indirect_inst=0x{:x}, fid={}",
-                    src_inst_id, self.4.0
-                )
+                let src_inst = self.0.unwrap();
+                if let Some(src_inst_id) = src_inst.inst_id {
+                    write!(
+                        f,
+                        "Gather: src_indirect_inst=0x{:x}, fid={}",
+                        src_inst_id.0.get(),
+                        self.4.0
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Gather: unknown src_indirect_inst from node {}, fid={}",
+                        src_inst.node_id().0,
+                        self.4.0
+                    )
+                }
             }
             (_, _) => {
-                write!(
-                    f,
-                    "src_inst=0x{:x}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
-                    src_inst_id, self.4.0, dst_inst_id, self.5.0, self.6
-                )
+                let src_inst = self.0.unwrap();
+                let dst_inst = self.1.unwrap();
+                if let Some(src_inst_id) = src_inst.inst_id {
+                    if let Some(dst_inst_id) = dst_inst.inst_id {
+                        write!(
+                            f,
+                            "src_inst=0x{:x}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
+                            src_inst_id.0.get(),
+                            self.4.0,
+                            dst_inst_id.0.get(),
+                            self.5.0,
+                            self.6
+                        )
+                    } else {
+                        write!(
+                            f,
+                            "src_inst=0x{:x}, src_fid={}, unknown dst_inst from node {}, dst_fid={}, num_hops={}",
+                            src_inst_id.0.get(),
+                            self.4.0,
+                            dst_inst.node_id().0,
+                            self.5.0,
+                            self.6
+                        )
+                    }
+                } else {
+                    if let Some(dst_inst_id) = dst_inst.inst_id {
+                        write!(
+                            f,
+                            "unknown src_inst from node {}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
+                            src_inst.node_id().0,
+                            self.4.0,
+                            dst_inst_id.0.get(),
+                            self.5.0,
+                            self.6
+                        )
+                    } else {
+                        // Should only be here on a node where we know one instance
+                        unreachable!();
+                    }
+                }
             }
         }
     }
@@ -1010,12 +1064,16 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         }
         write!(f, "[")?;
         for (i, inst) in insts_set.iter().enumerate() {
-            write!(
-                f,
-                "[\"0x{:x}\",{}]",
-                inst.inst_id.unwrap().0,
-                inst.base.prof_uid.0
-            )?;
+            if let Some(inst_id) = inst.inst_id {
+                write!(f, "[\"0x{:x}\",{}]", inst_id.0, inst.base.prof_uid.0)?;
+            } else {
+                write!(
+                    f,
+                    "[\"unknown instance from node {}\",{}]",
+                    inst.node_id().0,
+                    inst.base.prof_uid.0
+                )?;
+            }
             if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
