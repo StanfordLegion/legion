@@ -34,6 +34,12 @@ use legion_prof::backend::{analyze, dump, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
 use legion_prof::state::{Config, NodeID, State, Timestamp};
 
+// We don't see a performance benefit to custom allocators on macOS so
+// make this Linux-only.
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[derive(Debug, Clone, Args)]
 struct ParserArgs {
     #[arg(required = true, help = "input Legion Prof log filenames")]

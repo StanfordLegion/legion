@@ -44,6 +44,9 @@ env_logger = "0.11"
 nonmax = { version = "0.5.5", features = ["serde"] }
 petgraph = "0.7"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+jemallocator = "0.5.4"
+
 [profile.dev]
 opt-level = 2
 debug-assertions = true
