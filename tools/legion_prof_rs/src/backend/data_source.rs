@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use foldhash::{HashMap, HashMapExt, HashSet};
@@ -182,12 +183,12 @@ impl StateDataSource {
         let chan_groups = state.group_chans();
         let deppart_groups = state.group_depparts();
 
-        let mut nodes: HashSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
-        let proc_kinds: HashSet<_> = proc_groups
+        let mut nodes: BTreeSet<_> = proc_groups.keys().map(|ProcGroup(n, _, _)| *n).collect();
+        let proc_kinds: BTreeSet<_> = proc_groups
             .keys()
             .map(|ProcGroup(_, k, d)| (*k, *d))
             .collect();
-        let mem_kinds: HashSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
+        let mem_kinds: BTreeSet<_> = mem_groups.keys().map(|MemGroup(_, k)| *k).collect();
 
         if !state.has_multiple_nodes() {
             nodes.remove(&None);
