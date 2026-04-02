@@ -1,6 +1,30 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 26.03.0 (March 27, 2026)
+  * Legion
+    - Legion now logs geometry information about index spaces for 
+      Legion Prof to aid it in diagnosing performance issues
+    - Legion provides a way now to specify that task-local memory pools
+      are non-escaping so that the memory for the pool can be immediately
+      reclaimed for future allocations even before the task starts running
+    - Legion now treats passing empty futures between tasks as "control"
+      dependences rather than before when it would break such dependences
+      due to a lack of observable information flow
+    - Legion Prof logging is now lighter weight and more efficient
+      than it was previously
+  * Realm
+    - Realm is now managed as a Git subtree inside the Legion repo
+    - Update Realm to version 77e872a5a9cafa9bb2fe6ae784c01d45ad691d5f
+  * Tools
+    - Legion Prof now uses an adaptive archive format which reduces processing
+       time, memory and disk usage
+    - Improvements to the Legion Prof viewer UI include a horizontal scroll bar
+       and better responsiveness
+    - Legion Prof now understands geometry and uses it analyze how efficiently
+      tasks and copies are accessing instances which should help in 
+      diagnosing slow execution
+
 Version 25.12.0 (December 16, 2025)
   * Legion
     - Re-enable out of order commit while still ensuring that deletion
