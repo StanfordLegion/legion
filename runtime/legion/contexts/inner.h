@@ -1144,8 +1144,9 @@ namespace Legion {
       // so we can see when there are conflicts, note that accessing
       // this data structure requires the inline lock because
       // unordered detach operations can touch it without synchronizing
-      // with the executing task
-      ctx::list<PhysicalRegion> inline_regions;
+      // with the executing task, we sort inline regions by region tree ID
+      // to help filter down to interfering regions quickly
+      ctx::map<RegionTreeID, ctx::list<PhysicalRegion> > inline_regions;
       unsigned physical_region_count = 0;
     protected:
       mutable LocalLock child_op_lock;

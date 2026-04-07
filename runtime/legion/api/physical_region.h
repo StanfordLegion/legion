@@ -49,6 +49,10 @@ namespace Legion {
     {
       return (impl == reg.impl);
     }
+    inline bool operator!=(const PhysicalRegion& reg) const
+    {
+      return (impl != reg.impl);
+    }
     inline bool operator<(const PhysicalRegion& reg) const
     {
       return (impl < reg.impl);
