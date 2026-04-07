@@ -2448,74 +2448,51 @@ namespace Legion {
             std::vector<LegionColor> interfering;
             if (!find_interfering_children_kd(child, interfering))
             {
-              // Not enough entries for a kd-tree so do it locally
-              IndexSpaceExpression* difference = nullptr;
-              std::set<IndexSpaceExpression*> previous;
+              interfering.reserve(total_children);
               for (ColorSpaceIterator itr2(this); itr2; itr2++)
-              {
-                if ((*itr) == (*itr2))
-                {
-                  if (previous.empty())
-                    difference = child;
-                  else
-                    difference = runtime->subtract_index_spaces(
-                        child, runtime->union_index_spaces(previous));
-                }
-                else
-                {
-                  IndexSpaceNode* other = get_child(*itr2);
-                  if ((*itr) < (*itr2))
-                  {
-                    IndexSpaceExpression* intersection =
-                        runtime->intersect_index_spaces(difference, other);
-                    intersection_volume += intersection->get_volume();
-                  }
-                  else
-                  {
-                    IndexSpaceExpression* intersection =
-                        runtime->intersect_index_spaces(child, other);
-                    if (!intersection->is_empty())
-                      previous.insert(intersection);
-                  }
-                }
-              }
+                interfering.push_back(*itr2);
+              legion_assert(
+                  std::is_sorted(interfering.begin(), interfering.end()));
             }
             else
-            {
-              legion_assert(!interfering.empty());
-#ifdef LEGION_DEBUG
               std::sort(interfering.begin(), interfering.end());
-              legion_assert(std::binary_search(
-                  interfering.begin(), interfering.end(), *itr));
-#endif
-              if (interfering.size() > 1)
+            std::vector<LegionColor>::const_iterator split =
+                std::lower_bound(interfering.begin(), interfering.end(), *itr);
+            // Better find our split value
+            legion_assert(split != interfering.end());
+            legion_assert(*split == *itr);
+            // for cases where there is all-to-all interference we try to
+            // avoid everyone stampeding on the colors in order, so we start
+            // with loading the colors below our color in reverse order and
+            // then we wrap around to do the colors above our split value
+            // also in reverse order
+            std::set<IndexSpaceExpression*> previous;
+            std::vector<LegionColor>::const_iterator next = split;
+            while (next != interfering.begin())
+            {
+              next = std::prev(next);
+              IndexSpaceExpression* intersection =
+                  runtime->intersect_index_spaces(child, get_child(*next));
+              if (!intersection->is_empty())
+                previous.insert(intersection);
+            }
+            IndexSpaceExpression* difference =
+                previous.empty() ?
+                    child :
+                    runtime->subtract_index_spaces(
+                        child, runtime->union_index_spaces(previous));
+            // Now we can compute the intersection volume by wrapping
+            // around to the end of the list of colors
+            if (!difference->is_empty())
+            {
+              next = std::prev(interfering.end());
+              while (next != split)
               {
-                IndexSpaceExpression* difference = nullptr;
-                std::set<IndexSpaceExpression*> previous;
-                for (const LegionColor& it : interfering)
-                {
-                  if ((*itr) == it)
-                  {
-                    IndexSpaceNode* child = get_child(it);
-                    if (previous.empty())
-                      difference = child;
-                    else
-                      difference = runtime->subtract_index_spaces(
-                          child, runtime->union_index_spaces(previous));
-                  }
-                  else
-                  {
-                    IndexSpaceNode* other = get_child(it);
-                    if ((*itr) < it)
-                    {
-                      IndexSpaceExpression* intersection =
-                          runtime->intersect_index_spaces(difference, other);
-                      intersection_volume += intersection->get_volume();
-                    }
-                    else
-                      previous.insert(other);
-                  }
-                }
+                IndexSpaceNode* other = get_child(*next);
+                IndexSpaceExpression* intersection =
+                    runtime->intersect_index_spaces(difference, other);
+                intersection_volume += intersection->get_volume();
+                next = std::prev(next);
               }
             }
           }
@@ -2539,78 +2516,51 @@ namespace Legion {
             std::vector<LegionColor> interfering;
             if (!find_interfering_children_kd(child, interfering))
             {
-              // Not enough entries for a kd-tree so do it locally
-              IndexSpaceExpression* difference = nullptr;
-              std::set<IndexSpaceExpression*> previous;
+              interfering.reserve(total_children);
               for (ColorSpaceIterator itr2(this); itr2; itr2++)
-              {
-                if ((*itr) == (*itr2))
-                {
-                  if (previous.empty())
-                    difference = child;
-                  else
-                    difference = runtime->subtract_index_spaces(
-                        child, runtime->union_index_spaces(previous));
-                }
-                else
-                {
-                  IndexSpaceNode* other = get_child(*itr2);
-                  if ((*itr) < (*itr2))
-                  {
-                    IndexSpaceExpression* intersection =
-                        runtime->intersect_index_spaces(difference, other);
-                    if (!intersection->is_empty())
-                      intersection_volumes[std::make_pair(*itr, *itr2)] =
-                          intersection->get_volume();
-                  }
-                  else
-                  {
-                    IndexSpaceExpression* intersection =
-                        runtime->intersect_index_spaces(child, other);
-                    if (!intersection->is_empty())
-                      previous.insert(intersection);
-                  }
-                }
-              }
+                interfering.push_back(*itr2);
+              legion_assert(
+                  std::is_sorted(interfering.begin(), interfering.end()));
             }
             else
-            {
-              legion_assert(!interfering.empty());
-#ifdef LEGION_DEBUG
               std::sort(interfering.begin(), interfering.end());
-              legion_assert(std::binary_search(
-                  interfering.begin(), interfering.end(), *itr));
-#endif
-              if (interfering.size() > 1)
+            std::vector<LegionColor>::const_iterator split =
+                std::lower_bound(interfering.begin(), interfering.end(), *itr);
+            // Better find our split value
+            legion_assert(split != interfering.end());
+            legion_assert(*split == *itr);
+            // for cases where there is all-to-all interference we try to
+            // avoid everyone stampeding on the colors in order, so we start
+            // with loading the colors below our color in reverse order and
+            // then we wrap around to do the colors above our split value
+            // also in reverse order
+            std::set<IndexSpaceExpression*> previous;
+            std::vector<LegionColor>::const_iterator next = split;
+            while (next != interfering.begin())
+            {
+              next = std::prev(next);
+              IndexSpaceExpression* intersection =
+                  runtime->intersect_index_spaces(child, get_child(*next));
+              if (!intersection->is_empty())
+                previous.insert(intersection);
+            }
+            IndexSpaceExpression* difference =
+                previous.empty() ?
+                    child :
+                    runtime->subtract_index_spaces(
+                        child, runtime->union_index_spaces(previous));
+            if (!difference->is_empty())
+            {
+              next = std::prev(interfering.end());
+              while (next != split)
               {
-                IndexSpaceExpression* difference = nullptr;
-                std::set<IndexSpaceExpression*> previous;
-                for (const LegionColor& it : interfering)
-                {
-                  if ((*itr) == it)
-                  {
-                    IndexSpaceNode* child = get_child(it);
-                    if (previous.empty())
-                      difference = child;
-                    else
-                      difference = runtime->subtract_index_spaces(
-                          child, runtime->union_index_spaces(previous));
-                  }
-                  else
-                  {
-                    IndexSpaceNode* other = get_child(it);
-                    if ((*itr) < it)
-                    {
-                      IndexSpaceExpression* intersection =
-                          runtime->intersect_index_spaces(difference, other);
-                      if (!intersection->is_empty())
-                        intersection_volumes[std::make_pair(*itr, it)] =
-                            intersection->get_volume();
-                    }
-                    else
-                      previous.insert(other);
-                  }
-                }
+                IndexSpaceNode* other = get_child(*next);
+                IndexSpaceExpression* intersection =
+                    runtime->intersect_index_spaces(difference, other);
+                if (!intersection->is_empty())
+                  intersection_volumes.emplace(
+                      std::make_pair(*itr, *next), intersection->get_volume());
+                next = std::prev(next);
               }
             }
           }
