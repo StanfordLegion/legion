@@ -10409,21 +10409,37 @@ namespace Legion {
       {
         AutoLock t_lock(tracker_lock);
 #ifdef LEGION_DEBUG
-        // A little sanity check, we should never be receiving racy
-        // creations for fields that were also being invalidated because
-        // mapping dependences should guarantee non-overlapping of these
-        // two processes
+        // Sanity check: creations and invalidations can race due to
+        // false aliasing in the EqKD tree (independent operations on
+        // different points sharing a KD-tree node with overlapping
+        // field masks). Any such overlap must be covered by an entry
+        // in equivalence_sets_ready so that finalize_equivalence_sets
+        // will detect it and recompute.
         if (!!pending_invalidations)
         {
+          FieldMask creation_fields;
           if (!create_now_rectangles.empty())
           {
             for (op::map<Domain, FieldMask>::const_iterator it =
                      create_now_rectangles.begin();
                  it != create_now_rectangles.end(); it++)
-              legion_assert(pending_invalidations * it->second);
+              creation_fields |= it->second;
           }
           else
-            legion_assert(pending_invalidations * to_create.get_valid_mask());
+            creation_fields = to_create.get_valid_mask();
+          const FieldMask overlap = pending_invalidations & creation_fields;
+          if (!!overlap)
+          {
+            // The overlap is only safe if equivalence_sets_ready covers
+            // it, ensuring finalize_equivalence_sets will handle cleanup
+            legion_assert(equivalence_sets_ready != nullptr);
+            FieldMask covered;
+            for (shrt::map<RtUserEvent, FieldMask>::const_iterator it =
+                     equivalence_sets_ready->begin();
+                 it != equivalence_sets_ready->end(); it++)
+              covered |= it->second;
+            legion_assert(!(overlap - covered));
+          }
         }
 #endif
         // Record pending equivalence sets
@@ -12146,16 +12162,29 @@ namespace Legion {
           if (!!to_filter)
           {
 #ifdef LEGION_DEBUG
-            // A little sanity check, we should never be receiving racy
-            // invalidations for fields that we are also trying to create
-            // equivalence sets for because mapping dependence analysis
-            // should guarantee non-overlapping of these index spaces
+            // Sanity check: invalidations and creations can race due
+            // to false aliasing in the EqKD tree (independent operations
+            // on different points sharing a KD-tree node with overlapping
+            // field masks). Any such overlap must be covered by
+            // equivalence_sets_ready so finalize_equivalence_sets will
+            // detect it and recompute.
             if (creation_rectangles != nullptr)
             {
+              FieldMask creation_fields;
               for (op::map<Domain, FieldMask>::const_iterator it =
                        creation_rectangles->begin();
                    it != creation_rectangles->end(); it++)
-                legion_assert(to_filter * it->second);
+                creation_fields |= it->second;
+              const FieldMask overlap = to_filter & creation_fields;
+              if (!!overlap)
+              {
+                FieldMask covered;
+                for (shrt::map<RtUserEvent, FieldMask>::const_iterator it =
+                         equivalence_sets_ready->begin();
+                     it != equivalence_sets_ready->end(); it++)
+                  covered |= it->second;
+                legion_assert(!(overlap - covered));
+              }
             }
 #endif
             pending_invalidations |= to_filter;
