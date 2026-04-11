@@ -91,6 +91,11 @@ function launcher.launch(main, default_exe_name, extra_setup_thunk, additional_l
     if os.getenv('STANDALONE') == '1' then
       os.execute('cp ' .. os.getenv('LEGION_INSTALL_PREFIX') .. '/lib/' ..
           regentlib.binding_library .. ' ' .. out_dir)
+      os.execute('cp --no-dereference ' .. os.getenv('LEGION_INSTALL_PREFIX') ..
+          '/lib/liblegion.so* ' .. out_dir)
+      os.execute('cp --no-dereference ' ..
+          (os.getenv('Realm_ROOT') or os.getenv('LEGION_INSTALL_PREFIX')) ..
+          '/lib/librealm.so* ' .. out_dir)
     end
 
     local exe = os.getenv('OBJNAME') or default_exe_name
