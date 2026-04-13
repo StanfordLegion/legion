@@ -8065,9 +8065,12 @@ namespace Legion {
           allocation, view_did, op_uid, &first);
       if (first && (value != nullptr))
         view->set_value(value, value_size);
-      // Delete the collective associated with this fill view
-      delete collective;
       AutoLock f_lock(fill_view_lock);
+      // Delete the collective associated with this fill view
+      // It's not safe to do this until we're holding the lock because other
+      // threads might still be invoking the 'matches' function on collectives
+      // in the list so we need to make sure none of them are outstanding
+      delete collective;
       // Check the pending set first since that is easy
       std::map<FillView*, size_t>::iterator finder =
           pending_fill_views.find(view);
