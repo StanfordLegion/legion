@@ -327,14 +327,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_assert(local_shard != origin);
+      // Pull a copy of the done event onto the stack in case the
+      // collective ends up being deleted immediately after it is registered
+      const RtEvent result = done_event;
       // Register this with the context
       context->register_collective(this);
-      if (!done_event.has_triggered())
+      if (!result.has_triggered())
       {
         if (block)
-          done_event.wait();
+          result.wait();
         else
-          return done_event;
+          return result;
       }
       return RtEvent::NO_RT_EVENT;
     }
