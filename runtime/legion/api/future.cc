@@ -2563,6 +2563,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool FutureImpl::needs_remote_instance_update(AddressSpaceID source) const
+    //--------------------------------------------------------------------------
+    {
+      // This function helps resource a really hairy case where messages that
+      // pack and unpack references from nodes can race with the registration
+      // message send by record_future_registered. In such cases the owner
+      // node can see unpacks of references from a remote node that isn't
+      // registered yet and then the counts for packs and unpack incorrectly
+      // balance without new remote node having been consulted yet. To address
+      // this we always do extra remote registrations on messages from remote
+      // nodes just to be safe since we can do it multiple times without
+      // causing any issues
+      return (
+          is_owner() && ((collective_mapping == nullptr) ||
+                         !collective_mapping->contains(source)));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void FutureResultMessage::handle(
         Deserializer& derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -2571,6 +2589,8 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
       FutureImpl* future = legion_safe_cast<FutureImpl*>(dc);
+      if (future->needs_remote_instance_update(source))
+        future->update_remote_instances(source);
 #ifdef LEGION_DEBUG
       // A little bit strange, but if we go to do the broadcast when
       // unpacking the result, we might need to pack other global references
@@ -2605,6 +2625,8 @@ namespace Legion {
       FutureImpl* future = legion_safe_cast<FutureImpl*>(dc);
       size_t future_size;
       derez.deserialize(future_size);
+      if (future->needs_remote_instance_update(source))
+        future->update_remote_instances(source);
 #ifdef LEGION_DEBUG
       // Same case here as above to avoid overzealous assertions
       legion_no_skip_assert(future->check_global_and_increment(RUNTIME_REF));
@@ -2627,6 +2649,8 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
       FutureImpl* future = legion_safe_cast<FutureImpl*>(dc);
+      if (future->needs_remote_instance_update(source))
+        future->update_remote_instances(source);
 #ifdef LEGION_DEBUG
       // Same case here as above to avoid overzealous assertions
       legion_no_skip_assert(future->check_global_and_increment(RUNTIME_REF));
