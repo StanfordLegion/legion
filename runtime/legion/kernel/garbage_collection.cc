@@ -616,7 +616,9 @@ namespace Legion {
       legion_assert(!is_owner());
       legion_assert(registered_with_runtime);
       RtUserEvent registered_event;
-      if (!has_global_reference)
+      if (has_global_reference)
+        pack_global_ref();
+      else
         registered_event = Runtime::create_rt_user_event();
       DistributedRemoteRegistration rez;
       {
@@ -643,6 +645,8 @@ namespace Legion {
       target->update_remote_instances(source);
       if (done_event.exists())
         Runtime::trigger_event(done_event);
+      else
+        target->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
