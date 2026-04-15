@@ -67,9 +67,11 @@ namespace Legion {
       rez.serialize(arrive_barriers.size());
       for (const PhaseBarrier& barrier : arrive_barriers)
         pack_phase_barrier(barrier, rez);
-      rez.serialize(arglen);
-      if (arglen > 0)
-        rez.serialize(args, arglen);
+      arg_manager.serialize(rez);
+      // Not the argmanager here in case the buffer is from a future
+      rez.serialize(local_arglen);
+      if (local_arglen)
+        rez.serialize(local_args, local_arglen);
       pack_mappable(*this, rez);
       rez.serialize(is_index_space);
       rez.serialize(concurrent_task);
@@ -77,8 +79,6 @@ namespace Legion {
       rez.serialize(index_domain);
       rez.serialize(index_point);
       rez.serialize(sharding_space);
-      rez.serialize(local_arglen);
-      rez.serialize(local_args, local_arglen);
       rez.serialize(orig_proc);
       // No need to pack current proc, it will get set when we unpack
       rez.serialize(steal_count);
@@ -128,13 +128,12 @@ namespace Legion {
       arrive_barriers.resize(num_arrive_barriers);
       for (PhaseBarrier& barrier : arrive_barriers)
         unpack_phase_barrier(barrier, derez);
-      derez.deserialize(arglen);
-      if (arglen > 0)
-      {
-        arg_manager.save_buffer(derez.get_current_pointer(), arglen);
-        derez.advance_pointer(arglen);
-        args = arg_manager.get_buffer();
-      }
+      arg_manager.deserialize(derez);
+      arglen = arg_manager.get_size();
+      args = arg_manager.get_buffer();
+      local_arg_manager.deserialize(derez);
+      local_arglen = local_arg_manager.get_size();
+      local_args = local_arg_manager.get_buffer();
       unpack_mappable(*this, derez);
       derez.deserialize(is_index_space);
       derez.deserialize(concurrent_task);
@@ -142,12 +141,6 @@ namespace Legion {
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       derez.deserialize(sharding_space);
-      derez.deserialize(local_arglen);
-      if (local_arglen > 0)
-      {
-        local_args = malloc(local_arglen);
-        derez.deserialize(local_args, local_arglen);
-      }
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
@@ -359,12 +352,9 @@ namespace Legion {
         args = nullptr;
         arglen = 0;
       }
-      if (local_args != nullptr)
-      {
-        free(local_args);
-        local_args = nullptr;
-        local_arglen = 0;
-      }
+      // We don't own these so just reset them
+      local_args = nullptr;
+      local_arglen = 0;
       if (mapper_data != nullptr)
       {
         free(mapper_data);
@@ -1023,8 +1013,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::clone_task_op_from(
-        TaskOp* rhs, Processor p, bool can_steal, bool duplicate_args)
+    void TaskOp::clone_task_op_from(TaskOp* rhs, Processor p, bool can_steal)
     //--------------------------------------------------------------------------
     {
       legion_assert(p.exists());
@@ -1048,19 +1037,9 @@ namespace Legion {
       this->grants = rhs->grants;
       this->wait_barriers = rhs->wait_barriers;
       this->arrive_barriers = rhs->arrive_barriers;
-      this->arglen = rhs->arglen;
-      if (this->arglen > 0)
-      {
-        if (duplicate_args)
-        {
-          arg_manager.save_buffer(rhs->args, this->arglen);
-          this->args = arg_manager.get_buffer();
-        }
-        else
-        {
-          this->args = rhs->args;
-        }
-      }
+      this->arg_manager = rhs->arg_manager;
+      this->arglen = this->arg_manager.get_size();
+      this->args = this->arg_manager.get_buffer();
       this->map_id = rhs->map_id;
       this->tag = rhs->tag;
       if (rhs->mapper_data_size > 0)
@@ -2025,7 +2004,7 @@ namespace Legion {
     {
       legion_assert(get_owner_space() == runtime->address_space);
       RtEvent precondition;
-      void* result = nullptr;
+      const void* result = nullptr;
       size_t size = 0;
       bool is_mutable = false;
       {

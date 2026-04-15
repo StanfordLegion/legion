@@ -312,7 +312,7 @@ namespace Legion {
     {
       legion_assert(this->launch_space == nullptr);
       legion_assert(this->future_handles == nullptr);
-      this->clone_task_op_from(rhs, p, stealable, false /*duplicate*/);
+      this->clone_task_op_from(rhs, p, stealable);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
       add_launch_space_reference(this->launch_space);

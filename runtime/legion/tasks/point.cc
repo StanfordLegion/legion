@@ -596,14 +596,8 @@ namespace Legion {
         {
           if (inline_task)
           {
-            const void* buffer = f.impl->get_buffer(
+            local_args = f.impl->get_buffer(
                 runtime->runtime_system_memory, &local_arglen);
-            // Have to make a local copy since the point takes ownership
-            if (local_arglen > 0)
-            {
-              local_args = malloc(local_arglen);
-              memcpy(local_args, buffer, local_arglen);
-            }
           }
           else
           {
@@ -613,14 +607,7 @@ namespace Legion {
             const RtEvent ready = f.impl->subscribe();
             if (ready.exists() && !ready.has_triggered())
               ready.wait();
-            const void* buffer =
-                f.impl->find_runtime_buffer(parent_ctx, local_arglen);
-            // Have to make a local copy since the point takes ownership
-            if (local_arglen > 0)
-            {
-              local_args = malloc(local_arglen);
-              memcpy(local_args, buffer, local_arglen);
-            }
+            local_args = f.impl->find_runtime_buffer(parent_ctx, local_arglen);
           }
         }
       }

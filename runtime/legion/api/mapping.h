@@ -149,7 +149,7 @@ namespace Legion {
     std::vector<Grant> grants;
     std::vector<PhaseBarrier> wait_barriers;
     std::vector<PhaseBarrier> arrive_barriers;
-    void* args;
+    const void* args;
     size_t arglen;
   public:
     // Index task argument information
@@ -159,7 +159,7 @@ namespace Legion {
     Domain index_domain;
     DomainPoint index_point;
     IndexSpace sharding_space;
-    void* local_args;
+    const void* local_args;
     size_t local_arglen;
   public:
     // Meta data information from the runtime
