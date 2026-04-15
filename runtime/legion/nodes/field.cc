@@ -688,7 +688,7 @@ namespace Legion {
     {
       legion_assert(get_owner_space() == runtime->address_space);
       RtEvent precondition;
-      void* result = nullptr;
+      const void* result = nullptr;
       size_t size = 0;
       bool is_mutable = false;
       {
@@ -747,7 +747,7 @@ namespace Legion {
     {
       legion_assert(get_owner_space() == runtime->address_space);
       RtEvent precondition;
-      void* result = nullptr;
+      const void* result = nullptr;
       size_t size = 0;
       bool is_mutable = false;
       {

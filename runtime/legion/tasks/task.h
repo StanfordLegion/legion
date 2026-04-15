@@ -47,6 +47,7 @@ namespace Legion {
       virtual void set_context_index(uint64_t index) = 0;
     protected:
       BufferManager<Task, OPERATION_LIFETIME> arg_manager;
+      BufferManager<Task, OPERATION_LIFETIME> local_arg_manager;
     };
 
     /**
@@ -291,8 +292,7 @@ namespace Legion {
       void activate_outstanding_task(void);
       void deactivate_outstanding_task(void);
     public:
-      void clone_task_op_from(
-          TaskOp* rhs, Processor p, bool stealable, bool duplicate_args);
+      void clone_task_op_from(TaskOp* rhs, Processor p, bool stealable);
       void update_grants(const std::vector<Grant>& grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier>& barriers);
       void finalize_output_region_trees(void);

@@ -138,8 +138,7 @@ namespace Legion {
     void SingleTask::clone_single_from(SingleTask* rhs)
     //--------------------------------------------------------------------------
     {
-      this->clone_task_op_from(
-          rhs, this->target_proc, false /*stealable*/, true /*duplicate*/);
+      this->clone_task_op_from(rhs, this->target_proc, false /*stealable*/);
       this->index_point = rhs->index_point;
       this->virtual_mapped = rhs->virtual_mapped;
       this->no_access_regions = rhs->no_access_regions;

@@ -6526,7 +6526,7 @@ void legion_task_id_retrieve_name(
   runtime->retrieve_name(task_id, *result);
 }
 
-void* legion_task_get_args(legion_task_t task_)
+const void* legion_task_get_args(legion_task_t task_)
 {
   Task* task = CObjectWrapper::unwrap(task_);
 
@@ -6575,7 +6575,7 @@ bool legion_task_get_is_index_space(legion_task_t task_)
   return task->is_index_space;
 }
 
-void* legion_task_get_local_args(legion_task_t task_)
+const void* legion_task_get_local_args(legion_task_t task_)
 {
   Task* task = CObjectWrapper::unwrap(task_);
 

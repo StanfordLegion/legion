@@ -369,7 +369,7 @@ void producer_global_task(const Task *task,
 {
   static constexpr int DIM = 2;
 
-  TestArgs *args = reinterpret_cast<TestArgs*>(task->args);
+  const TestArgs *args = reinterpret_cast<const TestArgs*>(task->args);
 
   std::vector<OutputRegion> outputs;
   runtime->get_output_regions(ctx, outputs);
@@ -423,7 +423,7 @@ void producer_local_task(const Task *task,
 {
   static constexpr int DIM = 2;
 
-  TestArgs *args = reinterpret_cast<TestArgs*>(task->args);
+  const TestArgs *args = reinterpret_cast<const TestArgs*>(task->args);
 
   std::vector<OutputRegion> outputs;
   runtime->get_output_regions(ctx, outputs);
@@ -496,7 +496,7 @@ void consumer_global_task(const Task *task,
 {
   static constexpr int DIM = 2;
 
-  TestArgs *args = reinterpret_cast<TestArgs*>(task->args);
+  const TestArgs *args = reinterpret_cast<const TestArgs*>(task->args);
 
   Rect<DIM, int32_t> r(regions[0]);
   log_test.print() << "[Consumer " << task->index_point
@@ -552,7 +552,7 @@ void consumer_local_task(const Task *task,
                          Context ctx,
                          Runtime *runtime)
 {
-  TestArgs *args = reinterpret_cast<TestArgs*>(task->args);
+  const TestArgs *args = reinterpret_cast<const TestArgs*>(task->args);
 
   if (args->index_launch)
   {

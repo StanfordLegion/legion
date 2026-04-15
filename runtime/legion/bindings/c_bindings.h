@@ -4554,7 +4554,7 @@ extern "C"
   /**
    * @see Legion::Task::args
    */
-  void* legion_task_get_args(legion_task_t task);
+  const void* legion_task_get_args(legion_task_t task);
 
   /**
    * @see Legion::Task::args
@@ -4589,7 +4589,7 @@ extern "C"
   /**
    * @see Legion::Task::local_args
    */
-  void* legion_task_get_local_args(legion_task_t task);
+  const void* legion_task_get_local_args(legion_task_t task);
 
   /**
    * @see Legion::Task::local_arglen

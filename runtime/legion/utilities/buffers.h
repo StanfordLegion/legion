@@ -16,6 +16,8 @@
 #ifndef __LEGION_BUFFERS_H__
 #define __LEGION_BUFFERS_H__
 
+#include "legion/utilities/serdez.h"
+
 namespace Legion {
   namespace Internal {
 
@@ -29,55 +31,160 @@ namespace Legion {
     template<typename T, AllocationLifetime L>
     class BufferManager : public NoHeapify {
     public:
-      BufferManager(void) : buffer(nullptr), size(0) { }
-      BufferManager(const BufferManager& rhs) = delete;
-      BufferManager(BufferManager&& rhs) noexcept
-        : buffer(rhs.buffer), size(rhs.size)
+      inline BufferManager(void) : size(0) { }
+      inline BufferManager(const void* buffer, size_t s)
       {
-        rhs.buffer = nullptr;
+        save_buffer(buffer, s);
+      }
+      inline BufferManager(const BufferManager& rhs) : size(rhs.size)
+      {
+        if (size <= VALUE_SIZE)
+          std::memcpy(data.value, rhs.data.value, size);
+        else
+        {
+          // If it's not shared yet make it shared
+          if (rhs.data.shared.references == nullptr)
+          {
+            rhs.data.shared.references = new std::atomic<uint32_t>(2);
+            data.shared.references = rhs.data.shared.references;
+          }
+          else
+          {
+            data.shared.references = rhs.data.shared.references;
+            data.shared.references->fetch_add(1);
+          }
+          data.shared.buffer = rhs.data.shared.buffer;
+        }
+      }
+      inline BufferManager(BufferManager&& rhs) noexcept : size(rhs.size)
+      {
+        if (rhs.size <= VALUE_SIZE)
+          std::memcpy(data.value, rhs.data.value, size);
+        else
+          data.shared = rhs.data.shared;
         rhs.size = 0;
       }
-      ~BufferManager(void) { clear(); }
+      inline ~BufferManager(void) { clear(); }
     public:
-      BufferManager& operator=(const BufferManager& rhs) = delete;
-      BufferManager& operator=(BufferManager&& rhs) noexcept
+      inline BufferManager& operator=(const BufferManager& rhs)
       {
-        save_buffer(rhs.buffer, rhs.size);
-        rhs.buffer = nullptr;
+        if (this == &rhs)
+          return *this;
+        clear();
+        size = rhs.size;
+        if (size <= VALUE_SIZE)
+          std::memcpy(data.value, rhs.data.value, size);
+        else
+        {
+          // If it's not shared yet make it shared
+          if (rhs.data.shared.references == nullptr)
+          {
+            rhs.data.shared.references = new std::atomic<uint32_t>(2);
+            data.shared.references = rhs.data.shared.references;
+          }
+          else
+          {
+            data.shared.references = rhs.data.shared.references;
+            data.shared.references->fetch_add(1);
+          }
+          data.shared.buffer = rhs.data.shared.buffer;
+        }
+        return *this;
+      }
+      inline BufferManager& operator=(BufferManager&& rhs) noexcept
+      {
+        if (this == &rhs)
+          return *this;
+        clear();
+        size = rhs.size;
+        if (rhs.size <= VALUE_SIZE)
+          std::memcpy(data.value, rhs.data.value, size);
+        else
+          data.shared = rhs.data.shared;
         rhs.size = 0;
         return *this;
       }
     public:
       inline void clear(void)
       {
-        if (buffer != nullptr)
+        if (VALUE_SIZE < size)
         {
-          legion_free<void, BufferManager<T, L> >(buffer, size);
-          buffer = nullptr;
-          size = 0;
+          // Check to see if we're sharing it
+          if (data.shared.references == nullptr)
+            legion_free<void, BufferManager<T, L> >(data.shared.buffer, size);
+          else
+          {
+            const uint32_t previous = data.shared.references->fetch_sub(1);
+            legion_assert(previous > 0);
+            if (previous == 1)
+            {
+              legion_free<void, BufferManager<T, L> >(data.shared.buffer, size);
+              delete data.shared.references;
+            }
+          }
         }
+        size = 0;
       }
-      inline void save_buffer(const void* src, size_t sz)
+      inline void save_buffer(const void* buffer, size_t s)
       {
-        if (buffer != nullptr)
-          legion_free<void, BufferManager<T, L> >(buffer, size);
-        size = sz;
-        if (size > 0)
-        {
-          buffer = legion_malloc<void, L, BufferManager<T, L> >(
-              size, alignof(uint8_t));
-          std::memcpy(buffer, src, size);
-        }
+        clear();
+        size = s;
+        if (size <= VALUE_SIZE)
+          std::memcpy(data.value, buffer, size);
         else
         {
-          buffer = nullptr;
+          data.shared.buffer = legion_malloc<void, L, BufferManager<T, L> >(
+              size, alignof(std::max_align_t));
+          std::memcpy(data.shared.buffer, buffer, size);
+          data.shared.references = nullptr;
         }
       }
-      inline void* get_buffer(void) const { return buffer; }
+      inline const void* get_buffer(void) const
+      {
+        if (size <= VALUE_SIZE)
+          return data.value;
+        else
+          return data.shared.buffer;
+      }
       inline size_t get_size(void) const { return size; }
+      inline void serialize(Serializer& rez) const
+      {
+        rez.serialize(size);
+        if (size <= VALUE_SIZE)
+          rez.serialize(data.value, size);
+        else
+          rez.serialize(data.shared.buffer, size);
+      }
+      inline void deserialize(Deserializer& derez)
+      {
+        clear();
+        derez.deserialize(size);
+        if (size <= VALUE_SIZE)
+          std::memcpy(data.value, derez.get_current_pointer(), size);
+        else
+        {
+          data.shared.buffer = legion_malloc<void, L, BufferManager<T, L> >(
+              size, alignof(std::max_align_t));
+          std::memcpy(data.shared.buffer, derez.get_current_pointer(), size);
+          data.shared.references = nullptr;
+        }
+        derez.advance_pointer(size);
+      }
     private:
-      void* buffer;
       size_t size;
+      struct SharedBuffer {
+        void* buffer = nullptr;
+        mutable std::atomic<uint32_t>* references = nullptr;
+      };
+      // If the data is less than or equal to the VALUE_SIZE then
+      // we pass it by value when the buffer is copied, otherwise
+      // we can just share the pointer to the allocation. We pick
+      // 64 bytes since it is a common cache line size.
+      static constexpr size_t VALUE_SIZE = 64;
+      union {
+        SharedBuffer shared = SharedBuffer{};
+        std::byte value[VALUE_SIZE];
+      } data;
     };
 
     /////////////////////////////////////////////////////////////
@@ -92,10 +199,8 @@ namespace Legion {
     public:
       SemanticInfo(void) : is_mutable(false) { }
       SemanticInfo(const void* buf, size_t s, bool is_mut = true)
-        : is_mutable(is_mut)
-      {
-        buffer.save_buffer(buf, s);
-      }
+        : buffer(buf, s), is_mutable(is_mut)
+      { }
       SemanticInfo(RtUserEvent ready) : ready_event(ready), is_mutable(true) { }
     public:
       inline bool is_valid(void) const { return ready_event.has_triggered(); }
