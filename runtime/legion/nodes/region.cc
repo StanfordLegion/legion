@@ -407,7 +407,11 @@ namespace Legion {
           // anything in an interfering sub-tree without changing the
           // state of the region tree states
           state.record_refinement_dependences(
-              ctx, refinement_user, it->second, no_projection_info, next_child,
+              ctx, refinement_user, it->second, no_projection_info,
+              // Can only pass in the next_child to skip if the refinement
+              // came from further down the tree otherwise we need to perform
+              // dependence analysis on any open children
+              (it->first->get_refinement_node() == this) ? nullptr : next_child,
               privilege_root, logical_analysis);
         }
         // A bit of a hairy case: if the user is not read-write and we have
