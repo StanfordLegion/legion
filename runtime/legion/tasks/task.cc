@@ -497,7 +497,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TaskMessage::handle(Deserializer& derez, AddressSpaceID)
+    /*static*/ void TaskMessage::handle(
+        Deserializer& derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Figure out what kind of task this is and where it came from
@@ -512,7 +513,7 @@ namespace Legion {
           {
             IndividualTask* task = runtime->get_operation<IndividualTask>();
             std::set<RtEvent> ready_events;
-            if (task->unpack_task(derez, current, ready_events))
+            if (task->unpack_task(derez, current, source, ready_events))
             {
               RtEvent ready;
               if (!ready_events.empty())
@@ -540,7 +541,7 @@ namespace Legion {
           {
             SliceTask* task = runtime->get_operation<SliceTask>();
             std::set<RtEvent> ready_events;
-            if (task->unpack_task(derez, current, ready_events))
+            if (task->unpack_task(derez, current, source, ready_events))
             {
               RtEvent ready;
               if (!ready_events.empty())
@@ -565,7 +566,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteTaskReplay::handle(
-        Deserializer& derez, AddressSpaceID)
+        Deserializer& derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Figure out what kind of task this is and where it came from
@@ -582,7 +583,7 @@ namespace Legion {
           {
             IndividualTask* task = runtime->get_operation<IndividualTask>();
             std::set<RtEvent> ready_events;
-            task->unpack_task(derez, target_proc, ready_events);
+            task->unpack_task(derez, target_proc, source, ready_events);
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -596,7 +597,7 @@ namespace Legion {
           {
             SliceTask* task = runtime->get_operation<SliceTask>();
             std::set<RtEvent> ready_events;
-            task->unpack_task(derez, target_proc, ready_events);
+            task->unpack_task(derez, target_proc, source, ready_events);
             if (!ready_events.empty())
             {
               const RtEvent wait_on = Runtime::merge_events(ready_events);

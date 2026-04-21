@@ -350,7 +350,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PointTask::unpack_task(
-        Deserializer& derez, Processor current, std::set<RtEvent>& ready_events)
+        Deserializer& derez, Processor current, AddressSpaceID,
+        std::set<RtEvent>& ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);

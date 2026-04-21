@@ -401,8 +401,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(did);
-      if ((collective_mapping == nullptr) ||
-          !collective_mapping->contains(target))
+      if ((target != owner_space) && ((collective_mapping == nullptr) ||
+                                      !collective_mapping->contains(target)))
       {
         rez.serialize<bool>(true);  // can create
         rez.serialize(future_map_domain->handle);
@@ -420,7 +420,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ FutureMap FutureMapImpl::unpack_future_map(
-        Deserializer& derez, TaskContext* ctx)
+        Deserializer& derez, AddressSpaceID source, TaskContext* ctx)
     //--------------------------------------------------------------------------
     {
       DistributedID future_map_did;
@@ -434,6 +434,11 @@ namespace Legion {
         // Have to wait to find this one since it is created collectively
         FutureMap result(static_cast<FutureMapImpl*>(
             runtime->find_distributed_collectable(future_map_did)));
+        // Make sure we know about all the remote instances before
+        // decrementing to avoid races with registration/unpack
+        if ((result.impl->collective_mapping == nullptr) ||
+            (!result.impl->collective_mapping->contains(source)))
+          result.impl->update_remote_instances(source);
         result.impl->unpack_global_ref();
         return result;
       }

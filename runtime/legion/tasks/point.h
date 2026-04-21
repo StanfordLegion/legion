@@ -100,7 +100,7 @@ namespace Legion {
           Processor target, std::vector<SingleTask*>& others) override;
       virtual bool pack_task(Serializer& rez, AddressSpaceID target) override;
       virtual bool unpack_task(
-          Deserializer& derez, Processor current,
+          Deserializer& derez, Processor current, AddressSpaceID source,
           std::set<RtEvent>& ready_events) override;
     public:
       virtual void handle_future(

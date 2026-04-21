@@ -488,7 +488,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool SliceTask::unpack_task(
-        Deserializer& derez, Processor current, std::set<RtEvent>& ready_events)
+        Deserializer& derez, Processor current, AddressSpaceID source,
+        std::set<RtEvent>& ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -511,7 +512,8 @@ namespace Legion {
       if (!elide_future_return)
       {
         if (redop == 0)
-          future_map = FutureMapImpl::unpack_future_map(derez, parent_ctx);
+          future_map =
+              FutureMapImpl::unpack_future_map(derez, source, parent_ctx);
         // Unpack the predicate false infos
         predicate_false_future = FutureImpl::unpack_future(derez);
         size_t predicate_false_size;
@@ -530,7 +532,7 @@ namespace Legion {
       {
         PointTask* point = runtime->get_operation<PointTask>();
         point->slice_owner = this;
-        point->unpack_task(derez, current, ready_events);
+        point->unpack_task(derez, current, source, ready_events);
         point->parent_ctx = parent_ctx;
         points.emplace_back(point);
         LegionSpy::log_slice_point(
@@ -552,7 +554,8 @@ namespace Legion {
       }
       if (num_points == 0)
       {
-        point_arguments = FutureMapImpl::unpack_future_map(derez, parent_ctx);
+        point_arguments =
+            FutureMapImpl::unpack_future_map(derez, source, parent_ctx);
         size_t num_point_futures;
         derez.deserialize(num_point_futures);
         if (num_point_futures > 0)
@@ -560,7 +563,7 @@ namespace Legion {
           point_futures.resize(num_point_futures);
           for (unsigned idx = 0; idx < num_point_futures; idx++)
             point_futures[idx] =
-                FutureMapImpl::unpack_future_map(derez, parent_ctx);
+                FutureMapImpl::unpack_future_map(derez, source, parent_ctx);
         }
       }
       if (implicit_profiler != nullptr)

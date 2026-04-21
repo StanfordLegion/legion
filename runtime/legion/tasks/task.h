@@ -277,7 +277,7 @@ namespace Legion {
       // Returns true if the task should be deactivated
       virtual bool pack_task(Serializer& rez, AddressSpaceID target) = 0;
       virtual bool unpack_task(
-          Deserializer& derez, Processor current,
+          Deserializer& derez, Processor current, AddressSpaceID source,
           std::set<RtEvent>& ready_events) = 0;
       virtual void perform_inlining(
           VariantImpl* variant,
