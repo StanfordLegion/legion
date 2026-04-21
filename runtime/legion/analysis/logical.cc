@@ -1180,33 +1180,32 @@ namespace Legion {
     LogicalAnalysis::~LogicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
-      // If we have any pending refinements, have them record dependences
-      // on any pending closes that were done along their path and then
-      // issue the refinements
+      // If we have any pending refinements, have them record dependences on
+      // any pending closes that are interfering and then issue the refinements
       unsigned internal_index = 0;
       for (const std::pair<RefinementOp*, FieldMask>& it : pending_refinements)
       {
         RegionTreeNode* node = it.first->get_refinement_node();
-        RegionTreeNode* path_node = node;
-        while (path_node != nullptr)
+        IndexTreeNode* refinement_row = node->get_row_source();
+        const RegionTreeID refinement_treeid = node->get_tree_id();
+        for (const std::pair<RegionTreeNode* const, MergeCloseOp*>& cit :
+             pending_closes)
         {
-          std::map<RegionTreeNode*, MergeCloseOp*>::const_iterator finder =
-              pending_closes.find(path_node);
-          if (finder != pending_closes.end())
-          {
-            FieldMask overlap = it.second & finder->second->get_close_mask();
-            if (!!overlap)
-            {
-              LegionSpy::log_mapping_dependence(
-                  context->get_unique_id(), finder->second->get_unique_op_id(),
-                  0 /*index*/, it.first->get_unique_op_id(), 0 /*index*/,
-                  LEGION_TRUE_DEPENDENCE);
-              it.first->register_region_dependence(
-                  0 /*index*/, finder->second, finder->second->get_generation(),
-                  0 /*index*/, LEGION_TRUE_DEPENDENCE, overlap);
-            }
-          }
-          path_node = path_node->get_parent();
+          if (refinement_treeid != cit.first->get_tree_id())
+            continue;
+          const FieldMask overlap = it.second & cit.second->get_close_mask();
+          if (!overlap)
+            continue;
+          if (runtime->are_disjoint_tree_only(
+                  refinement_row, cit.first->get_row_source()))
+            continue;
+          LegionSpy::log_mapping_dependence(
+              context->get_unique_id(), cit.second->get_unique_op_id(),
+              0 /*index*/, it.first->get_unique_op_id(), 0 /*index*/,
+              LEGION_TRUE_DEPENDENCE);
+          it.first->register_region_dependence(
+              0 /*index*/, cit.second, cit.second->get_generation(),
+              0 /*index*/, LEGION_TRUE_DEPENDENCE, overlap);
         }
         it.first->record_refinement_mask(internal_index, it.second);
         issue_internal_operation(node, it.first, it.second, internal_index++);

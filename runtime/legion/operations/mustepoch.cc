@@ -964,8 +964,9 @@ namespace Legion {
               const RegionRequirement& dst_req = dst_task->regions[it.second];
               IndexSpaceNode* dst_node =
                   runtime->get_node(dst_req.region.get_index_space());
-              IndexTreeNode* dummy = nullptr;
-              if (runtime->are_disjoint_tree_only(src_node, dst_node, dummy))
+              if (runtime->are_disjoint_tree_only(src_node, dst_node))
+                continue;
+              if (!src_node->intersects_with(dst_node))
                 continue;
               // Update the dependence type
               DependenceType internal_dtype =
@@ -1006,8 +1007,9 @@ namespace Legion {
             runtime->get_node(src_req.region.get_index_space());
         IndexSpaceNode* dst_node =
             runtime->get_node(dst_req.region.get_index_space());
-        IndexTreeNode* dummy = nullptr;
-        if (runtime->are_disjoint_tree_only(src_node, dst_node, dummy))
+        if (runtime->are_disjoint_tree_only(src_node, dst_node))
+          return false;
+        if (!src_node->intersects_with(dst_node))
           return false;
         // Update the dependence type
         dtype = check_dependence_type<true, true /*reductions interfere*/>(

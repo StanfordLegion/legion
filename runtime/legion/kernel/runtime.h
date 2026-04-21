@@ -537,9 +537,7 @@ namespace Legion {
       bool are_disjoint(IndexSpace one, IndexPartition two);
       bool are_disjoint(IndexPartition one, IndexPartition two);
       // Can only use the region tree for proving disjointness here
-      bool are_disjoint_tree_only(
-          IndexTreeNode* one, IndexTreeNode* two,
-          IndexTreeNode*& common_ancestor);
+      bool are_disjoint_tree_only(IndexTreeNode* one, IndexTreeNode* two);
     public:
       bool check_types(TypeTag t1, TypeTag t2, bool& diff_dims);
       bool is_dominated(IndexSpace src, IndexSpace dst);
