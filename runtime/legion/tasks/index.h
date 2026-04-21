@@ -128,7 +128,7 @@ namespace Legion {
     public:
       virtual bool pack_task(Serializer& rez, AddressSpaceID target) override;
       virtual bool unpack_task(
-          Deserializer& derez, Processor current,
+          Deserializer& derez, Processor current, AddressSpaceID source,
           std::set<RtEvent>& ready_events) override;
       virtual void perform_inlining(
           VariantImpl* variant,

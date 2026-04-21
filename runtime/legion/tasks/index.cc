@@ -1700,7 +1700,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexTask::unpack_task(
-        Deserializer& derez, Processor current, std::set<RtEvent>& ready_events)
+        Deserializer& derez, Processor current, AddressSpaceID,
+        std::set<RtEvent>& ready_events)
     //--------------------------------------------------------------------------
     {
       // should never be called

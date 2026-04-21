@@ -71,7 +71,8 @@ namespace Legion {
       bool reset_all_futures(void);
     public:
       void pack_future_map(Serializer& rez, AddressSpaceID target);
-      static FutureMap unpack_future_map(Deserializer& derez, TaskContext* ctx);
+      static FutureMap unpack_future_map(
+          Deserializer& derez, AddressSpaceID source, TaskContext* ctx);
     public:
       virtual void get_all_futures(std::map<DomainPoint, FutureImpl*>& futures);
       void set_all_futures(const std::map<DomainPoint, Future>& futures);
