@@ -436,8 +436,9 @@ namespace Legion {
             runtime->find_distributed_collectable(future_map_did)));
         // Make sure we know about all the remote instances before
         // decrementing to avoid races with registration/unpack
-        if ((result.impl->collective_mapping == nullptr) ||
-            (!result.impl->collective_mapping->contains(source)))
+        if (result.impl->is_owner() &&
+            ((result.impl->collective_mapping == nullptr) ||
+             (!result.impl->collective_mapping->contains(source))))
           result.impl->update_remote_instances(source);
         result.impl->unpack_global_ref();
         return result;
