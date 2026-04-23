@@ -31,7 +31,7 @@ namespace Legion {
         case SEND_STARTUP_BARRIER:
           break;
         case TASK_MESSAGE:
-          return TASK_VIRTUAL_CHANNEL;
+          return DEFAULT_VIRTUAL_CHANNEL;
         case STEAL_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;
         case ADVERTISEMENT_MESSAGE:
