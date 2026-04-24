@@ -174,7 +174,7 @@ namespace Legion {
             num_profiling_nodes(0), serializer_type("binary"),
             prof_footprint_threshold(128 << 20), prof_target_latency(100),
             prof_call_threshold(1), prof_self_profile(false),
-            prof_no_critical_paths(false), prof_all_critical_arrivals(false)
+            prof_no_critical_paths(true), prof_all_critical_arrivals(false)
         { }
       public:
         size_t parse_option(
@@ -182,7 +182,7 @@ namespace Legion {
             std::vector<std::string>::const_iterator end, bool& bad_parameter);
         bool parse_bool(
             const std::string& parameter, const std::string_view& flag,
-            bool& value);
+            bool& value, bool polarity = true);
         template<typename T>
         bool parse_int(
             std::vector<std::string>::const_iterator it,

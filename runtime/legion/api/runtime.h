@@ -4594,6 +4594,10 @@ namespace Legion {
      *              In general these are tiny and not worth profiling,
      *              but you might still want to see them. They are not
      *              recorded by default.
+     * -lg:prof_critical_paths Enable critical path logging which will
+     *              capture Realm event graph structures. This may add
+     *              50% overhead to execution and increase profile log
+     *              sizes by a multiplicative factor.
      * -lg:prof_no_critical_paths Disable logging for performing critial
      *              path analysis as it is can greatly increase the size
      *              of the Legion Prof log files

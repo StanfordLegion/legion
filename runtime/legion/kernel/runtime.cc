@@ -10958,12 +10958,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::LegionConfiguration::parse_bool(
-        const std::string& parameter, const std::string_view& flag, bool& value)
+        const std::string& parameter, const std::string_view& flag, bool& value,
+        bool polarity)
     //--------------------------------------------------------------------------
     {
       if (parameter.compare(flag) != 0)
         return false;
-      value = true;
+      value = polarity;
       return true;
     }
 
@@ -11061,6 +11062,8 @@ namespace Legion {
               enable_pointwise_analysis) ||
           parse_bool(*it, "-lg:verbose", verbose_logging) ||
           parse_bool(*it, "-lg:prof_self", prof_self_profile) ||
+          parse_bool(
+              *it, "-lg:prof_critical_paths", prof_no_critical_paths, false) ||
           parse_bool(
               *it, "-lg:prof_no_critical_paths", prof_no_critical_paths) ||
           parse_bool(
