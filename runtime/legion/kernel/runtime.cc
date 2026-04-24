@@ -1252,21 +1252,28 @@ namespace Legion {
         {
           // First check to that we can convert the std::function back into
           // a function pointer, if we can't do that then there's no hope
-          const Realm::FunctionPointerImplementation impl(
-              (callback.has_args ?
-                   (void (*)())callback.withargs
-                       .target<RegistrationWithArgsCallbackFnptr>() :
-                   (void (*)())callback.withoutargs
-                       .target<RegistrationCallbackFnptr>()));
-          if (impl.fnptr == nullptr)
+          void (*raw_fnptr)() = nullptr;
+          if (callback.has_args)
+          {
+            const RegistrationWithArgsCallbackFnptr* p =
+                callback.withargs.target<RegistrationWithArgsCallbackFnptr>();
+            if (p != nullptr)
+              raw_fnptr = reinterpret_cast<void (*)()>(*p);
+          }
+          else
+          {
+            const RegistrationCallbackFnptr* p =
+                callback.withoutargs.target<RegistrationCallbackFnptr>();
+            if (p != nullptr)
+              raw_fnptr = reinterpret_cast<void (*)()>(*p);
+          }
+          if (raw_fnptr == nullptr)
           {
             Fatal fatal;
             fatal
-                << "Global registration callback function pointer "
-                << impl.fnptr
+                << "Global registration callback function pointer " << raw_fnptr
                 << " is not portable. All registration callbacks requesting to "
-                   "be "
-                << "performed 'globally' must be able to be recognized by "
+                << "be performed 'globally' must be able to be recognized by "
                 << "a call to 'dladdr'. This requires that they come from a "
                 << "shared object or the binary is linked with the '-rdynamic' "
                 << "flag.";
@@ -1279,6 +1286,7 @@ namespace Legion {
 #endif
             fatal.raise();
           }
+          const Realm::FunctionPointerImplementation impl(raw_fnptr);
           // Convert this to it's portable representation or raise an error
           // This is a little scary, we could still be inside of dlopen when
           // we get this call as part of the constructor for a shared object
@@ -1295,11 +1303,9 @@ namespace Legion {
           {
             Fatal fatal;
             fatal
-                << "Global registration callback function pointer "
-                << impl.fnptr
+                << "Global registration callback function pointer " << raw_fnptr
                 << " is not portable. All registration callbacks requesting to "
-                   "be "
-                << "performed 'globally' must be able to be recognized by "
+                << "be performed 'globally' must be able to be recognized by "
                 << "a call to 'dladdr'. This requires that they come from a "
                 << "shared object or the binary is linked with the '-rdynamic' "
                 << "flag.";
@@ -1367,12 +1373,21 @@ namespace Legion {
         }
         else
         {
-          void* fnptr =
-              (callback.has_args ?
-                   (void*)callback.withargs
-                       .target<RegistrationWithArgsCallbackFnptr>() :
-                   (void*)callback.withoutargs
-                       .target<RegistrationCallbackFnptr>());
+          void* fnptr = nullptr;
+          if (callback.has_args)
+          {
+            const RegistrationWithArgsCallbackFnptr* p =
+                callback.withargs.target<RegistrationWithArgsCallbackFnptr>();
+            if (p != nullptr)
+              fnptr = reinterpret_cast<void*>(*p);
+          }
+          else
+          {
+            const RegistrationCallbackFnptr* p =
+                callback.withoutargs.target<RegistrationCallbackFnptr>();
+            if (p != nullptr)
+              fnptr = reinterpret_cast<void*>(*p);
+          }
           if (fnptr == nullptr)
           {
             Fatal fatal;
