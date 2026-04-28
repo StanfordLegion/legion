@@ -6533,7 +6533,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::initiate_runtime_shutdown(
         AddressSpaceID source, ShutdownManager::ShutdownPhase phase,
-        ShutdownManager* owner)
+        ShutdownManager* owner, uint64_t expected)
     //--------------------------------------------------------------------------
     {
       log_shutdown.info(
@@ -6565,15 +6565,14 @@ namespace Legion {
         // First time we check for shutdown we do the prepare for shutdown
         prepare_runtime_shutdown();
       }
-      ShutdownManager* shutdown_manager =
-          new ShutdownManager(phase, source, LEGION_SHUTDOWN_RADIX, owner);
+      ShutdownManager* shutdown_manager = new ShutdownManager(
+          phase, source, LEGION_SHUTDOWN_RADIX, owner, expected);
       if (shutdown_manager->attempt_shutdown())
         delete shutdown_manager;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::confirm_runtime_shutdown(
-        ShutdownManager* shutdown_manager, bool phase_one)
+    void Runtime::confirm_runtime_shutdown(ShutdownManager* shutdown_manager)
     //--------------------------------------------------------------------------
     {
       if (has_outstanding_tasks())
@@ -6607,7 +6606,7 @@ namespace Legion {
       {
         MessageManager* manager = message_managers[idx].load();
         if (manager != nullptr)
-          manager->confirm_shutdown(shutdown_manager, phase_one);
+          manager->confirm_shutdown(shutdown_manager);
       }
     }
 

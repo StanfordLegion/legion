@@ -434,15 +434,12 @@ namespace Legion {
       void send_message(
           MessageKind kind, const Serializer& rez, RtEvent send_precondition,
           Processor target, bool response);
-      void record_seen(MessageKind kind);
-      void confirm_shutdown(
-          ShutdownManager* shutdown_manager, bool phase_one, Processor target,
-          bool profiling_virtual_channel);
+      void record_received(void);
+      void confirm_shutdown(ShutdownManager* shutdown_manager);
     private:
       void handle_message(
           MessageKind kind, AddressSpaceID remote_address_space,
           const void* args, size_t arglen);
-      void filter_unordered_events(void);
     private:
       mutable LocalLock channel_lock;
       RtEvent last_message_event;
@@ -452,9 +449,13 @@ namespace Legion {
       const LgPriority request_priority;
       const LgPriority response_priority;
     private:
-      static const unsigned MAX_UNORDERED_EVENTS = 32;
+      // Keep track of the unordered events for shutdown
       std::deque<RtEvent> unordered_events;
-      bool observed_recent;
+      // Monotonically increasing counters for sent and received messages
+      // 64-bit counters should pretty much never overflow so we never
+      // need to reset them back to zero
+      uint64_t sent_messages = 0;
+      std::atomic<uint64_t> received_messages = 0;
     };
 
     /**
@@ -489,7 +490,7 @@ namespace Legion {
           bool response = false,
           RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
       VirtualChannel& find_channel(VirtualChannelKind vc);
-      void confirm_shutdown(ShutdownManager* shutdown_manager, bool phase_one);
+      void confirm_shutdown(ShutdownManager* shutdown_manager);
       static void register_handlers(void);
       // Maintain a static-mapping between message kinds and virtual channels
       static constexpr VirtualChannelKind find_message_vc(MessageKind kind);

@@ -13,8 +13,6 @@
  * limitations under the License.
  */
 
-#include <unistd.h>  // usleep
-
 #include "legion/managers/message.h"
 #include "legion/kernel/runtime.h"
 #include "legion/managers/shard.h"
@@ -61,14 +59,17 @@ namespace Legion {
           implicit_profiler->record_event_trigger(
               original_fevent, implicit_fevent);
       }
-      // Record that we've seen this message
-      channel.record_seen(header.kind);
       // Find the handler for this message
       legion_assert(header.kind < LAST_SEND_KIND);
       void (*handler)(Deserializer&, AddressSpaceID) =
           MessageManager::message_handler_table[header.kind];
       legion_assert(handler != nullptr);
       (*handler)(derez, header.sender);
+      // If this is not a shutdown message then record that we've
+      // finished receiving the message
+      if ((header.kind != SEND_SHUTDOWN_NOTIFICATION) &&
+          (header.kind != SEND_SHUTDOWN_RESPONSE))
+        channel.record_received();
     }
 
     /////////////////////////////////////////////////////////////
@@ -92,8 +93,7 @@ namespace Legion {
             (kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
                 LG_THROUGHPUT_RESPONSE_PRIORITY :
             (kind == UPDATE_VIRTUAL_CHANNEL) ? LG_LATENCY_MESSAGE_PRIORITY :
-                                               LG_LATENCY_RESPONSE_PRIORITY),
-        observed_recent(true)
+                                               LG_LATENCY_RESPONSE_PRIORITY)
     //--------------------------------------------------------------------------
     { }
 
@@ -108,191 +108,78 @@ namespace Legion {
         Processor target, bool response)
     //--------------------------------------------------------------------------
     {
-      // Need an excluisve lock if this an ordered channel, otherwise this
-      // is just a formality and many messages can be sent in parallel
-      // and just can't race with shutdown tests
+      // Need an exclusive lock to update internal data structures
       AutoLock c_lock(channel_lock);
+      // If this is not a shutdown message record that we're sending it
+      if ((kind != SEND_SHUTDOWN_NOTIFICATION) &&
+          (kind != SEND_SHUTDOWN_RESPONSE))
+        sent_messages++;
+      const RtEvent precondition =
+          ordered_channel ? (send_precondition.exists() ?
+                                 Runtime::merge_events(
+                                     send_precondition, last_message_event) :
+                                 last_message_event) :
+                            send_precondition;
+      Realm::ProfilingRequestSet requests;
+      if (profile_outgoing_messages)
+        LegionProfiler::add_message_request(
+            requests, kind, target, precondition);
       // Send the message directly there, don't go through the
       // runtime interface to avoid being counted, still include
       // a profiling request though if necessary in order to
       // see waits on message handlers
-      if (profile_outgoing_messages)
-      {
-        Realm::ProfilingRequestSet requests;
-        const RtEvent precondition =
-            ordered_channel ? (send_precondition.exists() ?
-                                   Runtime::merge_events(
-                                       send_precondition, last_message_event) :
-                                   last_message_event) :
-                              send_precondition;
-        LegionProfiler::add_message_request(
-            requests, kind, target, precondition);
-        const RtEvent message_done(target.spawn(
+      const RtEvent message_done(target.spawn(
 #ifdef LEGION_SEPARATE_META_TASKS
-            LG_TASK_ID + LG_MESSAGE_ID + kind,
+          LG_TASK_ID + LG_MESSAGE_ID + kind,
 #else
-            LG_TASK_ID,
+          LG_TASK_ID,
 #endif
-            rez.get_buffer(), rez.get_used_bytes(), requests, precondition,
-            response ? response_priority : request_priority));
-        if (!ordered_channel)
+          rez.get_buffer(), rez.get_used_bytes(), requests, precondition,
+          response ? response_priority : request_priority));
+      if (!ordered_channel)
+      {
+        while (!unordered_events.empty())
         {
-          unordered_events.push_back(message_done);
-          if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
-            filter_unordered_events();
+          if (!unordered_events.front().has_triggered())
+            break;
+          unordered_events.pop_front();
         }
-        else
-          last_message_event = message_done;
+        unordered_events.push_back(message_done);
       }
       else
-      {
-        const RtEvent message_done(target.spawn(
-#ifdef LEGION_SEPARATE_META_TASKS
-            LG_TASK_ID + LG_MESSAGE_ID + kind,
-#else
-            LG_TASK_ID,
-#endif
-            rez.get_buffer(), rez.get_used_bytes(),
-            ordered_channel ? (send_precondition.exists() ?
-                                   Runtime::merge_events(
-                                       send_precondition, last_message_event) :
-                                   last_message_event) :
-                              send_precondition,
-            response ? response_priority : request_priority));
-        if (!ordered_channel)
-        {
-          unordered_events.push_back(message_done);
-          if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
-            filter_unordered_events();
-        }
-        else
-          last_message_event = message_done;
-      }
+        last_message_event = message_done;
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::filter_unordered_events(void)
+    void VirtualChannel::record_received(void)
     //--------------------------------------------------------------------------
     {
-      // Lock held from caller
-      legion_assert(!ordered_channel);
-      legion_assert(unordered_events.size() >= MAX_UNORDERED_EVENTS);
-      // Pop as many triggered events off the front as we can
-      while (!unordered_events.empty())
-      {
-        if (!unordered_events.front().has_triggered())
-          break;
-        unordered_events.pop_front();
-      }
+      // Atomic!
+      received_messages++;
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::record_seen(MessageKind kind)
-    //--------------------------------------------------------------------------
-    {
-      // Any message that is not a shutdown message needs to be recorded
-      if ((kind != SEND_SHUTDOWN_NOTIFICATION) &&
-          (kind != SEND_SHUTDOWN_RESPONSE))
-      {
-        AutoLock c_lock(channel_lock);
-        observed_recent = true;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualChannel::confirm_shutdown(
-        ShutdownManager* shutdown_manager, bool phase_one, Processor target,
-        bool profiling_virtual_channel)
+    void VirtualChannel::confirm_shutdown(ShutdownManager* shutdown_manager)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(channel_lock);
-      if (phase_one)
+      // Record our total message counts and any events we might need
+      // to end up waiting for to ensure messages are done
+      shutdown_manager->record_message_counts(
+          sent_messages, received_messages.load());
+      if (!ordered_channel)
       {
-        if (ordered_channel)
+        while (!unordered_events.empty())
         {
-          if (!last_message_event.has_triggered())
-          {
-            // Subscribe to make sure we see this trigger
-            last_message_event.subscribe();
-            // A little hack here for slow gasnet conduits
-            // If the event didn't trigger yet, make sure its just
-            // because we haven't gotten the return message yet
-            usleep(1000);
-            if (!last_message_event.has_triggered())
-              shutdown_manager->record_pending_message(last_message_event);
-            else
-              observed_recent = false;
-          }
-          else
-            observed_recent = false;
+          if (!unordered_events.front().has_triggered())
+            break;
+          unordered_events.pop_front();
         }
-        else
-        {
-          observed_recent = false;
-          for (const RtEvent& event : unordered_events)
-          {
-            if (!event.has_triggered())
-            {
-              // Subscribe to make sure we see this trigger
-              event.subscribe();
-              // A little hack here for slow gasnet conduits
-              // If the event didn't trigger yet, make sure its just
-              // because we haven't gotten the return message yet
-              usleep(1000);
-              if (!event.has_triggered())
-              {
-                shutdown_manager->record_pending_message(event);
-                observed_recent = true;
-                break;
-              }
-            }
-          }
-        }
+        for (RtEvent pending : unordered_events)
+          shutdown_manager->record_pending_message(pending);
       }
       else
-      {
-        if (observed_recent)
-        {
-          shutdown_manager->record_recent_message();
-        }
-        else
-        {
-          if (ordered_channel)
-          {
-            if (!last_message_event.has_triggered())
-            {
-              // Subscribe to make sure we see this trigger
-              last_message_event.subscribe();
-              // A little hack here for slow gasnet conduits
-              // If the event didn't trigger yet, make sure its just
-              // because we haven't gotten the return message yet
-              usleep(1000);
-              if (!last_message_event.has_triggered())
-                shutdown_manager->record_recent_message();
-            }
-          }
-          else
-          {
-            for (const RtEvent& event : unordered_events)
-            {
-              if (!event.has_triggered())
-              {
-                // Subscribe to make sure we see this trigger
-                event.subscribe();
-                // A little hack here for slow gasnet conduits
-                // If the event didn't trigger yet, make sure its just
-                // because we haven't gotten the return message yet
-                usleep(1000);
-                if (!event.has_triggered())
-                {
-                  shutdown_manager->record_recent_message();
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
+        shutdown_manager->record_pending_message(last_message_event);
     }
 
     //--------------------------------------------------------------------------
@@ -355,14 +242,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::confirm_shutdown(
-        ShutdownManager* shutdown_manager, bool phase_one)
+    void MessageManager::confirm_shutdown(ShutdownManager* shutdown_manager)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-        channels[idx].confirm_shutdown(
-            shutdown_manager, phase_one, target,
-            (idx == PROFILING_VIRTUAL_CHANNEL));
+        channels[idx].confirm_shutdown(shutdown_manager);
     }
 
     //--------------------------------------------------------------------------

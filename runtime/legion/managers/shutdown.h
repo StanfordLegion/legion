@@ -50,7 +50,7 @@ namespace Legion {
     public:
       ShutdownManager(
           ShutdownPhase phase, AddressSpaceID source, unsigned radix,
-          ShutdownManager* owner = nullptr);
+          ShutdownManager* owner, uint64_t expected);
       ShutdownManager(const ShutdownManager& rhs) = delete;
       ~ShutdownManager(void);
     public:
@@ -58,21 +58,24 @@ namespace Legion {
     public:
       bool attempt_shutdown(void);
       bool handle_response(
-          int code, bool success, const std::set<RtEvent>& to_add);
+          int code, bool success, uint64_t sent, uint64_t received,
+          RtEvent wait_for);
     protected:
       void finalize(void);
     public:
       void record_outstanding_tasks(void);
-      void record_recent_message(void);
+      void record_message_counts(uint64_t sent, uint64_t received);
       void record_pending_message(RtEvent pending_event);
     public:
       const ShutdownPhase phase;
       const AddressSpaceID source;
       const unsigned radix;
       ShutdownManager* const owner;
+      const uint64_t expected_messages;
     protected:
       mutable LocalLock shutdown_lock;
       unsigned needed_responses;
+      uint64_t total_sent, total_received;
       std::set<RtEvent> wait_for;
       int return_code;
       bool result;

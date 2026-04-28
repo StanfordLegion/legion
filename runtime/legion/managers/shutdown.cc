@@ -27,8 +27,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShutdownManager::ShutdownManager(
-        ShutdownPhase p, AddressSpaceID s, unsigned r, ShutdownManager* own)
-      : phase(p), source(s), radix(r), owner(own), needed_responses(0),
+        ShutdownPhase p, AddressSpaceID s, unsigned r, ShutdownManager* own,
+        uint64_t expected)
+      : phase(p), source(s), radix(r), owner(own), expected_messages(expected),
+        needed_responses(0), total_sent(0), total_received(0),
         return_code(runtime->return_code), result(true)
     //--------------------------------------------------------------------------
     { }
@@ -55,7 +57,6 @@ namespace Legion {
         else
           break;
       }
-
       if (!targets.empty())
       {
         // Set the number of needed_responses
@@ -75,7 +76,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ShutdownManager::handle_response(
-        int code, bool success, const std::set<RtEvent>& to_add)
+        int code, bool success, uint64_t sent, uint64_t received, RtEvent wait)
     //--------------------------------------------------------------------------
     {
       bool done = false;
@@ -85,7 +86,10 @@ namespace Legion {
           return_code = code;
         if (result && !success)
           result = false;
-        wait_for.insert(to_add.begin(), to_add.end());
+        total_sent += sent;
+        total_received += received;
+        if (wait.exists())
+          wait_for.insert(wait);
         legion_assert(needed_responses > 0);
         needed_responses--;
         done = (needed_responses == 0);
@@ -103,8 +107,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do our local check
-      runtime->confirm_runtime_shutdown(
-          this, (phase == CHECK_TERMINATION) || (phase == CHECK_SHUTDOWN));
+      runtime->confirm_runtime_shutdown(this);
 #ifdef LEGION_DEBUG_SHUTDOWN_HANG
       if (!result)
       {
@@ -120,7 +123,27 @@ namespace Legion {
         }
       }
 #endif
-      if (result && (runtime->address_space == source))
+      if (runtime->address_space != source)
+      {
+        legion_assert(owner != nullptr);
+        // Send the message back to the owner
+        ShutdownResponse rez;
+        rez.serialize(owner);
+        rez.serialize(return_code);
+        rez.serialize<bool>(result);
+        rez.serialize(Runtime::merge_events(wait_for));
+        rez.serialize(total_sent);
+        rez.serialize(total_received);
+        rez.dispatch(source);
+      }
+      else if (
+          result && (total_sent == total_received) &&
+          // If we're on a "CHECK" phase we just need to know that the
+          // message counts are the same, if we're on a "CONFIRM" phase
+          // then we need to verify that the count hasn't changed
+          // otherwise it's fine to just establish that the counts are
+          // the same on a "CHECK" phase
+          (((phase % 2) == 1) || (total_sent == expected_messages)))
       {
         log_shutdown.info("SHUTDOWN PHASE %d SUCCESS!", phase);
         if (phase != CONFIRM_SHUTDOWN)
@@ -129,7 +152,7 @@ namespace Legion {
             runtime->prepare_runtime_shutdown();
           // Do the next phase
           runtime->initiate_runtime_shutdown(
-              source, (ShutdownPhase)(phase + 1));
+              source, (ShutdownPhase)(phase + 1), nullptr, total_sent);
         }
         else
         {
@@ -149,22 +172,22 @@ namespace Legion {
           realm.shutdown(Runtime::merge_events(shutdown_events), return_code);
         }
       }
-      else if (runtime->address_space != source)
-      {
-        legion_assert(owner != nullptr);
-        // Send the message back
-        ShutdownResponse rez;
-        rez.serialize(owner);
-        rez.serialize(return_code);
-        rez.serialize<bool>(result);
-        rez.serialize<size_t>(wait_for.size());
-        for (const RtEvent& event : wait_for) rez.serialize(event);
-        rez.dispatch(source);
-      }
       else
       {
-        legion_assert(!result);
-        log_shutdown.info("FAILED SHUTDOWN PHASE %d! Trying again...", phase);
+        if (!result)
+          log_shutdown.info()
+              << "FAILED SHUTDOWN PHASE " << phase
+              << " because of outstanding tasks! Trying again...";
+        else if (total_sent != total_received)
+          log_shutdown.info()
+              << "FAILED SHUTDOWN PHASE " << phase
+              << " because of mismatched message counts (sent=" << total_sent
+              << ",received=" << total_received << ")! Trying again...";
+        else
+          log_shutdown.info() << "FAILED SHUTDOWN PHASE " << phase
+                              << " because total message count " << total_sent
+                              << " does not equal the expected message count "
+                              << expected_messages << "! Trying again...";
         RtEvent precondition;
         if (!wait_for.empty())
           precondition = Runtime::merge_events(wait_for);
@@ -205,16 +228,13 @@ namespace Legion {
       derez.deserialize(return_code);
       bool success;
       derez.deserialize(success);
-      size_t num_events;
-      derez.deserialize(num_events);
-      std::set<RtEvent> wait_for;
-      for (unsigned idx = 0; idx < num_events; idx++)
-      {
-        RtEvent event;
-        derez.deserialize(event);
-        wait_for.insert(event);
-      }
-      if (shutdown_manager->handle_response(return_code, success, wait_for))
+      RtEvent wait;
+      derez.deserialize(wait);
+      uint64_t sent, received;
+      derez.deserialize(sent);
+      derez.deserialize(received);
+      if (shutdown_manager->handle_response(
+              return_code, success, sent, received, wait))
         delete shutdown_manager;
     }
 
@@ -228,21 +248,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShutdownManager::record_recent_message(void)
+    void ShutdownManager::record_message_counts(
+        uint64_t sent, uint64_t received)
     //--------------------------------------------------------------------------
     {
-      // Instant death
-      result = false;
-      log_shutdown.info(
-          "Outstanding message on node %d", runtime->address_space);
+      // No need for a lock here since we're sequentially polling message
+      // managers and having them respond back to us
+      total_sent += sent;
+      total_received += received;
     }
 
     //--------------------------------------------------------------------------
     void ShutdownManager::record_pending_message(RtEvent pending_event)
     //--------------------------------------------------------------------------
     {
-      // Instant death
-      result = false;
       wait_for.insert(pending_event);
       log_shutdown.info("Pending message on node %d", runtime->address_space);
     }
