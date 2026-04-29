@@ -1073,9 +1073,8 @@ namespace Legion {
       void issue_runtime_shutdown_attempt(void);
       void initiate_runtime_shutdown(
           AddressSpaceID source, ShutdownManager::ShutdownPhase phase,
-          ShutdownManager* owner = nullptr);
-      void confirm_runtime_shutdown(
-          ShutdownManager* shutdown_manager, bool phase_one);
+          ShutdownManager* owner = nullptr, uint64_t expected = 0);
+      void confirm_runtime_shutdown(ShutdownManager* shutdown_manager);
       void prepare_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
