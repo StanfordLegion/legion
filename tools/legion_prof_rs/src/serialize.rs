@@ -125,7 +125,7 @@ pub enum Record {
     PhysicalInstLayoutDesc { fevent: EventID, field_id: FieldID, fspace_id: FSpaceID, has_align: bool, eqk: u32, align_desc: u32 },
     PhysicalInstDimOrderDesc { fevent: EventID, dim: u32, dim_kind: u32 },
     PhysicalInstanceSpaces { fevent: EventID, union_space: Option<ISpaceID>, piece_space: Option<ISpaceID> },
-    PhysicalInstanceUsage { inst_event: EventID, fevent: EventID, op_id: OpID, start: Timestamp, stop: Option<Timestamp>, index_expr: Option<ISpaceID>, privilege: PrivilegeMode, field: FieldID, index: Option<u32> },
+    PhysicalInstanceUsage { inst_event: EventID, fevent: EventID, op_id: OpID, start: Option<Timestamp>, stop: Option<Timestamp>, index_expr: Option<ISpaceID>, privilege: PrivilegeMode, field: FieldID, index: Option<u32> },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
     OperationInstance { op_id: OpID, parent_id: Option<OpID>, kind: u32, provenance: Option<ProvenanceID> },
@@ -737,7 +737,7 @@ fn parse_physical_inst_usage(input: &[u8], _max_dim: i32) -> IResult<&[u8], Reco
     let (input, inst_event) = parse_event_id(input)?;
     let (input, fevent) = parse_event_id(input)?;
     let (input, op_id) = parse_op_id(input)?;
-    let (input, start) = parse_timestamp(input)?;
+    let (input, start) = parse_option_timestamp(input)?;
     let (input, stop) = parse_option_timestamp(input)?;
     let (input, index_expr) = parse_option_ispace_id(input)?;
     let (input, field) = parse_field_id(input)?;
@@ -1566,6 +1566,9 @@ fn filter_nodes(record: &Record, visible_nodes: &[NodeID], node_id: Option<NodeI
             State::is_on_visible_nodes(visible_nodes, mem_id.node_id())
         }
         Record::PartitionInfo { .. } => true,
+        Record::PartInstInfo { src, .. } => {
+            State::is_on_visible_nodes(visible_nodes, src.node_id())
+        }
         _ => false,
     }
 }
