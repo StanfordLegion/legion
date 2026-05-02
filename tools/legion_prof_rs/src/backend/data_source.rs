@@ -1,4 +1,3 @@
-use std::cmp::max;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -26,10 +25,10 @@ use crate::backend::common::{
 };
 use crate::geometry::{Bounds, ISpaceID, Rect};
 use crate::state::{
-    BacktraceID, ChanEntry, ChanID, Color, Container, ContainerEntry, Copy, CopyInstInfo, DepPart,
+    ChanEntry, ChanID, Color, Container, ContainerEntry, Copy, CopyInstInfo, DepPart,
     DepPartInstInfo, DeviceKind, Dim, DimKind, EventEntry, EventEntryKind, EventID, Fill,
     FillInstInfo, Inst, MemID, MemKind, NodeID, OpID, PrivilegeMode, ProcEntryKind, ProcID,
-    ProcKind, ProfUID, ProvenanceID, State, TimeRange, Timestamp, WaitInterval,
+    ProcKind, ProfUID, State, StatusIntervalKind, TimeRange, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -94,11 +93,14 @@ pub struct Fields {
     size: FieldID,
     interval: FieldID,
     num_items: FieldID,
-    hidden_waits: FieldID,
+    hidden_intervals: FieldID,
     provenance: FieldID,
     status_ready: FieldID,
     status_running: FieldID,
     status_waiting: FieldID,
+    status_live: FieldID,
+    status_dead: FieldID,
+    status_pending: FieldID,
     deferred_time: FieldID,
     delayed_time: FieldID,
     creator: FieldID,
@@ -116,6 +118,8 @@ pub struct Fields {
     effective_bandwidth: FieldID,
     launch_domain: FieldID,
     reduction_op: FieldID,
+    first_writer: FieldID,
+    last_reader: FieldID,
 }
 
 #[derive(Debug)]
@@ -148,12 +152,15 @@ impl StateDataSource {
             inst_layout: field_schema.insert("Layout".to_owned(), true),
             interval: field_schema.insert("Lifetime".to_owned(), false),
             num_items: field_schema.insert("Number of Items".to_owned(), false),
-            hidden_waits: field_schema.insert("Contains Hidden Waits".to_owned(), false),
+            hidden_intervals: field_schema.insert("Contains Hidden Intervals".to_owned(), false),
             provenance: field_schema.insert("Provenance".to_owned(), true),
             size: field_schema.insert("Size".to_owned(), true),
             status_ready: field_schema.insert("Ready".to_owned(), false),
             status_running: field_schema.insert("Running".to_owned(), false),
             status_waiting: field_schema.insert("Waiting".to_owned(), false),
+            status_live: field_schema.insert("Live".to_owned(), false),
+            status_dead: field_schema.insert("Dead".to_owned(), false),
+            status_pending: field_schema.insert("Pending Live".to_owned(), false),
             deferred_time: field_schema.insert("Deferred".to_owned(), false),
             delayed_time: field_schema.insert("Delayed".to_owned(), false),
             creator: field_schema.insert("Creator".to_owned(), false),
@@ -171,6 +178,8 @@ impl StateDataSource {
             effective_bandwidth: field_schema.insert("Effective Bandwidth".to_owned(), false),
             launch_domain: field_schema.insert("Launch Domain".to_owned(), false),
             reduction_op: field_schema.insert("Reduction Operator".to_owned(), true),
+            first_writer: field_schema.insert("First Writer".to_owned(), true),
+            last_reader: field_schema.insert("Last Reader".to_owned(), true),
         };
 
         let mut entry_map = HashMap::<EntryID, EntryKind>::new();
@@ -655,25 +664,6 @@ fn merge_items(
     false
 }
 
-/// Filter out short waits (that won't be visible to the user)
-fn show_wait_interval(wait: &WaitInterval, tile_id: TileID, full: bool) -> bool {
-    // Never filter anything in a full profile.
-    if full {
-        return true;
-    }
-
-    let tile_interval = tile_id.0;
-    let screen_space_fraction =
-        |interval: ts::Interval| interval.duration_ns() as f64 / tile_interval.duration_ns() as f64;
-
-    // Hide wait intervals smaller than this size
-    // (measured relative to the size of the current tile interval)
-    const WAIT_INTERVAL_MIN_SIZE: f64 = 5.0e-4;
-
-    let interval = ts::Interval::new(wait.start.into(), wait.end.into());
-    screen_space_fraction(interval) >= WAIT_INTERVAL_MIN_SIZE
-}
-
 fn convert_to_viewer_format(util: Vec<(Timestamp, f64)>) -> Vec<UtilPoint> {
     util.iter()
         .map(|&(t, u)| UtilPoint {
@@ -817,6 +807,16 @@ impl StateDataSource {
 
         let tile_interval = tile_id.0;
 
+        // Compute the minimum status interval for this tile
+        // Hide wait intervals smaller than this size
+        // (measured relative to the size of the current tile interval)
+        const WAIT_INTERVAL_MIN_FRACTION: u64 = 2000; // 1/5e-4
+        let min_interval = if full {
+            Timestamp::ZERO
+        } else {
+            Timestamp::from_ns(tile_interval.duration_ns() as u64 / WAIT_INTERVAL_MIN_FRACTION)
+        };
+
         for (level, points) in points_stacked.iter().enumerate() {
             let items = &mut items[level];
             let mut item_metas = item_metas.as_mut().map(|m| &mut m[level]);
@@ -852,8 +852,11 @@ impl StateDataSource {
                 assert!(point.first);
 
                 let entry = cont.entry(point.entry);
-                let (base, time_range, waiters) =
-                    (&entry.base(), entry.time_range(), &entry.waiters());
+                let (base, time_range, status_intervals) = (
+                    &entry.base(),
+                    entry.time_range(),
+                    entry.status_intervals(min_interval),
+                );
 
                 let point_interval: ts::Interval = time_range.into();
                 assert!(point_interval.overlaps(tile_interval));
@@ -889,135 +892,154 @@ impl StateDataSource {
                     .as_ref()
                     .map(|_| get_meta(entry, ItemInfo { point_interval }));
 
-                let mut add_item =
-                    |interval: ts::Interval,
-                     opacity: f32,
-                     status: Option<FieldID>,
-                     wait_callee: Option<ProfUID>,
-                     wait_provenance: Option<ProvenanceID>,
-                     wait_backtrace: Option<BacktraceID>,
-                     wait_event: Option<EventID>,
-                     num_hidden_wait_intervals: u64,
-                     find_previous_executing: bool| {
-                        if !interval.overlaps(tile_id.0) {
-                            return;
-                        }
-                        let view_interval = interval.intersection(tile_id.0);
-                        let color =
-                            (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
-                        let item = Item {
-                            item_uid: base.prof_uid.into(),
-                            interval: view_interval,
-                            color,
+                // Iterate over all the status intervals of the entry
+                // There can be more than one here if a task had waiters
+                // or if in an instance goes through different livenss periods
+                for status_interval in status_intervals {
+                    let time_interval = ts::Interval::new(
+                        status_interval.start.into(),
+                        status_interval.stop.into(),
+                    );
+                    if !time_interval.overlaps(tile_id.0) {
+                        continue;
+                    }
+                    let view_interval = time_interval.intersection(tile_id.0);
+                    let opacity = match status_interval.kind {
+                        StatusIntervalKind::Running | StatusIntervalKind::Live => 1.0,
+                        StatusIntervalKind::Waiting | StatusIntervalKind::Dead => 0.15,
+                        StatusIntervalKind::Ready | StatusIntervalKind::Pending => 0.45,
+                    };
+                    let color =
+                        (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
+                    let item = Item {
+                        item_uid: base.prof_uid.into(),
+                        interval: view_interval,
+                        color,
+                    };
+                    items.push(item);
+                    if let Some(ref mut item_metas) = item_metas {
+                        let mut item_meta = item_meta.clone().unwrap();
+                        let status = match status_interval.kind {
+                            StatusIntervalKind::Running => self.fields.status_running,
+                            StatusIntervalKind::Waiting => self.fields.status_waiting,
+                            StatusIntervalKind::Ready => self.fields.status_ready,
+                            StatusIntervalKind::Live => self.fields.status_live,
+                            StatusIntervalKind::Dead => self.fields.status_dead,
+                            StatusIntervalKind::Pending => self.fields.status_pending,
                         };
-                        items.push(item);
-                        if let Some(ref mut item_metas) = item_metas {
-                            let mut item_meta = item_meta.clone().unwrap();
-                            if let Some(status) = status {
-                                item_meta
-                                    .fields
-                                    .insert(1, ItemField(status, Field::Interval(interval), None));
-                            }
-                            if num_hidden_wait_intervals > 0 {
-                                item_meta.fields.insert(
-                                    2,
-                                    ItemField(self.fields.hidden_waits, Field::Empty, None),
-                                );
-                                item_meta.fields.insert(
-                                    3,
-                                    ItemField(
-                                        self.fields.num_items,
-                                        Field::U64(num_hidden_wait_intervals),
-                                        None,
-                                    ),
-                                );
-                            }
-                            if let Some(callee) = wait_callee {
-                                // Filter out any other callee fields
-                                item_meta
-                                    .fields
-                                    .retain(|item_field| item_field.0 != self.fields.callee);
-                                item_meta.fields.push(ItemField(
-                                    self.fields.callee,
-                                    self.generate_proc_link(callee),
+                        item_meta
+                            .fields
+                            .insert(1, ItemField(status, Field::Interval(time_interval), None));
+                        if status_interval.hidden_intervals > 0 {
+                            item_meta.fields.insert(
+                                2,
+                                ItemField(self.fields.hidden_intervals, Field::Empty, None),
+                            );
+                            item_meta.fields.insert(
+                                3,
+                                ItemField(
+                                    self.fields.num_items,
+                                    Field::U64(status_interval.hidden_intervals),
                                     None,
-                                ));
-                            }
-                            if let Some(pid) = wait_provenance {
-                                // Filter out any other provenance fields
-                                item_meta
-                                    .fields
-                                    .retain(|item_field| item_field.0 != self.fields.provenance);
-                                if let Some(provenance) = self.state.find_provenance(pid) {
+                                ),
+                            );
+                        }
+                        // Special cases for other kinds
+                        match status_interval.kind {
+                            StatusIntervalKind::Waiting => {
+                                // Record any waiting information
+                                if let Some(callee) = status_interval.callee {
+                                    // Filter out any other callee fields
+                                    item_meta
+                                        .fields
+                                        .retain(|item_field| item_field.0 != self.fields.callee);
                                     item_meta.fields.push(ItemField(
-                                        self.fields.provenance,
-                                        Self::parse_provenance(provenance),
+                                        self.fields.callee,
+                                        self.generate_proc_link(callee),
                                         None,
                                     ));
                                 }
-                            }
-                            if let Some(backtrace) = wait_backtrace {
-                                // Filter out any other backtrace fields
-                                item_meta
-                                    .fields
-                                    .retain(|item_field| item_field.0 != self.fields.backtrace);
-                                item_meta.fields.push(ItemField(
-                                    self.fields.backtrace,
-                                    Field::String(
-                                        self.state.backtraces.get(&backtrace).unwrap().to_string(),
-                                    ),
-                                    None,
-                                ));
-                            }
-                            if let Some(event) = wait_event {
-                                // Filter out any other critical fields
-                                item_meta
-                                    .fields
-                                    .retain(|item_field| item_field.0 != self.fields.critical);
-                                if let Some(event_entry) = self.state.find_critical_entry(event) {
-                                    item_meta.fields.push(ItemField(
-                                        self.fields.critical,
-                                        self.generate_critical_link(event, event_entry),
-                                        self.select_critical_color(event_entry),
-                                    ));
-                                    // Record the time it took for Realm to propagate the event trigger
-                                    if event_entry.kind != EventEntryKind::UnknownEvent {
-                                        // Filter out any other trigger_time fields
-                                        item_meta.fields.retain(|item_field| {
-                                            item_field.0 != self.fields.trigger_time
-                                        });
-                                        let trigger_time = event_entry.trigger_time.unwrap();
+                                if let Some(pid) = status_interval.provenance {
+                                    // Filter out any other provenance fields
+                                    item_meta.fields.retain(|item_field| {
+                                        item_field.0 != self.fields.provenance
+                                    });
+                                    if let Some(provenance) = self.state.find_provenance(pid) {
                                         item_meta.fields.push(ItemField(
-                                            self.fields.trigger_time,
-                                            Field::Interval(ts::Interval::new(
-                                                trigger_time.into(),
-                                                interval.stop,
-                                            )),
-                                            self.select_interval_color(
-                                                trigger_time,
-                                                interval.stop.into(),
-                                            ),
+                                            self.fields.provenance,
+                                            Self::parse_provenance(provenance),
+                                            None,
                                         ));
                                     }
-                                } else if event.is_barrier() {
+                                }
+                                if let Some(backtrace) = status_interval.backtrace {
+                                    // Filter out any other backtrace fields
+                                    item_meta
+                                        .fields
+                                        .retain(|item_field| item_field.0 != self.fields.backtrace);
                                     item_meta.fields.push(ItemField(
-                                                self.fields.critical,
-                                                Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.", event.0, event.node_id().0)), 
-                                                Some(Color32::BLUE)));
-                                } else {
-                                    item_meta.fields.push(ItemField(
-                                                self.fields.critical,
-                                                Field::String(format!("Waiting on unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.", event.0, event.node_id().0)),
-                                                Some(Color32::BLUE)));
+                                        self.fields.backtrace,
+                                        Field::String(
+                                            self.state
+                                                .backtraces
+                                                .get(&backtrace)
+                                                .unwrap()
+                                                .to_string(),
+                                        ),
+                                        None,
+                                    ));
+                                }
+                                if let Some(event) = status_interval.wait_event {
+                                    // Filter out any other critical fields
+                                    item_meta
+                                        .fields
+                                        .retain(|item_field| item_field.0 != self.fields.critical);
+                                    if let Some(event_entry) = self.state.find_critical_entry(event)
+                                    {
+                                        item_meta.fields.push(ItemField(
+                                            self.fields.critical,
+                                            self.generate_critical_link(event, event_entry),
+                                            self.select_critical_color(event_entry),
+                                        ));
+                                        // Record the time it took for Realm to propagate the event trigger
+                                        if event_entry.kind != EventEntryKind::UnknownEvent {
+                                            // Filter out any other trigger_time fields
+                                            item_meta.fields.retain(|item_field| {
+                                                item_field.0 != self.fields.trigger_time
+                                            });
+                                            let trigger_time = event_entry.trigger_time.unwrap();
+                                            item_meta.fields.push(ItemField(
+                                                self.fields.trigger_time,
+                                                Field::Interval(ts::Interval::new(
+                                                    trigger_time.into(),
+                                                    time_interval.stop,
+                                                )),
+                                                self.select_interval_color(
+                                                    trigger_time,
+                                                    time_interval.stop.into(),
+                                                ),
+                                            ));
+                                        }
+                                    } else if event.is_barrier() {
+                                        item_meta.fields.push(ItemField(
+                                                    self.fields.critical,
+                                                    Field::String(format!("Waiting on unknown critical path barrier {:#x} created on node {}. Please load the logfile from at least one node that arrives on this barrier to start determining a critical path. You'll need to load the logs from all nodes that arrive on this barrier to determine a precise critical path. If you see this message and did not run with the -lg:prof_all_critical_arrivals flag then please report this case as it is likely a bug.", event.0, event.node_id().0)), 
+                                                    Some(Color32::BLUE)));
+                                    } else {
+                                        item_meta.fields.push(ItemField(
+                                                    self.fields.critical,
+                                                    Field::String(format!("Waiting on unknown critical path event {:#x} from node {}. Please load the logfile from that node to see it.", event.0, event.node_id().0)),
+                                                    Some(Color32::BLUE)));
+                                    }
                                 }
                             }
-                            if find_previous_executing {
+                            StatusIntervalKind::Ready => {
                                 // For ready intervals, find the last running range before this
                                 // task can resume and record that as the previous executing field
                                 if let Some((previous, prev_start, prev_stop)) = cont
                                     .find_previous_executing_entry(
-                                        interval.start.into(),
-                                        interval.stop.into(),
+                                        status_interval.start,
+                                        status_interval.stop,
                                         device,
                                     )
                                 {
@@ -1038,81 +1060,46 @@ impl StateDataSource {
                                         self.fields.scheduling_overhead,
                                         Field::Interval(ts::Interval::new(
                                             prev_stop.into(),
-                                            interval.start,
+                                            time_interval.start,
                                         )),
-                                        self.select_interval_color(prev_stop, interval.stop.into()),
+                                        self.select_interval_color(
+                                            prev_stop,
+                                            status_interval.stop.into(),
+                                        ),
                                     ));
                                 }
                             }
-                            item_metas.push(item_meta);
+                            StatusIntervalKind::Live => {
+                                // Report the first writer and last reader
+                                if let Some(first_writer) = status_interval.first_writer {
+                                    item_meta.fields.push(ItemField(
+                                        self.fields.first_writer,
+                                        self.generate_user_link(first_writer),
+                                        None,
+                                    ));
+                                }
+                                if let Some(last_reader) = status_interval.last_reader {
+                                    item_meta.fields.push(ItemField(
+                                        self.fields.last_reader,
+                                        self.generate_user_link(last_reader),
+                                        None,
+                                    ));
+                                }
+                            }
+                            StatusIntervalKind::Pending => {
+                                // Report the first writer
+                                if let Some(first_writer) = status_interval.first_writer {
+                                    item_meta.fields.push(ItemField(
+                                        self.fields.first_writer,
+                                        self.generate_user_link(first_writer),
+                                        None,
+                                    ));
+                                }
+                            }
+                            _ => {} // Don't care about the rest
                         }
-                    };
-                if let Some(waiters) = waiters {
-                    let mut start = time_range.start.unwrap();
-                    let mut num_hidden_wait_intervals = 0u64;
-                    for wait in &waiters.wait_intervals {
-                        if !show_wait_interval(wait, tile_id, full) {
-                            num_hidden_wait_intervals += 1;
-                            continue;
-                        }
-
-                        let running_interval = ts::Interval::new(start.into(), wait.start.into());
-                        let waiting_interval =
-                            ts::Interval::new(wait.start.into(), wait.ready.into());
-                        let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
-                        add_item(
-                            running_interval,
-                            1.0,
-                            Some(self.fields.status_running),
-                            None,
-                            None,
-                            None,
-                            None,
-                            num_hidden_wait_intervals,
-                            false,
-                        );
-                        add_item(
-                            waiting_interval,
-                            0.15,
-                            Some(self.fields.status_waiting),
-                            wait.callee,
-                            wait.provenance,
-                            wait.backtrace,
-                            wait.event,
-                            0,
-                            false,
-                        );
-                        add_item(
-                            ready_interval,
-                            0.45,
-                            Some(self.fields.status_ready),
-                            None,
-                            None,
-                            None,
-                            None,
-                            0,
-                            true,
-                        );
-                        start = max(start, wait.end);
-                        num_hidden_wait_intervals = 0;
+                        item_metas.push(item_meta);
                     }
-                    let stop = time_range.stop.unwrap();
-                    if start < stop {
-                        let running_interval = ts::Interval::new(start.into(), stop.into());
-                        add_item(
-                            running_interval,
-                            1.0,
-                            Some(self.fields.status_running),
-                            None,
-                            None,
-                            None,
-                            None,
-                            num_hidden_wait_intervals,
-                            false,
-                        );
-                    }
-                } else {
-                    add_item(view_interval, 1.0, None, None, None, None, None, 0, false);
                 }
             }
         }
@@ -1373,6 +1360,23 @@ impl StateDataSource {
             interval: entry.time_range().into(),
             entry_id: self.proc_entries.get(proc_id).unwrap().clone(),
         })
+    }
+
+    fn generate_user_link(&self, user_uid: ProfUID) -> Field {
+        // A user could either be from a processor or a channel
+        if let Some(chan_id) = self.state.prof_uid_chan.get(&user_uid) {
+            let chan = self.state.chans.get(chan_id).unwrap();
+            let entry = chan.find_entry(user_uid).unwrap();
+            let op_name = entry.name(&self.state);
+            Field::ItemLink(ItemLink {
+                item_uid: entry.base().prof_uid.into(),
+                title: op_name,
+                interval: entry.time_range().into(),
+                entry_id: self.chan_entries.get(chan_id).unwrap().clone(),
+            })
+        } else {
+            self.generate_proc_link(user_uid)
+        }
     }
 
     // Use this function to generate a link to the creator of an operation

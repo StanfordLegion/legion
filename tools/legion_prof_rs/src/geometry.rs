@@ -1,3 +1,4 @@
+use foldhash::{HashSet, HashSetExt};
 use std::cmp::{max, min};
 use std::num::NonZeroU64;
 
@@ -50,6 +51,9 @@ impl Rect {
         }
         vol
     }
+    pub fn is_empty(&self) -> bool {
+        self.volume() == 0
+    }
     pub fn union_bbox_point(&self, point: &Point) -> Self {
         assert!(self.dim() == point.dim());
         let lo: Vec<_> = self
@@ -86,6 +90,19 @@ impl Rect {
             .collect();
         Rect::new(Point::new(lo), Point::new(hi))
     }
+    pub fn union_bbox_rect_in_place(&mut self, rect: &Rect) {
+        assert!(self.dim() == rect.dim());
+        self.lo
+            .values
+            .iter_mut()
+            .zip(&rect.lo.values)
+            .for_each(|(a, &b)| *a = min(*a, b));
+        self.hi
+            .values
+            .iter_mut()
+            .zip(&rect.hi.values)
+            .for_each(|(a, &b)| *a = max(*a, b));
+    }
     pub fn contains_point(&self, point: &Point) -> bool {
         assert!(point.dim() == self.dim());
         for idx in 0..point.dim() {
@@ -110,6 +127,99 @@ impl Rect {
             }
         }
         return true;
+    }
+    pub fn intersection(&self, rect: &Rect) -> Rect {
+        assert!(rect.dim() == self.dim());
+        let lo: Vec<_> = self
+            .lo
+            .values
+            .iter()
+            .zip(rect.lo.values.iter())
+            .map(|(a, b)| max(*a, *b))
+            .collect();
+        let hi: Vec<_> = self
+            .hi
+            .values
+            .iter()
+            .zip(rect.hi.values.iter())
+            .map(|(a, b)| min(*a, *b))
+            .collect();
+        Rect::new(Point::new(lo), Point::new(hi))
+    }
+    pub fn dominates(&self, rect: &Rect) -> bool {
+        if rect.is_empty() {
+            return true;
+        }
+        if self.is_empty() {
+            return false;
+        }
+        for idx in 0..self.dim() {
+            if rect.lo.values[idx] < self.lo.values[idx]
+                || self.hi.values[idx] < rect.hi.values[idx]
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    pub fn subtract(&self, rect: &Rect) -> Option<Vec<Rect>> {
+        assert!(self.dim() == rect.dim());
+        if !self.overlaps(rect) {
+            return None;
+        }
+        let mut subrects = Vec::new();
+        if !rect.dominates(self) {
+            Rect::subtract_helper(self.clone(), rect, 0, &mut subrects);
+        }
+        Some(subrects)
+    }
+    fn subtract_helper(rect: Rect, other: &Rect, dim: usize, subrects: &mut Vec<Rect>) {
+        if dim == rect.dim() {
+            // Base case
+            if rect.overlaps(other) {
+                assert!(other.dominates(&rect));
+            } else {
+                subrects.push(rect.clone());
+            }
+        } else {
+            // Recursive case through the dimensions
+            // Figure out how to break this rectangle along this dimension
+            if other.lo.values[dim] <= rect.lo.values[dim] {
+                if other.hi.values[dim] < rect.hi.values[dim] {
+                    // Dominate lower edge, two outputs
+                    let mut hi = rect.hi.clone();
+                    hi.values[dim] = other.hi.values[dim];
+                    Rect::subtract_helper(Rect::new(rect.lo.clone(), hi), other, dim + 1, subrects);
+                    let mut lo = rect.lo.clone();
+                    lo.values[dim] = other.hi.values[dim] + 1;
+                    Rect::subtract_helper(Rect::new(lo, rect.hi.clone()), other, dim + 1, subrects);
+                } else {
+                    // Dominate both edges, one output
+                    Rect::subtract_helper(rect, other, dim + 1, subrects);
+                }
+            } else if other.hi.values[dim] >= rect.hi.values[dim] {
+                // Dominate upper edge, two outputs
+                let mut hi = rect.hi.clone();
+                hi.values[dim] = other.lo.values[dim] - 1;
+                Rect::subtract_helper(Rect::new(rect.lo.clone(), hi), other, dim + 1, subrects);
+                let mut lo = rect.lo.clone();
+                lo.values[dim] = other.lo.values[dim];
+                Rect::subtract_helper(Rect::new(lo, rect.hi.clone()), other, dim + 1, subrects);
+            } else {
+                // No domination, three outputs
+                let mut hi = rect.hi.clone();
+                hi.values[dim] = other.lo.values[dim] - 1;
+                Rect::subtract_helper(Rect::new(rect.lo.clone(), hi), other, dim + 1, subrects);
+                let mut lo = rect.lo.clone();
+                hi = rect.hi.clone();
+                lo.values[dim] = other.lo.values[dim];
+                hi.values[dim] = other.hi.values[dim];
+                Rect::subtract_helper(Rect::new(lo, hi), other, dim + 1, subrects);
+                lo = rect.lo.clone();
+                lo.values[dim] = other.hi.values[dim] + 1;
+                Rect::subtract_helper(Rect::new(lo, rect.hi.clone()), other, dim + 1, subrects);
+            }
+        }
     }
 }
 
@@ -250,7 +360,7 @@ impl ISpace {
                 true
             }
             _ => {
-                panic!("Unknown bounds");
+                panic!("Unknown bounds for {:?}", self.ispace_id);
             }
         }
     }
@@ -265,7 +375,7 @@ impl ISpace {
                 false
             }
             _ => {
-                panic!("Unknown bounds");
+                panic!("Unknown bounds for {:?}", self.ispace_id);
             }
         }
     }
@@ -280,7 +390,7 @@ impl ISpace {
                     result += 1;
                 }
                 _ => {
-                    panic!("Bad bounds entry");
+                    panic!("Bad bounds entry in {:?}", self.ispace_id);
                 }
             }
         }
@@ -298,7 +408,7 @@ impl ISpace {
                 numerator / denominator
             }
             _ => {
-                panic!("Bad index space bounds");
+                panic!("Bad index space bounds in {:?}", self.ispace_id);
             }
         }
     }
@@ -359,6 +469,236 @@ impl ISpace {
             }
         }
         false
+    }
+}
+
+// R-tree spatial index for accelerating rectangle overlap queries.
+// Uses Sort-Tile-Recursive (STR) bulk loading.
+const RTREE_BRANCH_FACTOR: usize = 16;
+const RTREE_THRESHOLD: usize = 64;
+
+struct RTreeNode {
+    bbox: Rect,
+    children: RTreeChildren,
+}
+
+enum RTreeChildren {
+    Leaves(Vec<usize>), // indices into the original rect slice
+    Internal(Vec<RTreeNode>),
+}
+
+struct RTree<'a> {
+    rects: &'a [Rect],
+    root: Option<RTreeNode>,
+}
+
+impl<'a> RTree<'a> {
+    fn build(rects: &'a [Rect]) -> Self {
+        if rects.is_empty() {
+            return RTree { rects, root: None };
+        }
+        let indices: Vec<usize> = (0..rects.len()).collect();
+        let root = Self::build_node(rects, indices, 0);
+        RTree {
+            rects,
+            root: Some(root),
+        }
+    }
+
+    fn build_node(rects: &[Rect], mut indices: Vec<usize>, dim: usize) -> RTreeNode {
+        if indices.len() <= RTREE_BRANCH_FACTOR {
+            // Leaf node
+            let bbox = Self::compute_bbox(rects, &indices);
+            RTreeNode {
+                bbox,
+                children: RTreeChildren::Leaves(indices),
+            }
+        } else {
+            let ndim = rects[indices[0]].dim();
+            let sort_dim = dim % ndim;
+            // Sort by center coordinate along current dimension
+            indices.sort_by(|&a, &b| {
+                let ca = rects[a].lo.values[sort_dim] + rects[a].hi.values[sort_dim];
+                let cb = rects[b].lo.values[sort_dim] + rects[b].hi.values[sort_dim];
+                ca.cmp(&cb)
+            });
+            // Partition into groups and recurse on next dimension
+            let num_slices = (indices.len() + RTREE_BRANCH_FACTOR - 1) / RTREE_BRANCH_FACTOR;
+            let slice_size = (indices.len() + num_slices - 1) / num_slices;
+            let mut child_nodes = Vec::with_capacity(num_slices);
+            for chunk in indices.chunks(slice_size) {
+                child_nodes.push(Self::build_node(rects, chunk.to_vec(), dim + 1));
+            }
+            let bbox = Self::compute_bbox_from_nodes(&child_nodes);
+            RTreeNode {
+                bbox,
+                children: RTreeChildren::Internal(child_nodes),
+            }
+        }
+    }
+
+    fn compute_bbox(rects: &[Rect], indices: &[usize]) -> Rect {
+        indices
+            .iter()
+            .skip(1)
+            .fold(rects[indices[0]].clone(), |mut acc, &idx| {
+                acc.union_bbox_rect_in_place(&rects[idx]);
+                acc
+            })
+    }
+
+    fn compute_bbox_from_nodes(nodes: &[RTreeNode]) -> Rect {
+        nodes
+            .iter()
+            .skip(1)
+            .fold(nodes[0].bbox.clone(), |mut acc, n| {
+                acc.union_bbox_rect_in_place(&n.bbox);
+                acc
+            })
+    }
+
+    fn query_overlaps(&self, query: &Rect, results: &mut Vec<usize>) {
+        if let Some(ref root) = self.root {
+            Self::query_node(self.rects, root, query, results);
+        }
+    }
+
+    fn query_node(rects: &[Rect], node: &RTreeNode, query: &Rect, results: &mut Vec<usize>) {
+        if !node.bbox.overlaps(query) {
+            return;
+        }
+        match &node.children {
+            RTreeChildren::Leaves(indices) => {
+                for &idx in indices {
+                    if rects[idx].overlaps(query) {
+                        results.push(idx);
+                    }
+                }
+            }
+            RTreeChildren::Internal(children) => {
+                for child in children {
+                    Self::query_node(rects, child, query, results);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EquivalenceSet {
+    pub rects: Vec<Rect>,
+    pub spaces: HashSet<ISpaceID>,
+}
+
+impl EquivalenceSet {
+    pub fn new(space: &ISpace) -> Self {
+        let mut rects = Vec::new();
+        for point in &space.points {
+            match point {
+                Bounds::Rect(rect) => rects.push(rect.clone()),
+                Bounds::Point(point) => rects.push(Rect::new(point.clone(), point.clone())),
+                _ => panic!("Bad bounds entry"),
+            }
+        }
+        let mut spaces = HashSet::new();
+        spaces.insert(space.ispace_id);
+        EquivalenceSet { rects, spaces }
+    }
+    pub fn overlaps(&self, other: &EquivalenceSet) -> Option<EquivalenceSet> {
+        let mut rects = Vec::new();
+        if self.rects.len() >= RTREE_THRESHOLD || other.rects.len() >= RTREE_THRESHOLD {
+            // Use R-tree acceleration
+            let tree = RTree::build(&other.rects);
+            let mut hits = Vec::new();
+            for r1 in &self.rects {
+                hits.clear();
+                tree.query_overlaps(r1, &mut hits);
+                for &idx in &hits {
+                    let intersect = r1.intersection(&other.rects[idx]);
+                    if !intersect.is_empty() {
+                        rects.push(intersect);
+                    }
+                }
+            }
+        } else {
+            // Brute force for small sets
+            for r1 in &self.rects {
+                for r2 in &other.rects {
+                    let intersect = r1.intersection(r2);
+                    if !intersect.is_empty() {
+                        rects.push(intersect);
+                    }
+                }
+            }
+        }
+        if !rects.is_empty() {
+            Some(EquivalenceSet {
+                rects,
+                spaces: self.spaces.union(&other.spaces).cloned().collect(),
+            })
+        } else {
+            None
+        }
+    }
+    pub fn volume(&self) -> u64 {
+        let mut result = 0;
+        for rect in &self.rects {
+            result += rect.volume();
+        }
+        result
+    }
+    pub fn is_empty(&self) -> bool {
+        self.volume() == 0
+    }
+    pub fn subtract(&mut self, other: &EquivalenceSet) {
+        if self.rects.len() >= RTREE_THRESHOLD || other.rects.len() >= RTREE_THRESHOLD {
+            // Use R-tree acceleration: build tree on other, iterate self
+            let tree = RTree::build(&other.rects);
+            let mut new_rects = Vec::new();
+            let mut hits = Vec::new();
+            let old_rects = std::mem::take(&mut self.rects);
+            for rect in old_rects {
+                hits.clear();
+                tree.query_overlaps(&rect, &mut hits);
+                if hits.is_empty() {
+                    new_rects.push(rect);
+                } else {
+                    // Subtract all overlapping rects from other
+                    let mut pending = vec![rect];
+                    for &idx in &hits {
+                        let orect = &other.rects[idx];
+                        let mut next_pending = Vec::new();
+                        for r in pending {
+                            if let Some(mut subrects) = r.subtract(orect) {
+                                next_pending.append(&mut subrects);
+                            } else {
+                                next_pending.push(r);
+                            }
+                        }
+                        pending = next_pending;
+                    }
+                    new_rects.extend(pending);
+                }
+            }
+            self.rects = new_rects;
+        } else {
+            // Brute force for small sets
+            for orect in &other.rects {
+                let mut old_rects = Vec::new();
+                std::mem::swap(&mut old_rects, &mut self.rects);
+                for rect in old_rects {
+                    if let Some(mut subrects) = rect.subtract(orect) {
+                        self.rects.append(&mut subrects);
+                    } else {
+                        self.rects.push(rect);
+                    }
+                }
+            }
+        }
+    }
+    pub fn clear(&mut self) {
+        self.rects.clear();
+        self.spaces.clear();
     }
 }
 
@@ -975,6 +1315,439 @@ mod tests {
             let r1 = rect3d(-10, -10, -10, 0, 0, 0);
             let r2 = rect3d(-5, -5, -5, 5, 5, 5);
             assert!(r1.overlaps(&r2));
+        }
+    }
+
+    // ==================== intersection tests ====================
+
+    mod intersection_tests {
+        use super::*;
+
+        #[test]
+        fn test_intersection_1d_same() {
+            let r1 = rect1d(0, 10);
+            let r2 = rect1d(0, 10);
+            assert_eq!(r1.intersection(&r2), rect1d(0, 10));
+        }
+
+        #[test]
+        fn test_intersection_1d_partial() {
+            let r1 = rect1d(0, 10);
+            let r2 = rect1d(5, 15);
+            assert_eq!(r1.intersection(&r2), rect1d(5, 10));
+        }
+
+        #[test]
+        fn test_intersection_1d_contained() {
+            // When r2 is fully inside r1, the intersection is r2.
+            let r1 = rect1d(0, 20);
+            let r2 = rect1d(5, 15);
+            assert_eq!(r1.intersection(&r2), rect1d(5, 15));
+        }
+
+        #[test]
+        fn test_intersection_1d_touching() {
+            // Sharing a single point produces a unit-volume result.
+            let r1 = rect1d(0, 10);
+            let r2 = rect1d(10, 20);
+            let result = r1.intersection(&r2);
+            assert_eq!(result, rect1d(10, 10));
+            assert_eq!(result.volume(), 1);
+        }
+
+        #[test]
+        fn test_intersection_1d_disjoint() {
+            // Disjoint inputs produce an empty (hi < lo) rectangle.
+            let r1 = rect1d(0, 5);
+            let r2 = rect1d(10, 15);
+            let result = r1.intersection(&r2);
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn test_intersection_1d_negative_coords() {
+            let r1 = rect1d(-10, 5);
+            let r2 = rect1d(-3, 10);
+            assert_eq!(r1.intersection(&r2), rect1d(-3, 5));
+        }
+
+        #[test]
+        fn test_intersection_1d_single_point_each() {
+            let r1 = rect1d(7, 7);
+            let r2 = rect1d(7, 7);
+            assert_eq!(r1.intersection(&r2), rect1d(7, 7));
+        }
+
+        #[test]
+        fn test_intersection_2d_same() {
+            let r1 = rect2d(0, 0, 10, 10);
+            let r2 = rect2d(0, 0, 10, 10);
+            assert_eq!(r1.intersection(&r2), rect2d(0, 0, 10, 10));
+        }
+
+        #[test]
+        fn test_intersection_2d_partial() {
+            let r1 = rect2d(0, 0, 10, 10);
+            let r2 = rect2d(5, 5, 15, 15);
+            assert_eq!(r1.intersection(&r2), rect2d(5, 5, 10, 10));
+        }
+
+        #[test]
+        fn test_intersection_2d_contained() {
+            let r1 = rect2d(0, 0, 20, 20);
+            let r2 = rect2d(5, 5, 15, 15);
+            assert_eq!(r1.intersection(&r2), rect2d(5, 5, 15, 15));
+        }
+
+        #[test]
+        fn test_intersection_2d_touching_corner() {
+            // Two rects touching at a single corner intersect at that point.
+            let r1 = rect2d(0, 0, 10, 10);
+            let r2 = rect2d(10, 10, 20, 20);
+            let result = r1.intersection(&r2);
+            assert_eq!(result, rect2d(10, 10, 10, 10));
+            assert_eq!(result.volume(), 1);
+        }
+
+        #[test]
+        fn test_intersection_2d_touching_edge() {
+            // Touching on a shared edge collapses to a 1xN rectangle.
+            let r1 = rect2d(0, 0, 10, 10);
+            let r2 = rect2d(10, 0, 20, 10);
+            let result = r1.intersection(&r2);
+            assert_eq!(result, rect2d(10, 0, 10, 10));
+            assert_eq!(result.volume(), 11);
+        }
+
+        #[test]
+        fn test_intersection_2d_disjoint_x() {
+            let r1 = rect2d(0, 0, 5, 10);
+            let r2 = rect2d(10, 0, 15, 10);
+            let result = r1.intersection(&r2);
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn test_intersection_2d_disjoint_y() {
+            let r1 = rect2d(0, 0, 10, 5);
+            let r2 = rect2d(0, 10, 10, 15);
+            let result = r1.intersection(&r2);
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn test_intersection_2d_disjoint_both() {
+            let r1 = rect2d(0, 0, 5, 5);
+            let r2 = rect2d(10, 10, 15, 15);
+            let result = r1.intersection(&r2);
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn test_intersection_2d_cross_shape() {
+            // A horizontal and vertical strip intersect in their shared square.
+            let horizontal = rect2d(-10, 0, 10, 2);
+            let vertical = rect2d(0, -10, 2, 10);
+            assert_eq!(horizontal.intersection(&vertical), rect2d(0, 0, 2, 2));
+        }
+
+        #[test]
+        fn test_intersection_3d_same() {
+            let r1 = rect3d(0, 0, 0, 10, 10, 10);
+            let r2 = rect3d(0, 0, 0, 10, 10, 10);
+            assert_eq!(r1.intersection(&r2), rect3d(0, 0, 0, 10, 10, 10));
+        }
+
+        #[test]
+        fn test_intersection_3d_partial() {
+            let r1 = rect3d(0, 0, 0, 10, 10, 10);
+            let r2 = rect3d(5, 5, 5, 15, 15, 15);
+            assert_eq!(r1.intersection(&r2), rect3d(5, 5, 5, 10, 10, 10));
+        }
+
+        #[test]
+        fn test_intersection_3d_contained() {
+            let r1 = rect3d(0, 0, 0, 20, 20, 20);
+            let r2 = rect3d(5, 5, 5, 15, 15, 15);
+            assert_eq!(r1.intersection(&r2), rect3d(5, 5, 5, 15, 15, 15));
+        }
+
+        #[test]
+        fn test_intersection_3d_touching_corner() {
+            let r1 = rect3d(0, 0, 0, 10, 10, 10);
+            let r2 = rect3d(10, 10, 10, 20, 20, 20);
+            let result = r1.intersection(&r2);
+            assert_eq!(result, rect3d(10, 10, 10, 10, 10, 10));
+            assert_eq!(result.volume(), 1);
+        }
+
+        #[test]
+        fn test_intersection_3d_disjoint_z() {
+            let r1 = rect3d(0, 0, 0, 10, 10, 5);
+            let r2 = rect3d(0, 0, 10, 10, 10, 15);
+            let result = r1.intersection(&r2);
+            assert!(result.is_empty());
+        }
+
+        #[test]
+        fn test_intersection_3d_negative_coords() {
+            let r1 = rect3d(-10, -10, -10, 0, 0, 0);
+            let r2 = rect3d(-5, -5, -5, 5, 5, 5);
+            assert_eq!(r1.intersection(&r2), rect3d(-5, -5, -5, 0, 0, 0));
+        }
+
+        #[test]
+        fn test_intersection_commutative() {
+            // a.intersection(b) should equal b.intersection(a).
+            let r1 = rect3d(0, 0, 0, 10, 10, 10);
+            let r2 = rect3d(5, 5, 5, 15, 15, 15);
+            assert_eq!(r1.intersection(&r2), r2.intersection(&r1));
+        }
+
+        #[test]
+        fn test_intersection_idempotent() {
+            // a.intersection(a) should equal a.
+            let r = rect2d(3, -4, 12, 7);
+            assert_eq!(r.intersection(&r), r);
+        }
+
+        #[test]
+        fn test_intersection_volume_consistent_with_overlaps() {
+            // Whenever overlaps() is true, the intersection must be non-empty;
+            // whenever overlaps() is false, the intersection must be empty.
+            let overlapping = rect2d(0, 0, 10, 10);
+            let other = rect2d(5, 5, 15, 15);
+            assert!(overlapping.overlaps(&other));
+            assert!(!overlapping.intersection(&other).is_empty());
+
+            let disjoint_a = rect2d(0, 0, 5, 5);
+            let disjoint_b = rect2d(10, 10, 15, 15);
+            assert!(!disjoint_a.overlaps(&disjoint_b));
+            assert!(disjoint_a.intersection(&disjoint_b).is_empty());
+        }
+
+        #[test]
+        #[should_panic]
+        fn test_intersection_mismatched_dims_panics() {
+            // The method asserts on matching dimensionality.
+            let r1 = rect1d(0, 10);
+            let r2 = rect2d(0, 0, 10, 10);
+            let _ = r1.intersection(&r2);
+        }
+    }
+
+    // ==================== RTree tests ====================
+
+    mod rtree_tests {
+        use super::*;
+
+        // Reference implementation of query_overlaps for validating the tree.
+        fn brute_force_overlaps(rects: &[Rect], query: &Rect) -> Vec<usize> {
+            (0..rects.len())
+                .filter(|&i| rects[i].overlaps(query))
+                .collect()
+        }
+
+        fn query_sorted(tree: &RTree, query: &Rect) -> Vec<usize> {
+            let mut results = Vec::new();
+            tree.query_overlaps(query, &mut results);
+            results.sort();
+            results
+        }
+
+        #[test]
+        fn test_rtree_build_empty() {
+            let rects: Vec<Rect> = Vec::new();
+            let tree = RTree::build(&rects);
+            assert!(tree.root.is_none());
+        }
+
+        #[test]
+        fn test_rtree_query_empty_returns_no_results() {
+            let rects: Vec<Rect> = Vec::new();
+            let tree = RTree::build(&rects);
+            let mut results = Vec::new();
+            tree.query_overlaps(&rect2d(0, 0, 10, 10), &mut results);
+            assert!(results.is_empty());
+        }
+
+        #[test]
+        fn test_rtree_single_rect_is_leaf_root() {
+            let rects = vec![rect2d(0, 0, 5, 5)];
+            let tree = RTree::build(&rects);
+            let root = tree.root.as_ref().expect("expected a root node");
+            // A single-rect tree: root is a leaf whose bbox equals the rect.
+            assert_eq!(root.bbox, rect2d(0, 0, 5, 5));
+            assert!(matches!(root.children, RTreeChildren::Leaves(_)));
+        }
+
+        #[test]
+        fn test_rtree_leaf_root_for_small_input() {
+            // <= RTREE_BRANCH_FACTOR rects fit directly in a leaf root.
+            let rects: Vec<Rect> = (0..RTREE_BRANCH_FACTOR as i64)
+                .map(|i| rect2d(i, 0, i + 1, 1))
+                .collect();
+            let tree = RTree::build(&rects);
+            let root = tree.root.as_ref().unwrap();
+            assert!(matches!(root.children, RTreeChildren::Leaves(_)));
+            // The root bbox must dominate every input rect.
+            for r in &rects {
+                assert!(root.bbox.dominates(r));
+            }
+        }
+
+        #[test]
+        fn test_rtree_internal_root_for_large_input() {
+            // > RTREE_BRANCH_FACTOR rects force an internal root.
+            let rects: Vec<Rect> = (0..RTREE_BRANCH_FACTOR as i64 + 4)
+                .map(|i| rect2d(i, i, i + 1, i + 1))
+                .collect();
+            let tree = RTree::build(&rects);
+            let root = tree.root.as_ref().unwrap();
+            assert!(matches!(root.children, RTreeChildren::Internal(_)));
+            for r in &rects {
+                assert!(root.bbox.dominates(r));
+            }
+        }
+
+        #[test]
+        fn test_rtree_query_finds_overlapping_rects() {
+            let rects = vec![
+                rect2d(0, 0, 5, 5),
+                rect2d(10, 10, 15, 15),
+                rect2d(4, 4, 12, 12),
+            ];
+            let tree = RTree::build(&rects);
+            // The query overlaps rect 0 and rect 2 but not rect 1.
+            assert_eq!(query_sorted(&tree, &rect2d(3, 3, 6, 6)), vec![0, 2]);
+        }
+
+        #[test]
+        fn test_rtree_query_no_overlap() {
+            let rects = vec![rect2d(0, 0, 5, 5), rect2d(10, 10, 15, 15)];
+            let tree = RTree::build(&rects);
+            let mut results = Vec::new();
+            tree.query_overlaps(&rect2d(100, 100, 110, 110), &mut results);
+            assert!(results.is_empty());
+        }
+
+        #[test]
+        fn test_rtree_query_covers_all() {
+            let rects: Vec<Rect> = (0..5).map(|i| rect2d(i * 10, 0, i * 10 + 5, 5)).collect();
+            let tree = RTree::build(&rects);
+            assert_eq!(
+                query_sorted(&tree, &rect2d(-100, -100, 1000, 1000)),
+                vec![0, 1, 2, 3, 4]
+            );
+        }
+
+        #[test]
+        fn test_rtree_query_touching_counts_as_overlap() {
+            // Rect::overlaps treats touching as overlap; the tree must agree.
+            let rects = vec![rect2d(0, 0, 10, 10)];
+            let tree = RTree::build(&rects);
+            assert_eq!(query_sorted(&tree, &rect2d(10, 10, 20, 20)), vec![0]);
+        }
+
+        #[test]
+        fn test_rtree_matches_brute_force_2d() {
+            // A 10x10 grid of rects (100 total) forces a multi-level tree;
+            // every query result must match the brute-force answer.
+            let mut rects = Vec::new();
+            for i in 0..10 {
+                for j in 0..10 {
+                    rects.push(rect2d(i * 5, j * 5, i * 5 + 3, j * 5 + 3));
+                }
+            }
+            let tree = RTree::build(&rects);
+            let queries = vec![
+                rect2d(0, 0, 10, 10),
+                rect2d(-5, -5, 1, 1),
+                rect2d(17, 17, 22, 22),
+                rect2d(100, 100, 110, 110),
+                rect2d(0, 0, 100, 100),
+                rect2d(23, 2, 24, 48),
+            ];
+            for q in &queries {
+                let actual = query_sorted(&tree, q);
+                let mut expected = brute_force_overlaps(&rects, q);
+                expected.sort();
+                assert_eq!(actual, expected, "mismatch for query {:?}", q);
+            }
+        }
+
+        #[test]
+        fn test_rtree_matches_brute_force_3d() {
+            // A 5x5x5 grid (125 rects) stresses STR sorting across all 3 dims.
+            let mut rects = Vec::new();
+            for i in 0..5 {
+                for j in 0..5 {
+                    for k in 0..5 {
+                        rects.push(rect3d(i * 4, j * 4, k * 4, i * 4 + 2, j * 4 + 2, k * 4 + 2));
+                    }
+                }
+            }
+            let tree = RTree::build(&rects);
+            let queries = vec![
+                rect3d(0, 0, 0, 5, 5, 5),
+                rect3d(-3, -3, -3, 0, 0, 0),
+                rect3d(10, 10, 10, 14, 14, 14),
+                rect3d(100, 100, 100, 200, 200, 200),
+                rect3d(0, 0, 0, 100, 100, 100),
+            ];
+            for q in &queries {
+                let actual = query_sorted(&tree, q);
+                let mut expected = brute_force_overlaps(&rects, q);
+                expected.sort();
+                assert_eq!(actual, expected, "mismatch for query {:?}", q);
+            }
+        }
+
+        #[test]
+        fn test_rtree_no_duplicate_results() {
+            // Every overlapping rect must appear exactly once in the results.
+            let rects: Vec<Rect> = (0..50).map(|i| rect2d(i, 0, i + 1, 1)).collect();
+            let tree = RTree::build(&rects);
+            let mut results = Vec::new();
+            tree.query_overlaps(&rect2d(-10, -10, 100, 100), &mut results);
+            let len_before = results.len();
+            results.sort();
+            results.dedup();
+            assert_eq!(results.len(), len_before);
+            assert_eq!(results.len(), rects.len());
+        }
+
+        #[test]
+        fn test_rtree_query_appends_to_results() {
+            // query_overlaps should append to the caller's Vec, not clear it —
+            // callers in EquivalenceSet rely on controlling when to clear.
+            let rects = vec![rect2d(0, 0, 5, 5)];
+            let tree = RTree::build(&rects);
+            let mut results = vec![999];
+            tree.query_overlaps(&rect2d(0, 0, 5, 5), &mut results);
+            assert_eq!(results[0], 999);
+            assert!(results.contains(&0));
+        }
+
+        #[test]
+        fn test_rtree_handles_identical_rects() {
+            // Duplicate input rects should each be indexed and returned.
+            let rects: Vec<Rect> = (0..20).map(|_| rect2d(0, 0, 5, 5)).collect();
+            let tree = RTree::build(&rects);
+            let results = query_sorted(&tree, &rect2d(1, 1, 2, 2));
+            assert_eq!(results, (0..20).collect::<Vec<usize>>());
+        }
+
+        #[test]
+        fn test_rtree_1d_query() {
+            // The tree must also work for 1D rects.
+            let rects: Vec<Rect> = (0..30).map(|i| rect1d(i * 2, i * 2 + 1)).collect();
+            let tree = RTree::build(&rects);
+            let query = rect1d(5, 14);
+            let actual = query_sorted(&tree, &query);
+            let mut expected = brute_force_overlaps(&rects, &query);
+            expected.sort();
+            assert_eq!(actual, expected);
         }
     }
 

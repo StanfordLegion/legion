@@ -1,4 +1,4 @@
-use std::cmp::{Ordering, Reverse, max};
+use std::cmp::{Ordering, Reverse, max, min};
 use std::collections::{BTreeMap, BinaryHeap};
 use std::convert::TryFrom;
 use std::fmt;
@@ -13,6 +13,8 @@ use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
 
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
+
 use petgraph::algo::toposort;
 use petgraph::graph::{Graph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -23,7 +25,7 @@ use serde::Serialize;
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
-use crate::geometry::{ISpace, ISpaceID};
+use crate::geometry::{EquivalenceSet, ISpace, ISpaceID};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
 
@@ -229,13 +231,56 @@ pub enum DeviceKind {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ReductionID(pub NonZeroU32);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Copy, Clone, Hash, Serialize)]
 pub enum PrivilegeMode {
     NoAccess,
     ReadOnly,
     ReadWrite,
     WriteOnly,
     Reduce(ReductionID),
+}
+
+// Explicit ordering for PrivilegeMode so that liveness analysis
+// correctly sorts reads before writes when timestamps are equal.
+// The ordering is: NoAccess < ReadOnly < Reduce < ReadWrite < WriteOnly
+// This ensures that at the same timestamp, reads are processed before
+// writes when building def-use chains.
+
+fn privilege_rank(p: &PrivilegeMode) -> u8 {
+    match p {
+        PrivilegeMode::NoAccess => 0,
+        PrivilegeMode::ReadOnly => 1,
+        PrivilegeMode::Reduce(_) => 2,
+        PrivilegeMode::ReadWrite => 3,
+        PrivilegeMode::WriteOnly => 4,
+    }
+}
+
+impl Eq for PrivilegeMode {}
+
+impl PartialEq for PrivilegeMode {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
+
+impl Ord for PrivilegeMode {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let ord = privilege_rank(self).cmp(&privilege_rank(other));
+        if ord == std::cmp::Ordering::Equal {
+            // Only Reduce variants can tie on rank — break ties by ReductionID
+            if let (PrivilegeMode::Reduce(a), PrivilegeMode::Reduce(b)) = (self, other) {
+                return a.cmp(b);
+            }
+        }
+        ord
+    }
+}
+
+impl PartialOrd for PrivilegeMode {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 // the class used to save configurations
@@ -398,6 +443,86 @@ where
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub enum StatusIntervalKind {
+    // StatusInterval kinds for processors
+    Running,
+    Waiting,
+    Ready,
+    // StatusInterval kinds for instances
+    Live,
+    Dead,
+    Pending,
+}
+
+// In the case that a container entry needs to be rendered with multiple different
+// boxes then it can break itself up into intervals
+#[derive(Debug)]
+pub struct StatusInterval {
+    pub kind: StatusIntervalKind,
+    pub start: Timestamp,
+    pub stop: Timestamp,
+    pub hidden_intervals: u64,
+    pub callee: Option<ProfUID>,
+    pub first_writer: Option<ProfUID>,
+    pub last_reader: Option<ProfUID>,
+    pub provenance: Option<ProvenanceID>,
+    pub backtrace: Option<BacktraceID>,
+    pub wait_event: Option<EventID>,
+}
+
+impl StatusInterval {
+    pub fn new(
+        kind: StatusIntervalKind,
+        start: Timestamp,
+        stop: Timestamp,
+        hidden_intervals: u64,
+    ) -> Self {
+        StatusInterval {
+            kind,
+            start,
+            stop,
+            hidden_intervals,
+            callee: None,
+            first_writer: None,
+            last_reader: None,
+            provenance: None,
+            backtrace: None,
+            wait_event: None,
+        }
+    }
+    pub fn callee(mut self, callee: Option<ProfUID>) -> Self {
+        assert!(self.callee.is_none());
+        self.callee = callee;
+        self
+    }
+    pub fn last_reader(mut self, last_reader: Option<ProfUID>) -> Self {
+        assert!(self.last_reader.is_none());
+        self.last_reader = last_reader;
+        self
+    }
+    pub fn first_writer(mut self, first_writer: Option<ProfUID>) -> Self {
+        assert!(self.first_writer.is_none());
+        self.first_writer = first_writer;
+        self
+    }
+    pub fn provenance(mut self, provenance: Option<ProvenanceID>) -> Self {
+        assert!(self.provenance.is_none());
+        self.provenance = provenance;
+        self
+    }
+    pub fn backtrace(mut self, backtrace: Option<BacktraceID>) -> Self {
+        assert!(self.backtrace.is_none());
+        self.backtrace = backtrace;
+        self
+    }
+    pub fn wait_event(mut self, wait_event: Option<EventID>) -> Self {
+        assert!(self.wait_event.is_none());
+        self.wait_event = wait_event;
+        self
+    }
+}
+
 // Common methods that apply to Proc, Mem, Chan
 pub trait Container {
     type E: std::marker::Copy + std::fmt::Debug;
@@ -443,7 +568,7 @@ pub trait ContainerEntry {
     fn base_mut(&mut self) -> &mut Base;
     fn time_range(&self) -> TimeRange;
     fn time_range_mut(&mut self) -> &mut TimeRange;
-    fn waiters(&self) -> Option<&Waiters>;
+    fn status_intervals(&self, min_interval: Timestamp) -> Vec<StatusInterval>;
     fn initiation(&self) -> Option<OpID>;
     fn creator(&self) -> Option<ProfUID>;
     fn critical(&self) -> Option<EventID>;
@@ -505,6 +630,41 @@ impl ProcEntry {
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         self.time_range.trim_time_range(start, stop)
     }
+    fn find_instance_users(
+        &self,
+        state: &State,
+        instance_users: &mut HashMap<ProfUID, Vec<InstUser>>,
+    ) {
+        // Only need to record instance users for application tasks
+        match self.kind {
+            ProcEntryKind::Task(..) => {
+                if let Some(op_id) = self.op_id {
+                    if let Some(op) = state.find_op(op_id) {
+                        let prof_uid = self.base.prof_uid;
+                        let create = self.time_range.create.unwrap();
+                        let op_start = self.time_range.start.unwrap();
+                        let op_stop = self.time_range.stop.unwrap();
+                        for users in op.operation_inst_infos.values() {
+                            for user in users {
+                                instance_users.entry(user.inst_uid).or_default().push(
+                                    InstUser::new(
+                                        prof_uid,
+                                        create,
+                                        user.start.unwrap_or(op_start),
+                                        user.stop.unwrap_or(op_stop),
+                                        user.privilege,
+                                        user.field,
+                                        user.index_expr,
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {} // no-op for anything else
+        }
+    }
 }
 
 impl ContainerEntry for ProcEntry {
@@ -524,8 +684,54 @@ impl ContainerEntry for ProcEntry {
         &mut self.time_range
     }
 
-    fn waiters(&self) -> Option<&Waiters> {
-        Some(&self.waiters)
+    fn status_intervals(&self, min_interval: Timestamp) -> Vec<StatusInterval> {
+        let mut intervals = Vec::new();
+        let mut start = self.time_range.start.unwrap();
+        let mut hidden_intervals = 0;
+        for wait in &self.waiters.wait_intervals {
+            // Check to see if the wait is smaller than the min interval
+            let wait_time = wait.end - wait.start;
+            if wait_time < min_interval {
+                hidden_intervals += 1;
+                continue;
+            }
+            intervals.push(StatusInterval::new(
+                StatusIntervalKind::Running,
+                start,
+                wait.start,
+                hidden_intervals,
+            ));
+            hidden_intervals = 0;
+            // Always show the wait interval so that things make sense
+            intervals.push(
+                StatusInterval::new(StatusIntervalKind::Waiting, wait.start, wait.ready, 0)
+                    .callee(wait.callee)
+                    .provenance(wait.provenance)
+                    .backtrace(wait.backtrace)
+                    .wait_event(wait.event),
+            );
+            // We can elide the ready interval if it is tiny
+            let ready_time = wait.end - wait.ready;
+            if min_interval <= ready_time {
+                intervals.push(StatusInterval::new(
+                    StatusIntervalKind::Ready,
+                    wait.ready,
+                    wait.end,
+                    0,
+                ));
+            }
+            start = max(start, wait.end);
+        }
+        let stop = self.time_range.stop.unwrap();
+        if start < stop {
+            intervals.push(StatusInterval::new(
+                StatusIntervalKind::Running,
+                start,
+                stop,
+                hidden_intervals,
+            ));
+        }
+        intervals
     }
 
     fn initiation(&self) -> Option<OpID> {
@@ -1200,6 +1406,16 @@ impl Proc {
         }
         result
     }
+
+    fn find_instance_users(
+        &self,
+        state: &State,
+        instance_users: &mut HashMap<ProfUID, Vec<InstUser>>,
+    ) {
+        for entry in self.entries.values() {
+            entry.find_instance_users(state, instance_users);
+        }
+    }
 }
 
 impl Container for Proc {
@@ -1427,25 +1643,49 @@ impl Mem {
 
     fn sort_time_range(&mut self) {
         let mut time_points = Vec::new();
+        let mut util_time_points = Vec::new();
 
         for (key, inst) in &self.insts {
             if !inst.is_logged() {
                 continue;
             }
+            let inst_start = inst.time_range.ready.unwrap();
+            let inst_stop = inst.time_range.stop.unwrap();
             time_points.push(MemPoint::new(
-                inst.time_range.ready.unwrap(),
+                inst_start,
                 *key,
                 true,
-                Timestamp::MAX - inst.time_range.stop.unwrap(),
+                Timestamp::MAX - inst_stop,
             ));
-            time_points.push(MemPoint::new(
-                inst.time_range.stop.unwrap(),
-                *key,
-                false,
-                Timestamp::ZERO,
-            ));
+            time_points.push(MemPoint::new(inst_stop, *key, false, Timestamp::ZERO));
+            if let Some(live_ranges) = &inst.live_ranges {
+                for range in live_ranges {
+                    // Instances are "live" not just when they
+                    // are actively being used but also when
+                    // we know there are pending users
+                    assert!(inst_start <= range.pending);
+                    util_time_points.push(MemPoint::new(
+                        range.pending,
+                        *key,
+                        true,
+                        Timestamp::MAX - range.stop,
+                    ));
+                    assert!(range.stop <= inst_stop);
+                    util_time_points.push(MemPoint::new(range.stop, *key, false, Timestamp::ZERO));
+                }
+            } else {
+                // Just assume the instance is live for its whole life
+                util_time_points.push(MemPoint::new(
+                    inst_start,
+                    *key,
+                    true,
+                    Timestamp::MAX - inst_stop,
+                ));
+                util_time_points.push(MemPoint::new(inst_stop, *key, false, Timestamp::ZERO));
+            }
         }
         time_points.sort_by_key(|a| a.time_key());
+        util_time_points.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
@@ -1470,8 +1710,10 @@ impl Mem {
 
         // Rendering of the profile will never use non-first points, so we can
         // throw those away now.
-        self.time_points = time_points.iter().filter(|p| p.first).copied().collect();
-        self.util_time_points = time_points;
+        time_points.retain(|p| p.first);
+
+        self.time_points = time_points;
+        self.util_time_points = util_time_points;
 
         // If this memory has no capacity or a dynamic capacity then compute it based on the time points
         if self.capacity == 0 || self.kind == MemKind::GPUDynamic {
@@ -1602,6 +1844,13 @@ impl ChanEntry {
             ChanEntry::DepPart(_) => None,
         }
     }
+    fn find_instance_users(&self, instance_users: &mut HashMap<ProfUID, Vec<InstUser>>) {
+        match self {
+            ChanEntry::Copy(copy) => copy.find_instance_users(instance_users),
+            ChanEntry::Fill(fill) => fill.find_instance_users(instance_users),
+            ChanEntry::DepPart(deppart) => deppart.find_instance_users(instance_users),
+        }
+    }
 }
 
 impl ContainerEntry for ChanEntry {
@@ -1637,8 +1886,16 @@ impl ContainerEntry for ChanEntry {
         }
     }
 
-    fn waiters(&self) -> Option<&Waiters> {
-        None
+    fn status_intervals(&self, _min_interval: Timestamp) -> Vec<StatusInterval> {
+        let mut intervals = Vec::new();
+        let time_range = self.time_range();
+        intervals.push(StatusInterval::new(
+            StatusIntervalKind::Running,
+            time_range.start.unwrap(),
+            time_range.stop.unwrap(),
+            0,
+        ));
+        intervals
     }
 
     fn initiation(&self) -> Option<OpID> {
@@ -1858,6 +2115,12 @@ impl Chan {
 
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+
+    fn find_instance_users(&self, instance_users: &mut HashMap<ProfUID, Vec<InstUser>>) {
+        for entry in self.entries.values() {
+            entry.find_instance_users(instance_users);
+        }
     }
 }
 
@@ -2122,6 +2385,7 @@ pub struct Inst {
     pub creator: Option<ProfUID>,
     pub critical: Option<EventID>,
     pub previous: Option<ProfUID>, // previous in the case of redistricting
+    pub live_ranges: Option<Vec<LiveRange>>,
 }
 
 impl Inst {
@@ -2144,6 +2408,7 @@ impl Inst {
             creator: None,
             critical: None,
             previous: None,
+            live_ranges: None,
         }
     }
     pub fn is_logged(&self) -> bool {
@@ -2279,6 +2544,13 @@ impl Inst {
             true
         }
     }
+    fn set_live_ranges(&mut self, ranges: Vec<LiveRange>) {
+        // If the ranges are empty it can cause all sorts of problems later
+        // especially when you get to rendering
+        assert!(!ranges.is_empty());
+        assert!(self.live_ranges.is_none());
+        self.live_ranges = Some(ranges);
+    }
 }
 
 impl Ord for Inst {
@@ -2318,8 +2590,154 @@ impl ContainerEntry for Inst {
         &mut self.time_range
     }
 
-    fn waiters(&self) -> Option<&Waiters> {
-        None
+    fn status_intervals(&self, min_interval: Timestamp) -> Vec<StatusInterval> {
+        let mut intervals = Vec::new();
+        let time_range = self.time_range();
+        let start = time_range.start.unwrap();
+        let stop = time_range.stop.unwrap();
+        if let Some(live_ranges) = &self.live_ranges {
+            if let Some(first) = live_ranges.first() {
+                // This is a bit strange, but when we compute the status
+                // intervals for instances, if the live ranges are smaller
+                // than the min interval we don't want the instance to just
+                // look like it is dead all the time with some large number
+                // of small live ranges. Instead we want it to look like it is
+                // live unless the previous dead range is large enough to visualize
+                let first_dead = first.pending - start;
+                let mut hidden_intervals = 0;
+                let first_pending = if min_interval <= first_dead {
+                    intervals.push(StatusInterval::new(
+                        StatusIntervalKind::Dead,
+                        start,
+                        first.pending,
+                        0,
+                    ));
+                    first.pending
+                } else {
+                    hidden_intervals += 1;
+                    start
+                };
+                // See if the first pending range is large enough to render
+                let mut live_start = if min_interval <= (first.start - first_pending) {
+                    intervals.push(StatusInterval::new(
+                        StatusIntervalKind::Pending,
+                        first_pending,
+                        first.start,
+                        0,
+                    ));
+                    first.start
+                } else {
+                    // First live range starts at first pending
+                    first_pending
+                };
+                let mut live_end = first.stop;
+                let mut first_writer = first.first_writer;
+                let mut last_reader = first.last_reader;
+                for range in &live_ranges[1..] {
+                    // Check to see if the dead range is big enough to render
+                    let dead_range = range.pending - live_end;
+                    if dead_range < min_interval {
+                        // Fold this into the hidden ranges
+                        hidden_intervals += 1;
+                        live_end = range.stop;
+                        last_reader = range.last_reader;
+                    } else {
+                        // Record the previous live range
+                        intervals.push(
+                            StatusInterval::new(
+                                StatusIntervalKind::Live,
+                                live_start,
+                                live_end,
+                                hidden_intervals,
+                            )
+                            .first_writer(Some(first_writer))
+                            .last_reader(Some(last_reader)),
+                        );
+                        hidden_intervals = 0;
+                        // And the dead range too
+                        intervals.push(StatusInterval::new(
+                            StatusIntervalKind::Dead,
+                            live_end,
+                            range.pending,
+                            0,
+                        ));
+                        // Check to see if we can render the pending range
+                        if min_interval <= (range.start - range.pending) {
+                            intervals.push(
+                                StatusInterval::new(
+                                    StatusIntervalKind::Pending,
+                                    range.pending,
+                                    range.start,
+                                    0,
+                                )
+                                .first_writer(Some(range.first_writer)),
+                            );
+                            live_start = range.start;
+                        } else {
+                            // Pending range not big enough to render so just
+                            // pretend that the whole live intervals starts at pending
+                            live_start = range.pending;
+                        }
+                        first_writer = range.first_writer;
+                        last_reader = range.last_reader;
+                        live_end = range.stop;
+                    }
+                }
+                // Check to see if the final dead range is too small to render
+                // and fold it appropriately. Always render the live range here.
+                // It's possible there is a degenerate case here where you have
+                // a large enough dead range, a small live range, and then another
+                // large dead range and we'll end up putting in a live range that
+                // is too small to render but in that case there will only be
+                // one small live range and won't hurt the backend profiler perf
+                if min_interval <= (stop - live_end) {
+                    intervals.push(
+                        StatusInterval::new(
+                            StatusIntervalKind::Live,
+                            live_start,
+                            live_end,
+                            hidden_intervals,
+                        )
+                        .first_writer(Some(first_writer))
+                        .last_reader(Some(last_reader)),
+                    );
+                    intervals.push(StatusInterval::new(
+                        StatusIntervalKind::Dead,
+                        live_end,
+                        stop,
+                        0,
+                    ));
+                } else {
+                    hidden_intervals += 1;
+                    intervals.push(
+                        StatusInterval::new(
+                            StatusIntervalKind::Live,
+                            live_start,
+                            stop,
+                            hidden_intervals,
+                        )
+                        .first_writer(Some(first_writer))
+                        .last_reader(Some(last_reader)),
+                    );
+                }
+            } else {
+                // No live ranges means it was dead the whole time
+                intervals.push(StatusInterval::new(
+                    StatusIntervalKind::Dead,
+                    start,
+                    stop,
+                    0,
+                ));
+            }
+        } else {
+            intervals.push(StatusInterval::new(
+                StatusIntervalKind::Live,
+                start,
+                stop,
+                0,
+            ));
+        }
+        intervals
     }
 
     fn initiation(&self) -> Option<OpID> {
@@ -2361,6 +2779,48 @@ impl ContainerEntry for Inst {
         }
         None
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct InstUser {
+    pub user: ProfUID,
+    pub create: Timestamp,
+    pub start: Timestamp,
+    pub stop: Timestamp,
+    pub privilege: PrivilegeMode,
+    pub field: FieldID,
+    pub expr: Option<ISpaceID>,
+}
+
+impl InstUser {
+    pub fn new(
+        user: ProfUID,
+        create: Timestamp,
+        start: Timestamp,
+        stop: Timestamp,
+        privilege: PrivilegeMode,
+        field: FieldID,
+        expr: Option<ISpaceID>,
+    ) -> Self {
+        InstUser {
+            user,
+            create,
+            start,
+            stop,
+            privilege,
+            field,
+            expr,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash)]
+pub struct LiveRange {
+    pub pending: Timestamp,
+    pub start: Timestamp,
+    pub stop: Timestamp,
+    pub first_writer: ProfUID,
+    pub last_reader: ProfUID,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, LowerHex)]
@@ -2759,12 +3219,12 @@ pub struct OperationInstInfo {
     pub privilege: PrivilegeMode,
     pub field: FieldID,
     pub fevent: EventID,
-    pub start: Timestamp,
-    // This is an option timestamp because we might not
-    // know when the usage is done becasue it escapes out
-    // the end of the task. A None value here means that
-    // we need to consult the completion of the operation
-    // associated with the given fevent to find the stop time
+    // We use option timestamps here so that users do not
+    // need to specify specific time ranges if they don't
+    // want. If the timestamps are not specified then we'll
+    // use the associated start/stop time for the operation
+    // associated with the enclosing fevent.
+    pub start: Option<Timestamp>,
     pub stop: Option<Timestamp>,
     pub index: Option<u32>,
 }
@@ -2776,7 +3236,7 @@ impl OperationInstInfo {
         privilege: PrivilegeMode,
         field: FieldID,
         fevent: EventID,
-        start: Timestamp,
+        start: Option<Timestamp>,
         stop: Option<Timestamp>,
         index: Option<u32>,
     ) -> Self {
@@ -3065,6 +3525,48 @@ impl Copy {
         }
         result
     }
+
+    fn find_instance_users(&self, instance_users: &mut HashMap<ProfUID, Vec<InstUser>>) {
+        let prof_uid = self.base.prof_uid;
+        let create = self.time_range.create.unwrap();
+        let start = self.time_range.start.unwrap();
+        let stop = self.time_range.stop.unwrap();
+        let privilege = if let Some(redop) = self.redop {
+            PrivilegeMode::Reduce(redop)
+        } else {
+            PrivilegeMode::WriteOnly
+        };
+        for info in &self.copy_inst_infos {
+            if let Some(src_inst_uid) = info.src_inst_uid {
+                instance_users
+                    .entry(src_inst_uid)
+                    .or_default()
+                    .push(InstUser::new(
+                        prof_uid,
+                        create,
+                        start,
+                        stop,
+                        PrivilegeMode::ReadOnly,
+                        info.src_fid,
+                        info.src_expr,
+                    ));
+            }
+            if let Some(dst_inst_uid) = info.dst_inst_uid {
+                instance_users
+                    .entry(dst_inst_uid)
+                    .or_default()
+                    .push(InstUser::new(
+                        prof_uid,
+                        create,
+                        start,
+                        stop,
+                        privilege,
+                        info.dst_fid,
+                        info.dst_expr,
+                    ));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -3137,6 +3639,27 @@ impl Fill {
         let chan_id = ChanID::new_fill(chan_dst);
         self.chan_id = Some(chan_id);
     }
+
+    fn find_instance_users(&self, instance_users: &mut HashMap<ProfUID, Vec<InstUser>>) {
+        let prof_uid = self.base.prof_uid;
+        let create = self.time_range.create.unwrap();
+        let start = self.time_range.start.unwrap();
+        let stop = self.time_range.stop.unwrap();
+        for info in &self.fill_inst_infos {
+            instance_users
+                .entry(info.dst_inst_uid)
+                .or_default()
+                .push(InstUser::new(
+                    prof_uid,
+                    create,
+                    start,
+                    stop,
+                    PrivilegeMode::WriteOnly,
+                    info.fid,
+                    self.fill_expr,
+                ));
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -3191,6 +3714,27 @@ impl DepPart {
 
     fn add_deppart_inst_info(&mut self, deppart_inst_info: DepPartInstInfo) {
         self.deppart_inst_infos.push(deppart_inst_info);
+    }
+
+    fn find_instance_users(&self, instance_users: &mut HashMap<ProfUID, Vec<InstUser>>) {
+        let prof_uid = self.base.prof_uid;
+        let create = self.time_range.create.unwrap();
+        let start = self.time_range.start.unwrap();
+        let stop = self.time_range.stop.unwrap();
+        for info in &self.deppart_inst_infos {
+            instance_users
+                .entry(info.src_inst_uid)
+                .or_default()
+                .push(InstUser::new(
+                    prof_uid,
+                    create,
+                    start,
+                    stop,
+                    PrivilegeMode::ReadOnly,
+                    info.fid,
+                    info.src_expr,
+                ));
+        }
     }
 }
 
@@ -4724,6 +5268,322 @@ impl State {
                 );
                 // clear the event lookup so we can't lookup critical paths
                 self.event_lookup.clear();
+            }
+        }
+    }
+
+    pub fn compute_liveness_ranges(&mut self) {
+        let mut instance_users = HashMap::new();
+        // Record instance users for all the processors
+        for proc in self.procs.values() {
+            proc.find_instance_users(&self, &mut instance_users);
+        }
+        // Record instance users for all the channels
+        for chan in self.chans.values() {
+            chan.find_instance_users(&mut instance_users);
+        }
+        // Pull mems onto the stack since it's the only thing we're mutating
+        let mut mems = std::mem::take(&mut self.mems);
+        let total_insts: u64 = mems.values().map(|m| m.insts.len() as u64).sum();
+        let pb = ProgressBar::new(total_insts);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "  [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} instances (ETA {eta})",
+            )
+            .unwrap(),
+        );
+        // Compute liveness ranges for each of the instances
+        mems.par_iter_mut()
+            .flat_map(|(_, mem)| mem.insts.par_iter_mut())
+            .progress_with(pb.clone())
+            .for_each(|(inst_uid, inst)| {
+            // No need to compute liveness ranges for instances that were not logged
+            if !inst.is_logged() {
+                return;
+            }
+            let Some(users) = instance_users.get(&inst_uid) else {
+                return;
+            };
+            // First compute the equivalence sets for the spaces of users of this instance
+            let mut eq_sets = HashMap::new();
+            // Find all the unique index spaces referenced
+            for user in users {
+                if let Some(expr) = user.expr {
+                    eq_sets.entry(expr).or_default();
+                }
+            }
+            self.compute_equivalence_sets(&mut eq_sets);
+            // Next compute the def-use chains for each equivalence set-field pair
+            // Start by getting all the users for each set-field pair
+            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+            struct LivenessUser {
+                // Members must be in this order for sorting: by time first,
+                // then privilege (reads before writes), then user_index
+                time: Timestamp,
+                privilege: PrivilegeMode,
+                user_index: usize,
+            }
+            let mut eq_set_users: HashMap<(FieldID, Option<usize>), Vec<LivenessUser>> =
+                HashMap::new();
+            for (user_index, user) in users.iter().enumerate() {
+                match user.privilege {
+                    PrivilegeMode::ReadOnly | PrivilegeMode::Reduce(_) => {
+                        // Reads and reductions are both treated as readers
+                        if let Some(expr) = user.expr {
+                            for set in eq_sets.get(&expr).unwrap() {
+                                let key = (user.field, Some(*set));
+                                eq_set_users.entry(key).or_default().push(LivenessUser {
+                                    time: user.stop,
+                                    privilege: PrivilegeMode::ReadOnly,
+                                    user_index,
+                                });
+                            }
+                        } else {
+                            let key = (user.field, None);
+                            eq_set_users.entry(key).or_default().push(LivenessUser {
+                                time: user.stop,
+                                privilege: PrivilegeMode::ReadOnly,
+                                user_index,
+                            });
+                        }
+                    }
+                    PrivilegeMode::WriteOnly | PrivilegeMode::ReadWrite => {
+                        if let Some(expr) = user.expr {
+                            for set in eq_sets.get(&expr).unwrap() {
+                                let key = (user.field, Some(*set));
+                                eq_set_users.entry(key).or_default().push(LivenessUser {
+                                    time: user.start,
+                                    privilege: user.privilege,
+                                    user_index,
+                                });
+                            }
+                        } else {
+                            let key = (user.field, None);
+                            eq_set_users.entry(key).or_default().push(LivenessUser {
+                                time: user.start,
+                                privilege: user.privilege,
+                                user_index,
+                            });
+                        }
+                    }
+                    PrivilegeMode::NoAccess => {}
+                }
+            }
+            // Now we can sort each list of set-field users and compute the def-use ranges
+            // A def-use range is defined by its start and end times and the first writer
+            // and last reader of the range, no longer need to keep this separate for
+            // each of the field-set pairs as ranges are unioned over the instance
+            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+            struct LivenessRange {
+                // Members must be in this order for sorting
+                start_time: Timestamp,
+                stop_time: Timestamp,
+                first_writer_index: usize,
+                last_reader_index: usize,
+            }
+            // Closure to close out the current def-use range and push it
+            let close_range = |first: LivenessUser,
+                               last: Option<LivenessUser>,
+                               def_use_ranges: &mut Vec<LivenessRange>| {
+                if let Some(last) = last {
+                    // Full range from first writer to last reader
+                    def_use_ranges.push(LivenessRange {
+                        start_time: first.time,
+                        stop_time: last.time,
+                        first_writer_index: first.user_index,
+                        last_reader_index: last.user_index,
+                    });
+                } else {
+                    // Writer had no readers so range is only the writer
+                    def_use_ranges.push(LivenessRange {
+                        start_time: first.time,
+                        stop_time: users[first.user_index].stop,
+                        first_writer_index: first.user_index,
+                        last_reader_index: first.user_index,
+                    });
+                }
+            };
+            let mut def_use_ranges: Vec<LivenessRange> = Vec::new();
+            let mut warned_read_before_write = false;
+            for mut set_users in eq_set_users.into_values() {
+                // Sort them so they are in order by start time and then privilege
+                // where ties in time ensure reads come before writes
+                set_users.sort();
+                let mut first_writer: Option<LivenessUser> = None;
+                let mut last_reader: Option<LivenessUser> = None;
+                for user in set_users {
+                    match user.privilege {
+                        PrivilegeMode::ReadOnly => {
+                            if first_writer.is_some() {
+                                // Update the last reader
+                                last_reader = Some(user);
+                            } else {
+                                if !warned_read_before_write {
+                                    // Read before write is very surprising!
+                                    // Issue a warning about it since it is
+                                    // most likely a runtime logging bug
+                                    // Only warn the first time per instance
+                                    eprintln!(
+                                        "Warning: detected read before write in liveness analysis of instance {:x}",
+                                        inst.inst_id.unwrap().0
+                                    );
+                                    warned_read_before_write = true;
+                                }
+                                // Always update last reader to track the latest read time
+                                last_reader = Some(user);
+                            }
+                        }
+                        PrivilegeMode::WriteOnly => {
+                            if let Some(first) = first_writer {
+                                close_range(first, last_reader, &mut def_use_ranges);
+                            }
+                            first_writer = Some(user);
+                            last_reader = None;
+                        }
+                        PrivilegeMode::ReadWrite => {
+                            // Read-write effectively allows us to continue the
+                            // same live range if one already existed otherwise
+                            // we start a new live range, note that this means
+                            // we don't issue a warning for read-write being
+                            // the first entry in the list of users
+                            if first_writer.is_some() {
+                                // Need to update the time for a reader to
+                                // be the stop time
+                                last_reader = Some(LivenessUser {
+                                    time: users[user.user_index].stop,
+                                    privilege: user.privilege,
+                                    user_index: user.user_index,
+                                });
+                            } else {
+                                first_writer = Some(user);
+                                last_reader = None;
+                            }
+                        }
+                        _ => {
+                            unreachable!();
+                        }
+                    }
+                }
+                // Close the final range for this set-field group
+                if let Some(first) = first_writer {
+                    close_range(first, last_reader, &mut def_use_ranges);
+                }
+            }
+            // If we don't have any def-use ranges then we continue
+            // This can happen in logging failures where we had only
+            // readers/reducers and no obvious writers (e.g. sometimes with futures)
+            if def_use_ranges.is_empty() {
+                return;
+            }
+            // Unify the def-use chains to compute the time ranges for the instance
+            // Start by sorting them by the starting timestamp
+            def_use_ranges.sort();
+            let inst_stop = inst.time_range.stop.unwrap();
+            let mut live_ranges: Vec<LiveRange> = Vec::new();
+            for range in def_use_ranges {
+                // Due to timing skew between nodes we can get paradoxes here where
+                // it looks like instances are used before they exist or after they
+                // have been destroyed (could also be logging bugs). Similar paradoxes
+                // occur with "message" tasks that sometimes start running before they
+                // are even launched on their creator node. We add the clamps here to
+                // effectively "define away" such paradoxes. We attempt to minimize
+                // the prevalence of such paradoxes with the timing solve, but that
+                // does not guarantee that they will not occur at all.
+                // Clamp stop to inst_stop since a reader can outlive the instance
+                // (e.g. inline mapped regions in parent tasks)
+                let stop_time = min(range.stop_time, inst_stop);
+                // Skip ranges where the writer starts after the instance is destroyed
+                if range.start_time >= inst_stop {
+                    continue;
+                }
+                let mut pending_lower_bound = inst.time_range.start.unwrap();
+                if let Some(last) = live_ranges.last_mut() {
+                    // See if we can merge or if we need to append
+                    if range.start_time <= last.stop + Timestamp::from_ns(1) {
+                        // See if it is subsumed or can merge
+                        if last.stop < stop_time {
+                            // Merge since there's a new last reader in this range
+                            *last = LiveRange {
+                                pending: last.pending,
+                                start: last.start,
+                                stop: stop_time,
+                                first_writer: last.first_writer,
+                                last_reader: users[range.last_reader_index].user,
+                            };
+                        } // else range is subsumed
+                        continue;
+                    }
+                    pending_lower_bound = last.stop;
+                }
+                // Create a new range, bound previous so that it is at least
+                // as large as the end of the previous range which may be the
+                // start of the instance for the first new live range
+                let first_writer = users[range.first_writer_index];
+                let last_reader = users[range.last_reader_index];
+                live_ranges.push(LiveRange {
+                    pending: max(first_writer.create, pending_lower_bound),
+                    start: first_writer.start,
+                    stop: stop_time,
+                    first_writer: first_writer.user,
+                    last_reader: last_reader.user,
+                });
+            }
+            // Record the live ranges on the instance
+            inst.set_live_ranges(live_ranges);
+        });
+        pb.finish_and_clear();
+        // Restore mems
+        self.mems = mems;
+    }
+
+    pub fn compute_equivalence_sets(&self, eq_sets: &mut HashMap<ISpaceID, Vec<usize>>) {
+        // For each index space traverse the existing equivalence sets and
+        // update them or add them to the list
+        let mut equivalence_sets: Vec<EquivalenceSet> = Vec::new();
+        for space_id in eq_sets.keys() {
+            let space = self.index_spaces.get(&space_id).unwrap();
+            if space.is_empty() {
+                continue;
+            }
+            let mut new_set = EquivalenceSet::new(space);
+            let mut to_add = Vec::new();
+            for set in equivalence_sets.iter_mut() {
+                if let Some(overlap) = set.overlaps(&new_set) {
+                    if overlap.volume() == set.volume() {
+                        // New set is dominating
+                        if new_set.volume() == overlap.volume() {
+                            new_set.clear();
+                            *set = overlap;
+                            break;
+                        } else {
+                            new_set.subtract(&overlap);
+                            *set = overlap;
+                        }
+                    } else if overlap.volume() == new_set.volume() {
+                        // Old set is dominating
+                        set.subtract(&overlap);
+                        to_add.push(overlap);
+                        new_set.clear();
+                        break;
+                    } else {
+                        // Partial overlap so have to keep everything
+                        set.subtract(&overlap);
+                        new_set.subtract(&overlap);
+                        to_add.push(overlap);
+                    }
+                }
+            }
+            if !to_add.is_empty() {
+                equivalence_sets.append(&mut to_add);
+            }
+            if !new_set.is_empty() {
+                equivalence_sets.push(new_set);
+            }
+        }
+        for (index, set) in equivalence_sets.iter().enumerate() {
+            assert!(!set.is_empty());
+            for space in &set.spaces {
+                eq_sets.get_mut(space).unwrap().push(index);
             }
         }
     }

@@ -85,6 +85,9 @@ struct ParserArgs {
     #[arg(long, help = "disable computation of critical paths")]
     no_critical_paths: bool,
 
+    #[arg(long, help = "disable liveness range computation")]
+    no_liveness_ranges: bool,
+
     #[arg(short, long, help = "print verbose profiling information")]
     verbose: bool,
 }
@@ -447,6 +450,18 @@ fn main() -> io::Result<()> {
 
     Config::set_config(filter_input, args.verbose, have_alllogs);
 
+    // We can only compute the liveness ranges if we have all the nodes
+    // Do this before the time range computation which will pick up the
+    // results of the liveness analysis on the instances
+    if args.no_liveness_ranges {
+        println!("Skipping liveness range computation (disabled by --no-liveness-ranges)");
+    } else if args.filenames.len() < num_nodes {
+        println!("Skipping liveness range computation due to missing logs");
+    } else {
+        println!("Calculating liveness ranges");
+        state.compute_liveness_ranges();
+    }
+    timer.report_timing("liveness");
     state.trim_time_range(start_trim, stop_trim);
     timer.report_timing("trim time ranges");
     println!("Sorting time ranges");
