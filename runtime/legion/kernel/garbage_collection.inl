@@ -357,7 +357,9 @@ namespace Legion {
       }
       bool result = acquire_global(cnt);
 #else
-      bool result = acquire_global(cnt, source, detailed_nested_gc_references);
+      bool result = acquire_global(
+          cnt, LEGION_DISTRIBUTED_ID_FILTER(source),
+          detailed_nested_gc_references);
 #endif
 #ifdef LEGION_GC
       if (result)
@@ -512,8 +514,9 @@ namespace Legion {
       }
       bool result = acquire_valid(cnt);
 #else
-      bool result =
-          acquire_valid(cnt, source, detailed_nested_valid_references);
+      bool result = acquire_valid(
+          cnt, LEGION_DISTRIBUTED_ID_FILTER(source),
+          detailed_nested_valid_references);
 #endif
 #ifdef LEGION_GC
       if (result)
