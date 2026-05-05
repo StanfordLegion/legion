@@ -256,10 +256,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::is_output_valid(unsigned idx) const
+    bool PointTask::is_output_bounded(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      return slice_owner->is_output_valid(idx);
+      return slice_owner->is_output_bounded(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -854,7 +854,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RtEvent pre = parent_ctx->find_pointwise_dependence(
-          previous_context_index, previous_point, shard);
+          previous_context_index, previous_point, shard, false /*intra space*/);
       if (pre.exists())
       {
         pointwise_mapping_dependences.emplace_back(pre);

@@ -51,7 +51,10 @@ namespace Legion {
       virtual bool is_leaf_context(void) const override;
       virtual RtEvent find_pointwise_dependence(
           uint64_t context_index, const DomainPoint& point, ShardID shard,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
       virtual void return_resources(
           ResourceTracker* target, uint64_t return_index,
           std::set<RtEvent>& preconditions) override;
@@ -378,7 +381,8 @@ namespace Legion {
       virtual RtEvent escape_task_local_instance(
           PhysicalInstance instance, RtEvent effects, size_t num_results,
           PhysicalInstance* results, LgEvent* unique_events,
-          const Realm::InstanceLayoutGeneric** layouts = nullptr) override;
+          const Realm::InstanceLayoutGeneric** layouts = nullptr,
+          bool redistrict_only = false) override;
       virtual void release_task_local_instances(
           ApEvent effects, RtEvent safe_effects) override;
       virtual void handle_mispredication(void) override;

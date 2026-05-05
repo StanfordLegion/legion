@@ -3369,10 +3369,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent IndexCopyOp::find_pointwise_dependence(
-        const DomainPoint& point, GenerationID needed_gen,
-        RtUserEvent to_trigger)
+        const DomainPoint& point, GenerationID needed_gen, bool intra_space,
+        RtUserEvent to_trigger, std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
+      legion_assert(!output_index);
       AutoLock o_lock(op_lock);
       legion_assert(needed_gen <= gen);
       if ((needed_gen < gen) || mapped ||
@@ -3704,7 +3705,7 @@ namespace Legion {
     RtEvent IndexCopyOp::find_intra_space_dependence(const DomainPoint& point)
     //--------------------------------------------------------------------------
     {
-      return find_pointwise_dependence(point, get_generation());
+      return find_pointwise_dependence(point, get_generation(), true /*intra*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4045,8 +4046,9 @@ namespace Legion {
         ShardID shard)
     //--------------------------------------------------------------------------
     {
+      legion_assert(previous_context_index < context_index);
       const RtEvent pre = parent_ctx->find_pointwise_dependence(
-          previous_context_index, previous_point, shard);
+          previous_context_index, previous_point, shard, false /*intra space*/);
       if (pre.exists())
         pointwise_mapping_dependences.emplace_back(pre);
     }
@@ -4821,7 +4823,7 @@ namespace Legion {
         return IndexCopyOp::find_intra_space_dependence(point);
       else
         return repl_ctx->find_pointwise_dependence(
-            context_index, point, point_shard);
+            context_index, point, point_shard, true /*intra space*/);
     }
 
     //--------------------------------------------------------------------------

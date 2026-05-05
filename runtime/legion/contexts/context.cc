@@ -378,12 +378,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::add_output_region(
         const OutputRequirement& req, const InstanceSet& instances, bool global,
-        bool valid, bool grouped)
+        bool bounded, bool grouped)
     //--------------------------------------------------------------------------
     {
       size_t index = output_regions.size();
       OutputRegionImpl* impl = new OutputRegionImpl(
-          index, req, instances, this, global, valid, grouped);
+          index, req, instances, this, global, bounded, grouped);
       output_regions.emplace_back(OutputRegion(impl));
     }
 
@@ -406,7 +406,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::finalize_output_regions(RtEvent safe_effects)
+    void TaskContext::finalize_output_regions(
+        RtEvent safe_effects, std::vector<RtEvent>& output_regions_finalized)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
@@ -423,7 +424,9 @@ namespace Legion {
                 << idx << ".";
           error.raise();
         }
-        output_region.impl->finalize(safe_effects);
+        const RtEvent finalized = output_region.impl->finalize(safe_effects);
+        if (finalized.exists())
+          output_regions_finalized.push_back(finalized);
       }
       // Clear this to remove references in output region data structures
       output_regions.clear();
@@ -614,11 +617,12 @@ namespace Legion {
       // Finalize output regions by setting realm instances created during
       // task execution to the output regions' physical managers
       RtEvent safe_effects;
+      std::vector<RtEvent> output_regions_finalized;
       if (!output_regions.empty())
       {
         if (effects.exists())
           safe_effects = Runtime::protect_event(effects);
-        finalize_output_regions(safe_effects);
+        finalize_output_regions(safe_effects, output_regions_finalized);
       }
       if (!user_profiling_ranges.empty())
       {
@@ -741,7 +745,11 @@ namespace Legion {
           realm_done_event, instance, metadataptr, metadatasize,
           release_callback ? nullptr : callback_functor, executing_processor,
           owned);
-      owner_task->complete_execution();
+      if (output_regions_finalized.empty())
+        owner_task->complete_execution();
+      else
+        owner_task->complete_execution(
+            Runtime::merge_events(output_regions_finalized));
       // Clear the thread local task context to prevent users from
       // calling back into this context now that the task has finished
       // Do this before calling post-end task to make sure no references
@@ -812,7 +820,7 @@ namespace Legion {
     RtEvent TaskContext::escape_task_local_instance(
         PhysicalInstance instance, RtEvent safe_effects, size_t num_results,
         PhysicalInstance* results, LgEvent* unique_events,
-        const Realm::InstanceLayoutGeneric** layouts)
+        const Realm::InstanceLayoutGeneric** layouts, bool redistrict_only)
     //--------------------------------------------------------------------------
     {
       legion_assert(num_results > 0);
@@ -820,7 +828,7 @@ namespace Legion {
       std::map<PhysicalInstance, std::pair<LgEvent, bool>>::iterator finder =
           task_local_instances.find(instance);
       LgEvent old_unique_event;
-      if (finder != task_local_instances.end())
+      if ((finder != task_local_instances.end()) && !redistrict_only)
       {
         if (!finder->second.second)
         {

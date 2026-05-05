@@ -174,8 +174,10 @@ namespace Legion {
         return launch_space;
       }
       virtual RtEvent find_pointwise_dependence(
-          const DomainPoint& point, GenerationID gen,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          const DomainPoint& point, GenerationID gen, bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
       void enumerate_points(void);
       void handle_point_complete(ApEvent effect);
       void handle_point_commit(void);

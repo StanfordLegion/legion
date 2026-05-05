@@ -7747,7 +7747,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent ReplicateContext::find_pointwise_dependence(
         uint64_t context_index, const DomainPoint& point, ShardID shard,
-        RtUserEvent to_trigger)
+        bool intra_space, RtUserEvent to_trigger,
+        std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
       Operation* op;
@@ -7767,23 +7768,23 @@ namespace Legion {
           // Since shards execute independently, we could get a request
           // for a pointwise dependence for an operation that this shard
           // has not even created yet
-          std::map<DomainPoint, RtUserEvent>& pending_points =
+          std::vector<PendingPointwiseArgs>& pending_pointwise =
               pending_pointwise_dependences[context_index];
-          std::map<DomainPoint, RtUserEvent>::const_iterator finder =
-              pending_points.find(point);
-          if (finder == pending_points.end())
+          for (std::vector<PendingPointwiseArgs>::const_iterator it =
+                   pending_pointwise.begin();
+               it != pending_pointwise.end(); it++)
           {
-            if (!to_trigger.exists())
-              to_trigger = Runtime::create_rt_user_event();
-            pending_points.emplace(std::make_pair(point, to_trigger));
+            if (!it->matches(point, intra_space, output_index))
+              continue;
+            if (to_trigger.exists())
+              Runtime::trigger_event(to_trigger, it->to_trigger);
             return to_trigger;
           }
-          else
-          {
-            if (to_trigger.exists())
-              Runtime::trigger_event(to_trigger, finder->second);
-            return finder->second;
-          }
+          if (!to_trigger.exists())
+            to_trigger = Runtime::create_rt_user_event();
+          pending_pointwise.emplace_back(PendingPointwiseArgs{
+              point, to_trigger, output_index, intra_space});
+          return to_trigger;
         }
         // Operation has already been retired
         if (context_index < reorder_buffer.front().operation_index)
@@ -7797,23 +7798,23 @@ namespace Legion {
           // Since shards execute independently, we could get a request
           // for a pointwise dependence for an operation that this shard
           // has not even created yet
-          std::map<DomainPoint, RtUserEvent>& pending_points =
+          std::vector<PendingPointwiseArgs>& pending_pointwise =
               pending_pointwise_dependences[context_index];
-          std::map<DomainPoint, RtUserEvent>::const_iterator finder =
-              pending_points.find(point);
-          if (finder == pending_points.end())
+          for (std::vector<PendingPointwiseArgs>::const_iterator it =
+                   pending_pointwise.begin();
+               it != pending_pointwise.end(); it++)
           {
-            if (!to_trigger.exists())
-              to_trigger = Runtime::create_rt_user_event();
-            pending_points.emplace(std::make_pair(point, to_trigger));
+            if (!it->matches(point, intra_space, output_index))
+              continue;
+            if (to_trigger.exists())
+              Runtime::trigger_event(to_trigger, it->to_trigger);
             return to_trigger;
           }
-          else
-          {
-            if (to_trigger.exists())
-              Runtime::trigger_event(to_trigger, finder->second);
-            return finder->second;
-          }
+          if (!to_trigger.exists())
+            to_trigger = Runtime::create_rt_user_event();
+          pending_pointwise.emplace_back(PendingPointwiseArgs{
+              point, to_trigger, output_index, intra_space});
+          return to_trigger;
         }
         size_t offset = context_index - reorder_buffer.front().operation_index;
         const ReorderBufferEntry& entry = reorder_buffer[offset];
@@ -7832,8 +7833,9 @@ namespace Legion {
       }
       else
         return shard_manager->find_pointwise_dependence(
-            context_index, point, shard, to_trigger);
-      return op->find_pointwise_dependence(point, gen, to_trigger);
+            context_index, point, shard, intra_space, to_trigger, output_index);
+      return op->find_pointwise_dependence(
+          point, gen, intra_space, to_trigger, output_index);
     }
 
     //--------------------------------------------------------------------------
@@ -10041,6 +10043,76 @@ namespace Legion {
           report_output_registrations(
               source, source_space, references, new_subscriptions));
       set->unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_output_offset(Deserializer& derez)
+    //--------------------------------------------------------------------------
+    {
+      uint64_t context_index;
+      derez.deserialize(context_index);
+      unsigned index;
+      derez.deserialize(index);
+      unsigned dim;
+      derez.deserialize(dim);
+      size_t color_index;
+      derez.deserialize(color_index);
+      size_t offset;
+      derez.deserialize(offset);
+      // Check to see if the operation has been registered with the reorder
+      // buffer or not and then either save or forward the result
+      Operation* child_op = nullptr;
+      {
+        AutoLock child_lock(child_op_lock);
+        if (total_children_count <= context_index)
+        {
+          // Hasn't been registered yet so we need to buffer it
+          std::vector<std::optional<std::pair<size_t, size_t> > >& offsets =
+              pending_output_offsets[std::make_pair(context_index, index)];
+          if (offsets.size() <= dim)
+            offsets.resize(dim + 1);
+          legion_assert(!offsets[dim]);
+          offsets[dim] = std::make_pair(color_index, offset);
+          return;
+        }
+        else
+        {
+          legion_assert(!reorder_buffer.empty());
+          legion_assert(
+              reorder_buffer.front().operation_index <= context_index);
+          legion_assert(context_index <= reorder_buffer.back().operation_index);
+          const size_t offset =
+              context_index - reorder_buffer.front().operation_index;
+          const ReorderBufferEntry& entry = reorder_buffer[offset];
+          legion_assert(entry.operation_index == context_index);
+          child_op = entry.operation;
+        }
+      }
+      ReplIndexTask* task = legion_safe_cast<ReplIndexTask*>(child_op);
+      task->record_output_offset(index, dim, color_index, offset);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::find_pending_output_offsets(
+        uint64_t context_index, unsigned index,
+        std::vector<std::optional<std::pair<size_t, size_t> > >& offsets)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(offsets.empty());
+      const std::pair<uint64_t, unsigned> key(context_index, index);
+      AutoLock child_lock(child_op_lock);
+      legion_assert(context_index < total_children_count);
+      legion_assert(!reorder_buffer.empty());
+      legion_assert(reorder_buffer.front().operation_index <= context_index);
+      legion_assert(context_index <= reorder_buffer.back().operation_index);
+      std::map<
+          std::pair<uint64_t, unsigned>,
+          std::vector<std::optional<std::pair<size_t, size_t> > > >::iterator
+          finder = pending_output_offsets.find(key);
+      if (finder == pending_output_offsets.end())
+        return;
+      offsets.swap(finder->second);
+      pending_output_offsets.erase(finder);
     }
 
     //--------------------------------------------------------------------------

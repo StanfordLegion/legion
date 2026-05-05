@@ -18,6 +18,7 @@
 
 #include "legion/api/output_region.h"
 #include "legion/kernel/garbage_collection.h"
+#include "legion/kernel/metatask.h"
 
 namespace Legion {
   namespace Internal {
@@ -33,36 +34,29 @@ namespace Legion {
     class OutputRegionImpl
       : public Collectable,
         public Heapify<OutputRegionImpl, OPERATION_LIFETIME> {
-    private:
-      struct LayoutCreator {
+    public:
+      struct FinalizeOutputRegionArgs
+        : public LgTaskArgs<FinalizeOutputRegionArgs> {
       public:
-        LayoutCreator(
-            Realm::InstanceLayoutGeneric*& l, const Domain& d,
-            const Realm::InstanceLayoutConstraints& c,
-            const std::vector<int32_t>& d_order)
-          : layout(l), domain(d), constraints(c), dim_order(d_order)
-        { }
-        template<typename DIM, typename COLOR_T>
-        static inline void demux(LayoutCreator* creator)
+        static constexpr LgTaskID TASK_ID = LG_FINALIZE_OUTPUT_REGION_TASK_ID;
+      public:
+        FinalizeOutputRegionArgs(void) = default;
+        FinalizeOutputRegionArgs(OutputRegionImpl* r, RtEvent effects)
+          : LgTaskArgs<FinalizeOutputRegionArgs>(false, false), region(r),
+            safe_effects(effects)
         {
-          legion_assert(creator->dim_order.size() == DIM::N);
-          const DomainT<DIM::N, COLOR_T> bounds =
-              Rect<DIM::N, COLOR_T>(creator->domain);
-          creator->layout =
-              Realm::InstanceLayoutGeneric::choose_instance_layout(
-                  bounds, creator->constraints, creator->dim_order.data());
+          region->add_reference();
         }
-      private:
-        Realm::InstanceLayoutGeneric*& layout;
-        const Domain& domain;
-        const Realm::InstanceLayoutConstraints& constraints;
-        const std::vector<int32_t>& dim_order;
+        void execute(void) const;
+      public:
+        OutputRegionImpl* region;
+        RtEvent safe_effects;
       };
     public:
       OutputRegionImpl(
           unsigned index, const OutputRequirement& req,
           const InstanceSet& instance_set, TaskContext* ctx,
-          const bool global_indexing, const bool valid,
+          const bool global_indexing, const bool bounded,
           const bool grouped_fields);
       OutputRegionImpl(const OutputRegionImpl& rhs) = delete;
       ~OutputRegionImpl(void);
@@ -72,7 +66,7 @@ namespace Legion {
       Memory target_memory(void) const;
     public:
       LogicalRegion get_logical_region(void) const;
-      bool is_valid_output_region(void) const;
+      bool is_bounded_output_region(void) const;
     public:
       void check_type_tag(TypeTag type_tag) const;
       void check_field_size(FieldID field_id, size_t field_size) const;
@@ -86,7 +80,7 @@ namespace Legion {
           PhysicalInstance instance, const LayoutConstraintSet* constraints,
           bool check_constraints);
     public:
-      void finalize(RtEvent safe_effects);
+      RtEvent finalize(RtEvent safe_effects, bool escaped = false);
     public:
       bool is_complete(FieldID& unbound_field) const;
     public:

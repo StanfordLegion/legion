@@ -462,7 +462,7 @@ namespace Legion {
           const std::deque<PhysicalManager*>& candidates) const;
     public:
       PhysicalManager* create_unbound_instance(
-          LogicalRegion region, LayoutConstraintSet& constraints,
+          LogicalRegion region, const LayoutConstraintSet& constraints,
           ApEvent ready_event, GCPriority priority);
       void check_instance_deletions(const std::vector<PhysicalManager*>& del);
     protected:

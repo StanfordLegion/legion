@@ -77,7 +77,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx) override;
       virtual const VersionInfo& get_version_info(unsigned idx) const override;
       virtual bool is_output_global(unsigned idx) const override;
-      virtual bool is_output_valid(unsigned idx) const override;
+      virtual bool is_output_bounded(unsigned idx) const override;
       virtual bool is_output_grouped(unsigned idx) const override;
       virtual void record_output_extent(
           unsigned idx, const DomainPoint& color,

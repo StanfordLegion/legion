@@ -104,12 +104,12 @@ namespace Legion {
       class OutputOptions {
       public:
         OutputOptions(void) : store(0) { }
-        OutputOptions(bool global, bool valid, bool grouped)
-          : store((global ? 1 : 0) | (valid ? 2 : 0) | (grouped ? 4 : 0))
+        OutputOptions(bool global, bool bounded, bool grouped)
+          : store((global ? 1 : 0) | (bounded ? 2 : 0) | (grouped ? 4 : 0))
         { }
       public:
         inline bool global_indexing(void) const { return (store & 1); }
-        inline bool valid_requirement(void) const { return (store & 2); }
+        inline bool bounded_requirement(void) const { return (store & 2); }
         inline bool grouped_fields(void) const { return (store & 4); }
       private:
         uint8_t store;
@@ -269,7 +269,7 @@ namespace Legion {
       virtual void launch_task(bool inline_task = false) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool is_output_global(unsigned idx) const { return false; }
-      virtual bool is_output_valid(unsigned idx) const { return false; }
+      virtual bool is_output_bounded(unsigned idx) const { return false; }
       virtual bool is_output_grouped(unsigned idx) const { return false; }
     public:
       virtual TaskKind get_task_kind(void) const = 0;

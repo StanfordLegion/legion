@@ -44,7 +44,7 @@ namespace Legion {
     // The call is legal only when the output region is valid and
     // will raise an error otherwise.
     LogicalRegion get_logical_region(void) const;
-    bool is_valid_output_region(void) const;
+    bool is_bounded_output_region(void) const;
   public:
     // Returns a deferred buffer that satisfies the layout constraints of
     // this output region. The caller still needs to pass this buffer to

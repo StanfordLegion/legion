@@ -371,8 +371,10 @@ namespace Legion {
       virtual RtEvent find_intra_space_dependence(const DomainPoint& point);
       virtual bool is_pointwise_analyzable(void) const override;
       virtual RtEvent find_pointwise_dependence(
-          const DomainPoint& point, GenerationID gen,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          const DomainPoint& point, GenerationID gen, bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
     public:
       // From MemoizableOp
       virtual void trigger_replay(void) override;

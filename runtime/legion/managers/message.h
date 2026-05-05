@@ -47,7 +47,7 @@ namespace Legion {
 
     // clang-format off
     // All the different kinds of active mssages 
-    // (kind, type, name, response, escape context, escape op)
+    // enum, type, name, response, escape context, escape op
 #define LEGION_ACTIVE_MESSAGES(__op__) \
   __op__(SEND_STARTUP_BARRIER, StartupBarrierMessage, "Startup Barrier Message", false, true, true) \
   __op__(TASK_MESSAGE, TaskMessage, "Distribute Task Message", false, true, true) \
@@ -197,6 +197,7 @@ namespace Legion {
   __op__(SEND_FUTURE_MAP_POINTWISE, FutureMapPointwise, "Future Map Pointwise Message", false, false, false) \
   __op__(SEND_REPL_COMPUTE_EQUIVALENCE_SETS, ReplComputeEquivalenceSets, "Replicated Compute Equivalence Sets Message", false, false, false) \
   __op__(SEND_REPL_OUTPUT_EQUIVALENCE_SET, ReplOutputEquivalenceSet, "Replicated Output Equivalence Set Message", false, false, false) \
+  __op__(SEND_REPL_OUTPUT_OFFSET, ReplOutputOffset, "Replicated Output Region Offset", false, false, false) \
   __op__(SEND_REPL_REFINE_EQUIVALENCE_SETS, ReplRefineEquivalenceSets, "Replicated Refine Equivalence Sets Message", false, false, false) \
   __op__(SEND_REPL_EQUIVALENCE_SET_NOTIFICATION, ReplEquivalenceSetNotification, "Replicated Equivalence Set Notification Message", false, false, false) \
   __op__(SEND_REPL_BROADCAST_UPDATE, ReplBroadcastUpdate, "Replicated Broadcast Update Message", false, false, true) \

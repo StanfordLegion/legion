@@ -341,8 +341,9 @@ namespace Legion {
       virtual void replay_pointwise_dependences(
           std::map<unsigned, std::vector<PointwiseDependence> >& dependences);
       virtual RtEvent find_pointwise_dependence(
-          const DomainPoint& point, GenerationID gen,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+          const DomainPoint& point, GenerationID gen, bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_region = std::optional<unsigned>());
     protected:
       void filter_copy_request_kinds(
           MapperManager* mapper,

@@ -798,7 +798,10 @@ namespace Legion {
           ProjectionSummary* one, ProjectionSummary* two) override;
       virtual RtEvent find_pointwise_dependence(
           uint64_t context_index, const DomainPoint& point, ShardID shard,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
     public:
       virtual FillView* find_or_create_fill_view(
           FillOp* op, const void* value, size_t value_size,
@@ -910,6 +913,12 @@ namespace Legion {
       void handle_compute_equivalence_sets(Deserializer& derez);
       void handle_output_equivalence_set(Deserializer& derez);
       void handle_refine_equivalence_sets(Deserializer& derez);
+    public:
+      // Support for output region offset computations
+      void handle_output_offset(Deserializer& derez);
+      void find_pending_output_offsets(
+          uint64_t context_index, unsigned index,
+          std::vector<std::optional<std::pair<size_t, size_t> > >& offsets);
     public:
       // Fence barrier methods
       inline RtBarrier get_next_mapping_fence_barrier(void)
@@ -1262,6 +1271,13 @@ namespace Legion {
       std::map<std::pair<unsigned, unsigned>, RtBarrier> ready_clone_barriers;
       std::map<std::pair<unsigned, unsigned>, RtUserEvent>
           pending_clone_barriers;
+    protected:
+      // Pending output offsets for tasks that haven't been registered
+      // Should be at most one entry for each point task on each dimension
+      std::map<
+          std::pair<uint64_t, unsigned>,
+          std::vector<std::optional<std::pair<size_t, size_t> > > >
+          pending_output_offsets;
     protected:
       struct AttachLaunchSpace {
       public:

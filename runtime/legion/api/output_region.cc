@@ -90,10 +90,10 @@ namespace Legion {
   }
 
   //--------------------------------------------------------------------------
-  bool OutputRegion::is_valid_output_region(void) const
+  bool OutputRegion::is_bounded_output_region(void) const
   //--------------------------------------------------------------------------
   {
-    return impl->is_valid_output_region();
+    return impl->is_bounded_output_region();
   }
 
   //--------------------------------------------------------------------------
@@ -152,12 +152,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputRegionImpl::OutputRegionImpl(
         unsigned idx, const OutputRequirement& r, const InstanceSet& instances,
-        TaskContext* ctx, const bool global, const bool valid,
+        TaskContext* ctx, const bool global, const bool bounded,
         const bool grouped)
       : Collectable(), context(ctx), req(r),
         region(runtime->get_node(req.region)), index(idx),
         created_region(
-            (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !valid),
+            (req.flags & LEGION_CREATED_OUTPUT_REQUIREMENT_FLAG) && !bounded),
         global_indexing(global), grouped_fields(grouped)
     //--------------------------------------------------------------------------
     {
@@ -212,7 +212,7 @@ namespace Legion {
     LogicalRegion OutputRegionImpl::get_logical_region(void) const
     //--------------------------------------------------------------------------
     {
-      if (!is_valid_output_region())
+      if (!is_bounded_output_region())
       {
         Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
         error << "Logical region cannot be retrieved from output region "
@@ -224,7 +224,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool OutputRegionImpl::is_valid_output_region(void) const
+    bool OutputRegionImpl::is_bounded_output_region(void) const
     //--------------------------------------------------------------------------
     {
       return !created_region;
@@ -482,9 +482,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputRegionImpl::finalize(RtEvent safe_effects)
+    RtEvent OutputRegionImpl::finalize(RtEvent safe_effects, bool escaped)
     //--------------------------------------------------------------------------
     {
+      // If this is the first invocation, check to see if the index space
+      // is ready for the region. If not then we escape the instances
+      // and then defer until the bounds for the region are ready at
+      // which point we can actually finalize the output regions
+      if (!escaped)
+      {
+        RtEvent precondition = region->row_source->get_ready_event();
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          // Escape each of the returned instances before we return
+          // since the calling context can release the pool these
+          // instances are associated with as soon as we return
+          // and we need to keep these instances alive beyond then
+          std::vector<RtEvent> preconditions;
+          for (std::pair<const FieldID, PhysicalInstance>& instance :
+               returned_instances)
+          {
+            if (!instance.second.exists())
+              continue;
+            // We don't care what the unique event is here because this
+            // instance only needs to live until we redistrict it again
+            // to the actual bounds
+            LgEvent unique_event;
+            const RtEvent ready = context->escape_task_local_instance(
+                instance.second, safe_effects, 1 /*count*/, &instance.second,
+                &unique_event);
+            if (ready.exists())
+              preconditions.push_back(ready);
+          }
+          // Now we can defer this finalize
+          if (!preconditions.empty())
+          {
+            preconditions.push_back(precondition);
+            precondition = Runtime::merge_events(preconditions);
+          }
+          if (precondition.exists() && !precondition.has_triggered())
+          {
+            // Launch a continuation to actually finalize this output region
+            FinalizeOutputRegionArgs args(this, safe_effects);
+            return runtime->issue_runtime_meta_task(
+                args, LG_LATENCY_WORK_PRIORITY, precondition);
+          }
+          else
+            escaped = true;
+        }
+      }
+
       // Transpose the returned instances
       std::map<PhysicalInstance, std::vector<FieldID> > instance_fields;
       for (const std::pair<const FieldID, PhysicalInstance>& inst :
@@ -517,15 +564,6 @@ namespace Legion {
           legion_assert(
               (current == nullptr) ||
               (layout->alignment_reqd == current->alignment_reqd));
-          // Create an external Realm instance
-          Realm::ProfilingRequestSet requests;
-          if (runtime->profiler != nullptr)
-          {
-            const LgEvent unique_event = manager->get_unique_event();
-            legion_assert(unique_event.exists());
-            runtime->profiler->add_inst_request(
-                requests, context->get_unique_id(), unique_event);
-          }
           PhysicalInstance instance = pit.first;
           const size_t footprint = layout->bytes_used;
           if (instance.exists())
@@ -533,13 +571,21 @@ namespace Legion {
             LgEvent unique_event = manager->get_unique_event();
             const RtEvent ready = context->escape_task_local_instance(
                 instance, safe_effects, 1 /*count*/, &instance, &unique_event,
-                (const Realm::InstanceLayoutGeneric**)&layout);
+                (const Realm::InstanceLayoutGeneric**)&layout, escaped);
             if (manager->update_physical_instance(instance, ready, footprint))
               delete manager;
           }
           else
           {
             // We don't have an existing instance so we need to make one
+            Realm::ProfilingRequestSet requests;
+            if (runtime->profiler != nullptr)
+            {
+              const LgEvent unique_event = manager->get_unique_event();
+              legion_assert(unique_event.exists());
+              runtime->profiler->add_inst_request(
+                  requests, context->get_unique_id(), unique_event);
+            }
             const RtEvent ready(Realm::RegionInstance::create_instance(
                 instance, manager->memory_manager->memory, *layout, requests));
             if (ready.exists() && (implicit_profiler != nullptr))
@@ -588,7 +634,7 @@ namespace Legion {
           const RtEvent ready = context->escape_task_local_instance(
               pit.first, safe_effects, instances.size(), &instances.front(),
               &unique_events.front(),
-              (const Realm::InstanceLayoutGeneric**)&layouts.front());
+              (const Realm::InstanceLayoutGeneric**)&layouts.front(), escaped);
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
             if (managers[idx]->update_physical_instance(
@@ -633,6 +679,18 @@ namespace Legion {
           }
         }
       }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void OutputRegionImpl::FinalizeOutputRegionArgs::execute(void) const
+    //--------------------------------------------------------------------------
+    {
+      RtEvent finalized = region->finalize(safe_effects, true /*escaped*/);
+      if (finalized.exists())
+        Processor::add_finish_event_precondition(finalized);
+      if (region->remove_reference())
+        delete region;
     }
 
     //--------------------------------------------------------------------------

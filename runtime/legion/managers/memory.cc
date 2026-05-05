@@ -3807,7 +3807,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalManager* MemoryManager::create_unbound_instance(
-        LogicalRegion region, LayoutConstraintSet& constraints,
+        LogicalRegion region, const LayoutConstraintSet& constraints,
         ApEvent producer_event, GCPriority priority)
     //--------------------------------------------------------------------------
     {
@@ -3878,7 +3878,13 @@ namespace Legion {
           0 /*redop id*/, true /*register now*/, -1U /*instance_footprint*/,
           producer_event, unique_event, PhysicalManager::UNBOUND_INSTANCE_KIND,
           nullptr /*op*/, nullptr /*collective mapping*/, producer_event);
-
+      if (implicit_profiler != nullptr)
+      {
+        implicit_profiler->register_physical_instance_region(
+            unique_event, region);
+        implicit_profiler->register_physical_instance_layout(
+            unique_event, region.get_field_space(), constraints);
+      }
       // Register the instance to make it visible to downstream tasks
       record_created_instance(manager, true /*acquire*/, priority);
       return manager;

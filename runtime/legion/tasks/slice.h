@@ -56,7 +56,7 @@ namespace Legion {
       virtual void launch_task(bool inline_task = false) override;
       virtual bool is_stealable(void) const override;
       virtual bool is_output_global(unsigned idx) const override;
-      virtual bool is_output_valid(unsigned idx) const override;
+      virtual bool is_output_bounded(unsigned idx) const override;
       virtual bool is_output_grouped(unsigned idx) const override;
       virtual void trigger_complete(ApEvent effects) override;
     public:

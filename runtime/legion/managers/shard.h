@@ -166,7 +166,9 @@ namespace Legion {
           const std::vector<bool>& virtual_mappings);
       RtEvent find_pointwise_dependence(
           uint64_t context_index, const DomainPoint& point, ShardID shard,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+          bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index = std::optional<unsigned>());
     public:
       EquivalenceSet* get_initial_equivalence_set(
           unsigned idx, LogicalRegion region, InnerContext* context,
@@ -246,6 +248,9 @@ namespace Legion {
       void send_output_equivalence_set(
           ShardID target, const ReplOutputEquivalenceSet& rez);
       void handle_output_equivalence_set(Deserializer& derez);
+    public:
+      void send_output_offset(ShardID target, const ReplOutputOffset& rez);
+      void handle_output_offset(Deserializer& derez);
     public:
       void send_refine_equivalence_sets(
           ShardID target, const ReplRefineEquivalenceSets& rez);

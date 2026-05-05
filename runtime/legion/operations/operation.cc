@@ -2065,7 +2065,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent Operation::find_pointwise_dependence(
-        const DomainPoint& point, GenerationID gen, RtUserEvent to_trigger)
+        const DomainPoint& point, GenerationID gen, bool intra_space,
+        RtUserEvent to_trigger, std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
       // should never be called

@@ -142,8 +142,10 @@ namespace Legion {
       virtual bool are_all_direct_children(bool local) { return local; }
       virtual size_t get_collective_points(void) const override;
       virtual RtEvent find_pointwise_dependence(
-          const DomainPoint& point, GenerationID gen,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          const DomainPoint& point, GenerationID gen, bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
     public:
       void handle_point_complete(ApEvent effects);
       void handle_point_commit(void);

@@ -222,9 +222,9 @@ namespace Legion {
       {
         OutputRequirement& req = outputs[idx];
         output_region_options[idx] =
-            OutputOptions(false, req.valid_requirement, false /*grouped*/);
+            OutputOptions(false, req.bounded_requirement, false /*grouped*/);
 
-        if (!req.valid_requirement)
+        if (!req.bounded_requirement)
         {
           // Create a deferred index space
           IndexSpace index_space =
@@ -627,10 +627,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::is_output_valid(unsigned idx) const
+    bool IndividualTask::is_output_bounded(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      return output_region_options[idx].valid_requirement();
+      return output_region_options[idx].bounded_requirement();
     }
 
     //--------------------------------------------------------------------------

@@ -109,7 +109,10 @@ namespace Legion {
           const CollectiveMapping* mapping = nullptr) override;
       virtual RtEvent find_pointwise_dependence(
           uint64_t context_index, const DomainPoint& point, ShardID shard,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
       virtual void find_trace_local_sets(
           unsigned req_index, const FieldMask& mask,
           std::map<EquivalenceSet*, unsigned>& current_sets,

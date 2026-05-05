@@ -515,14 +515,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent ShardManager::find_pointwise_dependence(
         uint64_t context_index, const DomainPoint& point, ShardID shard,
-        RtUserEvent to_trigger)
+        bool intra_space, RtUserEvent to_trigger,
+        std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
       // See if it's local or not
       for (ShardTask* shard_task : local_shards)
         if (shard_task->shard_id == shard)
           return shard_task->get_replicate_context()->find_pointwise_dependence(
-              context_index, point, shard, to_trigger);
+              context_index, point, shard, intra_space, to_trigger,
+              output_index);
       const AddressSpaceID target_space = (*address_spaces)[shard];
       legion_assert(target_space != runtime->address_space);
       if (!to_trigger.exists())
@@ -534,7 +536,9 @@ namespace Legion {
         rez.serialize(context_index);
         rez.serialize(point);
         rez.serialize(shard);
+        rez.serialize<bool>(intra_space);
         rez.serialize(to_trigger);
+        rez.serialize(output_index);
       }
       rez.dispatch(target_space);
       return to_trigger;
@@ -1697,6 +1701,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_output_offset(
+        ShardID target, const ReplOutputOffset& rez)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(target < address_spaces->size());
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_payload(), rez.get_payload_size());
+        // Have to unpack the preample we already know
+        DistributedID local_repl;
+        derez.deserialize(local_repl);
+        handle_output_offset(derez);
+      }
+      else
+        rez.dispatch(target_space);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_output_offset(Deserializer& derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = local_shards.begin();
+           it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->get_replicate_context()->handle_output_offset(derez);
+          return;
+        }
+      }
+      // Should never get here
+      std::abort();
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::send_refine_equivalence_sets(
         ShardID target, const ReplRefineEquivalenceSets& rez)
     //--------------------------------------------------------------------------
@@ -2491,11 +2534,15 @@ namespace Legion {
       derez.deserialize(point);
       ShardID shard;
       derez.deserialize(shard);
+      bool intra_space;
+      derez.deserialize(intra_space);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      std::optional<unsigned> output_index;
+      derez.deserialize(output_index);
       ShardManager* manager = runtime->find_shard_manager(did);
       manager->find_pointwise_dependence(
-          context_index, point, shard, to_trigger);
+          context_index, point, shard, intra_space, to_trigger, output_index);
     }
 
     //--------------------------------------------------------------------------
@@ -2809,6 +2856,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager* manager = runtime->find_shard_manager(repl_id);
       manager->handle_output_equivalence_set(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplOutputOffset::handle(
+        Deserializer& derez, AddressSpaceID)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager* manager = runtime->find_shard_manager(repl_id);
+      manager->handle_output_offset(derez);
     }
 
     //--------------------------------------------------------------------------

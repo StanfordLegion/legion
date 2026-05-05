@@ -583,7 +583,8 @@ namespace Legion {
       }
       else
         return context->find_pointwise_dependence(
-            *context_index, point, 0 /*shard*/, to_trigger);
+            *context_index, point, 0 /*shard*/, false /*intra space*/,
+            to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -1121,7 +1122,8 @@ namespace Legion {
       const ShardID owner_shard =
           sharding_function.load()->find_owner(point, sharding_domain);
       return context->find_pointwise_dependence(
-          *context_index, point, owner_shard, to_trigger);
+          *context_index, point, owner_shard, false /*intra space*/,
+          to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

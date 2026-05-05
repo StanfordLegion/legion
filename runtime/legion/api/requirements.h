@@ -182,8 +182,8 @@ namespace Legion {
    * task, and are therefore not mapped ahead of the task's execution.
    *
    * Output region requirements come in two flavors: those that are already
-   * valid region requirements and those which are going to produce variable
-   * sized outputs. Valid region requirements behave like normal region
+   * bounded region requirements and those which are going to produce variable
+   * sized outputs. Bounded region requirements behave like normal region
    * requirements except they will not be mapped by the task. Alternatively,
    * for variable-sized output region requirements the runtime
    * will create fresh region and partition names for output requirements
@@ -244,7 +244,7 @@ namespace Legion {
    */
   struct OutputRequirement : public RegionRequirement {
   public:
-    OutputRequirement(bool valid_requirement = false);
+    OutputRequirement(bool bounded = false);
     OutputRequirement(const RegionRequirement& req);
     OutputRequirement(
         FieldSpace field_space, const std::set<FieldID>& fields, int dim = 1,
@@ -268,10 +268,10 @@ namespace Legion {
     void set_projection(ProjectionID projection, IndexSpace color_space);
   public:
     TypeTag type_tag;
-    FieldSpace field_space; /**< field space for the output region */
-    bool global_indexing;   /**< global indexing is used when true */
-    bool valid_requirement; /**< indicate requirement is valid */
-    IndexSpace color_space; /**< color space for the output partition */
+    FieldSpace field_space;   /**< field space for the output region */
+    bool global_indexing;     /**< global indexing is used when true */
+    bool bounded_requirement; /**< indicate requirement is bounded */
+    IndexSpace color_space;   /**< color space for the output partition */
   };
 
   /**

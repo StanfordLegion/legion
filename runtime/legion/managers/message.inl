@@ -341,6 +341,8 @@ namespace Legion {
           break;
         case SEND_REPL_OUTPUT_EQUIVALENCE_SET:
           break;
+        case SEND_REPL_OUTPUT_OFFSET:
+          break;
         case SEND_REPL_REFINE_EQUIVALENCE_SETS:
           break;
         case SEND_REPL_EQUIVALENCE_SET_NOTIFICATION:

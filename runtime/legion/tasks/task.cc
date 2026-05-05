@@ -159,7 +159,7 @@ namespace Legion {
       rez.serialize(req.type_tag);
       rez.serialize(req.field_space);
       rez.serialize(req.global_indexing);
-      rez.serialize(req.valid_requirement);
+      rez.serialize(req.bounded_requirement);
       rez.serialize(req.color_space);
     }
 
@@ -173,7 +173,7 @@ namespace Legion {
       derez.deserialize(req.type_tag);
       derez.deserialize(req.field_space);
       derez.deserialize(req.global_indexing);
-      derez.deserialize(req.valid_requirement);
+      derez.deserialize(req.bounded_requirement);
       derez.deserialize(req.color_space);
     }
 
@@ -1114,7 +1114,7 @@ namespace Legion {
       legion_assert(!output_regions.empty());
       const size_t offset = regions.size();
       for (unsigned idx = 0; idx < output_regions.size(); idx++)
-        if (!is_output_valid(idx))
+        if (!is_output_bounded(idx))
           parent_ctx->finalize_output_eqkd_tree(
               find_parent_index(offset + idx));
     }
