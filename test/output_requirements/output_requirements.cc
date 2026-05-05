@@ -315,6 +315,7 @@ struct RowMajorTransform : public ProjectionFunctor {
   RowMajorTransform(Runtime* rt) : ProjectionFunctor(rt) { }
   virtual bool is_functional(void) const { return true; }
   virtual bool is_exclusive(void) const { return true; }
+  virtual bool is_invertible(void) const { return true; }
   virtual unsigned get_depth(void) const { return 0; }
 
   using ProjectionFunctor::project;
@@ -330,12 +331,24 @@ struct RowMajorTransform : public ProjectionFunctor {
     assert(runtime->has_logical_subregion_by_color(upper_bound, result));
     return runtime->get_logical_subregion_by_color(upper_bound, result);
   }
+  
+  using ProjectionFunctor::invert;
+  virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+      const Domain& launch_domain, std::vector<DomainPoint>& ordered_points)
+  {
+    const DomainPoint color = runtime->get_index_space_color_point(region.get_index_space());
+    assert(color.dim == 2);
+    DomainPoint& point = ordered_points.emplace_back(DomainPoint());
+    point.dim = 1;
+    point[0] = color[1] * DIM_SIZE + color[0];
+  }
 };
 
 struct ColMajorTransform : public ProjectionFunctor {
   ColMajorTransform(Runtime* rt) : ProjectionFunctor(rt) { }
   virtual bool is_functional(void) const { return true; }
   virtual bool is_exclusive(void) const { return true; }
+  virtual bool is_invertible(void) const { return true; }
   virtual unsigned get_depth(void) const { return 0; }
 
   using ProjectionFunctor::project;
@@ -350,6 +363,17 @@ struct ColMajorTransform : public ProjectionFunctor {
     result[1] = point[0] % DIM_SIZE;
     assert(runtime->has_logical_subregion_by_color(upper_bound, result));
     return runtime->get_logical_subregion_by_color(upper_bound, result);
+  }
+
+  using ProjectionFunctor::invert;
+  virtual void invert(LogicalRegion region, LogicalPartition upper_bound,
+      const Domain& launch_domain, std::vector<DomainPoint>& ordered_points)
+  {
+    const DomainPoint color = runtime->get_index_space_color_point(region.get_index_space());
+    assert(color.dim == 2);
+    DomainPoint& point = ordered_points.emplace_back(DomainPoint());
+    point.dim = 1;
+    point[0] = color[0] * DIM_SIZE + color[1];
   }
 };
 

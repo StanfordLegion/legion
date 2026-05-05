@@ -99,7 +99,6 @@ namespace Legion {
       point_arguments = FutureMap();
       point_futures.clear();
       output_region_options.clear();
-      output_region_extents.clear();
       slices.clear();
       predicate_false_result.clear();
       predicate_false_future = Future();
@@ -341,7 +340,6 @@ namespace Legion {
       if (!rhs->point_futures.empty())
         this->point_futures = rhs->point_futures;
       this->output_region_options = rhs->output_region_options;
-      this->output_region_extents.resize(this->output_region_options.size());
       if (!elide_future_return)
       {
         this->predicate_false_future = rhs->predicate_false_future;
@@ -436,9 +434,6 @@ namespace Legion {
       if (concurrent_task)
         return false;
       if (!check_collective_regions.empty())
-        return false;
-      // TODO: relax this to support pointwse output regions
-      if (!output_regions.empty())
         return false;
       return PointwiseAnalyzable<
           CollectiveViewCreator<TaskOp> >::is_pointwise_analyzable();
@@ -577,7 +572,6 @@ namespace Legion {
         output_region_options.resize(num_globals);
         for (unsigned idx = 0; idx < num_globals; idx++)
           derez.deserialize(output_region_options[idx]);
-        output_region_extents.resize(num_globals);
       }
       if (concurrent_task)
       {

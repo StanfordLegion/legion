@@ -146,14 +146,19 @@ namespace Legion {
         version_info->record_equivalence_set(set, version_mask);
         // Launch a meta-task to register this equivalence set with
         // EqKDTree once the index space domain is ready
-        RtUserEvent done_event = Runtime::create_rt_user_event();
         // Always register with the operation's immediate enclosing context
         FinalizeOutputEquivalenceSetArgs args(
-            this, op->get_context(), parent_req_index, set, done_event);
-        runtime->issue_runtime_meta_task(
-            args, LG_LATENCY_DEFERRED_PRIORITY,
-            region_node->row_source->get_ready_event());
-        *output_region_ready = done_event;
+            this, op->get_context(), parent_req_index, set);
+        // If this an output region for an index space operation then we
+        // use the parent region being ready as the precondition since we
+        // won't be able to register the equivalence set until we know
+        // the bounds of the parent region anyway
+        const RtEvent precondition =
+            (region_node->parent != nullptr) ?
+                region_node->parent->parent->row_source->get_ready_event() :
+                region_node->row_source->get_ready_event();
+        *output_region_ready = runtime->issue_runtime_meta_task(
+            args, LG_LATENCY_DEFERRED_PRIORITY, precondition);
         AutoLock m_lock(manager_lock);
         legion_assert(version_mask * equivalence_sets.get_valid_mask());
         if (equivalence_sets.insert(set, version_mask))
@@ -386,7 +391,8 @@ namespace Legion {
     {
       RtEvent done = proxy_this->finalize_output_equivalence_set(
           set, context, parent_req_index);
-      Runtime::trigger_event(done_event, done);
+      if (done.exists())
+        Processor::add_finish_event_precondition(done);
       if (set->remove_base_gc_ref(META_TASK_REF))
         delete set;
     }

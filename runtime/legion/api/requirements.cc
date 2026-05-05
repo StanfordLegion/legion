@@ -600,18 +600,18 @@ namespace Legion {
   /////////////////////////////////////////////////////////////
 
   //--------------------------------------------------------------------------
-  OutputRequirement::OutputRequirement(bool valid)
+  OutputRequirement::OutputRequirement(bool bounded)
     : RegionRequirement(),
       type_tag(Internal::NT_TemplateHelper::encode_tag<1, coord_t>()),
       field_space(FieldSpace::NO_SPACE), global_indexing(false),
-      valid_requirement(valid), color_space(IndexSpace::NO_SPACE)
+      bounded_requirement(bounded), color_space(IndexSpace::NO_SPACE)
   //--------------------------------------------------------------------------
   { }
 
   //--------------------------------------------------------------------------
   OutputRequirement::OutputRequirement(const RegionRequirement& req)
     : RegionRequirement(req), type_tag(req.parent.get_type_tag()),
-      global_indexing(false), valid_requirement(true),
+      global_indexing(false), bounded_requirement(true),
       color_space(IndexSpace::NO_SPACE)
   //--------------------------------------------------------------------------
   { }
@@ -621,7 +621,7 @@ namespace Legion {
       FieldSpace _field_space, const std::set<FieldID>& fields, int dim /*=1*/,
       bool _global_indexing /*=false*/)
     : RegionRequirement(), field_space(_field_space),
-      global_indexing(_global_indexing), valid_requirement(false),
+      global_indexing(_global_indexing), bounded_requirement(false),
       color_space(IndexSpace::NO_SPACE)
   //--------------------------------------------------------------------------
   {
@@ -653,7 +653,8 @@ namespace Legion {
     : RegionRequirement(static_cast<const RegionRequirement&>(other)),
       type_tag(other.type_tag), field_space(other.field_space),
       global_indexing(other.global_indexing),
-      valid_requirement(other.valid_requirement), color_space(other.color_space)
+      bounded_requirement(other.bounded_requirement),
+      color_space(other.color_space)
   //--------------------------------------------------------------------------
   { }
 
@@ -670,7 +671,7 @@ namespace Legion {
         static_cast<const RegionRequirement&>(rhs);
     field_space = rhs.field_space;
     global_indexing = rhs.global_indexing;
-    valid_requirement = rhs.valid_requirement;
+    bounded_requirement = rhs.bounded_requirement;
     type_tag = rhs.type_tag;
     color_space = rhs.color_space;
     return *this;
@@ -684,7 +685,7 @@ namespace Legion {
         static_cast<const RegionRequirement&>(rhs);
     field_space = FieldSpace::NO_SPACE;
     global_indexing = false;
-    valid_requirement = true;
+    bounded_requirement = true;
     type_tag = rhs.region.get_type_tag();
     color_space = IndexSpace::NO_SPACE;
     return *this;
@@ -696,7 +697,7 @@ namespace Legion {
   {
     if ((field_space != rhs.field_space) ||
         (global_indexing != rhs.global_indexing) ||
-        (valid_requirement != rhs.valid_requirement) ||
+        (bounded_requirement != rhs.bounded_requirement) ||
         (color_space != rhs.color_space))
       return false;
     return static_cast<const RegionRequirement&>(*this) ==
@@ -715,9 +716,9 @@ namespace Legion {
       return true;
     if (global_indexing > rhs.global_indexing)
       return false;
-    if (valid_requirement < rhs.valid_requirement)
+    if (bounded_requirement < rhs.bounded_requirement)
       return true;
-    if (valid_requirement > rhs.valid_requirement)
+    if (bounded_requirement > rhs.bounded_requirement)
       return false;
     if (color_space < rhs.color_space)
       return true;

@@ -97,7 +97,7 @@ namespace Legion {
       virtual bool is_stealable(void) const override;
       virtual bool replicate_task(void) override;
     public:
-      virtual bool is_output_valid(unsigned idx) const override;
+      virtual bool is_output_bounded(unsigned idx) const override;
       virtual bool is_output_grouped(unsigned idx) const override;
     public:
       virtual TaskKind get_task_kind(void) const override;

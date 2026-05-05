@@ -6669,7 +6669,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       GenerationID pointwise_generation = 0;
-      std::map<DomainPoint, RtUserEvent> pending_pointwise;
+      std::vector<PendingPointwiseArgs> pending_pointwise;
       LgPriority priority = LG_THROUGHPUT_WORK_PRIORITY;
       // If this is ordered, we need to record this in the reorder buffer
       // and determine if we need to perform a window wait or not
@@ -6713,7 +6713,7 @@ namespace Legion {
         reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
         if (!pending_pointwise_dependences.empty())
         {
-          std::map<uint64_t, std::map<DomainPoint, RtUserEvent>>::iterator
+          std::map<uint64_t, std::vector<PendingPointwiseArgs>>::iterator
               finder = pending_pointwise_dependences.find(context_index);
           if (finder != pending_pointwise_dependences.end())
           {
@@ -6749,10 +6749,10 @@ namespace Legion {
       // Trigger any pending pointwise dependences
       if (!pending_pointwise.empty())
       {
-        for (const std::pair<const DomainPoint, RtUserEvent>& it :
-             pending_pointwise)
+        for (const PendingPointwiseArgs& it : pending_pointwise)
           op->find_pointwise_dependence(
-              it.first, pointwise_generation, it.second);
+              it.point, pointwise_generation, it.intra_space, it.to_trigger,
+              it.output_index);
       }
       RtEvent precondition;
       RtEvent commit_event;
@@ -7515,8 +7515,7 @@ namespace Legion {
         previous_trace = nullptr;
       }
       std::map<Operation*, GenerationID> pending_generations;
-      std::map<Operation*, std::map<DomainPoint, RtUserEvent>>
-          pending_pointwise;
+      std::map<Operation*, std::vector<PendingPointwiseArgs>> pending_pointwise;
       if (runtime->program_order_execution)
       {
         while (!ready_operations.empty())
@@ -7535,7 +7534,7 @@ namespace Legion {
             reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
             if (!pending_pointwise_dependences.empty())
             {
-              std::map<uint64_t, std::map<DomainPoint, RtUserEvent>>::iterator
+              std::map<uint64_t, std::vector<PendingPointwiseArgs>>::iterator
                   finder = pending_pointwise_dependences.find(context_index);
               if (finder != pending_pointwise_dependences.end())
               {
@@ -7576,7 +7575,7 @@ namespace Legion {
           reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
           if (!pending_pointwise_dependences.empty())
           {
-            std::map<uint64_t, std::map<DomainPoint, RtUserEvent>>::iterator
+            std::map<uint64_t, std::vector<PendingPointwiseArgs>>::iterator
                 finder = pending_pointwise_dependences.find(context_index);
             if (finder != pending_pointwise_dependences.end())
             {
@@ -7600,15 +7599,16 @@ namespace Legion {
       {
         d_lock.release();
         for (const std::pair<
-                 Operation* const, std::map<DomainPoint, RtUserEvent>>& pit :
+                 Operation* const, std::vector<PendingPointwiseArgs>>& pit :
              pending_pointwise)
         {
           std::map<Operation*, GenerationID>::const_iterator finder =
               pending_generations.find(pit.first);
           legion_assert(finder != pending_generations.end());
-          for (const std::pair<const DomainPoint, RtUserEvent>& it : pit.second)
+          for (const PendingPointwiseArgs& it : pit.second)
             pit.first->find_pointwise_dependence(
-                it.first, finder->second, it.second);
+                it.point, finder->second, it.intra_space, it.to_trigger,
+                it.output_index);
         }
         d_lock.reacquire();
       }
@@ -7636,17 +7636,19 @@ namespace Legion {
       reorder_buffer.emplace_back(ReorderBufferEntry(op, context_index));
       if (!pending_pointwise_dependences.empty())
       {
-        std::map<uint64_t, std::map<DomainPoint, RtUserEvent>>::iterator
-            finder = pending_pointwise_dependences.find(context_index);
+        std::map<uint64_t, std::vector<PendingPointwiseArgs>>::iterator finder =
+            pending_pointwise_dependences.find(context_index);
         if (finder != pending_pointwise_dependences.end())
         {
-          std::map<DomainPoint, RtUserEvent> to_trigger;
-          to_trigger.swap(finder->second);
+          std::vector<PendingPointwiseArgs> to_perform;
+          to_perform.swap(finder->second);
           pending_pointwise_dependences.erase(finder);
           const GenerationID generation = op->get_generation();
           child_lock.release();
-          for (const std::pair<const DomainPoint, RtUserEvent>& it : to_trigger)
-            op->find_pointwise_dependence(it.first, generation, it.second);
+          for (const PendingPointwiseArgs& it : to_perform)
+            op->find_pointwise_dependence(
+                it.point, generation, it.intra_space, it.to_trigger,
+                it.output_index);
         }
       }
     }
@@ -9213,9 +9215,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent InnerContext::find_pointwise_dependence(
         uint64_t context_index, const DomainPoint& point, ShardID shard,
-        RtUserEvent to_trigger)
+        bool intra_space, RtUserEvent to_trigger,
+        std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
+      // should only get this with control replication
+      legion_assert(!output_index);
       Operation* op;
       GenerationID gen;
       {
@@ -9246,7 +9251,8 @@ namespace Legion {
         gen = op->get_generation();
       }
       // Now we can do the base call to get the operation
-      return op->find_pointwise_dependence(point, gen, to_trigger);
+      return op->find_pointwise_dependence(
+          point, gen, intra_space, to_trigger, output_index);
     }
 
     //--------------------------------------------------------------------------

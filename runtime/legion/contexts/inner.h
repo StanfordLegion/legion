@@ -942,7 +942,10 @@ namespace Legion {
           ProjectionSummary* one, ProjectionSummary* two);
       virtual RtEvent find_pointwise_dependence(
           uint64_t context_index, const DomainPoint& point, ShardID shard,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_index =
+              std::optional<unsigned>()) override;
     public:
       virtual FillView* find_or_create_fill_view(
           FillOp* op, const void* value, size_t value_size, RtEvent& ready);
@@ -1260,7 +1263,20 @@ namespace Legion {
       // Our cached set of index spaces for immediate domains
       std::map<Domain, IndexSpace> index_launch_spaces;
     protected:
-      std::map<uint64_t, std::map<DomainPoint, RtUserEvent> >
+      struct PendingPointwiseArgs {
+        inline bool matches(
+            const DomainPoint& p, bool intra,
+            const std::optional<unsigned>& index) const
+        {
+          return (point == p) && (intra_space == intra) &&
+                 (output_index == index);
+        }
+        DomainPoint point;
+        RtUserEvent to_trigger;
+        std::optional<unsigned> output_index;
+        bool intra_space;
+      };
+      std::map<uint64_t, std::vector<PendingPointwiseArgs> >
           pending_pointwise_dependences;
     protected:
       // Dependence tracking information for phase barriers

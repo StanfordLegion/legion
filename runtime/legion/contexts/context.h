@@ -145,7 +145,10 @@ namespace Legion {
     public:
       virtual RtEvent find_pointwise_dependence(
           uint64_t context_index, const DomainPoint& point, ShardID shard,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) = 0;
+          bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_region =
+              std::optional<unsigned>()) = 0;
       virtual void return_resources(
           ResourceTracker* target, uint64_t return_index,
           std::set<RtEvent>& preconditions) = 0;
@@ -462,7 +465,8 @@ namespace Legion {
       virtual RtEvent escape_task_local_instance(
           PhysicalInstance instance, RtEvent effects, size_t num_results,
           PhysicalInstance* results, LgEvent* unique_events,
-          const Realm::InstanceLayoutGeneric** layouts = nullptr);
+          const Realm::InstanceLayoutGeneric** layouts = nullptr,
+          bool redistrict_only = false);
       virtual void release_task_local_instances(
           ApEvent effects, RtEvent safe_effects);
       FutureInstance* copy_to_future_inst(const void* value, size_t size);
@@ -518,8 +522,9 @@ namespace Legion {
     public:
       void add_output_region(
           const OutputRequirement& req, const InstanceSet& instances,
-          bool global_indexing, bool valid, bool grouped);
-      void finalize_output_regions(RtEvent safe_effects);
+          bool global_indexing, bool bounded, bool grouped);
+      void finalize_output_regions(
+          RtEvent safe_effects, std::vector<RtEvent>& output_regions_finalized);
       void initialize_overhead_profiler(void);
       bool begin_runtime_call(RuntimeCallKind kind, Provenance* provenance);
       void end_runtime_call(

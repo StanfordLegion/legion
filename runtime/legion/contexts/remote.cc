@@ -459,7 +459,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::find_pointwise_dependence(
         uint64_t context_index, const DomainPoint& point, ShardID shard,
-        RtUserEvent to_trigger)
+        bool intra_space, RtUserEvent to_trigger,
+        std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
       if (!to_trigger.exists())
@@ -471,7 +472,9 @@ namespace Legion {
         rez.serialize(context_index);
         rez.serialize(point);
         rez.serialize(shard);
+        rez.serialize(intra_space);
         rez.serialize(to_trigger);
+        rez.serialize(output_index);
       }
       rez.dispatch(owner_space);
       return to_trigger;
@@ -952,9 +955,14 @@ namespace Legion {
       derez.deserialize(point);
       ShardID shard;
       derez.deserialize(shard);
+      bool intra_space;
+      derez.deserialize<bool>(intra_space);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      local->find_pointwise_dependence(context_index, point, shard, to_trigger);
+      std::optional<unsigned> output_index;
+      derez.deserialize(output_index);
+      local->find_pointwise_dependence(
+          context_index, point, shard, intra_space, to_trigger, output_index);
     }
 
     //--------------------------------------------------------------------------

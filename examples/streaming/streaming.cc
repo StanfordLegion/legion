@@ -25,39 +25,32 @@ using namespace Legion::Mapping;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
-  POINTWISE_ANALYSABLE_FILL_ID,
-  POINTWISE_ANALYSABLE_INC_ID,
-  POINTWISE_ANALYSABLE_SUM_ID,
+  EXTRACT_TASK_ID,
+  TRANSFORM_TASK_ID,
+  LOAD_TASK_ID,
 };
 
 enum FieldIDs {
   FID_DATA,
 };
 
-#define TOTAL_POINTS 4
-#define DATA_MULTIPLIER 6553600
+struct ConfigArgs {
+  int tasks_per_processor = 4;
+  int points_per_task = 6553600;
+};
 
 class StreamingMapper: public DefaultMapper {
   private:
-    int current_point;
-    int points_executed;
-    int point_types;
+    MapperEvent deferral_event;
+    std::optional<DomainPoint> current_point;
+    std::optional<uint64_t> current_index;
     bool enable_point_wise_analysis = false;
-    struct InFlightTask {
-      // An event that we will trigger when the task completes.
-      MapperEvent event;
-    };
-    std::deque<InFlightTask> queue;
 
   public:
     StreamingMapper(Machine m,
         Runtime *rt, Processor p)
       : DefaultMapper(rt->get_mapper_runtime(), m, p)
     {
-      current_point = 0;
-      points_executed = 0;
-      point_types = 3; // type_of_task
-
       int argc = Legion::Runtime::get_input_args().argc;
       char **argv = Legion::Runtime::get_input_args().argv;
       // Parse some command line parameters.
@@ -69,44 +62,97 @@ class StreamingMapper: public DefaultMapper {
       }
     }
   public:
-    void select_tasks_to_map(const MapperContext ctx,
+    virtual void select_tasks_to_map(MapperContext ctx,
         const SelectMappingInput& input,
-        SelectMappingOutput& output)
+        SelectMappingOutput& output) override
     {
-      if (!this->enable_point_wise_analysis)
-        DefaultMapper::select_tasks_to_map(ctx, input, output);
-      else
+      assert(!input.ready_tasks.empty());
+      if (this->enable_point_wise_analysis)
       {
-        MapperEvent return_event = this->runtime->create_mapper_event(ctx);
-
-        for (std::list<const Task*>::const_iterator it =
-            input.ready_tasks.begin();
-            (it != input.ready_tasks.end()); it++)
+        if (!current_point)
         {
-          output.map_tasks.insert(*it);
+          const Task* task = input.ready_tasks.front();
+          if (task->task_id == TOP_LEVEL_TASK_ID)
+          {
+            output.map_tasks.insert(task);
+            return;
+          }
+          current_point = task->index_point;
+          current_index = task->get_context_index();
+          // Initialize the current point for this processor
+          for (std::list<const Task*>::const_iterator it =
+                input.ready_tasks.begin(); it !=
+                input.ready_tasks.end(); it++)
+          {
+            if ((*it)->index_point < *current_point)
+              current_point = (*it)->index_point;
+            if ((*it)->get_context_index() < *current_index)
+              current_index = (*it)->get_context_index();
+          }
         }
-        // If we don't schedule any tasks for mapping, the runtime needs to know
-        // when to ask us again to schedule more things. Return the MapperEvent we
-        // selected earlier.
-        if (output.map_tasks.size() == 0)
+        // See if we can find the next task to map
+        const Task* next = nullptr;
+        for (std::list<const Task*>::const_iterator it =
+              input.ready_tasks.begin(); it !=
+              input.ready_tasks.end(); it++)
         {
-          printf("Did not get any task to select\n");
-          assert(return_event.exists());
-          output.deferral_event = return_event;
+          if ((*it)->index_point != *current_point)
+            continue;
+          if ((*it)->get_context_index() != *current_index)
+            continue;
+          next = *it;
+          break;
+        }
+        if (next == nullptr)
+        {
+          if (!deferral_event.exists())
+            deferral_event = runtime->create_mapper_event(ctx);
+          output.deferral_event = deferral_event;
+        }
+        else
+        {
+          output.map_tasks.insert(next);
+          if (++(*current_index) == 4)
+          {
+            // Reset for the next chain
+            current_index.reset();
+            current_point.reset();
+          }
+          if (deferral_event.exists())
+          {
+            MapperEvent to_trigger;
+            std::swap(to_trigger, deferral_event);
+            runtime->trigger_mapper_event(ctx, to_trigger);
+          }
         }
       }
+      else
+        DefaultMapper::select_tasks_to_map(ctx, input, output);
     }
 
-    void map_task(const MapperContext ctx,
+    virtual void slice_task(MapperContext ctx,
+                            const Task& task,
+                            const SliceTaskInput& input,
+                                  SliceTaskOutput& output) override
+    {
+      // Just one slice on the local processor
+      if (input.domain_is.exists())
+        output.slices.emplace_back(TaskSlice(input.domain_is,
+              local_proc, false, false));
+      else
+        output.slices.emplace_back(TaskSlice(input.domain,
+              local_proc, false, false));
+    }
+
+    virtual void map_task(MapperContext ctx,
                   const Task& task,
                   const MapTaskInput& input,
-                  MapTaskOutput& output)
+                  MapTaskOutput& output) override
     {
       if (this->enable_point_wise_analysis)
       {
-        if (task.task_id == POINTWISE_ANALYSABLE_FILL_ID ||
-            task.task_id == POINTWISE_ANALYSABLE_INC_ID  ||
-            task.task_id == POINTWISE_ANALYSABLE_SUM_ID)
+        if (task.task_id == TRANSFORM_TASK_ID  ||
+            task.task_id == LOAD_TASK_ID)
         {
 
           Processor::Kind target_kind = task.target_proc.kind();
@@ -157,36 +203,36 @@ class StreamingMapper: public DefaultMapper {
             LayoutConstraintSet constraints;
             constraints.add_constraint(FieldConstraint(
                   task.regions[i].privilege_fields,
-                  false /*!contiguous*/));
+                  false /*!contiguous*/, false/*inorder*/));
             std::vector<LogicalRegion> regions(1,
                 task.regions[i].region);
-            bool created;
-            bool ok = runtime->find_or_create_physical_instance(ctx,
+            bool ok = runtime->find_physical_instance(ctx,
                       target_memory,
                       constraints,
                       regions,
                       inst,
-                      created,
                       true/*acquire*/,
-                      0/*priority*/,
                       true/*tight_region_bounds*/
                       );
             if (ok)
               output.chosen_instances[i].push_back(inst);
-            else {
-              output.abort_mapping = true;
-              return;
-            }
+            else
+              std::abort();
           }
         }
         else
-        {
           DefaultMapper::map_task(ctx, task, input, output);
-        }
       }
       else
       {
         DefaultMapper::map_task(ctx, task, input, output);
+      }
+      if (task.task_id == EXTRACT_TASK_ID)
+      {
+        const Memory target =
+          default_policy_select_output_target(ctx, task.target_proc);
+        assert(target.exists());
+        output.leaf_pool_bounds[target] = PoolBounds(LEGION_STRICT_UNBOUNDED_POOL);
       }
     }
 
@@ -194,9 +240,8 @@ class StreamingMapper: public DefaultMapper {
         Runtime *rt,
         const std::set<Processor> &local_procs)
     {
-      for (auto proc: local_procs) {
+      for (auto proc: local_procs)
         rt->replace_default_mapper(new StreamingMapper(m, rt, proc), proc);
-      }
     }
 };
 
@@ -204,70 +249,105 @@ void top_level_task(const Task *task,
     const std::vector<PhysicalRegion> &regions,
     Context ctx, Runtime *runtime)
 {
-  int num_points = TOTAL_POINTS;
-  printf("Running with ...\n");
-  printf("Number of Point tasks for each IndexSpace Launch: %d\n", num_points);
-  printf("Number of data points for each point task: %d\n", DATA_MULTIPLIER);
-  double data_size = (num_points * DATA_MULTIPLIER * sizeof(uint64_t)) / (1024 * 1024);
-  printf("Size of allocated data (Number of points * data points for each point task * sizeof(uint64_t): %lf MB\n", data_size);
+  Future total_cpus_f = runtime->select_tunable_value(
+      ctx, DefaultMapper::DEFAULT_TUNABLE_GLOBAL_CPUS);
 
-  Rect<1> launch_bounds(0, num_points - 1);
+  const InputArgs &command_args = Runtime::get_input_args();
+  char **argv = command_args.argv;
+  int argc = command_args.argc;
+
+  ConfigArgs args;
+  for (int i = 0; i < argc; i++)
+    if (strcmp(argv[i], "-tasks") == 0)
+      args.tasks_per_processor = std::atoi(argv[++i]);
+    else if (strcmp(argv[i], "-points") == 0)
+      args.points_per_task = std::atoi(argv[++i]);
+  assert(args.tasks_per_processor > 0);
+  assert(args.points_per_task > 0);
+
+  const size_t total_procs = total_cpus_f.get<size_t>(); 
+  const size_t total_point_tasks = total_procs * args.tasks_per_processor;
+
+  LEGION_PRINT_ONCE(runtime, ctx, stdout, "Tasks per processor: %d\n", args.tasks_per_processor);
+  LEGION_PRINT_ONCE(runtime, ctx, stdout, "Points per task: %d\n", args.points_per_task);
+  const uint64_t total_points = total_point_tasks * args.points_per_task;
+  const double data_size = (total_points * sizeof(uint64_t)) / (1024 * 1024);
+  LEGION_PRINT_ONCE(runtime, ctx, stdout, "Total data size: %.2lf MB\n", data_size);
+
+  const Rect<1> launch_bounds(0, total_point_tasks - 1);
   IndexSpaceT<1> launch_is = runtime->create_index_space(ctx, launch_bounds);
 
-  Rect<1> data_bounds(0, (num_points * DATA_MULTIPLIER) - 1);
-  IndexSpaceT<1> data_is = runtime->create_index_space(ctx, data_bounds);
-
-  FieldSpace fs = runtime->create_field_space(ctx);
+  const FieldSpace fs = runtime->create_field_space(ctx);
   {
     FieldAllocator allocator =
       runtime->create_field_allocator(ctx, fs);
     allocator.allocate_field(sizeof(uint64_t), FID_DATA);
   }
-  LogicalRegion lr = runtime->create_logical_region(ctx, data_is, fs);
 
-  const uint64_t zero = 0;
+  const TaskArgument task_args(&args, sizeof(args));
+  std::vector<OutputRequirement> output_requirements;
+  OutputRequirement& out_req = output_requirements.emplace_back(
+      OutputRequirement(fs, {FID_DATA}, 1/*dimension*/, true/*global indexing*/));
 
-  IndexPartition ip = runtime->create_equal_partition(ctx, data_is, launch_is);
+  // Launch the extract task
+  IndexTaskLauncher extract_launcher(EXTRACT_TASK_ID, launch_is, task_args);
+  runtime->execute_index_space(ctx, extract_launcher, &output_requirements);
 
-  LogicalPartition lp = runtime->get_logical_partition(ctx, lr, ip);
+  // We can get back the name of the logical partition created here
+  const LogicalRegion parent = out_req.parent;
+  const LogicalPartition lp = out_req.partition; 
 
-  ArgumentMap arg_map;
+  IndexTaskLauncher transform_launcher(TRANSFORM_TASK_ID, launch_is);
+  RegionRequirement& transform_req =
+    transform_launcher.add_region_requirement(
+        RegionRequirement(lp, 0/*identity projection*/, LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent));
+  transform_req.add_field(FID_DATA);
+  runtime->execute_index_space(ctx, transform_launcher);
 
-  IndexLauncher point_wise_analysable_fill_launcher(POINTWISE_ANALYSABLE_FILL_ID,
-      launch_is, TaskArgument(NULL, 0), arg_map);
-  point_wise_analysable_fill_launcher.add_region_requirement(
-      RegionRequirement(lp, 0/*projection ID*/,
-        LEGION_WRITE_ONLY, LEGION_EXCLUSIVE, lr));
-  point_wise_analysable_fill_launcher.add_field(0, FID_DATA);
-  point_wise_analysable_fill_launcher.global_arg = TaskArgument(&zero, sizeof(zero));
+  IndexTaskLauncher load_launcher(LOAD_TASK_ID, launch_is);
+  RegionRequirement& load_req =
+    load_launcher.add_region_requirement(
+        RegionRequirement(lp, 0/*identity projection*/, 
+          LEGION_READ_ONLY | LEGION_DISCARD_OUTPUT_MASK, LEGION_EXCLUSIVE, parent));
+  load_req.add_field(FID_DATA);
+  Future f = runtime->execute_index_space(ctx, load_launcher, LEGION_REDOP_SUM_UINT64);
 
-  IndexLauncher point_wise_analysable_inc_launcher(POINTWISE_ANALYSABLE_INC_ID,
-      launch_is, TaskArgument(NULL, 0), arg_map);
-  point_wise_analysable_inc_launcher.add_region_requirement(
-      RegionRequirement(lp, 0/*projection ID*/,
-        LEGION_READ_WRITE, LEGION_EXCLUSIVE, lr));
-  point_wise_analysable_inc_launcher.add_field(0, FID_DATA);
+  runtime->destroy_logical_region(ctx, parent);
+  runtime->destroy_field_space(ctx, fs);
+  runtime->destroy_index_space(ctx, parent.get_index_space());
 
-  IndexLauncher point_wise_analysable_sum_launcher(POINTWISE_ANALYSABLE_SUM_ID,
-      launch_is, TaskArgument(NULL, 0), arg_map);
-  point_wise_analysable_sum_launcher.add_region_requirement(
-      RegionRequirement(lp, 0/*projection ID*/,
-        LEGION_READ_ONLY | LEGION_DISCARD_OUTPUT_MASK, LEGION_EXCLUSIVE, lr));
-  point_wise_analysable_sum_launcher.add_field(0, FID_DATA);
-
-  {
-    runtime->execute_index_space(ctx, point_wise_analysable_fill_launcher);
-    runtime->execute_index_space(ctx, point_wise_analysable_inc_launcher);
-    Future f = runtime->execute_index_space(ctx, point_wise_analysable_sum_launcher, LEGION_REDOP_SUM_UINT64);
-    uint64_t result = f.get_result<uint64_t>();
-    uint64_t expected = num_points * DATA_MULTIPLIER;
-    assert (result == expected);
-  }
-
-  runtime->destroy_index_space(ctx, launch_is);
+  const uint64_t result = f.get<uint64_t>();
+  assert(result == total_points);
 }
 
-void point_wise_analysable_fill(const Task *task,
+void extract_task(const Task *task,
+    const std::vector<PhysicalRegion> &regions,
+    Context ctx, Runtime *runtime)
+{
+  assert(task->arglen == sizeof(ConfigArgs));
+  const ConfigArgs* args = static_cast<const ConfigArgs*>(task->args);
+
+  const Point<1> point = task->index_point;
+  printf("Extract Task %d\n", int(point.x()));
+
+  std::vector<OutputRegion> outputs;
+  runtime->get_output_regions(ctx, outputs);
+  assert(outputs.size() == 1);
+  OutputRegion &output = outputs.back();
+
+  // Extract the data from the filesystem. We're not actually
+  // going to load data from the file system here but we're
+  // using an output region to showcase that you can handle
+  // variable sized data coming from an external source.
+  // We return the same size output for each task, but that
+  // is not required for output regions.
+
+  uint64_t initial_value = 0;
+  output.create_buffer<uint64_t, 1>(
+      Point<1>(args->points_per_task), FID_DATA, &initial_value, true/*return buffer*/);
+}
+
+void transform_task(const Task *task,
     const std::vector<PhysicalRegion> &regions,
     Context ctx, Runtime *runtime)
 {
@@ -275,31 +355,10 @@ void point_wise_analysable_fill(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
-  const Point<1> point = task->index_point;
-  printf("Fill Task %d\n", int(point.x()));
-  const FieldAccessor<LEGION_WRITE_ONLY,uint64_t,1,coord_t,
-        Realm::AffineAccessor<uint64_t,1,coord_t> >
-          accessor(regions[0], FID_DATA);
-
-  const uint64_t fill = *((const uint64_t*)task->args);
-  Rect<1> rect = runtime->get_index_space_domain(ctx,
-      task->regions[0].region.get_index_space());
-  for (PointInRectIterator<1> pir(rect); pir(); pir++)
-  {
-    accessor[*pir] = fill;
-  }
-}
-
-void point_wise_analysable_inc(const Task *task,
-    const std::vector<PhysicalRegion> &regions,
-    Context ctx, Runtime *runtime)
-{
-  assert(regions.size() == 1);
-  assert(task->regions.size() == 1);
-  assert(task->regions[0].privilege_fields.size() == 1);
+  // Transform the data. We're just going to increment it. 
 
   const Point<1> point = task->index_point;
-  printf("Inc Task %d\n", int(point.x()));
+  printf("Transform Task %d\n", int(point.x()));
   const FieldAccessor<LEGION_READ_WRITE,uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
@@ -307,12 +366,10 @@ void point_wise_analysable_inc(const Task *task,
   Rect<1> rect = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
-  {
     accessor[*pir] += 1;
-  }
 }
 
-uint64_t point_wise_analysable_sum(const Task *task,
+uint64_t load_task(const Task *task,
     const std::vector<PhysicalRegion> &regions,
     Context ctx, Runtime *runtime)
 {
@@ -320,8 +377,11 @@ uint64_t point_wise_analysable_sum(const Task *task,
   assert(task->regions.size() == 1);
   assert(task->regions[0].privilege_fields.size() == 1);
 
+  // Load the data into whatever form you want. In this
+  // case we're just going to reduce it down to a value
+
   const Point<1> point = task->index_point;
-  printf("Sum Task %d\n", int(point.x()));
+  printf("Load Task %d\n", int(point.x()));
   const FieldAccessor<LEGION_READ_ONLY, uint64_t,1,coord_t,
         Realm::AffineAccessor<uint64_t,1,coord_t> >
           accessor(regions[0], FID_DATA);
@@ -345,22 +405,22 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
   {
-    TaskVariantRegistrar registrar(POINTWISE_ANALYSABLE_FILL_ID, "fill_task");
+    TaskVariantRegistrar registrar(EXTRACT_TASK_ID, "extract_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<point_wise_analysable_fill>(registrar, "point_wise_analysable_fill");
+    Runtime::preregister_task_variant<extract_task>(registrar, "extract_task");
   }
   {
-    TaskVariantRegistrar registrar(POINTWISE_ANALYSABLE_INC_ID, "inc_task");
+    TaskVariantRegistrar registrar(TRANSFORM_TASK_ID, "transform_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<point_wise_analysable_inc>(registrar, "point_wise_analysable_inc");
+    Runtime::preregister_task_variant<transform_task>(registrar, "transform_task");
   }
   {
-    TaskVariantRegistrar registrar(POINTWISE_ANALYSABLE_SUM_ID, "sum_task");
+    TaskVariantRegistrar registrar(LOAD_TASK_ID, "load_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
     registrar.set_leaf();
-    Runtime::preregister_task_variant<uint64_t, point_wise_analysable_sum>(registrar, "point_wise_analysable_sum");
+    Runtime::preregister_task_variant<uint64_t, load_task>(registrar, "load_task");
   }
   Runtime::add_registration_callback(StreamingMapper::register_my_mapper);
   return Runtime::start(argc, argv);

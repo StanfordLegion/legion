@@ -85,10 +85,9 @@ namespace Legion {
         FinalizeOutputEquivalenceSetArgs(void) = default;
         FinalizeOutputEquivalenceSetArgs(
             VersionManager* proxy, InnerContext* ctx, unsigned req_index,
-            EquivalenceSet* s, RtUserEvent done)
+            EquivalenceSet* s)
           : LgTaskArgs<FinalizeOutputEquivalenceSetArgs>(false, false),
-            proxy_this(proxy), context(ctx), parent_req_index(req_index),
-            set(s), done_event(done)
+            proxy_this(proxy), context(ctx), parent_req_index(req_index), set(s)
         {
           set->add_base_gc_ref(META_TASK_REF);
         }
@@ -98,7 +97,6 @@ namespace Legion {
         InnerContext* context;
         unsigned parent_req_index;
         EquivalenceSet* set;
-        RtUserEvent done_event;
       };
     public:
       VersionManager(RegionTreeNode* node, ContextID ctx);

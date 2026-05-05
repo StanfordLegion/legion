@@ -31,7 +31,6 @@ namespace Legion {
     class MultiTask
       : public PointwiseAnalyzable<CollectiveViewCreator<TaskOp> > {
     public:
-      typedef std::map<DomainPoint, DomainPoint> OutputExtentMap;
       struct FutureHandles : public Collectable {
       public:
         std::map<DomainPoint, DistributedID> handles;
@@ -154,7 +153,6 @@ namespace Legion {
       FutureMap point_arguments;
       std::vector<FutureMap> point_futures;
       std::vector<OutputOptions> output_region_options;
-      std::vector<OutputExtentMap> output_region_extents;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns* serdez_redop_fns;
       std::atomic<FutureInstance*> reduction_instance;

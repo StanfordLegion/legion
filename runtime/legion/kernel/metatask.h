@@ -78,6 +78,7 @@ namespace Legion {
   __op__(LG_COPY_FILL_DELETION_TASK_ID, CopyFillGuard::CopyFillDeletion, "Deferred Copy-Fill Aggregator Deletion") \
   __op__(LG_FINALIZE_EQ_SETS_TASK_ID, EqSetTracker::LgFinalizeEqSetsArgs, "Deferred Finalize Equivalence Sets") \
   __op__(LG_FINALIZE_OUTPUT_EQ_SET_TASK_ID, VersionManager::FinalizeOutputEquivalenceSetArgs, "Deferred Finalize Output Equivalence Set") \
+  __op__(LG_FINALIZE_OUTPUT_REGION_TASK_ID, OutputRegionImpl::FinalizeOutputRegionArgs, "Deferred Finalize Output Region") \
   __op__(LG_DEFERRED_COPY_ACROSS_TASK_ID, CopyOp::DeferredCopyAcross, "Deferred Copy Across") \
   __op__(LG_DEFER_REMOTE_OP_DELETION_TASK_ID, RemoteOp::DeferRemoteOpDeletionArgs, "Deferred Remote Op Deletion") \
   __op__(LG_DEFER_PERFORM_TRAVERSAL_TASK_ID, PhysicalAnalysis::DeferPerformTraversalArgs, "Deferred Physical Analysis Traversal Stage") \

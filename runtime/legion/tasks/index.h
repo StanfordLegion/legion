@@ -34,6 +34,20 @@ namespace Legion {
      */
     class IndexTask : public MultiTask,
                       public Heapify<IndexTask, RUNTIME_LIFETIME> {
+    public:
+      struct OutputRegionState {
+        std::map<DomainPoint, DomainPoint> points;
+        // Indexed by [dim][color[dim]]
+        std::vector<std::vector<coord_t> > extents;
+        std::vector<std::vector<coord_t> > offsets;
+        // for control replication
+        std::vector<std::set<DomainPoint> > dim_pending_points;
+        std::map<DomainPoint, unsigned> pending_points;
+        // Only valid for global indexing requirements
+        Domain global_color_space;
+        ProjectionFunction* projection = nullptr;
+        bool has_hi_point = false;
+      };
     private:
       struct OutputRegionTagCreator {
       public:
@@ -90,18 +104,11 @@ namespace Legion {
     public:
       virtual void prepare_map_must_epoch(void);
     public:
-      void record_output_extents(std::vector<OutputExtentMap>& output_extents);
+      // Virtual for overload with control replication
+      virtual void record_output_extent(
+          unsigned index, const DomainPoint& color, const DomainPoint& extent);
+      virtual void validate_output_extents(unsigned index);
       virtual void record_output_registered(RtEvent registered);
-    protected:
-      Domain compute_global_output_ranges(
-          IndexSpaceNode* parent, IndexPartNode* part,
-          const OutputExtentMap& output_sizes,
-          const OutputExtentMap& local_sizes);
-      void validate_output_extents(
-          unsigned index, const OutputRequirement& output_requirement,
-          const OutputExtentMap& output_sizes) const;
-    public:
-      virtual void finalize_output_regions(bool first_invocation);
     public:
       virtual bool has_prepipeline_stage(void) const override { return true; }
       virtual void trigger_prepipeline_stage(void) override;
@@ -174,12 +181,11 @@ namespace Legion {
       virtual uint64_t collective_lamport_allreduce(
           uint64_t lamport_clock, size_t points, bool need_result);
     public:
-      virtual RtEvent find_intra_space_dependence(
-          const DomainPoint& point,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       virtual RtEvent find_pointwise_dependence(
-          const DomainPoint& point, GenerationID gen,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+          const DomainPoint& point, GenerationID gen, bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_region =
+              std::optional<unsigned>()) override;
     public:
       void record_origin_mapped_slice(SliceTask* local_slice);
       void initialize_must_epoch_concurrent_group(
@@ -229,6 +235,9 @@ namespace Legion {
       std::set<RtEvent> commit_preconditions;
     protected:
       std::map<DomainPoint, RtUserEvent> pending_pointwise_dependences;
+      // Note the DomainPoints here are colors and not index points!
+      std::vector<std::map<DomainPoint, RtEvent> > output_pointwise_dependences;
+      std::vector<OutputRegionState> output_region_states;
     protected:
       std::vector<ProfilingMeasurementID> task_profiling_requests;
       std::vector<ProfilingMeasurementID> copy_profiling_requests;
@@ -250,12 +259,12 @@ namespace Legion {
      */
     class OutputExtentExchange : public AllGatherCollective<false> {
     public:
-      typedef std::map<DomainPoint, DomainPoint> OutputExtentMap;
+      typedef IndexTask::OutputRegionState OutputRegionState;
     public:
       OutputExtentExchange(
           ReplicateContext* ctx, ReplIndexTask* owner,
           CollectiveIndexLocation loc,
-          std::vector<OutputExtentMap>& all_output_extents);
+          std::vector<OutputRegionState>& all_output_states);
       OutputExtentExchange(const OutputExtentExchange& rhs) = delete;
       virtual ~OutputExtentExchange(void);
     public:
@@ -272,7 +281,7 @@ namespace Legion {
       virtual RtEvent post_complete_exchange(void) override;
     public:
       ReplIndexTask* const owner;
-      std::vector<OutputExtentMap>& all_output_extents;
+      std::vector<OutputRegionState>& all_output_states;
     };
 
     /**
@@ -408,21 +417,39 @@ namespace Legion {
       virtual uint64_t collective_lamport_allreduce(
           uint64_t lamport_clock, size_t points, bool need_result) override;
       void select_sharding_function(ReplicateContext* repl_ctx);
+      void finalize_output_regions(bool first_invocation);
     public:
-      virtual RtEvent find_intra_space_dependence(
-          const DomainPoint& point,
-          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT) override;
+      virtual RtEvent find_pointwise_dependence(
+          const DomainPoint& point, GenerationID gen, bool intra_space,
+          RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT,
+          std::optional<unsigned> output_region =
+              std::optional<unsigned>()) override;
       virtual void finish_check_point_requirements(
           std::map<unsigned, std::vector<std::pair<DomainPoint, Domain> > >&
               domain_points) override;
     public:
       // Output regions
+      virtual void record_output_extent(
+          unsigned index, const DomainPoint& color,
+          const DomainPoint& extent) override;
+      virtual void validate_output_extents(unsigned index) override;
       virtual void record_output_registered(RtEvent registered) override;
-      virtual void finalize_output_regions(bool first_invocation) override;
     public:
       virtual size_t get_collective_points(void) const override;
       virtual bool find_shard_participants(
           std::vector<ShardID>& shards) override;
+    public:
+      void record_output_offset(
+          unsigned index, unsigned dim, size_t color_index, size_t offset);
+    protected:
+      void compute_output_extent_shards(
+          unsigned index, unsigned dim, size_t color_index,
+          const Domain& color_space, ProjectionFunction* projection,
+          std::set<ShardID>& shards) const;
+      void send_output_offset_messages(
+          unsigned index, unsigned dim, size_t color_index, size_t offset,
+          const std::set<ShardID>& previous_shards,
+          const std::set<ShardID>& next_shards) const;
     protected:
       ShardingID sharding_functor;
       ShardingFunction* sharding_function;
@@ -436,9 +463,6 @@ namespace Legion {
       InterferingPointExchange<ReplIndexTask>* interfering_exchange;
       RtBarrier output_bar;
       std::map<Color, CollectiveID> concurrent_exchange_ids;
-    protected:
-      // Map of output sizes collected by this shard
-      std::vector<OutputExtentMap> local_output_extents;
     protected:
       std::set<std::pair<DomainPoint, ShardID> > unique_intra_space_deps;
     protected:

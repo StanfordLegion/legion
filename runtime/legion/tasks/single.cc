@@ -421,7 +421,7 @@ namespace Legion {
         if (version_info.has_version_info())
           continue;
         const RegionRequirement& req = logical_regions[idx];
-        if ((regions.size() <= idx) && !is_output_valid(idx - regions.size()))
+        if ((regions.size() <= idx) && !is_output_bounded(idx - regions.size()))
         {
           RtEvent output_ready;
           Operation::perform_versioning_analysis(
@@ -3209,7 +3209,7 @@ namespace Legion {
               physical_instances[regions.size() + idx]);
           execution_context->add_output_region(
               output_regions[idx], physical_instances[regions.size() + idx],
-              is_output_global(idx), is_output_valid(idx),
+              is_output_global(idx), is_output_bounded(idx),
               is_output_grouped(idx));
         }
         // Initialize any region tree contexts

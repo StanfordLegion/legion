@@ -161,9 +161,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent LeafContext::find_pointwise_dependence(
         uint64_t context_index, const DomainPoint& point, ShardID shard,
-        RtUserEvent to_trigger)
+        bool intra_space, RtUserEvent to_trigger,
+        std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
+      legion_assert(!output_index);
       // The only reason we're here is if we're inlining index tasks
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -2065,12 +2067,12 @@ namespace Legion {
     RtEvent LeafContext::escape_task_local_instance(
         PhysicalInstance instance, RtEvent safe_effects, size_t num_results,
         PhysicalInstance* results, LgEvent* unique_events,
-        const Realm::InstanceLayoutGeneric** layouts)
+        const Realm::InstanceLayoutGeneric** layouts, bool redistrict_only)
     //--------------------------------------------------------------------------
     {
       legion_assert(num_results > 0);
       legion_assert((layouts != nullptr) || (num_results == 1));
-      if (!memory_pools.empty())
+      if (!memory_pools.empty() && !redistrict_only)
       {
         // See if this is an instance that we made
         std::map<PhysicalInstance, std::pair<LgEvent, bool>>::iterator finder =
@@ -2101,7 +2103,8 @@ namespace Legion {
       }
       // Otherwise we fall through and do the base case at this point
       return TaskContext::escape_task_local_instance(
-          instance, safe_effects, num_results, results, unique_events, layouts);
+          instance, safe_effects, num_results, results, unique_events, layouts,
+          redistrict_only);
     }
 
     //--------------------------------------------------------------------------

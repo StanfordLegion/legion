@@ -90,6 +90,8 @@ namespace Legion {
       version_infos.clear();
       interfering_requirements.clear();
       point_requirements.clear();
+      output_region_states.clear();
+      output_pointwise_dependences.clear();
       legion_assert(pending_pointwise_dependences.empty());
       MultiTask::deactivate(false /*free*/);
       if (freeop)
@@ -97,87 +99,187 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::validate_output_extents(
-        unsigned index, const OutputRequirement& req,
-        const OutputExtentMap& output_extents) const
+    void IndexTask::record_output_extent(
+        unsigned index, const DomainPoint& color, const DomainPoint& extent)
     //--------------------------------------------------------------------------
     {
-      size_t num_tasks = 0;
-      if (sharding_space.exists())
-        num_tasks = runtime->get_domain_volume(sharding_space);
-      else
-        num_tasks = launch_space->get_volume();
-
-      if (output_extents.size() == num_tasks)
-        return;
-
-      Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-      error << "A projection functor for every output requirement must be "
-               "bijective, "
-            << "but projection functor " << req.projection
-            << " for output requirement " << index << " in task "
-            << get_task_name() << " (UID: " << get_unique_op_id()
-            << ") mapped more than one point in the launch domain to the same "
-               "subregion.";
-      error.raise();
+      legion_assert(index < output_regions.size());
+      legion_assert(index < output_region_states.size());
+      legion_assert(output_regions.size() == output_region_options.size());
+      legion_assert(!is_output_bounded(index));
+      const OutputOptions& options = output_region_options[index];
+      legion_assert(!options.bounded_requirement());
+      OutputRegionState& state = output_region_states[index];
+      // Should always be able to set the domain for the color when we're done
+      bool done;
+      std::vector<Domain> done_colors;
+      {
+        AutoLock o_lock(op_lock);
+        if (!state.points.emplace(std::make_pair(color, extent)).second)
+        {
+          const OutputRequirement& req = output_regions[index];
+          Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+          error << "A projection functor for every output requirement must "
+                << "be bijective, but projection functor " << req.projection
+                << " for output requirement " << index << " in task " << *this
+                << " mapped more than one point in the launch domain to the "
+                << "same subregion of color " << color << ".";
+          error.raise();
+        }
+        if (options.global_indexing())
+        {
+          legion_assert(color.get_dim() == extent.get_dim());
+          // Iterate over each of the dimensions
+          for (int dim = 0; dim < color.get_dim(); dim++)
+          {
+            const size_t color_index =
+                color[dim] - state.global_color_space.lo()[dim];
+            std::vector<coord_t>& dim_extents = state.extents[dim];
+            legion_assert(color_index < dim_extents.size());
+            if (0 <= dim_extents[color_index])
+            {
+              // Already set, so there's nothing to do here other than
+              // to check that the extent matches what we expect
+              if (dim_extents[color_index] != extent[dim])
+              {
+                Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+                error << "Point task " << color
+                      << " returned an output of extent " << extent[dim]
+                      << " for dimension " << dim
+                      << ", but an adjacent point task returned an output "
+                      << "of extent " << dim_extents[dim] << ". Please make "
+                      << "sure the outputs from point tasks are aligned.";
+                error.raise();
+              }
+              continue;
+            }
+            else  // We're a new extent, so we can save it
+              dim_extents[color_index] = extent[dim];
+            // Check to see if the offset is ready
+            std::vector<coord_t>& dim_offsets = state.offsets[dim];
+            legion_assert(color_index < dim_offsets.size());
+            // If the previous offset is not ready yet there's nothing to do
+            if (dim_offsets[color_index] < 0)
+              continue;
+            // Ripple carry add the extents forward as many times as we can
+            // and compute the new rectangle of points we need to update
+            // using the new extent(s)
+            DomainPoint lo, hi;
+            lo = state.global_color_space.lo();
+            lo[dim] += color_index;
+            hi = lo;
+            for (unsigned idx = color_index; idx < dim_extents.size(); idx++)
+            {
+              if (dim_extents[idx] < 0)
+                break;
+              dim_offsets[idx + 1] = dim_offsets[idx] + dim_extents[idx];
+              hi[dim]++;
+            }
+            hi[dim]--;  // Make sure it is inclusive
+            // For all the other dimensions fill in their sizes based on
+            // the extents that have been previously set
+            // Handle the case where one dimension doesn't have any extents yet
+            bool empty_dim = false;
+            for (int dim2 = 0; dim2 < color.get_dim(); dim2++)
+            {
+              if (dim == dim2)
+                continue;
+              // Count the dim_size we have here
+              unsigned dim_size = 0;
+              const std::vector<coord_t>& other_extents = state.extents[dim2];
+              for (unsigned idx = 0; idx < other_extents.size(); idx++)
+              {
+                if (other_extents[idx] < 0)
+                  break;
+                dim_size++;
+              }
+              if (dim_size == 0)
+              {
+                empty_dim = true;
+                break;
+              }
+              hi[dim2] = lo[dim2] + dim_size - 1;  // Make sure it's inclusive
+            }
+            if (!empty_dim)
+              done_colors.emplace_back(Domain(lo, hi));
+          }
+        }
+        done = (state.points.size() == total_points);
+      }
+      // First iterate over any done points and assign their local results
+      if (!done_colors.empty())
+      {
+        IndexPartNode* part = runtime->get_node(
+            output_regions[index].partition.get_index_partition());
+        for (std::vector<Domain>::const_iterator it = done_colors.begin();
+             it != done_colors.end(); it++)
+        {
+          for (Domain::DomainPointIterator itr(*it); itr; itr++)
+          {
+            DomainPoint lo, hi;
+            lo.dim = color.dim;
+            hi.dim = color.dim;
+            for (int dim = 0; dim < color.dim; dim++)
+            {
+              const unsigned color_index =
+                  (*itr)[dim] - state.global_color_space.lo()[dim];
+              lo[dim] = state.offsets[dim][color_index];
+              hi[dim] = state.offsets[dim][color_index + 1] - 1;  // inclusive
+            }
+            IndexSpaceNode* child =
+                part->get_child(part->color_space->linearize_color(*itr));
+            if (child->set_domain(
+                    Domain(lo, hi), ApEvent::NO_AP_EVENT,
+                    false /*take ownership*/, true /*broadcast*/))
+              delete child;
+          }
+        }
+      }
+      if (done)
+      {
+        if (runtime->safe_model)
+          validate_output_extents(index);
+        IndexSpaceNode* parent =
+            runtime->get_node(output_regions[index].parent.get_index_space());
+        // If we're done we can set the parent index space result
+        if (options.global_indexing())
+        {
+          DomainPoint lo, hi;
+          lo.dim = color.dim;
+          hi.dim = color.dim;
+          for (int dim = 0; dim < color.dim; dim++)
+          {
+            lo[dim] = 0;
+            hi[dim] = state.offsets[dim].back() - 1;  // inclusive
+          }
+          if (parent->set_domain(
+                  Domain(lo, hi), ApEvent::NO_AP_EVENT,
+                  false /*take ownership*/, true /*broadcast*/))
+            delete parent;
+        }
+        else if (parent->set_output_union(state.points))
+          delete parent;
+      }
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::record_output_extents(
-        std::vector<OutputExtentMap>& output_extents)
+    void IndexTask::validate_output_extents(unsigned index)
     //--------------------------------------------------------------------------
     {
-      legion_assert(output_region_extents.size() == output_extents.size());
-      {
-        AutoLock o_lock(op_lock);
-        for (unsigned idx = 0; idx < output_extents.size(); idx++)
-        {
-          OutputExtentMap& target = output_region_extents[idx];
-          if (!target.empty())
-          {
-            // Merge the new extents in
-            OutputExtentMap& extents = output_extents[idx];
-            for (const std::pair<const DomainPoint, DomainPoint>& extent_pair :
-                 extents)
-            {
-              if (target.find(extent_pair.first) != target.end())
-              {
-                const DomainPoint& color = extent_pair.first;
-                const OutputRequirement& req = output_regions[idx];
-                std::stringstream ss;
-                ss << "(" << color[0];
-                for (int dim = 1; dim < color.dim; ++dim)
-                  ss << "," << color[dim];
-                ss << ")";
-                Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-                error << "A projection functor for every output requirement "
-                         "must be bijective, "
-                      << "but projection functor " << req.projection
-                      << " for output requirement " << idx << " in task "
-                      << get_task_name() << " (UID: " << get_unique_id()
-                      << ") mapped more than one point in the launch domain to "
-                         "the same subregion of color "
-                      << ss.str() << ".";
-                error.raise();
-              }
-              target.insert(extent_pair);
-            }
-          }
-          else
-            target.swap(output_extents[idx]);
-        }
-        // Now Check to see if we've received all the extents
-        for (unsigned idx = 0; idx < output_region_extents.size(); idx++)
-        {
-          if (is_output_valid(idx))
-            continue;
-          legion_assert(output_region_extents[idx].size() <= total_points);
-          if (output_region_extents[idx].size() < total_points)
-            return;
-        }
-      }
-      // If we get here then we can finalize our output regions
-      finalize_output_regions(true /*first invocation*/);
+      legion_assert(output_regions.size() == output_region_states.size());
+      legion_assert(output_regions.size() == output_region_options.size());
+      const size_t expected_points = launch_space->get_volume();
+      if (output_region_options[index].bounded_requirement())
+        return;
+      if (output_region_states[index].points.size() == expected_points)
+        return;
+      Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+      error << "A projection functor for every output requirement must be "
+            << "bijective, but projection functor "
+            << output_regions[index].projection << " for output requirement "
+            << index << " in task " << *this << " mapped more than one point "
+            << "in the launch domain to the same subregion.";
+      error.raise();
     }
 
     //--------------------------------------------------------------------------
@@ -199,178 +301,6 @@ namespace Legion {
             args, LG_LATENCY_DEFERRED_PRIORITY,
             Runtime::merge_events(output_preconditions));
         commit_preconditions.insert(registered);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    Domain IndexTask::compute_global_output_ranges(
-        IndexSpaceNode* parent, IndexPartNode* part,
-        const OutputExtentMap& output_extents,
-        const OutputExtentMap& local_extents)
-    //--------------------------------------------------------------------------
-    {
-      // First, we collect all the extents of local outputs.
-      // While doing this, we also check the alignment.
-      Domain color_space = part->color_space->get_tight_domain();
-      legion_assert(color_space.dense());
-      int32_t ndim = color_space.dim;
-      DomainPoint color_extents = color_space.hi() - color_space.lo() + 1;
-
-      if (runtime->safe_model)
-      {
-        // Check alignments between tiles
-        for (const std::pair<const DomainPoint, DomainPoint>& extent_pair :
-             output_extents)
-        {
-          const DomainPoint& color = extent_pair.first;
-          const DomainPoint& extent = extent_pair.second;
-
-          for (int32_t dim = 0; dim < ndim; ++dim)
-          {
-            if (color[dim] == 0)
-              continue;
-            DomainPoint neighbor = color;
-            --neighbor[dim];
-            legion_assert(
-                output_extents.find(neighbor) != output_extents.end());
-
-            const DomainPoint& neighbor_extent =
-                output_extents.find(neighbor)->second;
-            // For all dimensions that are not the one we just traversed
-            // then the colors should be the same
-            for (int32_t dim2 = 0; dim2 < ndim; dim2++)
-            {
-              if (dim == dim2)
-                continue;
-              if (extent[dim2] != neighbor_extent[dim2])
-              {
-                Error error(LEGION_INTERFACE_EXCEPTION);
-                error << "Point task " << color
-                      << " returned an output of extent " << extent[dim2]
-                      << " for dimension " << dim2 << ", but point task "
-                      << neighbor << " returned an output of extent "
-                      << neighbor_extent[dim2] << ". Please make sure "
-                      << "the outputs from point tasks are aligned.";
-                error.raise();
-              }
-            }
-          }
-        }
-      }
-
-      // Initialize the vectors of extents with 0
-      std::vector<std::vector<coord_t>> all_extents(ndim);
-      for (int32_t dim = 0; dim < ndim; ++dim)
-        all_extents[dim].resize(color_extents[dim] + 1, 0);
-
-      // Populate the extent vectors
-      for (const std::pair<const DomainPoint, DomainPoint>& extent_pair :
-           output_extents)
-      {
-        const DomainPoint& color = extent_pair.first;
-        const DomainPoint& extent = extent_pair.second;
-        for (int32_t dim = 0; dim < ndim; ++dim)
-        {
-          coord_t c = color[dim];
-          coord_t ext = extent[dim];
-          coord_t& to_update = all_extents[dim][c];
-          // Ignore all zero extents when populating the extent vector
-          if (to_update == 0 && ext > 0)
-            to_update = ext;
-        }
-      }
-
-      // Prefix sum the extents to get sub-ranges for each dimension
-      for (int32_t dim = 0; dim < ndim; ++dim)
-      {
-        std::vector<coord_t>& extents = all_extents[dim];
-        coord_t sum = 0;
-        for (size_t idx = 0; idx < extents.size() - 1; ++idx)
-        {
-          coord_t ext = extents[idx];
-          extents[idx] = sum;
-          sum += ext;
-        }
-        extents.back() = sum;
-      }
-
-      // Initialize the subspaces using the compute sub-ranges
-      for (const std::pair<const DomainPoint, DomainPoint>& extent_pair :
-           output_extents)
-      {
-        const DomainPoint& color = extent_pair.first;
-
-        // If this subspace isn't local to us, we are not allowed to
-        // set its range.
-        if (local_extents.find(color) == local_extents.end())
-          continue;
-
-        IndexSpaceNode* child =
-            part->get_child(part->color_space->linearize_color(color));
-
-        DomainPoint lo;
-        lo.dim = ndim;
-        DomainPoint hi;
-        hi.dim = ndim;
-        for (int32_t dim = 0; dim < ndim; ++dim)
-        {
-          std::vector<coord_t>& extents = all_extents[dim];
-          coord_t c = color[dim];
-          lo[dim] = extents[c];
-          hi[dim] = extents[c + 1] - 1;
-        }
-        if (child->set_domain(
-                Domain(lo, hi), ApEvent::NO_AP_EVENT, false /*take ownership*/,
-                true /*broadcast*/))
-          delete child;
-      }
-
-      // Finally, compute the extents of the root index space and return it
-      DomainPoint lo;
-      lo.dim = ndim;
-      DomainPoint hi;
-      hi.dim = ndim;
-      for (int32_t dim = 0; dim < ndim; ++dim)
-        hi[dim] = all_extents[dim].back() - 1;
-
-      return Domain(lo, hi);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::finalize_output_regions(bool first_invocation)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-      {
-        const OutputOptions& options = output_region_options[idx];
-        if (options.valid_requirement())
-          continue;
-        IndexSpaceNode* parent =
-            runtime->get_node(output_regions[idx].parent.get_index_space());
-        if (runtime->safe_model)
-          validate_output_extents(
-              idx, output_regions[idx], output_region_extents[idx]);
-        if (options.global_indexing())
-        {
-          // For globally indexed output regions, we need to check
-          // the alignment between outputs from adjacent point tasks
-          // and compute the ranges of subregions via prefix sum.
-
-          IndexPartNode* part = runtime->get_node(
-              output_regions[idx].partition.get_index_partition());
-          Domain root_domain = compute_global_output_ranges(
-              parent, part, output_region_extents[idx],
-              output_region_extents[idx]);
-
-          if (parent->set_domain(
-                  root_domain, ApEvent::NO_AP_EVENT, false /*take ownership*/))
-            delete parent;
-        }
-        // For locally indexed output regions, sizes of subregions are already
-        // set when they are fianlized by the point tasks. So we only need to
-        // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(output_region_extents[idx]))
-          delete parent;
       }
     }
 
@@ -763,81 +693,88 @@ namespace Legion {
       size_t num_tasks = runtime->get_domain_volume(launch_space);
       Provenance* provenance = get_provenance();
       output_region_options.resize(outputs.size());
-      output_region_extents.resize(outputs.size());
+      output_region_states.resize(outputs.size());
+      bool has_global_indexing = false;
       for (unsigned idx = 0; idx < outputs.size(); idx++)
       {
         OutputRequirement& req = outputs[idx];
         output_region_options[idx] = OutputOptions(
-            req.global_indexing, req.valid_requirement, false /*grouped*/);
+            req.global_indexing, req.bounded_requirement, false /*grouped*/);
 
-        IndexSpace color_space = launch_space;
-        if (req.projection != 0)
-        {
-          color_space = req.color_space;
-
-          if (!color_space.exists())
-          {
-            Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-            error << "Output region " << idx << " of task " << get_task_name()
-                  << " (UID: " << get_unique_op_id()
-                  << ") requests projection of ID " << req.projection
-                  << " but no color space is specified. Every output "
-                  << "requirement with a non-identity projection must have a "
-                     "color space set.";
-            error.raise();
-          }
-
-          IndexSpaceNode* node = runtime->get_node(color_space);
-          Domain color_domain = node->get_tight_domain();
-          if (req.global_indexing && !color_domain.dense())
-          {
-            Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-            error << "The global indexing mode requires the color space of an "
-                     "output "
-                  << "requirement to be dense, but a sparse color space is "
-                     "assigned to "
-                  << "output requirement " << idx << " of task "
-                  << get_task_name() << " (UID: " << get_unique_op_id() << ").";
-            error.raise();
-          }
-
-          if (color_domain.get_volume() != num_tasks)
-          {
-            Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-            error
-                << "Output region " << idx << " of task " << get_task_name()
-                << " (UID: " << get_unique_op_id()
-                << ") requests projection but the "
-                << "volume of the color space is different from the total "
-                   "number of "
-                << "point tasks. The mapping between the launch domain and the "
-                << "subregions must be bijective.";
-            error.raise();
-          }
-        }
-        int color_dim = color_space.get_dim();
-
-        if (!req.valid_requirement)
+        IndexSpaceNode* color_space = req.color_space.exists() ?
+                                          runtime->get_node(req.color_space) :
+                                          runtime->get_node(launch_space);
+        const unsigned color_dim = color_space->get_num_dims();
+        if (!req.bounded_requirement)
         {
           TypeTag type_tag;
-          int requested_dim =
+          const unsigned requested_dim =
               Internal::NT_TemplateHelper::get_dim(req.type_tag);
           if (req.global_indexing)
           {
+            has_global_indexing = true;
             if (color_dim != requested_dim)
             {
               Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-              error << "Output region " << idx << " of task " << get_task_name()
-                    << " (UID: " << get_unique_op_id() << ") is requested to "
-                    << "have " << requested_dim
-                    << " dimensions, but the color space has " << color_dim
-                    << " dimensions. Dimensionalities of output regions must "
-                       "be the same as "
-                    << "the color space's in global indexing mode.";
+              error << "Output region " << idx << " of task " << *this
+                    << " is requested to have " << requested_dim
+                    << " dimensions, but the color space has "
+                    << index_domain.get_dim()
+                    << " dimensions. Dimensionalities "
+                    << "of output regions must be the same as the "
+                    << "color space's in global indexing mode.";
+              error.raise();
+            }
+            if (req.global_indexing && color_space->is_sparse())
+            {
+              Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+              error << "The global indexing mode requires the color space of "
+                    << "an output requirement to be dense, but a sparse color "
+                    << "space is assigned to output requirement " << idx
+                    << " of task " << *this << ".";
+              error.raise();
+            }
+            if (color_space->get_volume() != num_tasks)
+            {
+              Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+              error
+                  << "Output region " << idx << " of task " << *this
+                  << " requests projection but the volume of the color space "
+                  << "is different from the total number of point tasks. "
+                  << "The mapping between the launch domain and the subregions "
+                  << "must be bijective.";
               error.raise();
             }
 
             type_tag = req.type_tag;
+            OutputRegionState& state = output_region_states[idx];
+            state.extents.resize(color_dim);
+            state.offsets.resize(color_dim);
+            const Domain color_domain = color_space->get_tight_domain();
+            state.global_color_space = color_domain;
+            state.projection =
+                runtime->find_projection_function(req.projection);
+            if ((req.projection != 0) && !state.projection->is_invertible)
+            {
+              Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+              error << "Output region " << idx << " of task " << *this
+                    << " is using custom projection function " << req.projection
+                    << " for global indexing but that projection function "
+                    << "is not invertible. All custom projection functions "
+                    << "used with global indexing for output regions must "
+                    << "be invertible.";
+              error.raise();
+            }
+            // All offsets start at zero
+            for (unsigned dim = 0; dim < color_dim; dim++)
+            {
+              const size_t color_dim_size =
+                  (color_domain.hi()[dim] - color_domain.lo()[dim]) + 1;
+              legion_assert(color_dim_size > 0);
+              state.extents[dim].resize(color_dim_size, -1);
+              state.offsets[dim].resize(color_dim_size + 1, -1);
+              state.offsets[dim].front() = 0;
+            }
           }
           else
           {
@@ -846,16 +783,15 @@ namespace Legion {
 
             // Before creating the index space, we make sure that
             // the dimensionality (N+1) does not exceed LEGION_MAX_DIM.
-            if (color_dim + requested_dim > LEGION_MAX_DIM)
+            if ((color_dim + requested_dim) > LEGION_MAX_DIM)
             {
-              Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-              error << "Dimensionality of output region " << idx << " of task "
-                    << get_task_name() << " (UID: " << get_unique_op_id()
-                    << ") exceeded LEGION_MAX_DIM. You may rebuild your code "
-                       "with a bigger "
-                    << "LEGION_MAX_DIM value or reduce dimensionality of "
-                       "either the color "
-                    << "space or the output region.";
+              Error error(LEGION_INTERFACE_EXCEPTION);
+              error
+                  << "Dimensionality of output region " << idx << " of task "
+                  << *this << " exceeded LEGION_MAX_DIM=" << LEGION_MAX_DIM
+                  << ". You may rebuild your code with a bigger LEGION_MAX_DIM "
+                  << "value or reduce dimensionality of either the color space "
+                  << "or the output region.";
               error.raise();
             }
 
@@ -871,7 +807,7 @@ namespace Legion {
           // Create a pending partition using the launch domain as the color
           // space
           IndexPartition pid = parent_ctx->create_pending_partition(
-              index_space, color_space, LEGION_DISJOINT_COMPLETE_KIND,
+              index_space, color_space->handle, LEGION_DISJOINT_COMPLETE_KIND,
               LEGION_AUTO_GENERATE_ID, provenance, true /*trust partitioning*/);
 
           // Instantiate all local children to ensure that others can refer
@@ -905,8 +841,10 @@ namespace Legion {
         req.privilege = LEGION_WRITE_DISCARD;
 
         // Store the output requirement in the task
-        output_regions.emplace_back(req);
+        output_regions.push_back(req);
       }
+      if (has_global_indexing)
+        output_pointwise_dependences.resize(outputs.size());
     }
 
     //--------------------------------------------------------------------------
@@ -1884,20 +1822,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexTask::find_intra_space_dependence(
-        const DomainPoint& point, RtUserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-      // We're not control replicated so this is just a pointwise dependence
-      return find_pointwise_dependence(point, get_generation(), to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent IndexTask::find_pointwise_dependence(
-        const DomainPoint& point, GenerationID needed_gen,
-        RtUserEvent to_trigger)
+        const DomainPoint& point, GenerationID needed_gen, bool intra_space,
+        RtUserEvent to_trigger, std::optional<unsigned> output_region)
     //--------------------------------------------------------------------------
     {
+      legion_assert(!output_region);
       AutoLock o_lock(op_lock);
       legion_assert(needed_gen <= gen);
       if ((needed_gen < gen) || mapped ||
@@ -1907,40 +1837,159 @@ namespace Legion {
           Runtime::trigger_event(to_trigger);
         return RtEvent::NO_RT_EVENT;
       }
+      RtEvent point_mapped;
       // See if we can find this in the point mapped events data structure
       std::map<DomainPoint, RtEvent>::const_iterator finder =
           point_mapped_events.find(point);
-      if (finder != point_mapped_events.end())
-      {
-        if (to_trigger.exists())
-        {
-          Runtime::trigger_event(to_trigger, finder->second);
-          return to_trigger;
-        }
-        else
-          return finder->second;
-      }
-      else
+      if (finder == point_mapped_events.end())
       {
         // Create a pending pointwise dependence for this point
         std::map<DomainPoint, RtUserEvent>::const_iterator pending_finder =
             pending_pointwise_dependences.find(point);
-        if (pending_finder != pending_pointwise_dependences.end())
+        if (pending_finder == pending_pointwise_dependences.end())
         {
-          if (to_trigger.exists())
-          {
-            Runtime::trigger_event(to_trigger, pending_finder->second);
-            return to_trigger;
-          }
-          else
-            return pending_finder->second;
+          RtUserEvent pending = Runtime::create_rt_user_event();
+          pending_pointwise_dependences.emplace(std::make_pair(point, pending));
+          point_mapped = pending;
         }
-        if (!to_trigger.exists())
-          to_trigger = Runtime::create_rt_user_event();
-        pending_pointwise_dependences.emplace(
-            std::make_pair(point, to_trigger));
+        else
+          point_mapped = pending_finder->second;
+      }
+      else
+        point_mapped = finder->second;
+      // If this is an intra-space look-up or we don't have output regions
+      // then we are already done
+      if (intra_space || output_pointwise_dependences.empty())
+      {
+        if (to_trigger.exists())
+        {
+          Runtime::trigger_event(to_trigger, point_mapped);
+          return to_trigger;
+        }
+        else
+          return point_mapped;
+      }
+      // Now for the hairy part: if we have globally indexed output regions then
+      // we also need to compute transitive dependences for each of the points
+      // that this next point will depend on as well in order to run safely
+      std::vector<RtEvent> preconditions(1, point_mapped);
+      for (unsigned idx = 0; idx < output_pointwise_dependences.size(); idx++)
+      {
+        if (!output_region_options[idx].global_indexing())
+          continue;
+        std::map<DomainPoint, RtEvent>& output_pointwise =
+            output_pointwise_dependences[idx];
+        DomainPoint color_point = point;
+        IndexPartNode* partition = nullptr;
+        ProjectionFunction* projection = nullptr;
+        const RegionRequirement& req = output_regions[idx];
+        const OutputRegionState& state = output_region_states[idx];
+        if (req.projection != 0)
+        {
+          // Need to convert the point into the color space to check if we
+          // have it already
+          partition = runtime->get_node(req.partition.get_index_partition());
+          projection = runtime->find_projection_function(req.projection);
+          LogicalRegion region = projection->project_point(
+              this, regions.size() + idx, index_domain, point);
+          legion_assert(region.exists());
+          color_point = runtime->get_node(region.get_index_space())
+                            ->get_domain_point_color();
+          legion_assert(state.global_color_space.contains(color_point));
+        }
+        finder = output_pointwise.find(color_point);
+        if (finder == output_pointwise.end())
+        {
+          // DFS backwards for this output region to find the points we need
+          std::vector<DomainPoint> needed_colors(1, color_point);
+          while (!needed_colors.empty())
+          {
+            const DomainPoint& needed_color = needed_colors.back();
+            std::vector<RtEvent> point_preconditions;
+            // Check to see if we have all our previous points
+            bool has_all_previous = true;
+            for (int dim = 0; dim < needed_color.get_dim(); dim++)
+            {
+              DomainPoint previous = needed_color;
+              previous[dim]--;
+              if (!state.global_color_space.contains(previous))
+                continue;
+              finder = output_pointwise.find(previous);
+              if (finder == output_pointwise.end())
+              {
+                needed_colors.push_back(previous);
+                has_all_previous = false;
+                break;
+              }
+              point_preconditions.push_back(finder->second);
+            }
+            if (!has_all_previous)
+              continue;
+            // Also include the particular point's mapped event
+            DomainPoint orig_point = needed_color;
+            if (projection != nullptr)
+            {
+              // Need to convert from color space back to the index space
+              IndexSpaceNode* child = partition->get_child(
+                  partition->color_space->linearize_color(needed_color));
+              LogicalRegion region(
+                  req.partition.tree_did, child->handle,
+                  req.partition.field_space);
+              std::vector<DomainPoint> points;
+              projection->functor->invert(
+                  region, req.partition, index_domain, points);
+              if (points.size() != 1)
+              {
+                Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+                error
+                    << "Illegal projection function inversion computed by "
+                    << "projection functor " << projection->projection_id
+                    << " for output region requirement " << idx << " of "
+                    << *this << ". The projection function says that "
+                    << points.size()
+                    << " different points map to logical region " << region
+                    << ", however projection functions for output "
+                    << "region requirements are required to be bijiective and "
+                    << "and therefore exactly one point should ever be allowed "
+                    << "to map to a single output logical region.";
+                error.raise();
+              }
+              orig_point = points.back();
+            }
+            finder = point_mapped_events.find(orig_point);
+            if (finder == point_mapped_events.end())
+            {
+              std::map<DomainPoint, RtUserEvent>::const_iterator
+                  pending_finder =
+                      pending_pointwise_dependences.find(orig_point);
+              if (pending_finder == pending_pointwise_dependences.end())
+              {
+                RtUserEvent pending = Runtime::create_rt_user_event();
+                pending_pointwise_dependences.emplace(
+                    std::make_pair(orig_point, pending));
+              }
+              else
+                point_preconditions.push_back(pending_finder->second);
+            }
+            else
+              point_preconditions.push_back(finder->second);
+            output_pointwise[needed_color] =
+                Runtime::merge_events(point_preconditions);
+            needed_colors.pop_back();
+          }
+          finder = output_pointwise.find(point);
+          legion_assert(finder != output_pointwise.end());
+        }
+        preconditions.push_back(finder->second);
+      }
+      if (to_trigger.exists())
+      {
+        Runtime::trigger_event(
+            to_trigger, Runtime::merge_events(preconditions));
         return to_trigger;
       }
+      else
+        return Runtime::merge_events(preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -2469,7 +2518,8 @@ namespace Legion {
       derez.deserialize(point);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      task->find_intra_space_dependence(point, to_trigger);
+      task->find_pointwise_dependence(
+          point, task->get_generation(), true /*intra space*/, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -2607,9 +2657,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OutputExtentExchange::OutputExtentExchange(
         ReplicateContext* ctx, ReplIndexTask* own, CollectiveIndexLocation loc,
-        std::vector<OutputExtentMap>& all_extents)
+        std::vector<OutputRegionState>& all_states)
       : AllGatherCollective<false>(loc, ctx), owner(own),
-        all_output_extents(all_extents)
+        all_output_states(all_states)
     //--------------------------------------------------------------------------
     { }
 
@@ -2624,16 +2674,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_DEBUG
-      rez.serialize(all_output_extents.size());
+      rez.serialize(all_output_states.size());
 #endif
-      for (const OutputExtentMap& extents : all_output_extents)
+      for (const OutputRegionState& state : all_output_states)
       {
-        rez.serialize(extents.size());
-        for (const std::pair<const DomainPoint, DomainPoint>& extent_pair :
-             extents)
+        rez.serialize(state.points.size());
+        for (const std::pair<const DomainPoint, DomainPoint>& it : state.points)
         {
-          rez.serialize(extent_pair.first);
-          rez.serialize(extent_pair.second);
+          rez.serialize(it.first);
+          rez.serialize(it.second);
         }
       }
     }
@@ -2647,26 +2696,17 @@ namespace Legion {
       size_t num_sizes;
       derez.deserialize(num_sizes);
 #endif
-      legion_assert(all_output_extents.size() == num_sizes);
-      for (unsigned idx = 0; idx < all_output_extents.size(); idx++)
+      legion_assert(all_output_states.size() == num_sizes);
+      for (unsigned idx = 0; idx < all_output_states.size(); idx++)
       {
-        OutputExtentMap& extents = all_output_extents[idx];
+        OutputRegionState& state = all_output_states[idx];
         size_t num_entries;
         derez.deserialize(num_entries);
         for (unsigned eidx = 0; eidx < num_entries; eidx++)
         {
           DomainPoint point;
           derez.deserialize(point);
-#ifdef LEGION_DEBUG
-          DomainPoint size;
-          derez.deserialize(size);
-          legion_assert(
-              (extents.find(point) == extents.end()) ||
-              (extents.find(point)->second == size));
-          extents[point] = size;
-#else
-          derez.deserialize(extents[point]);
-#endif
+          derez.deserialize(state.points[point]);
         }
       }
     }
@@ -3701,17 +3741,24 @@ namespace Legion {
       }
       if (!output_regions.empty())
       {
-        bool has_output_region = false;
+        bool has_unbound_region = false;
+        bool has_local_indexing = false;
         for (unsigned idx = 0; idx < output_regions.size(); ++idx)
-          if (!output_region_options[idx].valid_requirement())
-          {
-            has_output_region = true;
-            break;
-          }
-        if (has_output_region)
         {
-          output_size_collective = new OutputExtentExchange(
-              ctx, this, COLLECTIVE_LOC_29, output_region_extents);
+          if (!output_region_options[idx].bounded_requirement())
+          {
+            has_unbound_region = true;
+            if (!output_region_options[idx].global_indexing())
+              has_local_indexing = true;
+          }
+        }
+        if (has_unbound_region)
+        {
+          // We need an exchange if we've got a local index or we're
+          // validating the programming model
+          if (has_local_indexing || runtime->safe_model)
+            output_size_collective = new OutputExtentExchange(
+                ctx, this, COLLECTIVE_LOC_29, output_region_states);
           output_bar = ctx->get_next_output_regions_barrier();
         }
       }
@@ -4013,10 +4060,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndexTask::find_intra_space_dependence(
-        const DomainPoint& point, RtUserEvent to_trigger)
+    RtEvent ReplIndexTask::find_pointwise_dependence(
+        const DomainPoint& point, GenerationID needed_gen, bool intra_space,
+        RtUserEvent to_trigger, std::optional<unsigned> output_region)
     //--------------------------------------------------------------------------
     {
+      AutoLock o_lock(op_lock);
+      legion_assert(needed_gen <= gen);
+      if ((needed_gen < gen) || mapped ||
+          (predication_state == PREDICATED_FALSE_STATE))
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return RtEvent::NO_RT_EVENT;
+      }
       legion_assert(sharding_function != nullptr);
       ReplicateContext* repl_ctx =
           legion_safe_cast<ReplicateContext*>(parent_ctx);
@@ -4027,49 +4084,614 @@ namespace Legion {
         launch_domain = launch_space->get_tight_domain();
       const ShardID point_shard =
           sharding_function->find_owner(point, launch_domain);
-      if (point_shard == repl_ctx->owner_shard->shard_id)
+      if (point_shard != repl_ctx->owner_shard->shard_id)
       {
-        // Sharded locally to this shard
-        AutoLock o_lock(op_lock);
-        std::map<DomainPoint, RtEvent>::const_iterator finder =
-            point_mapped_events.find(point);
-        if (finder != point_mapped_events.end())
+        o_lock.release();
+        // Send it off to the remote shard to find it
+        return repl_ctx->find_pointwise_dependence(
+            context_index, point, point_shard, intra_space, to_trigger);
+      }
+      RtEvent point_mapped;
+      // See if we can find this in the point mapped events data structure
+      std::map<DomainPoint, RtEvent>::const_iterator finder =
+          point_mapped_events.find(point);
+      if (finder == point_mapped_events.end())
+      {
+        // Create a pending pointwise dependence for this point
+        std::map<DomainPoint, RtUserEvent>::const_iterator pending_finder =
+            pending_pointwise_dependences.find(point);
+        if (pending_finder == pending_pointwise_dependences.end())
         {
-          if (to_trigger.exists())
-          {
-            Runtime::trigger_event(to_trigger, finder->second);
-            return to_trigger;
-          }
-          else
-            return finder->second;
+          RtUserEvent pending = Runtime::create_rt_user_event();
+          pending_pointwise_dependences.emplace(std::make_pair(point, pending));
+          point_mapped = pending;
         }
         else
+          point_mapped = pending_finder->second;
+      }
+      else
+        point_mapped = finder->second;
+      // If this is an intra-space look-up or we don't have output regions
+      // then we are already done
+      if (intra_space || output_pointwise_dependences.empty())
+      {
+        legion_assert(!output_region);
+        if (to_trigger.exists())
         {
-          std::map<DomainPoint, RtUserEvent>::const_iterator pending_finder =
-              pending_pointwise_dependences.find(point);
-          if (pending_finder == pending_pointwise_dependences.end())
+          Runtime::trigger_event(to_trigger, point_mapped);
+          return to_trigger;
+        }
+        else
+          return point_mapped;
+      }
+      // Now for the hairy part: if we have globally indexed output regions then
+      // we also need to compute transitive dependences for each of the points
+      // that this next point will depend on as well in order to run safely
+      std::vector<RtEvent> preconditions(1, point_mapped);
+      for (unsigned idx = 0; idx < output_pointwise_dependences.size(); idx++)
+      {
+        if (!output_region_options[idx].global_indexing())
+          continue;
+        if (output_region && (idx != *output_region))
+          continue;
+        std::map<DomainPoint, RtEvent>& output_pointwise =
+            output_pointwise_dependences[idx];
+        DomainPoint color_point = point;
+        IndexPartNode* partition = nullptr;
+        ProjectionFunction* projection = nullptr;
+        const RegionRequirement& req = output_regions[idx];
+        const OutputRegionState& state = output_region_states[idx];
+        if (req.projection != 0)
+        {
+          // Need to convert the point into the color space to check if we
+          // have it already
+          partition = runtime->get_node(req.partition.get_index_partition());
+          projection = runtime->find_projection_function(req.projection);
+          LogicalRegion region = projection->project_point(
+              this, regions.size() + idx, index_domain, point);
+          legion_assert(region.exists());
+          color_point = runtime->get_node(region.get_index_space())
+                            ->get_domain_point_color();
+          legion_assert(state.global_color_space.contains(color_point));
+        }
+        finder = output_pointwise.find(color_point);
+        if (finder == output_pointwise.end())
+        {
+          // DFS backwards for this output region to find the points we need
+          std::vector<DomainPoint> needed_colors(1, color_point);
+          while (!needed_colors.empty())
           {
-            if (!to_trigger.exists())
-              to_trigger = Runtime::create_rt_user_event();
-            pending_pointwise_dependences.emplace(
-                std::make_pair(point, to_trigger));
-            return to_trigger;
-          }
-          else
-          {
-            if (to_trigger.exists())
+            const DomainPoint& needed_color = needed_colors.back();
+            std::vector<RtEvent> point_preconditions;
+            // Check to see if we have all our previous points
+            bool has_all_previous = true;
+            for (int dim = 0; dim < needed_color.get_dim(); dim++)
             {
-              Runtime::trigger_event(to_trigger, pending_finder->second);
-              return to_trigger;
+              DomainPoint previous = needed_color;
+              previous[dim]--;
+              if (!state.global_color_space.contains(previous))
+                continue;
+              finder = output_pointwise.find(previous);
+              if (finder == output_pointwise.end())
+              {
+                needed_colors.push_back(previous);
+                has_all_previous = false;
+                break;
+              }
+              point_preconditions.push_back(finder->second);
+            }
+            if (!has_all_previous)
+              continue;
+            // Also include the particular point's mapped event
+            DomainPoint orig_point = needed_color;
+            if (projection != nullptr)
+            {
+              // Need to convert from color space back to the index space
+              IndexSpaceNode* child = partition->get_child(
+                  partition->color_space->linearize_color(needed_color));
+              LogicalRegion region(
+                  req.partition.tree_did, child->handle,
+                  req.partition.field_space);
+              std::vector<DomainPoint> points;
+              projection->functor->invert(
+                  region, req.partition, index_domain, points);
+              if (points.size() != 1)
+              {
+                Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+                error
+                    << "Illegal projection function inversion computed by "
+                    << "projection functor " << projection->projection_id
+                    << " for output region requirement " << idx << " of "
+                    << *this << ". The projection function says that "
+                    << points.size()
+                    << " different points map to logical region " << region
+                    << ", however projection functions for output "
+                    << "region requirements are required to be bijiective and "
+                    << "and therefore exactly one point should ever be allowed "
+                    << "to map to a single output logical region.";
+                error.raise();
+              }
+              orig_point = points.back();
+            }
+            finder = point_mapped_events.find(orig_point);
+            if (finder == point_mapped_events.end())
+            {
+              // See if it was sharded to us or not
+              const ShardID pending_shard =
+                  sharding_function->find_owner(orig_point, launch_domain);
+              if (pending_shard == repl_ctx->owner_shard->shard_id)
+              {
+                // Sharded locally so either find it or make a pending
+                std::map<DomainPoint, RtUserEvent>::const_iterator
+                    pending_finder =
+                        pending_pointwise_dependences.find(orig_point);
+                if (pending_finder == pending_pointwise_dependences.end())
+                {
+                  RtUserEvent pending = Runtime::create_rt_user_event();
+                  pending_pointwise_dependences.emplace(
+                      std::make_pair(orig_point, pending));
+                }
+                else
+                  point_preconditions.push_back(pending_finder->second);
+              }
+              else
+              {
+                // Send a request to find the output region pointwise dependence
+                // Can't be holding the lock when we do this or we risk deadlock
+                // This looks scary, but actually isn't, if we race then we'll
+                // just do some extra event mergers and generate two events
+                // that mean the same thing
+                RtUserEvent pending = Runtime::create_rt_user_event();
+                point_mapped_events.emplace(
+                    std::make_pair(orig_point, pending));
+                o_lock.release();
+                repl_ctx->find_pointwise_dependence(
+                    context_index, orig_point, pending_shard,
+                    false /*intra space*/, pending, idx);
+                o_lock.reacquire();
+              }
             }
             else
-              return pending_finder->second;
+              point_preconditions.push_back(finder->second);
+            output_pointwise[needed_color] =
+                Runtime::merge_events(point_preconditions);
+            needed_colors.pop_back();
+          }
+          finder = output_pointwise.find(point);
+          legion_assert(finder != output_pointwise.end());
+        }
+        preconditions.push_back(finder->second);
+      }
+      if (to_trigger.exists())
+      {
+        Runtime::trigger_event(
+            to_trigger, Runtime::merge_events(preconditions));
+        return to_trigger;
+      }
+      else
+        return Runtime::merge_events(preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::record_output_offset(
+        unsigned index, unsigned dim, size_t color_index, size_t offset)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      legion_assert(index < output_region_states.size());
+      OutputRegionState& state = output_region_states[index];
+      legion_assert(dim < state.offsets.size());
+      legion_assert(color_index < state.offsets[dim].size());
+      legion_assert(state.offsets[dim][color_index] < 0);
+      state.offsets[dim][color_index] = offset;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::record_output_extent(
+        unsigned index, const DomainPoint& color, const DomainPoint& extent)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(index < output_regions.size());
+      legion_assert(index < output_region_states.size());
+      legion_assert(output_regions.size() == output_region_options.size());
+      legion_assert(!is_output_bounded(index));
+      const OutputOptions& options = output_region_options[index];
+      legion_assert(!options.bounded_requirement());
+      OutputRegionState& state = output_region_states[index];
+      // Should always be able to set the domain for the color when we're done
+      bool done;
+      std::vector<DomainPoint> done_points;
+      {
+        // Check to see if there are any buffered objects in the context
+        // that we need to handle if this is global indexing, must do this
+        // before taking the lock to avoid deadlock due to taking locks
+        // in the wrong order
+        std::vector<std::optional<std::pair<size_t, size_t>>> offsets;
+        if (options.global_indexing())
+        {
+          ReplicateContext* repl_ctx =
+              legion_safe_cast<ReplicateContext*>(parent_ctx);
+          repl_ctx->find_pending_output_offsets(context_index, index, offsets);
+        }
+        AutoLock o_lock(op_lock);
+        if (!offsets.empty())
+        {
+          legion_assert(state.points.empty());
+          for (unsigned dim = 0; dim < offsets.size(); dim++)
+          {
+            if (!offsets[dim])
+              continue;
+            const size_t color_index = offsets[dim]->first;
+            const size_t offset = offsets[dim]->second;
+            legion_assert(dim < state.offsets.size());
+            legion_assert(color_index < state.offsets[dim].size());
+            legion_assert(state.offsets[dim][color_index] < 0);
+            state.offsets[dim][color_index] = offset;
+          }
+        }
+        if (!state.points.emplace(std::make_pair(color, extent)).second)
+        {
+          const OutputRequirement& req = output_regions[index];
+          Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+          error << "A projection functor for every output requirement must "
+                << "be bijective, but projection functor " << req.projection
+                << " for output requirement " << index << " in task " << *this
+                << " mapped more than one point in the launch domain to the "
+                << "same subregion of color " << color << ".";
+          error.raise();
+        }
+        if (options.global_indexing())
+        {
+          if (color == state.global_color_space.hi())
+            state.has_hi_point = true;
+          unsigned remaining_dims = 0;
+          legion_assert(color.get_dim() == extent.get_dim());
+          // Iterate over each of the dimensions
+          for (int dim = 0; dim < color.get_dim(); dim++)
+          {
+            const size_t color_index =
+                color[dim] - state.global_color_space.lo()[dim];
+            std::vector<coord_t>& dim_extents = state.extents[dim];
+            legion_assert(color_index < dim_extents.size());
+            // Check to see if the offset is ready
+            std::vector<coord_t>& dim_offsets = state.offsets[dim];
+            legion_assert(color_index < dim_offsets.size());
+            if (0 <= dim_extents[color_index])
+            {
+              // Already set, so there's nothing to do here other than
+              // to check that the extent matches what we expect
+              if (dim_extents[color_index] != extent[dim])
+              {
+                Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+                error << "Point task " << color
+                      << " returned an output of extent " << extent[dim]
+                      << " for dimension " << dim
+                      << ", but an adjacent point task returned an output "
+                      << "of extent " << dim_extents[dim] << ". Please make "
+                      << "sure the outputs from point tasks are aligned.";
+                error.raise();
+              }
+              if (dim_offsets[color_index] < 0)
+              {
+                remaining_dims++;
+                if (state.dim_pending_points.empty())
+                  state.dim_pending_points.resize(color.get_dim());
+                state.dim_pending_points[dim].insert(color);
+              }
+              continue;
+            }
+            else  // We're a new extent, so we can save it
+              dim_extents[color_index] = extent[dim];
+            // If the previous offset is not ready yet there's nothing to do
+            if (dim_offsets[color_index] < 0)
+            {
+              remaining_dims++;
+              if (state.dim_pending_points.empty())
+                state.dim_pending_points.resize(color.get_dim());
+              state.dim_pending_points[dim].insert(color);
+              continue;
+            }
+            // Compute the set of shards for all the points associated with
+            // the current extent
+            std::set<ShardID> previous_shards;
+            compute_output_extent_shards(
+                index, dim, color_index, state.global_color_space,
+                state.projection, previous_shards);
+            // Ripple carry add the extents forward and send out any messages
+            // to other shards that need to be notified
+            for (unsigned idx = color_index; idx < dim_extents.size(); idx++)
+            {
+              if (dim_extents[idx] < 0)
+                break;
+              dim_offsets[idx + 1] = dim_offsets[idx] + dim_extents[idx];
+              // Compute the set of shards associated with the next extent
+              if (idx < (dim_extents.size() - 1))
+              {
+                std::set<ShardID> next_shards;
+                compute_output_extent_shards(
+                    index, dim, idx + 1, state.global_color_space,
+                    state.projection, next_shards);
+                send_output_offset_messages(
+                    index, dim, idx + 1, dim_offsets[idx + 1], previous_shards,
+                    next_shards);
+                previous_shards.swap(next_shards);
+              }
+              // Check for any local points for which we are done now
+              if (!state.dim_pending_points.empty() &&
+                  !state.dim_pending_points[dim].empty())
+              {
+                for (std::set<DomainPoint>::iterator it =
+                         state.dim_pending_points[dim].begin();
+                     it != state.dim_pending_points[dim].end();
+                     /*nothing*/)
+                {
+                  const unsigned index =
+                      (*it)[dim] - state.global_color_space.lo()[dim];
+                  if (index == (idx + 1))
+                  {
+                    std::map<DomainPoint, unsigned>::iterator finder =
+                        state.pending_points.find(*it);
+                    legion_assert(finder != state.pending_points.end());
+                    legion_assert(finder->second > 0);
+                    if (--finder->second == 0)
+                    {
+                      done_points.push_back(*it);
+                      state.pending_points.erase(finder);
+                    }
+                    std::set<DomainPoint>::iterator delete_it = it++;
+                    state.dim_pending_points[dim].erase(delete_it);
+                  }
+                  else
+                    it++;
+                }
+              }
+            }
+          }
+          if (remaining_dims > 0)
+          {
+            legion_assert(
+                state.pending_points.find(color) == state.pending_points.end());
+            state.pending_points.emplace(std::make_pair(color, remaining_dims));
+          }
+          else
+            done_points.push_back(color);
+        }
+        done = (state.points.size() == total_points);
+        if (done)
+        {
+          // Check to see if all the other output regions are done too
+          for (unsigned idx = 0; idx < output_regions.size(); idx++)
+          {
+            if (output_region_states[idx].points.size() == total_points)
+              continue;
+            done = false;
+            break;
           }
         }
       }
-      else  // Send it off to the remote shard to find it
-        return repl_ctx->find_pointwise_dependence(
-            context_index, point, point_shard, to_trigger);
+      if (!done_points.empty())
+      {
+        IndexPartNode* part = runtime->get_node(
+            output_regions[index].partition.get_index_partition());
+        for (std::vector<DomainPoint>::const_iterator it = done_points.begin();
+             it != done_points.end(); it++)
+        {
+          DomainPoint lo, hi;
+          lo.dim = color.dim;
+          hi.dim = color.dim;
+          for (int dim = 0; dim < color.dim; dim++)
+          {
+            const unsigned color_index =
+                (*it)[dim] - state.global_color_space.lo()[dim];
+            lo[dim] = state.offsets[dim][color_index];
+            hi[dim] = state.offsets[dim][color_index + 1] - 1;  // inclusive
+          }
+          IndexSpaceNode* child =
+              part->get_child(part->color_space->linearize_color(*it));
+          if (child->set_domain(
+                  Domain(lo, hi), ApEvent::NO_AP_EVENT,
+                  false /*take ownership*/, true /*broadcast*/))
+            delete child;
+        }
+      }
+      if (done)
+      {
+        // Still need to participate in the exchange for computing the
+        // top-level index space result regardless of indexing mode
+        finalize_output_regions(true /*first invocation*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::compute_output_extent_shards(
+        unsigned index, unsigned dim, size_t color_index,
+        const Domain& color_space, ProjectionFunction* projection,
+        std::set<ShardID>& shards) const
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(shards.empty());
+      legion_assert(sharding_function != nullptr);
+      DomainPoint lo = color_space.lo();
+      DomainPoint hi = color_space.hi();
+      // Restrict to all the points that shards the same color index on the dim
+      lo[dim] += color_index;
+      legion_assert(lo[dim] <= hi[dim]);
+      hi[dim] = lo[dim];
+      const Domain next_colors(lo, hi);
+      Domain sharding_domain;
+      if (sharding_space.exists())
+        runtime->find_domain(sharding_space, sharding_domain);
+      else
+        sharding_domain = index_domain;
+      if (projection->projection_id == 0)
+      {
+        // Identity projection is trivially invertible
+        for (Domain::DomainPointIterator itr(next_colors); itr; itr++)
+        {
+          const ShardID shard =
+              sharding_function->find_owner(*itr, sharding_domain);
+          shards.insert(shard);
+        }
+      }
+      else
+      {
+        // Need to invert to points in the launch domain before we can
+        // do the sharding computation
+        std::vector<LogicalRegion> next_regions;
+        next_regions.reserve(next_colors.get_volume());
+        const RegionRequirement& req = output_regions[index];
+        IndexPartNode* partition =
+            runtime->get_node(req.partition.get_index_partition());
+        for (Domain::DomainPointIterator itr(next_colors); itr; itr++)
+        {
+          LegionColor color = partition->color_space->linearize_color(*itr);
+          // This is a bit ineffecient because we really only need the name of
+          // child and don't need to actually construct the node for it here in
+          // order to do that but it does help in cases where we'll need to look
+          // it up multiple times so we'll end up caching the result so we'll
+          // just leave it for now
+          IndexSpaceNode* child = partition->get_child(color);
+          next_regions.emplace_back(LogicalRegion(
+              req.partition.tree_did, child->handle,
+              req.partition.field_space));
+        }
+        std::map<LogicalRegion, std::vector<DomainPoint>> next_points;
+        projection->find_inversions(
+            TASK_OP_KIND, unique_op_id, regions.size() + index, req,
+            launch_space, next_regions, next_points);
+        for (std::map<LogicalRegion, std::vector<DomainPoint>>::const_iterator
+                 it = next_points.begin();
+             it != next_points.end(); it++)
+        {
+          if (it->second.size() != 1)
+          {
+            Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+            error << "Illegal projection function inversion computed by "
+                  << "projection functor " << projection->projection_id
+                  << " for output region requirement " << index << " of "
+                  << *this << ". The projection function says that "
+                  << it->second.size()
+                  << " different points map to logical region " << it->first
+                  << ", however projection functions for output "
+                  << "region requirements are required to be bijiective and "
+                  << "and therefore exactly one point should ever be allowed "
+                  << "to map to a single output logical region.";
+            error.raise();
+          }
+          const ShardID shard =
+              sharding_function->find_owner(it->second.back(), sharding_domain);
+          shards.insert(shard);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::send_output_offset_messages(
+        unsigned index, unsigned dim, size_t color_index, size_t offset,
+        const std::set<ShardID>& previous_shards,
+        const std::set<ShardID>& next_shards) const
+    //--------------------------------------------------------------------------
+    {
+      ReplicateContext* repl_ctx =
+          legion_safe_cast<ReplicateContext*>(parent_ctx);
+      ShardManager* shard_manager = repl_ctx->shard_manager;
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      legion_assert(previous_shards.find(local_shard) != previous_shards.end());
+      // For each of the next shards, see if we need to send them a message
+      // with the output extent for this color_index of this dim
+      for (std::set<ShardID>::const_iterator it = next_shards.begin();
+           it != next_shards.end(); it++)
+      {
+        std::set<ShardID>::const_iterator finder =
+            previous_shards.lower_bound(*it);
+        if (finder == previous_shards.end())
+        {
+          // Above the last previous shard
+          // If we're not the last previous shard then we don't send it
+          if (local_shard != *std::prev(previous_shards.end()))
+            continue;
+        }
+        else if ((*finder) == *it)
+        {
+          // Shard will provide the extent to itself
+          continue;
+        }
+        else if (finder == previous_shards.begin())
+        {
+          // Before the first previous shard
+          // If we're not the first previous_shard then don't send it
+          if (local_shard != *previous_shards.begin())
+            continue;
+        }
+        else
+        {
+          // Between two entries
+          std::set<ShardID>::const_iterator previous = std::prev(finder);
+          if ((*it - *previous) <= (*finder - *it))
+          {
+            // Previous is closer
+            if (local_shard != *previous)
+              continue;
+          }
+          else
+          {
+            // Finder is closer
+            if (local_shard != *finder)
+              continue;
+          }
+        }
+        // If we get here then we're sending the message to the next shard
+        ReplOutputOffset rez;
+        rez.serialize(shard_manager->did);
+        rez.serialize(*it);
+        rez.serialize(context_index);
+        rez.serialize(index);
+        rez.serialize(dim);
+        rez.serialize(color_index);
+        rez.serialize(offset);
+        shard_manager->send_output_offset(*it, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::validate_output_extents(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      IndexTask::validate_output_extents(index);
+      // Since we don't see all the points on any one shard we still need to
+      // check for any global indexing violations where points on the same
+      // dimension given different extents.
+      if (output_region_options[index].bounded_requirement())
+        return;
+      if (!output_region_options[index].global_indexing())
+        return;
+      OutputRegionState& state = output_region_states[index];
+      for (std::map<DomainPoint, DomainPoint>::const_iterator it =
+               state.points.begin();
+           it != state.points.end(); it++)
+      {
+        legion_assert(it->first.get_dim() == it->second.get_dim());
+        for (int dim = 0; dim < it->first.get_dim(); dim++)
+        {
+          const size_t color_index = it->first[dim];
+          legion_assert(((size_t)dim) < state.extents.size());
+          legion_assert(color_index < state.extents[dim].size());
+          if (state.extents[dim][color_index] < 0)
+            state.extents[dim][color_index] = it->second[dim];
+          else if (state.extents[dim][color_index] != it->second[dim])
+          {
+            Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
+            error << "Point task " << it->first
+                  << " returned an output of extent " << it->second[dim]
+                  << " for dimension " << dim << " of output region " << index
+                  << ", but an adjacent point task returned an output "
+                  << "of extent " << state.extents[dim][color_index]
+                  << ". Please make sure the outputs from point tasks "
+                  << "are aligned.";
+            error.raise();
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4106,7 +4728,6 @@ namespace Legion {
       // Check to see if we have an exchange to perform
       if (first_invocation && (output_size_collective != nullptr))
       {
-        local_output_extents = output_region_extents;
         // We need to gather output region sizes from all the other shards
         // to determine the sizes of globally indexed output regions
         output_size_collective->perform_collective_async();
@@ -4122,42 +4743,52 @@ namespace Legion {
               (completed_points < total_points) || (total_points == 0));
           commit_preconditions.insert(done_event);
         }
-        return;
       }
-      ReplicateContext* repl_ctx =
-          legion_safe_cast<ReplicateContext*>(parent_ctx);
-      if (!repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
-        return;
-      for (unsigned idx = 0; idx < output_regions.size(); ++idx)
+      else
       {
-        const OutputOptions& options = output_region_options[idx];
-        if (options.valid_requirement())
-          continue;
-        IndexSpaceNode* parent =
-            runtime->get_node(output_regions[idx].parent.get_index_space());
-        if (runtime->safe_model)
-          validate_output_extents(
-              idx, output_regions[idx], output_region_extents[idx]);
-        if (options.global_indexing())
+        ReplicateContext* repl_ctx =
+            legion_safe_cast<ReplicateContext*>(parent_ctx);
+        const bool first_local_shard =
+            repl_ctx->shard_manager->is_first_local_shard(
+                repl_ctx->owner_shard);
+        for (unsigned idx = 0; idx < output_regions.size(); ++idx)
         {
-          // For globally indexed output regions, we need to check
-          // the alignment between outputs from adjacent point tasks
-          // and compute the ranges of subregions via prefix sum.
-          IndexPartNode* part = runtime->get_node(
-              output_regions[idx].partition.get_index_partition());
-          Domain root_domain = compute_global_output_ranges(
-              parent, part, output_region_extents[idx],
-              local_output_extents[idx]);
-
-          if (parent->set_domain(
-                  root_domain, ApEvent::NO_AP_EVENT, false /*take ownership*/))
-            delete parent;
+          const OutputOptions& options = output_region_options[idx];
+          if (options.bounded_requirement())
+            continue;
+          if (runtime->safe_model)
+            validate_output_extents(idx);
+          if (options.global_indexing())
+          {
+            const OutputRegionState& state = output_region_states[idx];
+            // Check to see if we had the last point in the color space
+            if (state.has_hi_point)
+            {
+              DomainPoint root_lo, root_hi;
+              root_lo.dim = state.offsets.size();
+              root_hi.dim = state.offsets.size();
+              for (int dim = 0; dim < root_lo.get_dim(); dim++)
+              {
+                legion_assert(state.offsets[dim].back() >= 0);
+                root_lo[dim] = 0;
+                root_hi[dim] = state.offsets[dim].back() - 1 /*inclusive*/;
+              }
+              IndexSpaceNode* parent = runtime->get_node(
+                  output_regions[idx].parent.get_index_space());
+              if (parent->set_domain(
+                      Domain(root_lo, root_hi), ApEvent::NO_AP_EVENT,
+                      false /*take ownership*/, true /*broadcast*/))
+                delete parent;
+            }
+          }
+          else if (first_local_shard)
+          {
+            IndexSpaceNode* parent =
+                runtime->get_node(output_regions[idx].parent.get_index_space());
+            if (parent->set_output_union(output_region_states[idx].points))
+              delete parent;
+          }
         }
-        // For locally indexed output regions, sizes of subregions are already
-        // set when they are fianlized by the point tasks. So we only need to
-        // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(output_region_extents[idx]))
-          delete parent;
       }
     }
 

@@ -498,7 +498,7 @@ namespace Legion {
                 ShardID shard = pit.sharding->shard(
                     point, launch_domain, parent_ctx->get_total_shards());
                 RtEvent precondition = parent_ctx->find_pointwise_dependence(
-                    pit.context_index, point, shard);
+                    pit.context_index, point, shard, false /*intra space*/);
                 if (precondition.exists())
                   preconditions[idx].emplace_back(precondition);
               }
@@ -514,7 +514,8 @@ namespace Legion {
               for (const DomainPoint& point : finder->second)
               {
                 RtEvent precondition = parent_ctx->find_pointwise_dependence(
-                    pit.context_index, point, 0 /*shard*/);
+                    pit.context_index, point, 0 /*shard*/,
+                    false /*intra space*/);
                 if (precondition.exists())
                   preconditions[idx].emplace_back(precondition);
               }
@@ -636,10 +637,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent IndexDetachOp::find_pointwise_dependence(
-        const DomainPoint& point, GenerationID needed_gen,
-        RtUserEvent to_trigger)
+        const DomainPoint& point, GenerationID needed_gen, bool intra_space,
+        RtUserEvent to_trigger, std::optional<unsigned> output_index)
     //--------------------------------------------------------------------------
     {
+      legion_assert(!intra_space);
+      legion_assert(!output_index);
       AutoLock o_lock(op_lock, false /*exclusive*/);
       legion_assert(needed_gen <= gen);
       if ((needed_gen < gen) || mapped)

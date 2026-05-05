@@ -259,11 +259,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::is_output_valid(unsigned idx) const
+    bool SliceTask::is_output_bounded(unsigned idx) const
     //--------------------------------------------------------------------------
     {
       legion_assert(idx < output_region_options.size());
-      return output_region_options[idx].valid_requirement();
+      return output_region_options[idx].bounded_requirement();
     }
 
     //--------------------------------------------------------------------------
@@ -1084,39 +1084,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_assert(index < output_regions.size());
-      legion_assert(output_regions.size() == output_region_extents.size());
       legion_assert(output_regions.size() == output_region_options.size());
-      legion_assert(!is_output_valid(index));
-      {
-        AutoLock o_lock(op_lock);
-        OutputExtentMap& output_extents = output_region_extents[index];
-        if (output_extents.find(color) != output_extents.end())
-        {
-          const OutputRequirement& req = output_regions[index];
-          Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
-          error << "A projection functor for every output requirement must be "
-                << "bijective, but projection functor " << req.projection
-                << " for output requirement " << index << " in " << *this
-                << " mapped more than one point in the launch domain to the "
-                << "same subregion of color " << color << ".";
-          error.raise();
-        }
-        output_extents[color] = extent;
-        legion_assert(output_extents.size() <= points.size());
-        if (output_extents.size() < points.size())
-          return;
-        // Check the other output regions to see if they are done as well
-        for (unsigned idx = 0; idx < output_regions.size(); idx++)
-        {
-          if (idx == index)
-            continue;
-          if (is_output_valid(idx))
-            continue;
-          legion_assert(output_region_extents[idx].size() <= points.size());
-          if (output_region_extents[idx].size() < points.size())
-            return;
-        }
-      }
+      legion_assert(!is_output_bounded(index));
       // If we get here then we need to send the sizes back to the index owner
       if (is_remote())
       {
@@ -1126,26 +1095,20 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(index_owner);
-          rez.serialize<size_t>(output_region_extents.size());
-          for (const OutputExtentMap& extents : output_region_extents)
-          {
-            rez.serialize<size_t>(extents.size());
-            for (const std::pair<const DomainPoint, DomainPoint>& extent_pair :
-                 extents)
-            {
-              rez.serialize(extent_pair.first);
-              rez.serialize(extent_pair.second);
-            }
-          }
+          rez.serialize(index);
+          rez.serialize(color);
+          rez.serialize(extent);
           rez.serialize(applied);
         }
         rez.dispatch(orig_proc.address_space());
         AutoLock o_lock(op_lock);
-        legion_assert(num_uncompleted_points.load() > 0);
+#ifdef DEBUG_LEGION
+        assert(num_uncompleted_points.load() > 0);
+#endif
         commit_preconditions.insert(applied);
       }
       else
-        index_owner->record_output_extents(output_region_extents);
+        index_owner->record_output_extent(index, color, extent);
     }
 
     //--------------------------------------------------------------------------
@@ -1156,23 +1119,12 @@ namespace Legion {
       DerezCheck z(derez);
       IndexTask* index_owner;
       derez.deserialize(index_owner);
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      std::vector<MultiTask::OutputExtentMap> output_region_extents(
-          num_regions);
-      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
-      {
-        MultiTask::OutputExtentMap& extents = output_region_extents[idx1];
-        size_t num_extents;
-        derez.deserialize(num_extents);
-        for (unsigned idx2 = 0; idx2 < num_extents; idx2++)
-        {
-          DomainPoint color;
-          derez.deserialize(color);
-          derez.deserialize(extents[color]);
-        }
-      }
-      index_owner->record_output_extents(output_region_extents);
+      unsigned index;
+      derez.deserialize(index);
+      DomainPoint color, extent;
+      derez.deserialize(color);
+      derez.deserialize(extent);
+      index_owner->record_output_extent(index, color, extent);
       RtUserEvent applied;
       derez.deserialize(applied);
       Runtime::trigger_event(applied);
@@ -1741,7 +1693,8 @@ namespace Legion {
         return temp_event;
       }
       else
-        return index_owner->find_intra_space_dependence(point);
+        return index_owner->find_pointwise_dependence(
+            point, index_owner->get_generation(), true /*intra space*/);
     }
 
     //--------------------------------------------------------------------------
