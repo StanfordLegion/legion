@@ -397,6 +397,9 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
       legion_assert(is_global<false /*need lock*/>());
+      // Promote the current state back up if we had a pending downgrade
+      if (current_state == PENDING_LOCAL_REF_STATE)
+        current_state = GLOBAL_REF_STATE;
       gc_references += cnt;
       std::map<ReferenceSource, int>::iterator finder =
           detailed_base_gc_references.find(source);
@@ -413,6 +416,9 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
       legion_assert(is_global<false /*need lock*/>());
+      // Promote the current state back up if we had a pending downgrade
+      if (current_state == PENDING_LOCAL_REF_STATE)
+        current_state = GLOBAL_REF_STATE;
       gc_references += cnt;
       std::map<DistributedID, int>::iterator finder =
           detailed_nested_gc_references.find(source);
@@ -1405,6 +1411,9 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
       legion_assert(is_valid<false /*need lock*/>());
+      // Promote the current state back up if we had a pending downgrade
+      if (current_state == PENDING_GLOBAL_REF_STATE)
+        current_state = VALID_REF_STATE;
       valid_references += cnt;
       std::map<ReferenceSource, int>::iterator finder =
           detailed_base_valid_references.find(source);
@@ -1421,6 +1430,9 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
       legion_assert(is_valid<false /*need lock*/>());
+      // Promote the current state back up if we had a pending downgrade
+      if (current_state == PENDING_GLOBAL_REF_STATE)
+        current_state = VALID_REF_STATE;
       valid_references += cnt;
       std::map<DistributedID, int>::iterator finder =
           detailed_nested_valid_references.find(source);
