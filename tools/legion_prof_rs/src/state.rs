@@ -5524,8 +5524,8 @@ impl State {
                 // range's stop, which would crash the status interval consumer.
                 let first_writer = users[range.first_writer_index];
                 let last_reader = users[range.last_reader_index];
-                let pending = min(max(first_writer.create, pending_lower_bound), inst_stop);
-                let start = min(max(first_writer.start, pending), inst_stop);
+                let pending = first_writer.create.clamp(pending_lower_bound, inst_stop);
+                let start = first_writer.start.clamp(pending, inst_stop);
                 let stop = max(stop_time, start);
                 live_ranges.push(LiveRange {
                     pending,
