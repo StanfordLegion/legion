@@ -7629,7 +7629,8 @@ namespace Legion {
             to_check.push_back(it.second);
       }
       // Can't hold the lookup lock while traversing as the traversal adds
-      // and removes references so it might
+      // and removes references so it might also try to take the lookup lock
+      // and then end up hanging during the reentrant lock acquire
       CurrentInitializer init(ctx);
       for (RegionNode* root : to_check)
       {
