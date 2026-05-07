@@ -7620,11 +7620,23 @@ namespace Legion {
     void Runtime::check_region_tree_context(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+      std::vector<RegionNode*> to_check;
+      {
+        AutoLock l_lock(lookup_lock, false /*exclusive*/);
+        // Need to hold references to prevent deletion race
+        for (const std::pair<const RegionTreeID, RegionNode*>& it : tree_nodes)
+          if (it.second->check_global_and_increment(RUNTIME_REF))
+            to_check.push_back(it.second);
+      }
+      // Can't hold the lookup lock while traversing as the traversal adds
+      // and removes references so it might
       CurrentInitializer init(ctx);
-      AutoLock l_lock(lookup_lock, false /*exclusive*/);
-      // Need to hold references to prevent deletion race
-      for (const std::pair<const RegionTreeID, RegionNode*>& it : tree_nodes)
-        it.second->visit_node(&init);
+      for (RegionNode* root : to_check)
+      {
+        root->visit_node(&init);
+        if (root->remove_base_gc_ref(RUNTIME_REF))
+          delete root;
+      }
     }
 
     //--------------------------------------------------------------------------
