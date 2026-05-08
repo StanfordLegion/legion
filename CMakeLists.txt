@@ -836,6 +836,7 @@ CPMFindPackage(NAME Realm
                OPTIONS 
                "REALM_ENABLE_INSTALL ON"
                "REALM_ENABLE_UCX ${REALM_ENABLE_UCX}"
+               "UCX_BOOTSTRAP_ENABLE_MPI ${REALM_ENABLE_UCX}"
                "REALM_ENABLE_GASNETEX ${REALM_ENABLE_GASNETEX}"
                "GASNet_ROOT ${GASNet_ROOT}"
                "GASNET_CONDUIT ${GASNet_CONDUIT}"
