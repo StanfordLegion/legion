@@ -157,8 +157,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
-      if (valid_references.fetch_add(cnt) == 0)
+      // Cannot increment valid references until after the effects of
+      // notify_valid are visible to avoid races
+      if (valid_references.load() == 0)
         notify_valid();
+      valid_references.fetch_add(cnt);
     }
 
     //--------------------------------------------------------------------------
