@@ -2512,6 +2512,7 @@ namespace Legion {
           rez.serialize(match_space);
           rez.serialize(origin);
           to_perform.trace_info->pack_trace_info(rez);
+          to_perform.analysis_mapping->pack(rez);
           rez.serialize(term_event);
           rez.serialize(to_perform.ready_event);
           rez.serialize(to_perform.registered);
