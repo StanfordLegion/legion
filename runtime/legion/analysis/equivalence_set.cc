@@ -9759,7 +9759,7 @@ namespace Legion {
           }
           shrt::FieldMaskMap<InstanceView>& updates =
               released_updates[released_overlap];
-          for (const std::pair<InstanceView*, FieldMask>& it : rit.second)
+          for (const std::pair<InstanceView* const, FieldMask>& it : rit.second)
           {
             const FieldMask overlap = mask & it.second;
             if (!overlap)
@@ -10602,7 +10602,7 @@ namespace Legion {
       op::FieldMaskMap<EqKDTree>& requests = (*creation_requests)[source];
       if (!requests.empty())
       {
-        for (const std::pair<EqKDTree*, FieldMask>& it : to_create)
+        for (const std::pair<EqKDTree* const, FieldMask>& it : to_create)
           requests.insert(it.first, it.second);
       }
       else
@@ -11943,7 +11943,7 @@ namespace Legion {
             {
               rez.serialize(nit.first);
               rez.serialize(nit.second.size());
-              for (const std::pair<EqKDTree*, FieldMask>& it : nit.second)
+              for (const std::pair<EqKDTree* const, FieldMask>& it : nit.second)
               {
                 rez.serialize(it.first);
                 rez.serialize(it.second);
@@ -12082,7 +12082,7 @@ namespace Legion {
           {
             rez.serialize(nit.first);
             rez.serialize(nit.second.size());
-            for (const std::pair<EqKDTree*, FieldMask>& it : nit.second)
+            for (const std::pair<EqKDTree* const, FieldMask>& it : nit.second)
             {
               rez.serialize(it.first);
               rez.serialize(it.second);
@@ -12326,7 +12326,7 @@ namespace Legion {
           legion_assert(!to_cancel.empty());
           rez.serialize<size_t>(to_cancel.size());
           rez.serialize(this);
-          for (const std::pair<EqKDTree*, FieldMask>& it : to_cancel)
+          for (const std::pair<EqKDTree* const, FieldMask>& it : to_cancel)
           {
             rez.serialize(it.first);
             rez.serialize(it.second);
@@ -12345,7 +12345,7 @@ namespace Legion {
       else
       {
         unsigned references_to_remove = 0;
-        for (const std::pair<EqKDTree*, FieldMask>& it : to_cancel)
+        for (const std::pair<EqKDTree* const, FieldMask>& it : to_cancel)
         {
           references_to_remove += it.first->cancel_subscription(
               this, runtime->address_space, it.second);

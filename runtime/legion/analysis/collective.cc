@@ -124,7 +124,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < target_views.size(); idx++)
       {
         PhysicalManager* manager = target_instances[idx];
-        for (const std::pair<InstanceView*, FieldMask>& it : target_views[idx])
+        for (const std::pair<InstanceView* const, FieldMask>& it :
+             target_views[idx])
         {
           if (!it.first->is_collective_view())
             continue;

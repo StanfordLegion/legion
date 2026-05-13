@@ -94,7 +94,8 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(original_source);
           rez.serialize<size_t>(rit.second.size());
-          for (const std::pair<EquivalenceSet*, FieldMask>& it : rit.second)
+          for (const std::pair<EquivalenceSet* const, FieldMask>& it :
+               rit.second)
           {
             rez.serialize(it.first->did);
             rez.serialize(it.second);
@@ -145,7 +146,7 @@ namespace Legion {
             rez.serialize(target_analysis);
             rez.serialize(response_event);
             rez.serialize<size_t>(recorded_instances->size());
-            for (const std::pair<LogicalView*, FieldMask>& it :
+            for (const std::pair<LogicalView* const, FieldMask>& it :
                  *recorded_instances)
             {
               rez.serialize(it.first->did);

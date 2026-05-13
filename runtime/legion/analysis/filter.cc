@@ -58,7 +58,7 @@ namespace Legion {
       if ((runtime->address_space != original_source) ||
           (previous != original_source))
       {
-        for (const std::pair<InstanceView*, FieldMask>& it : filter_views)
+        for (const std::pair<InstanceView* const, FieldMask>& it : filter_views)
           it.first->unpack_global_ref();
       }
     }
@@ -116,7 +116,8 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(original_source);
           rez.serialize<size_t>(rit.second.size());
-          for (const std::pair<EquivalenceSet*, FieldMask>& it : rit.second)
+          for (const std::pair<EquivalenceSet* const, FieldMask>& it :
+               rit.second)
           {
             rez.serialize(it.first->did);
             rez.serialize(it.second);
@@ -125,7 +126,8 @@ namespace Legion {
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           rez.serialize<size_t>(filter_views.size());
-          for (const std::pair<InstanceView*, FieldMask>& it : filter_views)
+          for (const std::pair<InstanceView* const, FieldMask>& it :
+               filter_views)
           {
             it.first->pack_global_ref();
             rez.serialize(it.first->did);

@@ -59,7 +59,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(equivalence_sets.size());
-      for (const std::pair<EquivalenceSet*, FieldMask>& it : equivalence_sets)
+      for (const std::pair<EquivalenceSet* const, FieldMask>& it :
+           equivalence_sets)
       {
         rez.serialize(it.first->did);
         rez.serialize(it.second);
@@ -373,7 +374,7 @@ namespace Legion {
                  it : to_cancel)
           cancel_subscriptions(it.first, FieldMapView(it.second));
       }
-      for (const std::pair<EquivalenceSet*, FieldMask>& it : to_remove)
+      for (const std::pair<EquivalenceSet* const, FieldMask>& it : to_remove)
       {
         // This would be a valid assertion except for cases with control
         // replication where there is another node that owns the equivalence
