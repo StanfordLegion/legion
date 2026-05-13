@@ -516,14 +516,18 @@ namespace Legion {
     void PhysicalAnalysis::DeferPerformTraversalArgs::execute(void) const
     //--------------------------------------------------------------------------
     {
+      // Get this before doing anything
+      const bool on_heap = analysis->on_heap;
       std::set<RtEvent> applied_events;
-      Runtime::trigger_event(
-          done_event, analysis->perform_traversal(
-                          RtEvent::NO_RT_EVENT, *version_info, applied_events));
+      const RtEvent done = analysis->perform_traversal(
+          RtEvent::NO_RT_EVENT, *version_info, applied_events);
       if (!applied_events.empty())
         analysis->record_deferred_applied_events(applied_events);
-      if (analysis->on_heap && analysis->remove_reference())
+      if (on_heap && analysis->remove_reference())
         delete analysis;
+      // Trigger the done event last so that no waiter of the meta-task can
+      // delete the analysis out from under us before we are finished using it
+      Runtime::trigger_event(done_event, done);
     }
 
     //--------------------------------------------------------------------------
@@ -551,16 +555,18 @@ namespace Legion {
       analysis->analyze(
           set, *mask, deferral_events, applied_events, RtEvent::NO_RT_EVENT,
           already_deferred);
-      if (!deferral_events.empty())
-        Runtime::trigger_event(
-            done_event, Runtime::merge_events(deferral_events));
-      else
-        Runtime::trigger_event(done_event);
       if (!applied_events.empty())
         analysis->record_deferred_applied_events(applied_events);
       if (on_heap && analysis->remove_reference())
         delete analysis;
       delete mask;
+      // Trigger the done event last so that no waiter of the meta-task can
+      // delete the analysis out from under us before we are finished using it
+      if (!deferral_events.empty())
+        Runtime::trigger_event(
+            done_event, Runtime::merge_events(deferral_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -583,11 +589,13 @@ namespace Legion {
       const bool on_heap = analysis->on_heap;
       const RtEvent done = analysis->perform_remote(
           RtEvent::NO_RT_EVENT, applied_events, true /*already deferred*/);
-      Runtime::trigger_event(done_event, done);
       if (!applied_events.empty())
         analysis->record_deferred_applied_events(applied_events);
       if (on_heap && analysis->remove_reference())
         delete analysis;
+      // Trigger the done event last so that no waiter of the meta-task can
+      // delete the analysis out from under us before we are finished using it
+      Runtime::trigger_event(done_event, done);
     }
 
     //--------------------------------------------------------------------------
@@ -610,11 +618,13 @@ namespace Legion {
       const bool on_heap = analysis->on_heap;
       const RtEvent done = analysis->perform_updates(
           RtEvent::NO_RT_EVENT, applied_events, true /*already deferred*/);
-      Runtime::trigger_event(done_event, done);
       if (!applied_events.empty())
         analysis->record_deferred_applied_events(applied_events);
       if (on_heap && analysis->remove_reference())
         delete analysis;
+      // Trigger the done event last so that no waiter of the meta-task can
+      // delete the analysis out from under us before we are finished using it
+      Runtime::trigger_event(done_event, done);
     }
 
     //--------------------------------------------------------------------------
@@ -636,6 +646,8 @@ namespace Legion {
     void PhysicalAnalysis::DeferPerformRegistrationArgs::execute(void) const
     //--------------------------------------------------------------------------
     {
+      // Get this before doing anything
+      const bool on_heap = analysis->on_heap;
       ApEvent insts_ready;
       std::set<RtEvent> applied_events;
       const RtEvent done = analysis->perform_registration(
@@ -643,11 +655,13 @@ namespace Legion {
           termination, insts_ready, symbolic);
       Runtime::trigger_event(
           instances_ready, insts_ready, *trace_info, applied_events);
-      Runtime::trigger_event(done_event, done);
       if (!applied_events.empty())
         analysis->record_deferred_applied_events(applied_events);
-      if (analysis->on_heap && analysis->remove_reference())
+      if (on_heap && analysis->remove_reference())
         delete analysis;
+      // Trigger the done event last so that no waiter of the meta-task can
+      // delete the analysis out from under us before we are finished using it
+      Runtime::trigger_event(done_event, done);
     }
 
     //--------------------------------------------------------------------------
