@@ -1265,7 +1265,8 @@ namespace Legion {
             rez.serialize(rit.first->handle);
             rit.first->pack_global_ref();
             rez.serialize(rit.second.size());
-            for (const std::pair<EquivalenceSet*, FieldMask>& it : rit.second)
+            for (const std::pair<EquivalenceSet* const, FieldMask>& it :
+                 rit.second)
             {
               it.first->pack_global_ref();
               rez.serialize(it.first->did);

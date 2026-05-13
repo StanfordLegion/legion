@@ -116,7 +116,8 @@ namespace Legion {
     FieldState::~FieldState(void)
     //--------------------------------------------------------------------------
     {
-      for (const std::pair<RegionTreeNode*, FieldMask>& it : open_children)
+      for (const std::pair<RegionTreeNode* const, FieldMask>& it :
+           open_children)
         if (it.first->remove_base_gc_ref(FIELD_STATE_REF))
           delete it.first;
     }
@@ -167,7 +168,7 @@ namespace Legion {
     {
       if (!rhs.open_children.empty())
       {
-        for (const std::pair<RegionTreeNode*, FieldMask>& it :
+        for (const std::pair<RegionTreeNode* const, FieldMask>& it :
              rhs.open_children)
           // Remove duplicate references if we already had it
           if (!open_children.insert(it.first, it.second))
@@ -286,7 +287,7 @@ namespace Legion {
       for (const FieldState& fit : field_states)
       {
         FieldMask actually_valid;
-        for (const std::pair<RegionTreeNode*, FieldMask>& it :
+        for (const std::pair<RegionTreeNode* const, FieldMask>& it :
              fit.open_children)
         {
           actually_valid |= it.second;
@@ -307,7 +308,7 @@ namespace Legion {
       if (!refinement_trackers.empty())
       {
         FieldMask disjoint_refinements;
-        for (const std::pair<RefinementTracker*, FieldMask>& it :
+        for (const std::pair<RefinementTracker* const, FieldMask>& it :
              refinement_trackers)
         {
           legion_assert(disjoint_refinements * it.second);
@@ -324,14 +325,16 @@ namespace Legion {
       field_states.clear();
       if (!curr_epoch_users.empty())
       {
-        for (const std::pair<LogicalUser*, FieldMask>& it : curr_epoch_users)
+        for (const std::pair<LogicalUser* const, FieldMask>& it :
+             curr_epoch_users)
           if (it.first->remove_reference())
             delete it.first;
         curr_epoch_users.clear();
       }
       if (!prev_epoch_users.empty())
       {
-        for (const std::pair<LogicalUser*, FieldMask>& it : prev_epoch_users)
+        for (const std::pair<LogicalUser* const, FieldMask>& it :
+             prev_epoch_users)
           if (it.first->remove_reference())
             delete it.first;
         prev_epoch_users.clear();
@@ -346,7 +349,7 @@ namespace Legion {
       }
       if (!refinement_trackers.empty())
       {
-        for (const std::pair<RefinementTracker*, FieldMask>& it :
+        for (const std::pair<RefinementTracker* const, FieldMask>& it :
              refinement_trackers)
           delete it.first;
         refinement_trackers.clear();
@@ -750,7 +753,7 @@ namespace Legion {
             break;
         }
         // Add new entries
-        for (const std::pair<RefinementTracker*, FieldMask>& it : to_add)
+        for (const std::pair<RefinementTracker* const, FieldMask>& it : to_add)
           refinement_trackers.insert(it.first, it.second);
       }
       if (!!need_tracker)
@@ -811,7 +814,7 @@ namespace Legion {
             break;
         }
         // Add new entries
-        for (const std::pair<RefinementTracker*, FieldMask>& it : to_add)
+        for (const std::pair<RefinementTracker* const, FieldMask>& it : to_add)
           refinement_trackers.insert(it.first, it.second);
       }
       if (!!need_tracker)
@@ -977,7 +980,7 @@ namespace Legion {
           const FieldMask field_overlap = fit.valid_fields() & refinement_mask;
           if (!field_overlap)
             continue;
-          for (const std::pair<RegionTreeNode*, FieldMask>& it :
+          for (const std::pair<RegionTreeNode* const, FieldMask>& it :
                fit.open_children)
           {
             // Can skip the previous child if we've already done it
@@ -1076,14 +1079,16 @@ namespace Legion {
       // Go through and filter any current or previous epoch users that have
       // been committed and therefore can no longer be rolled back
       std::vector<LogicalUser*> timeout_users;
-      for (const std::pair<LogicalUser*, FieldMask>& it : curr_epoch_users)
+      for (const std::pair<LogicalUser* const, FieldMask>& it :
+           curr_epoch_users)
       {
         if (!it.first->op->is_operation_committed(it.first->gen))
           continue;
         timeout_users.emplace_back(it.first);
       }
       const size_t prev_size = timeout_users.size();
-      for (const std::pair<LogicalUser*, FieldMask>& it : prev_epoch_users)
+      for (const std::pair<LogicalUser* const, FieldMask>& it :
+           prev_epoch_users)
       {
         if (!it.first->op->is_operation_committed(it.first->gen))
           continue;
@@ -1183,7 +1188,8 @@ namespace Legion {
       // If we have any pending refinements, have them record dependences on
       // any pending closes that are interfering and then issue the refinements
       unsigned internal_index = 0;
-      for (const std::pair<RefinementOp*, FieldMask>& it : pending_refinements)
+      for (const std::pair<RefinementOp* const, FieldMask>& it :
+           pending_refinements)
       {
         RegionTreeNode* node = it.first->get_refinement_node();
         IndexTreeNode* refinement_row = node->get_row_source();

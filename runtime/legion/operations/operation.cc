@@ -1853,8 +1853,8 @@ namespace Legion {
       {
         collectives_valid.reserve(
             collectives_valid.size() + collectives.size());
-        for (const std::pair<ReplicatedView*, FieldMask>& collective_pair :
-             collectives)
+        for (const std::pair<ReplicatedView* const, FieldMask>&
+                 collective_pair : collectives)
           collectives_valid.emplace_back(
               MappingCollective(collective_pair.first));
       }
@@ -1889,8 +1889,8 @@ namespace Legion {
       {
         collectives_valid.reserve(
             collectives_valid.size() + collectives.size());
-        for (const std::pair<ReplicatedView*, FieldMask>& collective_pair :
-             collectives)
+        for (const std::pair<ReplicatedView* const, FieldMask>&
+                 collective_pair : collectives)
           collectives_valid.emplace_back(
               MappingCollective(collective_pair.first));
       }
@@ -2239,7 +2239,8 @@ namespace Legion {
       if (analysis.report_instances(instances))
         req.flags |= LEGION_RESTRICTED_FLAG;
       const std::vector<LogicalRegion> to_meet(1, req.region);
-      for (const std::pair<LogicalView*, FieldMask>& instance_pair : instances)
+      for (const std::pair<LogicalView* const, FieldMask>& instance_pair :
+           instances)
       {
         legion_assert(instance_pair.first->is_instance_view());
         if (instance_pair.first->is_individual_view())
