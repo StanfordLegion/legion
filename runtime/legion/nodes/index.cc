@@ -2361,7 +2361,7 @@ namespace Legion {
       if (collective_mapping == nullptr)
         return true;
       else
-        return (collective_mapping->size() < total_children);
+        return (collective_mapping->size() < size_t(total_children));
     }
 
     //--------------------------------------------------------------------------
