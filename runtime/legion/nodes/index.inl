@@ -2077,6 +2077,8 @@ namespace Legion {
           op->get_unique_op_id(), expr_id, precondition, result,
           DEP_PART_BY_FIELD);
       unsigned index = (results == nullptr) ? 0 : colors.size();
+      const bool broadcast =
+          (results == nullptr) && partition->needs_subspace_broadcast();
       // Set our local children results here
       for (ColorSpaceIterator itr(partition, true /*local only*/); itr; itr++)
       {
@@ -2087,8 +2089,8 @@ namespace Legion {
         IndexSpaceNodeT<DIM, T>* child =
             static_cast<IndexSpaceNodeT<DIM, T>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(
-                subspaces[index++], result, false /*initialization*/,
-                (results == nullptr), source_space))
+                subspaces[index++], result, false /*initialization*/, broadcast,
+                source_space))
           delete child;
       }
       if (results != nullptr)
@@ -2549,6 +2551,8 @@ namespace Legion {
           DEP_PART_BY_PREIMAGE);
       // Update any local children with their results
       unsigned index = (results == nullptr) ? 0 : subspaces.size();
+      const bool broadcast =
+          (results == nullptr) && partition->needs_subspace_broadcast();
       // Set our local children results here
       for (ColorSpaceIterator itr(partition, true /*local only*/); itr; itr++)
       {
@@ -2559,8 +2563,8 @@ namespace Legion {
         IndexSpaceNodeT<DIM1, T1>* child =
             static_cast<IndexSpaceNodeT<DIM1, T1>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(
-                subspaces[index++], result, false /*initialization*/,
-                (results == nullptr), source_space))
+                subspaces[index++], result, false /*initialization*/, broadcast,
+                source_space))
           delete child;
       }
       if (results != nullptr)
@@ -2730,6 +2734,8 @@ namespace Legion {
           DEP_PART_BY_PREIMAGE_RANGE);
       // Update any local children with their results
       unsigned index = (results == nullptr) ? 0 : subspaces.size();
+      const bool broadcast =
+          (results == nullptr) && partition->needs_subspace_broadcast();
       // Set our local children results here
       for (ColorSpaceIterator itr(partition, true /*local only*/); itr; itr++)
       {
@@ -2740,8 +2746,8 @@ namespace Legion {
         IndexSpaceNodeT<DIM1, T1>* child =
             static_cast<IndexSpaceNodeT<DIM1, T1>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(
-                subspaces[index++], result, false /*initialization*/,
-                (results == nullptr), source_space))
+                subspaces[index++], result, false /*initialization*/, broadcast,
+                source_space))
           delete child;
       }
       if (results != nullptr)

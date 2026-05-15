@@ -1462,6 +1462,7 @@ namespace Legion {
       void set_child(IndexSpaceNode* child);
       void add_tracker(PartitionTracker* tracker);
       size_t get_num_children(void) const;
+      bool needs_subspace_broadcast(void) const;
       bool compute_disjointness_and_completeness(void);
       bool update_disjoint_complete_result(
           uint64_t children_volume, uint64_t intersection_volume = 0);
@@ -1470,7 +1471,6 @@ namespace Legion {
           std::map<std::pair<LegionColor, LegionColor>, uint64_t>*
               intersection_volumes = nullptr);
       bool finalize_disjoint_complete(void);
-      void get_subspace_preconditions(std::set<ApEvent>& preconditions);
     public:
       void initialize_disjoint_complete_notifications(void);
       bool is_disjoint(bool from_app = false, bool false_if_not_ready = false);
