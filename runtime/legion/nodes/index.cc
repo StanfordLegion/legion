@@ -2353,6 +2353,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndexPartNode::needs_subspace_broadcast(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Only need to broadcast if the number of children is larger than
+      // the number of participants creating this partition
+      if (collective_mapping == nullptr)
+        return true;
+      else
+        return (collective_mapping->size() < size_t(total_children));
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartNode::RemoteDisjointnessFunctor::RemoteDisjointnessFunctor(
         IndexPartitionDisjointUpdate& r)
       : rez(r)

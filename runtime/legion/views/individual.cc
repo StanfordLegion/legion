@@ -2502,7 +2502,6 @@ namespace Legion {
         // Send the message to the parent
         const AddressSpaceID parent =
             to_perform.analysis_mapping->get_parent(origin, local_space);
-        std::set<RtEvent> applied_events;
         CollectiveIndividualRegisterUser rez;
         {
           RezCheck z(rez);
@@ -2519,35 +2518,30 @@ namespace Legion {
           rez.serialize(to_perform.applied);
         }
         rez.dispatch(parent);
-        if (!applied_events.empty())
-          Runtime::trigger_event(
-              to_perform.applied, Runtime::merge_events(applied_events));
-        else
-          Runtime::trigger_event(to_perform.applied);
         legion_assert(to_perform.mask == nullptr);
       }
       else
       {
         legion_assert(to_perform.applied.exists());
         std::vector<RtEvent> registered_events;
-        std::set<RtEvent> applied_events;
+        std::set<RtEvent> local_applied;
         const ApEvent ready = register_user(
             to_perform.usage, *to_perform.mask, to_perform.expr,
             to_perform.op_id, op_ctx_index, index, term_event, manager,
             nullptr /*no analysis mapping*/, 0 /*no collective arrivals*/,
-            registered_events, applied_events, *to_perform.trace_info,
+            registered_events, local_applied, *to_perform.trace_info,
             runtime->address_space, to_perform.symbolic);
         Runtime::trigger_event(
             to_perform.ready_event, ready, *to_perform.trace_info,
-            applied_events);
+            local_applied);
         if (!registered_events.empty())
           Runtime::trigger_event(
               to_perform.registered, Runtime::merge_events(registered_events));
         else
           Runtime::trigger_event(to_perform.registered);
-        if (!applied_events.empty())
+        if (!local_applied.empty())
           Runtime::trigger_event(
-              to_perform.applied, Runtime::merge_events(applied_events));
+              to_perform.applied, Runtime::merge_events(local_applied));
         else
           Runtime::trigger_event(to_perform.applied);
         delete to_perform.mask;
