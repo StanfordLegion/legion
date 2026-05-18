@@ -7425,10 +7425,10 @@ namespace Legion {
       {
         TriggerCommitArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
-        return true;
+        return false;
       }
       else
-        return false;
+        return true;
     }
 
     //--------------------------------------------------------------------------
