@@ -1215,7 +1215,7 @@ namespace Legion {
       static inline void log_equivalence_set(
           DistributedID did, IndexSpaceExprID expr_id, RegionTreeID tid)
       {
-        if (spy_logging_level > EQ_SPY_LOGGING)
+        if (spy_logging_level > HEAVY_SPY_LOGGING)
           log_spy.print(
               "Equivalence Set %llx %lld %lld %llu", did, expr_id, tid,
               implicit_unique_op_id);
@@ -1224,7 +1224,7 @@ namespace Legion {
       static inline void log_equivalence_set_use(
           DistributedID did, UniqueID uid, unsigned index)
       {
-        if (spy_logging_level > EQ_SPY_LOGGING)
+        if (spy_logging_level > HEAVY_SPY_LOGGING)
           log_spy.print("Equivalence Use %llx %llu %d", did, uid, index);
       }
 

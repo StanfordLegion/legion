@@ -2271,6 +2271,7 @@ namespace Legion {
         // In order to avoid deadlock we have to make different copy fill
         // aggregators for each of the different fields of prior updates
         local::FieldMaskMap<CopyFillAggregator> to_add;
+        local::vector<CopyFillGuard*> to_remove;
         for (shrt::FieldMaskMap<CopyFillGuard>::iterator it =
                  read_only_guards.begin();
              it != read_only_guards.end(); it++)
@@ -2296,8 +2297,7 @@ namespace Legion {
           if (finder != analysis.input_aggregators.end())
           {
             input_aggregator = finder->second;
-            if (input_aggregator != nullptr)
-              input_aggregator->clear_update_fields();
+            input_aggregator->clear_update_fields();
           }
           // Use this to see if any new updates are recorded
           update_set_internal(
@@ -2307,8 +2307,7 @@ namespace Legion {
               analysis.record_valid);
           // If we did any updates record ourselves as the new guard here
           if ((input_aggregator != nullptr) &&
-              ((finder == analysis.input_aggregators.end()) ||
-               input_aggregator->has_update_fields()))
+              input_aggregator->has_update_fields())
           {
             if (finder == analysis.input_aggregators.end())
               analysis.input_aggregators[guard_event] = input_aggregator;
@@ -2320,8 +2319,11 @@ namespace Legion {
               std::abort();
             // Remove the current guard since it doesn't matter anymore
             it.filter(update_mask);
+            if (!it->second)
+              to_remove.push_back(it->first);
           }
         }
+        for (CopyFillGuard* guard : to_remove) read_only_guards.erase(guard);
         if (!to_add.empty())
         {
           for (local::FieldMaskMap<CopyFillAggregator>::const_iterator it =
@@ -2330,7 +2332,9 @@ namespace Legion {
             read_only_guards.insert(it->first, it->second);
         }
         // If we have unguarded fields we can easily do those
-        if (!!user_mask)
+        const FieldMask remainder =
+            user_mask - read_only_guards.get_valid_mask();
+        if (!!remainder)
         {
           CopyFillAggregator* input_aggregator = nullptr;
           // See if we have an input aggregator that we can use now
@@ -2339,21 +2343,21 @@ namespace Legion {
           if (finder != analysis.input_aggregators.end())
           {
             input_aggregator = finder->second;
-            if (input_aggregator != nullptr)
-              input_aggregator->clear_update_fields();
+            input_aggregator->clear_update_fields();
           }
           update_set_internal(
               input_aggregator, nullptr /*no previous guard*/, &analysis,
-              analysis.usage, expr, expr_covers, user_mask,
+              analysis.usage, expr, expr_covers, remainder,
               analysis.target_instances, analysis.target_views,
               analysis.source_views, analysis.trace_info,
               analysis.record_valid);
           // If we made the input aggregator then store it
           if ((input_aggregator != nullptr) &&
-              ((finder == analysis.input_aggregators.end()) ||
-               input_aggregator->has_update_fields()))
+              input_aggregator->has_update_fields())
           {
-            analysis.input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+            if (finder == analysis.input_aggregators.end())
+              analysis.input_aggregators[RtEvent::NO_RT_EVENT] =
+                  input_aggregator;
             // Record this as a guard for later operations
             read_only_guards.insert(
                 input_aggregator, input_aggregator->get_update_fields());
@@ -8861,11 +8865,12 @@ namespace Legion {
       }
       size_t num_read_only_guards;
       derez.deserialize(num_read_only_guards);
-      if (num_read_only_guards)
+      if (num_read_only_guards > 0)
       {
         // Need to hold the lock here to prevent copy fill guard
         // deletions from removing this before we've registered it
         AutoLock eq(eq_lock);
+        legion_assert(read_only_guards.empty());
         for (unsigned idx = 0; idx < num_read_only_guards; idx++)
         {
           CopyFillGuard* guard = CopyFillGuard::unpack_guard(derez, this);
@@ -8880,11 +8885,12 @@ namespace Legion {
       }
       size_t num_reduction_fill_guards;
       derez.deserialize(num_reduction_fill_guards);
-      if (num_reduction_fill_guards)
+      if (num_reduction_fill_guards > 0)
       {
         // Need to hold the lock here to prevent copy fill guard
         // deletions from removing this before we've registered it
         AutoLock eq(eq_lock);
+        legion_assert(reduction_fill_guards.empty());
         for (unsigned idx = 0; idx < num_reduction_fill_guards; idx++)
         {
           CopyFillGuard* guard = CopyFillGuard::unpack_guard(derez, this);
@@ -9101,6 +9107,44 @@ namespace Legion {
       filter_initialized_data(expr, expr_covers, mask);
       filter_restricted_instances(expr, expr_covers, mask);
       filter_released_instances(expr, expr_covers, mask);
+      if (expr_covers)
+      {
+        // This handles the migration case where we need to invalidate
+        // the copy-fill guards in case we migrate to a remote node and
+        // then come back here later. It shouldn't matter for cloning
+        // because copy-fill guards are all chained into tasks/ops mapping
+        // events which are fed into the refinement operation and ensure
+        // that all such guards finish before the refinement occurs
+        if (!read_only_guards.empty() &&
+            !(mask * read_only_guards.get_valid_mask()))
+        {
+          local::vector<CopyFillGuard*> to_remove;
+          for (shrt::FieldMaskMap<CopyFillGuard>::iterator it =
+                   read_only_guards.begin();
+               it != read_only_guards.end(); it++)
+          {
+            it.filter(mask);
+            if (!it->second)
+              to_remove.push_back(it->first);
+          }
+          for (CopyFillGuard* guard : to_remove) read_only_guards.erase(guard);
+        }
+        if (!reduction_fill_guards.empty() &&
+            !(mask * reduction_fill_guards.get_valid_mask()))
+        {
+          local::vector<CopyFillGuard*> to_remove;
+          for (shrt::FieldMaskMap<CopyFillGuard>::iterator it =
+                   reduction_fill_guards.begin();
+               it != reduction_fill_guards.end(); it++)
+          {
+            it.filter(mask);
+            if (!it->second)
+              to_remove.push_back(it->first);
+          }
+          for (CopyFillGuard* guard : to_remove)
+            reduction_fill_guards.erase(guard);
+        }
+      }
       if (tracing_preconditions != nullptr)
       {
         tracing_preconditions->invalidate_all_but(nullptr, expr, mask);

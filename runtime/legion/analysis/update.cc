@@ -310,7 +310,7 @@ namespace Legion {
       {
         output_aggregator->issue_updates(
             trace_info, term_event, true /*restricted output*/);
-        if (output_aggregator->effects_applied.has_triggered())
+        if (!output_aggregator->effects_applied.has_triggered())
           applied_events.insert(output_aggregator->effects_applied);
         if (output_aggregator->release_guards(applied_events))
           delete output_aggregator;
