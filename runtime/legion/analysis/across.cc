@@ -280,7 +280,7 @@ namespace Legion {
             false /*manage dst events*/, &dst_events);
         if (effect.exists())
           copy_events.emplace_back(effect);
-        if (across_aggregator->effects_applied.has_triggered())
+        if (!across_aggregator->effects_applied.has_triggered())
           applied_events.insert(across_aggregator->effects_applied);
         if (across_aggregator->release_guards(applied_events))
           delete across_aggregator;

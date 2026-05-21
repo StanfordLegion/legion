@@ -560,7 +560,7 @@ namespace Legion {
         if (finder != current_epoch_users.end())
         {
           const FieldMask overlap = it->second & finder->second;
-          if (!overlap)
+          if (!!overlap)
           {
             finder.filter(overlap);
             if (!finder->second)

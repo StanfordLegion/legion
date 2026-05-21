@@ -192,7 +192,7 @@ namespace Legion {
         if (release_aggregator->effects_applied.has_triggered())
           guard_events.insert(release_aggregator->effects_applied);
 #else
-        if (release_aggregator->effects_applied.has_triggered())
+        if (!release_aggregator->effects_applied.has_triggered())
         {
           if (original_source == runtime->address_space)
           {
