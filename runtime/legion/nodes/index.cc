@@ -3722,25 +3722,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtUserEvent
-        IndexPartNode::RemoteKDTracker::process_remote_interfering_response(
-            Deserializer& derez)
+    void IndexPartNode::RemoteKDTracker::process_remote_interfering_response(
+        Deserializer& derez)
     //--------------------------------------------------------------------------
     {
       size_t num_colors;
       derez.deserialize(num_colors);
-      AutoLock t_lock(tracker_lock);
-      for (unsigned idx = 0; idx < num_colors; idx++)
       {
-        LegionColor color;
-        derez.deserialize(color);
-        remote_colors.insert(color);
+        AutoLock t_lock(tracker_lock);
+        for (unsigned idx = 0; idx < num_colors; idx++)
+        {
+          LegionColor color;
+          derez.deserialize(color);
+          remote_colors.insert(color);
+        }
       }
       legion_assert(remaining.load() > 0);
-      if ((remaining.fetch_sub(1) == 1) && done_event.exists())
-        return done_event;
-      else
-        return RtUserEvent::NO_RT_USER_EVENT;
+      if (remaining.fetch_sub(1) == 1)
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3803,10 +3802,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartNode::RemoteKDTracker* tracker;
       derez.deserialize(tracker);
-      const RtUserEvent to_trigger =
-          tracker->process_remote_interfering_response(derez);
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
+      tracker->process_remote_interfering_response(derez);
     }
 
     /////////////////////////////////////////////////////////////

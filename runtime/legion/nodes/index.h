@@ -1409,7 +1409,7 @@ namespace Legion {
             const std::set<AddressSpaceID>& targets, IndexPartition handle,
             IndexSpaceExpression* expr);
         void get_remote_interfering(std::set<LegionColor>& colors);
-        RtUserEvent process_remote_interfering_response(Deserializer& derez);
+        void process_remote_interfering_response(Deserializer& derez);
       protected:
         mutable LocalLock tracker_lock;
         std::set<LegionColor> remote_colors;
