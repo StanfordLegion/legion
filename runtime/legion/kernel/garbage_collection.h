@@ -167,23 +167,6 @@ namespace Legion {
     };
 
     /**
-     * \interface Notifiable
-     * This is for registering waiters on predicate
-     * objects.  Notifiable objects will be notified
-     * when the predicate values have been set.  Note
-     * that a notifiable must be a collectable so
-     * we can add and remove references to them
-     * before and after doing notify operations.
-     */
-    class Notifiable : public Collectable {
-    public:
-      virtual ~Notifiable(void) = 0;
-    public:
-      virtual void notify(bool result, int key) = 0;
-      virtual void reset(int key) = 0;
-    };
-
-    /**
      * \class ImplicitReferenceTracker
      * This class tracks implicit references that are held either by
      * an application runtime API call or a meta-task. At the end of the

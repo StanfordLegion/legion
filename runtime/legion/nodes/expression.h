@@ -296,62 +296,6 @@ namespace Legion {
       std::atomic<bool> profiler_logged = false;
     };
 
-    /**
-     * This is a move-only object that tracks temporary references to
-     * index space expressions that are returned from region tree ops
-     */
-    class IndexSpaceExprRef {
-    public:
-      IndexSpaceExprRef(void) : expr(nullptr) { }
-      IndexSpaceExprRef(IndexSpaceExpression* e) : expr(e)
-      {
-        if (expr != nullptr)
-          expr->add_base_expression_reference(LIVE_EXPR_REF);
-      }
-      IndexSpaceExprRef(const IndexSpaceExprRef& rhs) = delete;
-      IndexSpaceExprRef(IndexSpaceExprRef&& rhs) noexcept : expr(rhs.expr)
-      {
-        rhs.expr = nullptr;
-      }
-      ~IndexSpaceExprRef(void)
-      {
-        if ((expr != nullptr) &&
-            expr->remove_base_expression_reference(LIVE_EXPR_REF))
-          delete expr;
-      }
-      IndexSpaceExprRef& operator=(const IndexSpaceExprRef& rhs) = delete;
-      inline IndexSpaceExprRef& operator=(IndexSpaceExprRef&& rhs) noexcept
-      {
-        if ((expr != nullptr) &&
-            expr->remove_base_expression_reference(LIVE_EXPR_REF))
-          delete expr;
-        expr = rhs.expr;
-        rhs.expr = nullptr;
-        return *this;
-      }
-    public:
-      inline bool operator==(const IndexSpaceExprRef& rhs) const
-      {
-        if (expr == nullptr)
-          return (rhs.expr == nullptr);
-        if (rhs.expr == nullptr)
-          return false;
-        return (expr->expr_id == rhs.expr->expr_id);
-      }
-      inline bool operator<(const IndexSpaceExprRef& rhs) const
-      {
-        if (expr == nullptr)
-          return (rhs.expr != nullptr);
-        if (rhs.expr == nullptr)
-          return false;
-        return (expr->expr_id < rhs.expr->expr_id);
-      }
-      inline IndexSpaceExpression* operator->(void) { return expr; }
-      inline IndexSpaceExpression* operator&(void) { return expr; }
-    protected:
-      IndexSpaceExpression* expr;
-    };
-
     class IndexSpaceOperation : public IndexSpaceExpression,
                                 public DistributedCollectable {
     public:

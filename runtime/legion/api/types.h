@@ -544,7 +544,6 @@ namespace Legion {
     class CopyAcrossExecutor;
     class CopyAcrossUnstructured;
     class IndexSpaceExpression;
-    class IndexSpaceExprRef;
     class IndexSpaceOperation;
     template<int DIM, typename T>
     class IndexSpaceOperationT;
@@ -608,7 +607,6 @@ namespace Legion {
     class CopyFillAggregator;
 
     class Collectable;
-    class Notifiable;
     class ImplicitReferenceTracker;
     class DistributedCollectable;
     class LayoutDescription;
