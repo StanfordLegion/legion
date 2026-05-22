@@ -1511,13 +1511,14 @@ namespace Legion {
         using Factories::recycle...;
       };
       OperationIndustry<
-          OperationFactory<IndividualTask, Predicated<IndividualTask> >,
+          OperationFactory<
+              IndividualTask, Memoizable<Predicated<IndividualTask> > >,
           OperationFactory<PointTask, Memoizable<PointTask>, true>,
-          OperationFactory<IndexTask, Predicated<IndexTask> >,
+          OperationFactory<IndexTask, Memoizable<Predicated<IndexTask> > >,
           OperationFactory<SliceTask, Memoizable<SliceTask>, true>,
           OperationFactory<MapOp>,
-          OperationFactory<CopyOp, Predicated<CopyOp> >,
-          OperationFactory<IndexCopyOp, Predicated<IndexCopyOp> >,
+          OperationFactory<CopyOp, Memoizable<Predicated<CopyOp> > >,
+          OperationFactory<IndexCopyOp, Memoizable<Predicated<IndexCopyOp> > >,
           OperationFactory<PointCopyOp, Memoizable<PointCopyOp> >,
           OperationFactory<FenceOp, Memoizable<FenceOp> >,
           OperationFactory<FrameOp>, OperationFactory<CreationOp>,
@@ -1528,15 +1529,15 @@ namespace Legion {
               DynamicCollectiveOp, Memoizable<DynamicCollectiveOp> >,
           OperationFactory<FuturePredOp>, OperationFactory<NotPredOp>,
           OperationFactory<AndPredOp>, OperationFactory<OrPredOp>,
-          OperationFactory<AcquireOp, Predicated<AcquireOp> >,
-          OperationFactory<ReleaseOp, Predicated<ReleaseOp> >,
+          OperationFactory<AcquireOp, Memoizable<Predicated<AcquireOp> > >,
+          OperationFactory<ReleaseOp, Memoizable<Predicated<ReleaseOp> > >,
           OperationFactory<TraceBeginOp>, OperationFactory<TraceRecurrentOp>,
           OperationFactory<TraceCompleteOp>, OperationFactory<MustEpochOp>,
           OperationFactory<PendingPartitionOp>,
           OperationFactory<DependentPartitionOp>,
           OperationFactory<PointDepPartOp, PointDepPartOp, true>,
-          OperationFactory<FillOp, Predicated<FillOp> >,
-          OperationFactory<IndexFillOp, Predicated<IndexFillOp> >,
+          OperationFactory<FillOp, Memoizable<Predicated<FillOp> > >,
+          OperationFactory<IndexFillOp, Memoizable<Predicated<IndexFillOp> > >,
           OperationFactory<PointFillOp, Memoizable<PointFillOp>, true>,
           OperationFactory<DiscardOp>, OperationFactory<AttachOp>,
           OperationFactory<IndexAttachOp>,
@@ -1545,14 +1546,18 @@ namespace Legion {
           OperationFactory<PointDetachOp, PointDetachOp, true>,
           OperationFactory<TimingOp>, OperationFactory<TunableOp>,
           OperationFactory<AllReduceOp, Memoizable<AllReduceOp> >,
-          OperationFactory<ReplIndividualTask, Predicated<ReplIndividualTask> >,
-          OperationFactory<ReplIndexTask, Predicated<ReplIndexTask> >,
+          OperationFactory<
+              ReplIndividualTask, Memoizable<Predicated<ReplIndividualTask> > >,
+          OperationFactory<
+              ReplIndexTask, Memoizable<Predicated<ReplIndexTask> > >,
           OperationFactory<ReplMergeCloseOp>,
           OperationFactory<ReplRefinementOp>, OperationFactory<ReplResetOp>,
-          OperationFactory<ReplFillOp, Predicated<ReplFillOp> >,
-          OperationFactory<ReplIndexFillOp, Predicated<ReplIndexFillOp> >,
-          OperationFactory<ReplCopyOp, Predicated<ReplCopyOp> >,
-          OperationFactory<ReplIndexCopyOp, Predicated<ReplIndexCopyOp> >,
+          OperationFactory<ReplFillOp, Memoizable<Predicated<ReplFillOp> > >,
+          OperationFactory<
+              ReplIndexFillOp, Memoizable<Predicated<ReplIndexFillOp> > >,
+          OperationFactory<ReplCopyOp, Memoizable<Predicated<ReplCopyOp> > >,
+          OperationFactory<
+              ReplIndexCopyOp, Memoizable<Predicated<ReplIndexCopyOp> > >,
           OperationFactory<ReplDeletionOp>,
           OperationFactory<ReplPendingPartitionOp>,
           OperationFactory<ReplDependentPartitionOp>,
@@ -1563,8 +1568,10 @@ namespace Legion {
           OperationFactory<ReplMapOp>, OperationFactory<ReplDiscardOp>,
           OperationFactory<ReplAttachOp>, OperationFactory<ReplIndexAttachOp>,
           OperationFactory<ReplDetachOp>, OperationFactory<ReplIndexDetachOp>,
-          OperationFactory<ReplAcquireOp, Predicated<ReplAcquireOp> >,
-          OperationFactory<ReplReleaseOp, Predicated<ReplReleaseOp> >,
+          OperationFactory<
+              ReplAcquireOp, Memoizable<Predicated<ReplAcquireOp> > >,
+          OperationFactory<
+              ReplReleaseOp, Memoizable<Predicated<ReplReleaseOp> > >,
           OperationFactory<ReplTraceBeginOp>,
           OperationFactory<ReplTraceRecurrentOp>,
           OperationFactory<ReplTraceCompleteOp> >
