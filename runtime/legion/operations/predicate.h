@@ -68,9 +68,9 @@ namespace Legion {
      * of predicated analysis or speculation
      */
     template<typename OP>
-    class Predicated : public Memoizable<OP> {
+    class Predicated : public OP {
     public:
-      Predicated(void) : Memoizable<OP>() { }
+      Predicated(void) : OP() { }
       virtual ~Predicated(void) { }
     public:
       virtual void trigger_dependence_analysis(void) override;

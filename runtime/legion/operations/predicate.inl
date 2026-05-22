@@ -44,7 +44,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_assert(!this->true_guard.exists() && !this->false_guard.exists());
-      this->set_memoizable_state();
       if (this->predication_state == OP::PENDING_PREDICATE_STATE)
       {
         if (this->is_recording())
@@ -88,7 +87,7 @@ namespace Legion {
         this->predicate_false();
       }
       else
-        Memoizable<OP>::trigger_ready();
+        OP::trigger_ready();
     }
 
     //--------------------------------------------------------------------------

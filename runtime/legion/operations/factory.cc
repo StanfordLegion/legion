@@ -237,13 +237,15 @@ namespace Legion {
 
     // explicit instantiations
     template class OperationFactory<
-        IndividualTask, Predicated<IndividualTask> >;
+        IndividualTask, Memoizable<Predicated<IndividualTask> > >;
     template class OperationFactory<PointTask, Memoizable<PointTask>, true>;
-    template class OperationFactory<IndexTask, Predicated<IndexTask> >;
+    template class OperationFactory<
+        IndexTask, Memoizable<Predicated<IndexTask> > >;
     template class OperationFactory<SliceTask, Memoizable<SliceTask>, true>;
     template class OperationFactory<MapOp>;
-    template class OperationFactory<CopyOp, Predicated<CopyOp> >;
-    template class OperationFactory<IndexCopyOp, Predicated<IndexCopyOp> >;
+    template class OperationFactory<CopyOp, Memoizable<Predicated<CopyOp> > >;
+    template class OperationFactory<
+        IndexCopyOp, Memoizable<Predicated<IndexCopyOp> > >;
     template class OperationFactory<PointCopyOp, Memoizable<PointCopyOp> >;
     template class OperationFactory<FenceOp, Memoizable<FenceOp> >;
     template class OperationFactory<FrameOp>;
@@ -259,8 +261,10 @@ namespace Legion {
     template class OperationFactory<NotPredOp>;
     template class OperationFactory<AndPredOp>;
     template class OperationFactory<OrPredOp>;
-    template class OperationFactory<AcquireOp, Predicated<AcquireOp> >;
-    template class OperationFactory<ReleaseOp, Predicated<ReleaseOp> >;
+    template class OperationFactory<
+        AcquireOp, Memoizable<Predicated<AcquireOp> > >;
+    template class OperationFactory<
+        ReleaseOp, Memoizable<Predicated<ReleaseOp> > >;
     template class OperationFactory<TraceBeginOp>;
     template class OperationFactory<TraceRecurrentOp>;
     template class OperationFactory<TraceCompleteOp>;
@@ -268,8 +272,9 @@ namespace Legion {
     template class OperationFactory<PendingPartitionOp>;
     template class OperationFactory<DependentPartitionOp>;
     template class OperationFactory<PointDepPartOp, PointDepPartOp, true>;
-    template class OperationFactory<FillOp, Predicated<FillOp> >;
-    template class OperationFactory<IndexFillOp, Predicated<IndexFillOp> >;
+    template class OperationFactory<FillOp, Memoizable<Predicated<FillOp> > >;
+    template class OperationFactory<
+        IndexFillOp, Memoizable<Predicated<IndexFillOp> > >;
     template class OperationFactory<PointFillOp, Memoizable<PointFillOp>, true>;
     template class OperationFactory<DiscardOp>;
     template class OperationFactory<AttachOp>;
@@ -282,17 +287,20 @@ namespace Legion {
     template class OperationFactory<TunableOp>;
     template class OperationFactory<AllReduceOp, Memoizable<AllReduceOp> >;
     template class OperationFactory<
-        ReplIndividualTask, Predicated<ReplIndividualTask> >;
-    template class OperationFactory<ReplIndexTask, Predicated<ReplIndexTask> >;
+        ReplIndividualTask, Memoizable<Predicated<ReplIndividualTask> > >;
+    template class OperationFactory<
+        ReplIndexTask, Memoizable<Predicated<ReplIndexTask> > >;
     template class OperationFactory<ReplMergeCloseOp>;
     template class OperationFactory<ReplRefinementOp>;
     template class OperationFactory<ReplResetOp>;
-    template class OperationFactory<ReplFillOp, Predicated<ReplFillOp> >;
     template class OperationFactory<
-        ReplIndexFillOp, Predicated<ReplIndexFillOp> >;
-    template class OperationFactory<ReplCopyOp, Predicated<ReplCopyOp> >;
+        ReplFillOp, Memoizable<Predicated<ReplFillOp> > >;
     template class OperationFactory<
-        ReplIndexCopyOp, Predicated<ReplIndexCopyOp> >;
+        ReplIndexFillOp, Memoizable<Predicated<ReplIndexFillOp> > >;
+    template class OperationFactory<
+        ReplCopyOp, Memoizable<Predicated<ReplCopyOp> > >;
+    template class OperationFactory<
+        ReplIndexCopyOp, Memoizable<Predicated<ReplIndexCopyOp> > >;
     template class OperationFactory<ReplDeletionOp>;
     template class OperationFactory<ReplPendingPartitionOp>;
     template class OperationFactory<ReplDependentPartitionOp>;
@@ -308,8 +316,10 @@ namespace Legion {
     template class OperationFactory<ReplIndexAttachOp>;
     template class OperationFactory<ReplDetachOp>;
     template class OperationFactory<ReplIndexDetachOp>;
-    template class OperationFactory<ReplAcquireOp, Predicated<ReplAcquireOp> >;
-    template class OperationFactory<ReplReleaseOp, Predicated<ReplReleaseOp> >;
+    template class OperationFactory<
+        ReplAcquireOp, Memoizable<Predicated<ReplAcquireOp> > >;
+    template class OperationFactory<
+        ReplReleaseOp, Memoizable<Predicated<ReplReleaseOp> > >;
     template class OperationFactory<ReplTraceBeginOp>;
     template class OperationFactory<ReplTraceRecurrentOp>;
     template class OperationFactory<ReplTraceCompleteOp>;
