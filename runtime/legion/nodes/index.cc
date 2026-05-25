@@ -3728,6 +3728,7 @@ namespace Legion {
     {
       size_t num_colors;
       derez.deserialize(num_colors);
+      RtUserEvent to_trigger;
       {
         AutoLock t_lock(tracker_lock);
         for (unsigned idx = 0; idx < num_colors; idx++)
@@ -3736,10 +3737,12 @@ namespace Legion {
           derez.deserialize(color);
           remote_colors.insert(color);
         }
+        legion_assert(remaining.load() > 0);
+        if (remaining.fetch_sub(1) == 1)
+          to_trigger = done_event;
       }
-      legion_assert(remaining.load() > 0);
-      if (remaining.fetch_sub(1) == 1)
-        Runtime::trigger_event(done_event);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
