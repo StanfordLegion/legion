@@ -3669,6 +3669,19 @@ namespace Legion {
     { }
 
     //--------------------------------------------------------------------------
+    IndexPartNode::RemoteKDTracker::~RemoteKDTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      // This looks spurious but isn't. It ensures that all the contributors
+      // have actually released their lock prior to this object being
+      // destructed. These can race since we do the remaining fetch_sub
+      // while holding the lock so one thread can do that before the count
+      // goes to zero and then be preempted and the object ends up being
+      // deleted before that thread exits the lock
+      AutoLock t_lock(tracker_lock);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent IndexPartNode::RemoteKDTracker::find_remote_interfering(
         const std::set<AddressSpaceID>& targets, IndexPartition handle,
         IndexSpaceExpression* expr)

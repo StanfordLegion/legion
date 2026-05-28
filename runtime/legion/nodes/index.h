@@ -1404,6 +1404,7 @@ namespace Legion {
       class RemoteKDTracker {
       public:
         RemoteKDTracker(void);
+        ~RemoteKDTracker(void);
       public:
         RtEvent find_remote_interfering(
             const std::set<AddressSpaceID>& targets, IndexPartition handle,
