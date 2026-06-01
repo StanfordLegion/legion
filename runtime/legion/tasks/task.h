@@ -189,18 +189,18 @@ namespace Legion {
       TaskOp(void);
       virtual ~TaskOp(void);
     public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual uint64_t get_context_index(void) const;
-      virtual void set_context_index(uint64_t index);
-      virtual bool has_parent_task(void) const;
-      virtual const Task* get_parent_task(void) const;
+      virtual UniqueID get_unique_id(void) const override;
+      virtual uint64_t get_context_index(void) const override;
+      virtual void set_context_index(uint64_t index) override;
+      virtual bool has_parent_task(void) const override;
+      virtual const Task* get_parent_task(void) const override;
       virtual const std::string_view& get_provenance_string(
-          bool human = true) const;
-      virtual const char* get_task_name(void) const;
+          bool human = true) const override;
+      virtual const char* get_task_name(void) const override;
       virtual bool is_reducing_future(void) const;
       virtual void pack_remote_operation(
           Serializer& rez, AddressSpaceID target,
-          std::set<RtEvent>& applied) const;
+          std::set<RtEvent>& applied) const override;
       virtual void pack_profiling_requests(
           Serializer& rez, std::set<RtEvent>& applied) const;
     public:
@@ -232,35 +232,36 @@ namespace Legion {
     public:
       bool select_task_options(bool prioritize);
     public:
-      virtual void activate(void);
-      virtual void deactivate(bool free = true);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
-      virtual size_t get_region_count(void) const;
-      virtual Mappable* get_mappable(void);
-      virtual bool invalidates_physical_trace_template(bool& exec_fence) const
+      virtual void activate(void) override;
+      virtual void deactivate(bool free = true) override;
+      virtual const char* get_logging_name(void) const override;
+      virtual OpKind get_operation_kind(void) const override;
+      virtual size_t get_region_count(void) const override;
+      virtual Mappable* get_mappable(void) override;
+      virtual bool invalidates_physical_trace_template(
+          bool& exec_fence) const override
       {
         exec_fence = false;
         return !regions.empty();
       }
     public:
-      virtual void trigger_dependence_analysis(void) = 0;
-      virtual void trigger_commit(void);
+      virtual void trigger_dependence_analysis(void) override = 0;
+      virtual void trigger_commit(void) override;
     public:
-      virtual void predicate_false(void) = 0;
+      virtual void predicate_false(void) override = 0;
     public:
       virtual void select_sources(
           const unsigned index, PhysicalManager* target,
           const std::vector<InstanceView*>& sources,
           std::vector<unsigned>& ranking,
-          std::map<unsigned, PhysicalManager*>& points);
+          std::map<unsigned, PhysicalManager*>& points) override;
       virtual void update_atomic_locks(
-          const unsigned index, Reservation lock, bool exclusive);
-      virtual unsigned find_parent_index(unsigned idx);
+          const unsigned index, Reservation lock, bool exclusive) override;
+      virtual unsigned find_parent_index(unsigned idx) override;
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual std::map<PhysicalManager*, unsigned>* get_acquired_instances_ref(
-          void);
+          void) override;
     public:
       virtual bool distribute_task(void) = 0;
       virtual bool perform_mapping(
@@ -300,11 +301,15 @@ namespace Legion {
       void compute_parent_indexes(bool force);
     public:
       // From Memoizable
-      virtual const RegionRequirement& get_requirement(unsigned idx) const
+      virtual const RegionRequirement& get_requirement(
+          unsigned idx) const override
       {
         return logical_regions[idx];
       }
-      virtual unsigned get_output_offset() const { return regions.size(); }
+      virtual unsigned get_output_offset() const override
+      {
+        return regions.size();
+      }
     public:  // helper for mapping, here because of inlining
       void validate_variant_selection(
           MapperManager* local_mapper, VariantImpl* impl, Processor::Kind kind,
