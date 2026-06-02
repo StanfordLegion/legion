@@ -21,8 +21,8 @@ variables:
   CPM_SOURCE_CACHE: $CI_PROJECT_DIR/.cache/cpm_src
   CARGO_HOME: $CI_PROJECT_DIR/.cargo
   REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
-  GASNET_SHA256: "24ab1c2e5ff2975de6578badfa6ea947f6539363ee7f5b94a36efb8f2df5c0e1"
-  GASNET_COMMIT: "3702b90a9da898ecccaf5c7abd0bb9928c01d3af"
+  GASNET_SHA256: "d10941409de2b36413d74fe6a1c23de6e379a5313b727e4c217ad40b24152e02"
+  GASNET_COMMIT: "372097ba7537e571c4e60ba40506ed68b707316f"
   # Set these to override the local realm source check out
   REALM_URL: ""
   REALM_SHA256: ""
