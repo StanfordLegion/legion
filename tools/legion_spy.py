@@ -15207,6 +15207,8 @@ def main(temp_dir):
         print('No matches found! Exiting...')
         return
     state.post_parse(simplify_graphs, physical_checks or event_graphs)
+    import pdb
+    pdb.set_trace()
     if logical_checks and not state.detailed_logging:
         print("WARNING: Requested logical analysis but logging information is "+
               "missing. Please compile the runtime with USE_SPY=1 to enable "+

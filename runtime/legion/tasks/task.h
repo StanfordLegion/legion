@@ -209,7 +209,7 @@ namespace Legion {
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicable(void) const { return replicate; }
-      int get_depth(void) const;
+      virtual int get_depth(void) const override;
     public:
       void set_current_proc(Processor current);
       inline void set_origin_mapped(bool origin) { map_origin = origin; }
