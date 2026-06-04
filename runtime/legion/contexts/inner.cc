@@ -925,7 +925,7 @@ namespace Legion {
         // If it's younger than our deletion we don't care
         if (entry.operation_index >= return_index)
           continue;
-        if (!entry.complete)
+        if (!entry.committed)
           dependences[entry.operation] = entry.operation->get_generation();
       }
     }
@@ -8091,7 +8091,7 @@ namespace Legion {
           // If it came after this fence we skip it
           if (next_fence_index <= it->operation_index)
             continue;
-          if (it->complete)
+          if (it->committed)
             continue;
           previous_operations.emplace_back(
               std::make_pair(it->operation, it->operation->get_generation()));
