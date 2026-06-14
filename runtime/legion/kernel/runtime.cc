@@ -9313,20 +9313,20 @@ namespace Legion {
       legion_assert(rhs->is_valid());
       if (lhs == rhs)
       {
-        lhs->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(lhs);
+        if (!lhs->try_add_live_reference())
+          std::abort();
         return lhs;
       }
       if (lhs->is_empty())
       {
-        rhs->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(rhs);
+        if (!rhs->try_add_live_reference())
+          std::abort();
         return rhs;
       }
       if (rhs->is_empty())
       {
-        lhs->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(lhs);
+        if (!lhs->try_add_live_reference())
+          std::abort();
         return lhs;
       }
       IndexSpaceExpression* result = lhs->inline_union(rhs);
@@ -9349,11 +9349,8 @@ namespace Legion {
         }
         result = union_index_spaces(exprs);
       }
-      else
-      {
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
-      }
+      else if (!result->try_add_live_reference())
+        std::abort();
       return result;
     }
 
@@ -9371,15 +9368,15 @@ namespace Legion {
       if (exprs.size() == 1)
       {
         IndexSpaceExpression* result = *(exprs.begin());
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       IndexSpaceExpression* result = (*exprs.begin())->inline_union(exprs);
       if (result != nullptr)
       {
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       std::vector<IndexSpaceExpression*> expressions;
@@ -9394,15 +9391,15 @@ namespace Legion {
       if (expressions.empty())
       {
         IndexSpaceExpression* result = *(exprs.begin());
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       if (expressions.size() == 1)
       {
         IndexSpaceExpression* result = expressions.back();
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       // sort them in order by their IDs
@@ -9417,8 +9414,8 @@ namespace Legion {
         if (expressions.size() == 1)
         {
           IndexSpaceExpression* result = expressions.back();
-          result->add_base_expression_reference(LIVE_EXPR_REF);
-          ImplicitReferenceTracker::record_live_expression(result);
+          if (!result->try_add_live_reference())
+            std::abort();
           return expressions.back();
         }
       }
@@ -9479,11 +9476,9 @@ namespace Legion {
         if (unique_expressions.size() == 1)
         {
           IndexSpaceExpression* result = *(unique_expressions.begin());
-          if (exprs.find(result) == exprs.end())
-          {
-            result->add_base_expression_reference(LIVE_EXPR_REF);
-            ImplicitReferenceTracker::record_live_expression(result);
-          }
+          if ((exprs.find(result) == exprs.end()) &&
+              !result->try_add_live_reference())
+            std::abort();
           // Remove the extra expression reference we added
           if (result->remove_base_expression_reference(REGION_TREE_REF))
             std::abort();  // should never hit this
@@ -9495,8 +9490,8 @@ namespace Legion {
           expressions[index++] = unique_expr;
       }
       result = union_index_spaces(expressions);
-      result->add_base_expression_reference(LIVE_EXPR_REF);
-      ImplicitReferenceTracker::record_live_expression(result);
+      if (!result->try_add_live_reference())
+        std::abort();
       if (!first_pass)
       {
         // Remove the extra references on the expression vector we added
@@ -9588,20 +9583,20 @@ namespace Legion {
       legion_assert(rhs->is_valid());
       if (lhs == rhs)
       {
-        lhs->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(lhs);
+        if (!lhs->try_add_live_reference())
+          std::abort();
         return lhs;
       }
       if (lhs->is_empty())
       {
-        lhs->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(lhs);
+        if (!lhs->try_add_live_reference())
+          std::abort();
         return lhs;
       }
       if (rhs->is_empty())
       {
-        rhs->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(rhs);
+        if (!rhs->try_add_live_reference())
+          std::abort();
         return rhs;
       }
       IndexSpaceExpression* result = lhs->inline_intersection(rhs);
@@ -9624,11 +9619,8 @@ namespace Legion {
         }
         result = intersect_index_spaces(exprs);
       }
-      else
-      {
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
-      }
+      else if (!result->try_add_live_reference())
+        std::abort();
       return result;
     }
 
@@ -9646,16 +9638,16 @@ namespace Legion {
       if (exprs.size() == 1)
       {
         IndexSpaceExpression* result = *(exprs.begin());
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       IndexSpaceExpression* result =
           (*exprs.begin())->inline_intersection(exprs);
       if (result != nullptr)
       {
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       std::vector<IndexSpaceExpression*> expressions(
@@ -9667,8 +9659,8 @@ namespace Legion {
         IndexSpaceExpression*& expr = expressions[idx];
         if (expr->is_empty())
         {
-          expr->add_base_expression_reference(LIVE_EXPR_REF);
-          ImplicitReferenceTracker::record_live_expression(expr);
+          if (!expr->try_add_live_reference())
+            std::abort();
           return expr;
         }
         expr = expr->get_canonical_expression();
@@ -9685,8 +9677,8 @@ namespace Legion {
         if (expressions.size() == 1)
         {
           IndexSpaceExpression* result = expressions.back();
-          result->add_base_expression_reference(LIVE_EXPR_REF);
-          ImplicitReferenceTracker::record_live_expression(result);
+          if (!result->try_add_live_reference())
+            std::abort();
           return result;
         }
       }
@@ -9741,8 +9733,8 @@ namespace Legion {
           if (unique->is_empty())
           {
             // Add a reference to the unique expression
-            unique->add_base_expression_reference(LIVE_EXPR_REF);
-            ImplicitReferenceTracker::record_live_expression(unique);
+            if (!unique->try_add_live_reference())
+              std::abort();
             // Remove references on all the things we no longer need
             for (IndexSpaceExpression* unique_expr : unique_expressions)
               if (unique_expr->remove_base_expression_reference(
@@ -9763,8 +9755,8 @@ namespace Legion {
         if (unique_expressions.size() == 1)
         {
           IndexSpaceExpression* result = *(unique_expressions.begin());
-          result->add_base_expression_reference(LIVE_EXPR_REF);
-          ImplicitReferenceTracker::record_live_expression(result);
+          if (!result->try_add_live_reference())
+            std::abort();
           // Remove the extra expression reference we added
           if (result->remove_base_expression_reference(REGION_TREE_REF))
             std::abort();  // should never hit this
@@ -9776,8 +9768,8 @@ namespace Legion {
           expressions[index++] = unique_expr;
       }
       result = intersect_index_spaces(expressions);
-      result->add_base_expression_reference(LIVE_EXPR_REF);
-      ImplicitReferenceTracker::record_live_expression(result);
+      if (!result->try_add_live_reference())
+        std::abort();
       if (!first_pass)
       {
         // Remove the extra references on the expression vector we added
@@ -9875,22 +9867,22 @@ namespace Legion {
       {
         if (lhs->is_empty())
         {
-          lhs->add_base_expression_reference(LIVE_EXPR_REF);
-          ImplicitReferenceTracker::record_live_expression(lhs);
+          if (!lhs->try_add_live_reference())
+            std::abort();
           return lhs;
         }
         if (rhs->is_empty())
         {
-          rhs->add_base_expression_reference(LIVE_EXPR_REF);
-          ImplicitReferenceTracker::record_live_expression(rhs);
+          if (!rhs->try_add_live_reference())
+            std::abort();
           return lhs;
         }
       }
       IndexSpaceExpression* result = lhs->inline_subtraction(rhs);
       if (result != nullptr)
       {
-        result->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(result);
+        if (!result->try_add_live_reference())
+          std::abort();
         return result;
       }
       std::vector<IndexSpaceExpression*> expressions(2);

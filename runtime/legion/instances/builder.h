@@ -39,14 +39,9 @@ namespace Legion {
           piece_list(nullptr), piece_list_size(0), valid(false),
           allocated(false)
       { }
-      InstanceBuilder(
-          const std::vector<LogicalRegion>& regs, IndexSpaceExpression* expr,
-          FieldSpaceNode* node, RegionTreeID tree_id,
-          const LayoutConstraintSet& cons, MemoryManager* memory, UniqueID cid,
-          const void* piece_list, size_t piece_list_size);
       virtual ~InstanceBuilder(void);
     public:
-      void initialize(void);
+      [[nodiscard]] bool initialize(void);
       PhysicalManager* create_physical_instance(
           LayoutConstraintKind* unsat_kind, unsigned* unsat_index,
           size_t* footprint = nullptr,
@@ -58,7 +53,7 @@ namespace Legion {
           const Realm::ProfilingResponse& response, const void* orig,
           size_t orig_length, LgEvent& fevent, bool& failed_alloc) override;
     protected:
-      void compute_space_and_domain(void);
+      bool compute_space_and_domain(void);
     protected:
       void compute_layout_parameters(void);
     protected:

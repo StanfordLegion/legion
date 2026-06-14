@@ -215,11 +215,13 @@ namespace Legion {
         {
           IndexSpaceOperation* op =
               legion_safe_cast<IndexSpaceOperation*>(result);
-          op->add_base_expression_reference(LIVE_EXPR_REF);
+          if (!op->try_add_live_reference())
+            std::abort();
           op->unpack_global_ref();
         }
-        // Else LIVE_EXPR_REF added by pack_expression call
-        ImplicitReferenceTracker::record_live_expression(result);
+        else
+          // LIVE_EXPR_REF was added by the pack_expression call
+          ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
       bool is_index_space;
@@ -230,8 +232,8 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         IndexSpaceNode* node = runtime->get_node(handle);
-        node->add_base_expression_reference(LIVE_EXPR_REF);
-        ImplicitReferenceTracker::record_live_expression(node);
+        if (!node->try_add_live_reference())
+          std::abort();
         // Now we can unpack the global expression reference
         node->unpack_global_ref();
         return node;
@@ -246,13 +248,13 @@ namespace Legion {
                 remote_expr_id, derez, created);
         IndexSpaceOperation* op =
             legion_safe_cast<IndexSpaceOperation*>(result);
-        result->add_base_expression_reference(LIVE_EXPR_REF);
+        if (!result->try_add_live_reference())
+          std::abort();
         if (created && (source != op->owner_space))
           // Notify the owner of the new instance
           op->send_remote_registration(true /*has global ref*/);
         // Unpack the global reference that we had
         op->unpack_global_ref();
-        ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
     }
@@ -349,6 +351,7 @@ namespace Legion {
         ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
+      legion_assert(has_gc_reference());
       add_base_gc_ref(source, count);
     }
 
@@ -357,6 +360,7 @@ namespace Legion {
         DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
+      legion_assert(has_gc_reference());
       add_nested_gc_ref(source, count);
     }
 
@@ -702,9 +706,8 @@ namespace Legion {
       creator.create_operation();
 
       IndexSpaceOperation* out = creator.result;
-      out->add_base_expression_reference(LIVE_EXPR_REF);
-      ImplicitReferenceTracker::record_live_expression(out);
-
+      if (!out->try_add_live_reference())
+        std::abort();
       return out;
     }
 

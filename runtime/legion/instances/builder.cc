@@ -29,27 +29,6 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    InstanceBuilder::InstanceBuilder(
-        const std::vector<LogicalRegion>& regs, IndexSpaceExpression* expr,
-        FieldSpaceNode* node, RegionTreeID tid, const LayoutConstraintSet& cons,
-        MemoryManager* memory, UniqueID cid, const void* pl, size_t pl_size)
-      : regions(regs), constraints(cons), memory_manager(memory),
-        creator_id(cid), instance(PhysicalInstance::NO_INST),
-        field_space_node(node), instance_domain(expr), tree_id(tid),
-        redop_id(0), reduction_op(nullptr), realm_layout(nullptr),
-        piece_list(nullptr), piece_list_size(0), valid(true), allocated(false)
-    //--------------------------------------------------------------------------
-    {
-      if (pl != nullptr)
-      {
-        piece_list_size = pl_size;
-        piece_list = malloc(piece_list_size);
-        memcpy(piece_list, pl, piece_list_size);
-      }
-      compute_layout_parameters();
-    }
-
-    //--------------------------------------------------------------------------
     InstanceBuilder::~InstanceBuilder(void)
     //--------------------------------------------------------------------------
     {
@@ -66,8 +45,7 @@ namespace Legion {
         LgEvent hole_unique_event)
     //--------------------------------------------------------------------------
     {
-      if (!valid)
-        initialize();
+      legion_assert(valid);
       // If there are no fields then we are done
       if (field_sizes.empty())
       {
@@ -302,16 +280,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceBuilder::initialize(void)
+    bool InstanceBuilder::initialize(void)
     //--------------------------------------------------------------------------
     {
-      compute_space_and_domain();
+      if (!compute_space_and_domain())
+        return false;
       compute_layout_parameters();
       valid = true;
+      return true;
     }
 
     //--------------------------------------------------------------------------
-    void InstanceBuilder::compute_space_and_domain(void)
+    bool InstanceBuilder::compute_space_and_domain(void)
     //--------------------------------------------------------------------------
     {
       legion_assert(!regions.empty());
@@ -330,11 +310,22 @@ namespace Legion {
         // Check to make sure that all the field spaces have the same handle
         legion_assert(field_space_node->handle == region.get_field_space());
         legion_assert(tree_id == region.get_tree_id());
+        IndexSpaceNode* node = runtime->get_node(
+            region.get_index_space(), nullptr, true /*can fail*/);
+        if ((node == nullptr) || !node->try_add_live_reference())
+        {
+          Warning warning;
+          warning << "Unable to create instance for region " << region
+                  << " because the corresponding index space has been deleted.";
+          warning.raise();
+          return false;
+        }
         region_exprs.insert(runtime->get_node(region.get_index_space()));
       }
       instance_domain = (region_exprs.size() == 1) ?
                             *(region_exprs.begin()) :
                             runtime->union_index_spaces(region_exprs);
+      return true;
     }
 
     //--------------------------------------------------------------------------

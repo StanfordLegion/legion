@@ -83,7 +83,7 @@ namespace Legion {
     {
       if (NEED_LOCK)
       {
-        AutoLock gc(gc_lock);
+        AutoLock gc(gc_lock, false /*exclusive*/);
         return (current_state == VALID_REF_STATE) ||
                (current_state == GLOBAL_REF_STATE) ||
                (current_state == PENDING_LOCAL_REF_STATE) ||
@@ -684,7 +684,8 @@ namespace Legion {
           // doing collections or we can wait for the next removal
           check_for_downgrade_restart(local_space);
         }
-        else if (current_state == PENDING_LOCAL_REF_STATE)
+        else if (
+            (current_state == PENDING_LOCAL_REF_STATE) || (gc_references == 0))
         {
           // Send a notification to the downgrade owner to check if it
           // needs to resume collections now that this reference has
@@ -699,6 +700,16 @@ namespace Legion {
           rez.serialize(did);
           rez.dispatch(downgrade_owner);
         }
+        else
+        {
+          // We have outstanding gc_references (state was promoted from
+          // PENDING_LOCAL_REF_STATE back to GLOBAL_REF_STATE by an
+          // add_gc_reference, or we never went pending). The downgrade
+          // owner can't act on this notification yet anyway, so defer
+          // it until our gc_references returns to zero so we send one
+          // consolidated DowngradeRestart per release cycle.
+          pending_downgrade_restart = true;
+        }
       }
     }
 
@@ -706,6 +717,19 @@ namespace Legion {
     bool DistributedCollectable::can_delete(AutoLock& gc)
     //--------------------------------------------------------------------------
     {
+      if (pending_downgrade_restart)
+      {
+        // Clear unconditionally so the flag doesn't outlive
+        // a release cycle, even when the conditions to actually send aren't
+        // met (e.g., we became the downgrade owner via DowngradeUpdate).
+        pending_downgrade_restart = false;
+        if ((downgrade_owner != local_space) && (remaining_responses == 0))
+        {
+          DistributedDowngradeRestart rez;
+          rez.serialize(did);
+          rez.dispatch(downgrade_owner);
+        }
+      }
       switch (current_state)
       {
         case VALID_REF_STATE:
@@ -1021,9 +1045,22 @@ namespace Legion {
       // If we can't downgrade then we'll restart the downgrade proces
       if ((current_state == LOCAL_REF_STATE) || !can_downgrade())
         return;
-      // If we get here then it should be because we were just waiting for
-      // an unpack somewhere and we've finally been told where it is
-      legion_assert(notready_owner == local_space);
+      // A deferred DowngradeRestart from a remote can arrive after the
+      // previous cycle finished with notready_owner already pointing
+      // elsewhere. That cycle is already over; drop this stale nudge
+      // rather than asserting.
+      if (notready_owner != local_space)
+        return;
+      // The DowngradeRestart can race with the sender's
+      // DistributedRemoteRegistration and arrive first. If we don't
+      // know about this remote yet (it's not in remote_instances or
+      // the collective_mapping), drop the restart; the upcoming
+      // registration will trigger the proper ownership transfer in
+      // update_remote_instances.
+      if ((new_owner != local_space) && !remote_instances.contains(new_owner) &&
+          ((collective_mapping == nullptr) ||
+           !collective_mapping->contains(new_owner)))
+        return;
       legion_assert(
           (current_state == VALID_REF_STATE) ||
           (current_state == GLOBAL_REF_STATE));
@@ -1362,7 +1399,7 @@ namespace Legion {
     {
       if (NEED_LOCK)
       {
-        AutoLock gc(gc_lock);
+        AutoLock gc(gc_lock, false /*exclusive*/);
         return (current_state == VALID_REF_STATE) ||
                (current_state == PENDING_GLOBAL_REF_STATE);
       }
@@ -1743,7 +1780,9 @@ namespace Legion {
           // doing collections or we can wait for the next removal
           check_for_downgrade_restart(local_space);
         }
-        else if (current_state == PENDING_GLOBAL_REF_STATE)
+        else if (
+            (current_state == PENDING_GLOBAL_REF_STATE) ||
+            (valid_references == 0))
         {
           // Send a notification to the downgrade owner to check if it
           // needs to resume collections now that this reference has
@@ -1757,6 +1796,14 @@ namespace Legion {
           DistributedDowngradeRestart rez;
           rez.serialize(did);
           rez.dispatch(downgrade_owner);
+        }
+        else
+        {
+          // We have outstanding valid_references (state was promoted from
+          // PENDING_GLOBAL_REF_STATE back to VALID_REF_STATE by an
+          // add_valid_reference, or we never went pending). Defer the
+          // notification until our valid_references returns to zero.
+          pending_downgrade_restart = true;
         }
       }
     }

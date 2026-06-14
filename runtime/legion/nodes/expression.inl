@@ -1541,7 +1541,9 @@ namespace Legion {
       {
         rez.serialize<bool>(true /*local*/);
         rez.serialize(this);
-        this->add_base_expression_reference(LIVE_EXPR_REF);
+        // Caller-side increment only - the unpacker will record_live_expression
+        if (!this->check_global_and_increment(LIVE_EXPR_REF))
+          std::abort();
       }
       else if (target == this->owner_space)
       {
@@ -2285,8 +2287,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This is another kind of live expression made by the region tree
-      this->add_base_expression_reference(LIVE_EXPR_REF);
-      ImplicitReferenceTracker::record_live_expression(this);
+      if (!this->try_add_live_reference())
+        std::abort();
       legion_assert(num_rects > 0);
       if (num_rects > 1)
       {

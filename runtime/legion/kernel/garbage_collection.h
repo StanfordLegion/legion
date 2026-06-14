@@ -245,6 +245,7 @@ namespace Legion {
       void pack_global_ref(unsigned cnt = 1);
       void unpack_global_ref(unsigned cnt = 1);
     public:
+      inline bool has_gc_reference(void) const;
       template<bool NEED_LOCK = true>
       bool is_global(void) const;
       // Atomic check and increment operations
@@ -354,6 +355,11 @@ namespace Legion {
       uint64_t sent_global_references, received_global_references;
       uint64_t total_sent_references, total_received_references;
       unsigned remaining_responses;
+      // Set when an unpack_*_ref happens while we hold references (so the
+      // downgrade owner can't act on the notification immediately anyway).
+      // Drained when the relevant reference count returns to zero so the
+      // owner gets one consolidated DowngradeRestart instead of one per unpack.
+      bool pending_downgrade_restart = false;
     protected:
       mutable bool registered_with_runtime;
     };
@@ -379,6 +385,7 @@ namespace Legion {
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
     public:
+      inline bool has_valid_reference(void) const;
       template<bool NEED_LOCK = true>
       bool is_valid(void) const;
       bool check_valid_and_increment(ReferenceSource source, int cnt = 1);
