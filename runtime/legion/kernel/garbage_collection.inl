@@ -307,6 +307,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::has_gc_reference(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_DEBUG_GC
+      AutoLock gc(gc_lock, false /*exclusive*/);
+#endif
+      return (gc_references > 0);
+    }
+
+    //--------------------------------------------------------------------------
     inline bool DistributedCollectable::check_global_and_increment(
         ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
@@ -461,6 +471,16 @@ namespace Legion {
       }
       return remove_valid_reference(cnt);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool ValidDistributedCollectable::has_valid_reference(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_DEBUG_GC
+      AutoLock gc(gc_lock, false /*exclusive*/);
+#endif
+      return (valid_references > 0);
     }
 
     //--------------------------------------------------------------------------

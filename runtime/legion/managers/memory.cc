@@ -1929,7 +1929,8 @@ namespace Legion {
         // Create the builder and initialize it before getting
         // the allocation privilege to avoid deadlock scenario
         InstanceBuilder builder(regions, constraints, this, creator_id);
-        builder.initialize();
+        if (!builder.initialize())
+          return false;
         // Acquire allocation privilege before doing anything
         const RtEvent wait_on =
             acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
@@ -2014,7 +2015,8 @@ namespace Legion {
         // Create the builder and initialize it before getting
         // the allocation privilege to avoid deadlock scenario
         InstanceBuilder builder(regions, *constraints, this, creator_id);
-        builder.initialize();
+        if (!builder.initialize())
+          return false;
         // Acquire allocation privilege before doing anything
         const RtEvent wait_on =
             acquire_allocation_privilege(coordinates, safe_for_unbounded_pools);
@@ -2108,7 +2110,8 @@ namespace Legion {
         // Create the builder and initialize it before getting
         // the allocation privilege to avoid deadlock scenario
         InstanceBuilder builder(regions, constraints, this, creator_id);
-        builder.initialize();
+        if (!builder.initialize())
+          return false;
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
         const RtEvent wait_on =
@@ -2214,7 +2217,8 @@ namespace Legion {
         // Create the builder and initialize it before getting
         // the allocation privilege to avoid deadlock scenario
         InstanceBuilder builder(regions, *constraints, this, creator_id);
-        builder.initialize();
+        if (!builder.initialize())
+          return false;
         // First get our allocation privileges so we're the only
         // one trying to do any allocations
         const RtEvent wait_on =
@@ -2316,7 +2320,8 @@ namespace Legion {
           // Create the builder and initialize it before getting
           // the allocation privilege to avoid deadlock scenario
           InstanceBuilder builder(regions, constraints, this, creator_id);
-          builder.initialize();
+          if (!builder.initialize())
+            return false;
           size_t footprint = 0;
           PhysicalManager* new_manager = builder.create_physical_instance(
               nullptr /*unsat kind*/, nullptr /*unset index*/, &footprint,
@@ -2417,7 +2422,8 @@ namespace Legion {
           // Create the builder and initialize it before getting
           // the allocation privilege to avoid deadlock scenario
           InstanceBuilder builder(regions, *constraints, this, creator_id);
-          builder.initialize();
+          if (!builder.initialize())
+            return false;
           size_t footprint = 0;
           PhysicalManager* new_manager = builder.create_physical_instance(
               nullptr /*unsat kind*/, nullptr /*unset index*/, &footprint,

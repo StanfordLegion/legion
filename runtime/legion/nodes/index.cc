@@ -1489,7 +1489,9 @@ namespace Legion {
       {
         rez.serialize<bool>(true /*local*/);
         rez.serialize<IndexSpaceExpression*>(this);
-        add_base_expression_reference(LIVE_EXPR_REF);
+        // Caller-side increment only - the unpacker will record_live_expression
+        if (!check_global_and_increment(LIVE_EXPR_REF))
+          std::abort();
       }
     }
 
@@ -1533,6 +1535,7 @@ namespace Legion {
         ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
+      legion_assert(has_valid_reference() || has_gc_reference());
       add_base_gc_ref(source, count);
     }
 
@@ -1541,6 +1544,7 @@ namespace Legion {
         DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
+      legion_assert(has_valid_reference() || has_gc_reference());
       add_nested_gc_ref(source, count);
     }
 
