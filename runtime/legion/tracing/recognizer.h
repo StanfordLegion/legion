@@ -37,12 +37,33 @@ namespace Legion {
         size_t repeats;
       };
       struct FindRepeatsResult {
-        std::vector<Murmur3Hasher::Hash> hashes;  // only for storage
-        std::vector<NonOverlappingRepeatsResult> result;
-        Murmur3Hasher::Hash* start;
+      public:
+        const Murmur3Hasher::Hash* start;
+      private:
         size_t size;
+      public:
         uint64_t opidx;
         RtEvent finish_event;
+        std::vector<Murmur3Hasher::Hash> hashes;  // only for storage
+        std::vector<NonOverlappingRepeatsResult> result;
+      public:
+        FindRepeatsResult(Murmur3Hasher::Hash* h, size_t s, uint64_t idx)
+          : start(h), size(s), opidx(idx)
+        { }
+        // Make this act like a string view that is always terminated with a
+        // sentinel
+        inline Murmur3Hasher::Hash operator[](unsigned idx) const
+        {
+          if (idx < size)
+            return start[idx];
+          legion_assert(idx == size);
+          return SENTINEL;
+        }
+        inline size_t length(void) const
+        {
+          // Always allow for the sentinel value
+          return size + 1;
+        }
       };
       struct FindRepeatsTaskArgs : public LgTaskArgs<FindRepeatsTaskArgs> {
       public:
@@ -79,11 +100,10 @@ namespace Legion {
       void add_trace(
           const Murmur3Hasher::Hash* hashes, uint64_t size, uint64_t opidx);
       void compute_suffix_array(
-          const Murmur3Hasher::Hash* hashes, size_t size,
-          std::vector<size_t>& sarray, std::vector<int64_t>& surrogate);
+          const FindRepeatsResult& string, std::vector<size_t>& sarray,
+          std::vector<int64_t>& surrogate);
       void compute_lcp(
-          const Murmur3Hasher::Hash* hashes, size_t size,
-          const std::vector<size_t>& sarray,
+          const FindRepeatsResult& string, const std::vector<size_t>& sarray,
           const std::vector<int64_t>& surrogate, std::vector<size_t>& lcp);
       void quick_matching_of_substrings(
           size_t min_length, const std::vector<size_t>& sarray,
