@@ -36,7 +36,7 @@ namespace Legion {
         watcher(ctx, config), unique_hash_value(0), wait_interval(1)
     //--------------------------------------------------------------------------
     {
-      hashes.reserve(batchsize + 1);
+      hashes.reserve(batchsize);
     }
 
     //--------------------------------------------------------------------------
@@ -48,7 +48,8 @@ namespace Legion {
       // and waiting for the last one should be sufficient to cancel everything
       if (!repeat_results.empty())
       {
-        repeat_results.front().finish_event.cancel_operation(nullptr, 0);
+        // TODO: re-enable this once Realm issue #450 is resolved
+        // repeat_results.front().finish_event.cancel_operation(nullptr, 0);
         bool do_not_care = false;
         repeat_results.back().finish_event.wait_faultaware(do_not_care, false);
       }
@@ -61,6 +62,7 @@ namespace Legion {
     {
       Murmur3Hasher::Hash hash;
       hasher.finalize(hash);
+      legion_assert(hashes.size() < hashes.capacity());
       hashes.emplace_back(hash);
       if (check_for_repeats(opidx))
         update_watcher(opidx);
@@ -84,6 +86,7 @@ namespace Legion {
       // dummy hash value into the trace identifier so that the
       // traces it finds don't span across these operations.
       // Generate a unique hash and enqueue it
+      legion_assert(hashes.size() < hashes.capacity());
       hashes.emplace_back(get_unique_hash());
       if (check_for_repeats(opidx))
         update_watcher(opidx);
@@ -110,13 +113,8 @@ namespace Legion {
     {
       if (hashes.size() == batchsize)
       {
-        // Insert the sentinel token before launching the meta task.
-        hashes.emplace_back(SENTINEL);
-        FindRepeatsResult& repeat =
-            repeat_results.emplace_back(FindRepeatsResult());
-        repeat.start = &hashes.front();
-        repeat.size = hashes.size();
-        repeat.opidx = opidx;
+        FindRepeatsResult& repeat = repeat_results.emplace_back(
+            FindRepeatsResult(&hashes.front(), hashes.size(), opidx));
         hashes.swap(repeat.hashes);
         // Runtime meta-task in program order
         if (max_inflight_requests > 0)
@@ -130,7 +128,7 @@ namespace Legion {
         }
         else
           compute_longest_nonoverlapping_repeats(repeat);
-        hashes.reserve(batchsize + 1);
+        hashes.reserve(batchsize);
         return true;
       }
       else if ((hashes.size() % multi_scale_factor) == 0)
@@ -142,11 +140,8 @@ namespace Legion {
         uint64_t index = hashes.size() / multi_scale_factor;
         uint64_t window_size = (index & ~(index - 1)) * multi_scale_factor;
         uint64_t start = hashes.size() - window_size;
-        FindRepeatsResult& repeat =
-            repeat_results.emplace_back(FindRepeatsResult());
-        repeat.start = &hashes[start];
-        repeat.size = window_size;
-        repeat.opidx = opidx;
+        FindRepeatsResult& repeat = repeat_results.emplace_back(
+            FindRepeatsResult(&hashes[start], window_size, opidx));
         if (max_inflight_requests > 0)
         {
           FindRepeatsTaskArgs args(this, &repeat);
@@ -251,7 +246,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceRecognizer::compute_suffix_array(
-        const Murmur3Hasher::Hash* str, size_t n, std::vector<size_t>& sarray,
+        const FindRepeatsResult& str, std::vector<size_t>& sarray,
         std::vector<int64_t>& surrogate)
     //--------------------------------------------------------------------------
     {
@@ -259,8 +254,8 @@ namespace Legion {
       // The code has been implemented based on the explanations from here:
       // http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf,
       // with special treatment of radix sort to make it O(n*log n).
-      if (n == 0)
-        return;
+      const size_t n = str.length();
+      legion_assert(n > 0);
 
       // Define a struct for sorting the input string. To handle an
       // arbitrary type T, we use a boolean `present` to ensure that
@@ -400,8 +395,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceRecognizer::compute_lcp(
-        const Murmur3Hasher::Hash* str, size_t n,
-        const std::vector<size_t>& sarray,
+        const FindRepeatsResult& str, const std::vector<size_t>& sarray,
         const std::vector<int64_t>& surrogate, std::vector<size_t>& lcp)
     //--------------------------------------------------------------------------
     {
@@ -409,6 +403,9 @@ namespace Legion {
       // http://www.cs.cmu.edu/~15451-f20/LectureNotes/lec25-suffarray.pdf
       // for an explanation. The original paper can be found here:
       // https://link.springer.com/chapter/10.1007/3-540-48194-X_17
+      const size_t n = str.length();
+      legion_assert(n > 0);
+
       int k = 0;
       lcp.resize(n, 0);
       for (size_t i = 0; i < n; i++)
@@ -451,7 +448,7 @@ namespace Legion {
         size_t l1 = lcp[i];
         size_t s1 = sarray[i];
         size_t s2 = sarray[i + 1];
-        if (s2 >= s1 + l1 || s2 <= s1 - l1)
+        if (s2 >= s1 + l1 || s1 >= s2 + l1)
         {
           // Non-overlapping
           if (pre_l != l1)
@@ -537,13 +534,13 @@ namespace Legion {
         FindRepeatsResult& repeat)
     //--------------------------------------------------------------------------
     {
-      if (repeat.size < 2)
+      if (repeat.length() <= 2)
         return;
-      std::vector<size_t> sarray(repeat.size);
-      std::vector<int64_t> surrogate(repeat.size);
-      compute_suffix_array(repeat.start, repeat.size, sarray, surrogate);
+      std::vector<size_t> sarray(repeat.length());
+      std::vector<int64_t> surrogate(repeat.length());
+      compute_suffix_array(repeat, sarray, surrogate);
       std::vector<size_t> lcp;
-      compute_lcp(repeat.start, repeat.size, sarray, surrogate, lcp);
+      compute_lcp(repeat, sarray, surrogate, lcp);
       quick_matching_of_substrings(
           min_trace_length, sarray, lcp, repeat.result);
     }
