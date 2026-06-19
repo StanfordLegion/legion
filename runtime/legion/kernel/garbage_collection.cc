@@ -660,12 +660,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      // Must be in a global state when packing a reference
-      legion_assert(
-          (current_state == VALID_REF_STATE) ||
-          (current_state == GLOBAL_REF_STATE) ||
-          (current_state == PENDING_GLOBAL_REF_STATE));
+#ifdef LEGION_DEBUG
+      // Sometimes we're holindg a global reference on a remote node or have
+      // another packed global ref that ensures this is safe even though
+      // a downgrade attempt is in progress, we handle that case in debug
+      // mode by falling back to doing an acquire
+      bool remove_reference = false;
+      if (current_state == PENDING_LOCAL_REF_STATE)
+      {
+        remove_reference = true;
+        legion_assert(gc_references == 0);
+        legion_assert(downgrade_owner != local_space);
+        gc.release();
+        // We should always succeed in acquiring this or there is a runtime
+        // bug somewhere that says were not handling references correctly
+        if (!check_global_and_increment(RUNTIME_REF))
+          std::abort();
+        gc.reacquire();
+      }
+      else
+#endif
+        // Must be in a global state when packing a reference
+        legion_assert(
+            (current_state == VALID_REF_STATE) ||
+            (current_state == GLOBAL_REF_STATE) ||
+            (current_state == PENDING_GLOBAL_REF_STATE));
       sent_global_references += cnt;
+#ifdef LEGION_DEBUG
+      gc.release();
+      // Should never have to delete this because we just packed a global ref
+      if (remove_reference && remove_base_gc_ref(RUNTIME_REF))
+        std::abort();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1759,9 +1785,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      // Must be valid when packing a reference
-      legion_assert(current_state == VALID_REF_STATE);
+#ifdef LEGION_DEBUG
+      // Sometimes we're holindg a valid reference on a remote node or have
+      // another packed valid ref that ensures this is safe even though
+      // a downgrade attempt is in progress, we handle that case in debug
+      // mode by falling back to doing an acquire
+      bool remove_reference = false;
+      if (current_state == PENDING_GLOBAL_REF_STATE)
+      {
+        remove_reference = true;
+        legion_assert(gc_references == 0);
+        legion_assert(downgrade_owner != local_space);
+        gc.release();
+        // We should always succeed in acquiring this or there is a runtime
+        // bug somewhere that says were not handling references correctly
+        if (!check_valid_and_increment(RUNTIME_REF))
+          std::abort();
+        gc.reacquire();
+      }
+      else
+#endif
+        // Must be valid when packing a reference
+        legion_assert(current_state == VALID_REF_STATE);
       sent_valid_references += cnt;
+#ifdef LEGION_DEBUG
+      gc.release();
+      // Should never have to delete this because we just packed a valid ref
+      if (remove_reference && remove_base_valid_ref(RUNTIME_REF))
+        std::abort();
+#endif
     }
 
     //--------------------------------------------------------------------------
