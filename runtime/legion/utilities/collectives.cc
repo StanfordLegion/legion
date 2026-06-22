@@ -2256,8 +2256,9 @@ namespace Legion {
       {
         mid = (first + last) / 2;
         const AddressSpaceID midval = (*this)[mid];
-        // Should never actually find it
-        legion_assert(search != midval);
+        // If we find it just return it
+        if (search == midval)
+          return search;
         if (search < midval)
           last = mid - 1;
         else if (midval < search)

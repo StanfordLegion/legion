@@ -730,7 +730,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM, T>::compute_pending_space(
-        Operation* op, const std::vector<IndexSpace>& handles, bool is_union)
+        Operation* op, const std::vector<IndexSpace>& handles, bool is_union,
+        bool broadcast)
     //--------------------------------------------------------------------------
     {
       ApUserEvent to_trigger;
@@ -787,7 +788,8 @@ namespace Legion {
         result = ApEvent(Realm::IndexSpace<DIM, T>::compute_intersection(
             spaces, result_space, requests, precondition));
       }
-      if (set_realm_index_space(result_space, result))
+      if (set_realm_index_space(
+              result_space, result, false /*init*/, broadcast, local_space))
         std::abort();  // should never hit this
       if (to_trigger.exists())
         Runtime::trigger_event_untraced(to_trigger, result);
@@ -797,7 +799,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM, T>::compute_pending_space(
-        Operation* op, IndexPartition part_handle, bool is_union)
+        Operation* op, IndexPartition part_handle, bool is_union,
+        bool broadcast)
     //--------------------------------------------------------------------------
     {
       if (part_handle.get_type_tag() != handle.get_type_tag())
@@ -856,7 +859,8 @@ namespace Legion {
         result = ApEvent(Realm::IndexSpace<DIM, T>::compute_intersection(
             spaces, result_space, requests, precondition));
       }
-      if (set_realm_index_space(result_space, result))
+      if (set_realm_index_space(
+              result_space, result, false /*init*/, broadcast, local_space))
         std::abort();  // should never hit this
       if (to_trigger.exists())
         Runtime::trigger_event_untraced(to_trigger, result);
@@ -866,7 +870,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM, T>::compute_pending_difference(
-        Operation* op, IndexSpace init, const std::vector<IndexSpace>& handles)
+        Operation* op, IndexSpace init, const std::vector<IndexSpace>& handles,
+        bool broadcast)
     //--------------------------------------------------------------------------
     {
       if (init.get_type_tag() != handle.get_type_tag())
@@ -919,7 +924,8 @@ namespace Legion {
             diff_requests, op, DEP_PART_DIFFERENCE, diff_pre);
       ApEvent result(Realm::IndexSpace<DIM, T>::compute_difference(
           lhs_space, rhs_space, result_space, diff_requests, diff_pre));
-      if (set_realm_index_space(result_space, result))
+      if (set_realm_index_space(
+              result_space, result, false /*init*/, broadcast, local_space))
         std::abort();  // should never hit this
       // Destroy the tempory rhs space once the computation is done
       rhs_space.destroy(result);
