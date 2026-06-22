@@ -420,13 +420,14 @@ namespace Legion {
           IndexPartNode* p, LegionColor& child) const override;
     public:
       virtual ApEvent compute_pending_space(
-          Operation* op, const std::vector<IndexSpace>& handles,
-          bool is_union) = 0;
+          Operation* op, const std::vector<IndexSpace>& handles, bool is_union,
+          bool broadcast) = 0;
       virtual ApEvent compute_pending_space(
-          Operation* op, IndexPartition handle, bool is_union) = 0;
+          Operation* op, IndexPartition handle, bool is_union,
+          bool broadcast) = 0;
       virtual ApEvent compute_pending_difference(
           Operation* op, IndexSpace initial,
-          const std::vector<IndexSpace>& handles) = 0;
+          const std::vector<IndexSpace>& handles, bool broadcast) = 0;
       virtual void get_index_space_domain(void* realm_is, TypeTag type_tag) = 0;
       virtual size_t get_volume(void) override = 0;
       virtual size_t get_num_dims(void) const = 0;
@@ -642,13 +643,14 @@ namespace Legion {
       void log_index_space_points(const Realm::IndexSpace<DIM, T>& space) const;
     public:
       virtual ApEvent compute_pending_space(
-          Operation* op, const std::vector<IndexSpace>& handles,
-          bool is_union) override;
+          Operation* op, const std::vector<IndexSpace>& handles, bool is_union,
+          bool broadcast) override;
       virtual ApEvent compute_pending_space(
-          Operation* op, IndexPartition handle, bool is_union) override;
+          Operation* op, IndexPartition handle, bool is_union,
+          bool broadcast) override;
       virtual ApEvent compute_pending_difference(
           Operation* op, IndexSpace initial,
-          const std::vector<IndexSpace>& handles) override;
+          const std::vector<IndexSpace>& handles, bool broadcast) override;
       virtual void get_index_space_domain(
           void* realm_is, TypeTag type_tag) override;
       virtual size_t get_volume(void) override;

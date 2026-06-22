@@ -587,12 +587,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode* child_node = runtime->get_node(target);
-      // See if we own this child or not
-      if (!child_node->is_owner() &&
-          ((child_node->collective_mapping == nullptr) ||
-           !child_node->collective_mapping->contains(child_node->local_space)))
+      bool broadcast = true;
+      if (perform_pending_space(child_node, broadcast))
+        return child_node->compute_pending_space(
+            this, handles, is_union, broadcast);
+      else
         return ApEvent::NO_AP_EVENT;
-      return child_node->compute_pending_space(this, handles, is_union);
     }
 
     //--------------------------------------------------------------------------
@@ -601,12 +601,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode* child_node = runtime->get_node(target);
-      // See if we own this child or not
-      if (!child_node->is_owner() &&
-          ((child_node->collective_mapping == nullptr) ||
-           !child_node->collective_mapping->contains(child_node->local_space)))
+      bool broadcast = true;
+      if (perform_pending_space(child_node, broadcast))
+        return child_node->compute_pending_space(
+            this, handle, is_union, broadcast);
+      else
         return ApEvent::NO_AP_EVENT;
-      return child_node->compute_pending_space(this, handle, is_union);
     }
 
     //--------------------------------------------------------------------------
@@ -616,12 +616,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode* child_node = runtime->get_node(target);
-      // See if we own this child or not
-      if (!child_node->is_owner() &&
-          ((child_node->collective_mapping == nullptr) ||
-           !child_node->collective_mapping->contains(child_node->local_space)))
+      bool broadcast = true;
+      if (perform_pending_space(child_node, broadcast))
+        return child_node->compute_pending_difference(
+            this, initial, handles, broadcast);
+      else
         return ApEvent::NO_AP_EVENT;
-      return child_node->compute_pending_difference(this, initial, handles);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PendingPartitionOp::perform_pending_space(
+        IndexSpaceNode* target, bool& broadcast)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(broadcast);
+      return true;
     }
 
     /////////////////////////////////////////////////////////////
@@ -681,6 +690,35 @@ namespace Legion {
         }
         else
           future_map.impl->get_all_futures(sources);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplPendingPartitionOp::perform_pending_space(
+        IndexSpaceNode* target, bool& broadcast)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(broadcast);
+      // We know we are in a replicate context
+      ReplicateContext* repl_ctx =
+          legion_safe_cast<ReplicateContext*>(parent_ctx);
+      const CollectiveMapping* shard_collective =
+          repl_ctx->shard_manager->collective_mapping;
+      legion_assert(shard_collective != nullptr);
+      // Check to see if the target is created collectively
+      if ((target->collective_mapping == nullptr) ||
+          !shard_collective->contains(*target->collective_mapping))
+      {
+        // Whichever node is closest to the owner is the one that does the work
+        const AddressSpaceID closest =
+            shard_collective->find_nearest(target->owner_space);
+        return (closest == repl_ctx->local_space);
+      }
+      else
+      {
+        broadcast = false;
+        // Only do the work if we're on one of the nodes for the target
+        return target->collective_mapping->contains(repl_ctx->local_space);
       }
     }
 

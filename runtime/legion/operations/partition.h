@@ -390,6 +390,8 @@ namespace Legion {
     protected:
       virtual void populate_sources(
           const FutureMap& fm, IndexPartition pid, bool need_all_futures);
+      virtual bool perform_pending_space(
+          IndexSpaceNode* target, bool& broadcast);
       void request_future_buffers(
           std::set<RtEvent>& mapped_events, std::set<RtEvent>& ready_events);
     protected:
@@ -418,6 +420,8 @@ namespace Legion {
       virtual void populate_sources(
           const FutureMap& fm, IndexPartition pid,
           bool needs_all_futures) override;
+      virtual bool perform_pending_space(
+          IndexSpaceNode* target, bool& broadcast) override;
       virtual void trigger_execution(void) override;
     };
 
