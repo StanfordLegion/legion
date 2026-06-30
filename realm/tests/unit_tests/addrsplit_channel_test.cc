@@ -16,6 +16,7 @@
  */
 
 #include "realm/mem_impl.h"
+#include "realm/runtime_impl.h"
 #include "realm/transfer/addrsplit_channel.h"
 #include "test_common.h"
 #include <tuple>

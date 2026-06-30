@@ -145,6 +145,59 @@ configure_file(
   @ONLY
 )
 
+# Embed src/realm/realm-gdb.py into librealm's .debug_gdb_scripts ELF
+# section so that gdb auto-loads it whenever Realm code is debugged.
+# Only useful when the library carries DWARF, so restrict to Debug and
+# RelWithDebInfo builds.  ELF only -- macOS/Windows skip this entirely.
+set(_realm_embed_gdb_script FALSE)
+if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+   AND (CMAKE_BUILD_TYPE STREQUAL "Debug"
+        OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+  set(_realm_embed_gdb_script TRUE)
+endif()
+
+if(_realm_embed_gdb_script)
+  set(REALM_GDB_PY_PATH "${REALM_SOURCE_DIR}/realm-gdb.py")
+
+  # Re-run CMake configuration whenever realm-gdb.py changes so the
+  # embedded bytes pick up edits.
+  set_property(DIRECTORY APPEND PROPERTY
+    CMAKE_CONFIGURE_DEPENDS "${REALM_GDB_PY_PATH}"
+  )
+
+  # Assemble the .debug_gdb_scripts payload at configure time, framed as
+  # gdb expects (see gdb_script.cc.in for the format).  Doing it in CMake
+  # keeps the generated source plain C++ -- no inline asm / .incbin -- so
+  # it builds with any gcc/clang on any ELF target (x86_64, aarch64, etc.).
+  file(READ "${REALM_GDB_PY_PATH}" _gdb_py_hex HEX)
+  string(HEX "realm-gdb.py" _gdb_name_hex)
+  # 04 = SECTION_SCRIPT_ID_PYTHON_TEXT
+  # 0a = '\n' terminating the script name
+  # 00 = '\0' terminating the entry
+  set(_gdb_full_hex "04${_gdb_name_hex}0a${_gdb_py_hex}00")
+  string(REGEX REPLACE
+    "([0-9a-f][0-9a-f])"
+    "0x\\1,"
+    REALM_GDB_PAYLOAD_C_LITERAL
+    "${_gdb_full_hex}"
+  )
+
+  set(_gdb_script_cc "${CMAKE_CURRENT_BINARY_DIR}/gdb_script.cc")
+  configure_file(
+    "${REALM_SOURCE_DIR}/gdb_script.cc.in"
+    "${_gdb_script_cc}"
+    @ONLY
+  )
+  list(APPEND REALM_SOURCES "${_gdb_script_cc}")
+endif()
+
+# Exported so the parent scope can add the matching compile define for
+# threads.cc's anchor reference.
+set(REALM_EMBED_GDB_SCRIPT
+    ${_realm_embed_gdb_script}
+    PARENT_SCOPE
+)
+
 # generate per-dimension object files for deppart stuff
 foreach(INST_N1 RANGE 1 ${REALM_MAX_DIM})
   foreach(INST_N2 RANGE 1 ${REALM_MAX_DIM})

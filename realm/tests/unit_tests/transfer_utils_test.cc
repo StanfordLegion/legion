@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include "realm/runtime_impl.h"
 #include "realm/transfer/transfer_utils.h"
 #include <variant>
 #include <vector>

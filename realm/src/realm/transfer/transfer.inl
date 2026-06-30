@@ -181,23 +181,18 @@ namespace Realm {
       const std::vector<const typename CopyIndirection<N, T>::Base *> &_indirects,
       const ProfilingRequestSet &requests, std::true_type)
     : refcount(1)
-    , deferred_analysis(this)
+    , domain(TransferDomain::construct(_is))
     , srcs(std::forward<SrcVec>(_srcs))
     , dsts(std::forward<DstVec>(_dsts))
     , prs(requests)
-    , analysis_complete(false)
-    , analysis_successful(false)
     , fill_data(0)
     , fill_size(0)
+    , analysis_init_done(false)
   {
-    domain = TransferDomain::construct(_is);
-
     indirects.resize(_indirects.size());
     for(size_t i = 0; i < _indirects.size(); i++) {
       indirects[i] = _indirects[i]->create_info(_is);
     }
-
-    check_analysis_preconditions();
   }
 
   inline void TransferDesc::add_reference() { refcount.fetch_add_acqrel(1); }

@@ -821,35 +821,43 @@ namespace Realm {
                              offsets.data(), MPI_BYTE, MPI_COMM_WORLD));
   }
 
-  size_t MPIModule::sample_messages_received_count(void)
+  void MPIModule::sample_quiescence_state(QuiescenceState &state)
   {
-    // we don't have the right count to match the incoming message manager
-    //  (since we count completion replies too), so use a count of 0 that
-    //  merely waits until the incoming manager is temporarily idle
-    return 0;
-  }
-
-  static unsigned long prev_total_rcvd = 0;
-  bool MPIModule::check_for_quiescence(size_t sampled_receive_count)
-  {
-    // ensure some progress happens on the poller before each quiescence check
+    // ensure some progress happens on the poller before each sample so the
+    //  receive counter reflects everything that's been delivered
     g_am_manager.ensure_polling_progress();
 
-    // add up the total messages sent/rcvd by anybody since last time we tried
-    unsigned long my_counts[2], totals[2];
-    my_counts[0] = MPI::messages_sent.load();
-    my_counts[1] = MPI::messages_rcvd.load();
-    CHECK_MPI(
-        MPI_Allreduce(my_counts, totals, 2, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD));
+    // The MPI module's accounting includes completion replies in the same
+    //  message counters as application messages (no separate rcomp_sent /
+    //  received tracking).  This means the rcomp imbalance is folded into
+    //  packets_reserved/packets_received and we don't have a separate
+    //  pending_completions to report.
+    state.packets_reserved = MPI::messages_sent.load();
+    state.packets_received = MPI::messages_rcvd.load();
+    state.pending_completions = 0;
 
-    // we're quiescent if:
-    //  a) the total messages rcvd is the same as total sent (i.e. none in
-    //      flight), and
-    //  b) the total messages rcvd is the same as last attempt (i.e. no new
-    //      messages showed up during the check)
-    bool quiesced = ((totals[0] == totals[1]) && (totals[1] == prev_total_rcvd));
-    prev_total_rcvd = totals[1];
-    return quiesced;
+    // The MPI backend doesn't expose individual queue states - the
+    //  message_manager queue is drained by Network::check_for_quiescence
+    //  before we sample, and any other in-flight work shows up as a counter
+    //  imbalance rather than as a queue.  The two-round Mattern's stability
+    //  check at the network.cc level catches cases where messages are still
+    //  flowing because the counters won't match across consecutive rounds.
+    state.queued_items = 0;
+    // No queues, so no monotonic add counter to track either.  Activity
+    //  shows up exclusively in packets_reserved/received imbalances, which
+    //  the stability check already monitors.
+    state.events_added = 0;
+    // Completion replies are counted in messages_rcvd but bypass
+    //  IncomingMessageManager, so the drain target must use the subset of
+    //  received messages actually handed to IMM.
+    state.messages_to_drain = MPI::messages_delivered_to_imm.load();
+  }
+
+  void MPIModule::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                           uint64_t *total_counts, size_t count)
+  {
+    CHECK_MPI(MPI_Allreduce(const_cast<uint64_t *>(local_counts), total_counts, count,
+                            MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD));
   }
 
   // used to create a remote proxy for a memory
@@ -989,6 +997,13 @@ namespace Realm {
     // we don't care about source data location
     return recommended_max_payload(target, dest_payload_addr, with_congestion,
                                    header_size);
+  }
+
+  size_t MPIModule::max_payload_size(size_t header_size, const void *src_payload_addr)
+  {
+    // MPI has no concept of registered segments - same limit either way
+    (void)src_payload_addr;
+    return (AM_BUF_SIZE - header_size);
   }
 
 }; // namespace Realm

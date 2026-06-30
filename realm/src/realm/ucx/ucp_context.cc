@@ -266,8 +266,8 @@ namespace Realm {
                          bool use_wakeup_, unsigned prog_boff_max_, int prog_itr_max_,
                          int rdesc_rel_max_, ucs_thread_mode_t thread_mode_,
                          size_t user_req_size_, size_t user_req_alignment_,
-                         size_t pbuf_max_size_, size_t pbuf_max_chunk_size_,
-                         size_t pbuf_max_count_, size_t pbuf_init_count_,
+                         size_t pbuf_mp_max_size_, size_t pbuf_mp_max_chunk_size_,
+                         size_t pbuf_mp_max_count_, size_t pbuf_mp_init_count_,
                          size_t mmp_max_obj_size_, bool leak_check_)
       : context(context_)
       , type(type_)
@@ -278,7 +278,7 @@ namespace Realm {
       , prog_itr_max(prog_itr_max_)
       , rdesc_rel_max(rdesc_rel_max_)
       , thread_mode(thread_mode_)
-      , pbuf_max_size(pbuf_max_size_)
+      , pbuf_mp_max_size(pbuf_mp_max_size_)
     {
       // request mpoll
       request_mp = new MPool("request_mp", leak_check_, user_req_size_ + ucp_req_size,
@@ -286,8 +286,8 @@ namespace Realm {
 
       // pre-registered payload buffer mpool
       pbuf_mp =
-          new MPool("pbuf_mp", leak_check_, pbuf_max_size_, am_alignment_, 0, 1024,
-                    pbuf_init_count_, pbuf_max_count_, pbuf_max_chunk_size_, 1.5,
+          new MPool("pbuf_mp", leak_check_, pbuf_mp_max_size_, am_alignment_, 0, 1024,
+                    pbuf_mp_init_count_, pbuf_mp_max_count_, pbuf_mp_max_chunk_size_, 1.5,
                     &UCPWorker::pbuf_chunk_alloc, this, &UCPWorker::pbuf_chunk_release,
                     this, nullptr, nullptr, nullptr, nullptr);
 
@@ -510,7 +510,7 @@ namespace Realm {
 
     void *UCPWorker::pbuf_get(size_t size)
     {
-      assert(size <= pbuf_max_size);
+      assert(size <= pbuf_mp_max_size);
 
       AutoLock<SpinLock> al(pbuf_mp_spinlock);
       return pbuf_mp->get();
@@ -564,13 +564,21 @@ namespace Realm {
         const char *config_name = &kv.first.c_str()[4];
 
         status = UCP_FNPTR(ucp_config_modify)(ucp_config, config_name, kv.second.c_str());
+        if(status == UCS_ERR_INVALID_PARAM) {
+          // On UCX >= 1.20.1, ucp_config_modify returns UCS_ERR_INVALID_PARAM
+          // for names not registered by any loaded UCT module (e.g. UCX built
+          // without IB on a non-IB system rejects IB_SEG_SIZE). Treat as a
+          // soft failure and keep going.
+          log_ucp.info() << "skipping unsupported UCX config " << kv.first << "="
+                         << kv.second;
+          continue;
+        }
         if(status != UCS_OK) {
           log_ucp.error() << "ucp_config_modify failed " << kv.first << " " << kv.second;
           goto err_rel_config;
-        } else {
-          log_ucp.info() << kv.first << " modified to " << kv.second << " for context "
-                         << this;
         }
+        log_ucp.info() << kv.first << " modified to " << kv.second << " for context "
+                       << this;
       }
 
       // Initialize UCX context

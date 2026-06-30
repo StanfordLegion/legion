@@ -826,6 +826,8 @@ namespace Realm {
 
     // ignore external instances here - we can't reuse their memory for
     //  future allocations
+    bool defer_dealloc_notify = false;
+    std::vector<RegionInstanceImpl *> deferred_dealloc_notifies;
     if(inst->metadata.ext_resource != 0) {
       unregister_external_resource(inst);
     } else {
@@ -870,14 +872,19 @@ namespace Realm {
               future_allocator.deallocate(inst->me);
               // see if we can reorder this (and maybe other) releases to
               //  satisfy the pending allocs
-              if(attempt_release_reordering(successful_allocs)) {
+              if(attempt_release_reordering(successful_allocs,
+                                            deferred_dealloc_notifies)) {
                 // we'll notify the successful allocations below, after we've
                 //  released the mutex
               } else {
                 // nope, stick ourselves on the back of the (unreordered)
-                //  pending release list
-                pending_releases.emplace_back(
+                //  pending release list - the tag is still in
+                //  current_allocator, so defer notify_deallocation() (and the
+                //  inst-slot recycle it triggers) until this entry is drained
+                PendingRelease &back = pending_releases.emplace_back(
                     PendingRelease(inst, true /*triggered*/, ++cur_release_seqid));
+                back.deferred_dealloc_notify = true;
+                defer_dealloc_notify = true;
               }
             }
           } else {
@@ -901,13 +908,19 @@ namespace Realm {
     }
 
     // even if we don't apply the destruction to the heap state right away,
-    //  we always ack a triggered destruction
+    //  we always ack a triggered destruction - unless that destruction had to
+    //  be queued in pending_releases with its tag still live in
+    //  current_allocator, in which case the ack (and the slot recycle it
+    //  triggers) waits until the entry is drained
     if(triggered) {
-      inst->notify_deallocation();
+      if(!defer_dealloc_notify)
+        inst->notify_deallocation();
     } else {
       // ask the instance to tell us when the precondition is satisified
       inst->deferred_destroy.defer(inst, this, precondition);
     }
+    for(RegionInstanceImpl *deferred_inst : deferred_dealloc_notifies)
+      deferred_inst->notify_deallocation();
   }
 
   MemoryImpl::AllocationResult LocalManagedMemory::reuse_storage_deferrable(
@@ -949,6 +962,8 @@ namespace Realm {
     std::vector<size_t> offsets(num_insts, RegionInstanceImpl::INSTOFFSET_FAILED);
     // this redistrict may satisfy pending allocation requests
     std::vector<std::pair<RegionInstanceImpl *, size_t>> successful_allocs;
+    bool defer_dealloc_notify = false;
+    std::vector<RegionInstanceImpl *> deferred_dealloc_notifies;
     do { // so we can 'break' out early below
       AutoLock<> al(allocator_mutex);
 
@@ -1011,15 +1026,19 @@ namespace Realm {
                                                      alignments, offsets);
             // see if we can reorder this (and maybe other) releases to
             //  satisfy the pending allocs
-            if(attempt_release_reordering(successful_allocs)) {
+            if(attempt_release_reordering(successful_allocs, deferred_dealloc_notifies)) {
               // we'll notify the successful allocations below, after we've
               //  released the mutex
             } else {
               // nope, stick ourselves on the back of the (unreordered)
-              //  pending release list
+              //  pending release list - old_inst's tag is still live in
+              //  current_allocator, so defer the dealloc notify until this
+              //  entry is drained from pending_releases
               PendingRelease &back = pending_releases.emplace_back(
                   PendingRelease(old_inst, true /*triggered*/, ++cur_release_seqid));
               back.record_redistrict(new_insts);
+              back.deferred_dealloc_notify = true;
+              defer_dealloc_notify = true;
             }
           }
         } else {
@@ -1044,7 +1063,10 @@ namespace Realm {
     }
 
     if(triggered) {
-      old_inst->notify_deallocation();
+      if(!defer_dealloc_notify)
+        old_inst->notify_deallocation();
+      for(RegionInstanceImpl *deferred_inst : deferred_dealloc_notifies)
+        deferred_inst->notify_deallocation();
       // Notify all the new instances
       for(unsigned idx = 0; idx < num_insts; idx++) {
         new_insts[idx]->notify_allocation((idx < allocated) ? ALLOC_INSTANT_SUCCESS
@@ -1056,6 +1078,8 @@ namespace Realm {
       assert(old_inst->deferred_redistrict.empty());
       old_inst->deferred_redistrict.swap(new_insts);
       old_inst->deferred_destroy.defer(old_inst, this, precondition);
+      // deferred_dealloc_notifies is necessarily empty here -
+      //  attempt_release_reordering is only called on the triggered path
       return ALLOC_DEFERRED;
     }
   }
@@ -1181,7 +1205,8 @@ namespace Realm {
   //  move the ready ones first - assumes 'release_allocator' has been
   //  properly maintained
   bool LocalManagedMemory::attempt_release_reordering(
-      std::vector<std::pair<RegionInstanceImpl *, size_t>> &successful_allocs)
+      std::vector<std::pair<RegionInstanceImpl *, size_t>> &successful_allocs,
+      std::vector<RegionInstanceImpl *> &deferred_dealloc_notifies)
   {
     PendingAlloc &oldest = pending_allocs.front();
     if(!release_allocator.can_allocate(oldest.inst->me, oldest.bytes, oldest.alignment)) {
@@ -1216,6 +1241,8 @@ namespace Realm {
       std::deque<PendingRelease>::iterator it3 = pending_releases.begin();
       while(it3 != pending_releases.end()) {
         if(it3->is_ready) {
+          if(it3->deferred_dealloc_notify)
+            deferred_dealloc_notifies.push_back(it3->inst);
           it3 = pending_releases.erase(it3);
         } else {
           ++it3;
@@ -1265,6 +1292,8 @@ namespace Realm {
         it3 = pending_releases.begin();
         while(it3 != pending_releases.end()) {
           if(it3->is_ready) {
+            if(it3->deferred_dealloc_notify)
+              deferred_dealloc_notifies.push_back(it3->inst);
             it3 = pending_releases.erase(it3);
           } else {
             ++it3;
@@ -1308,6 +1337,8 @@ namespace Realm {
     std::vector<size_t> offsets(new_insts.size(), RegionInstanceImpl::INSTOFFSET_FAILED);
     std::vector<std::pair<RegionInstanceImpl *, size_t>> successful_allocs;
     std::vector<RegionInstanceImpl *> failed_allocs;
+    std::vector<RegionInstanceImpl *> deferred_dealloc_notifies;
+    bool defer_dealloc_notify = false;
     // std::vector<RegionInstanceImpl *> deallocs;
     {
       AutoLock<> al(allocator_mutex);
@@ -1339,6 +1370,10 @@ namespace Realm {
           // catch up the current state
           do {
             allocated = it->release(current_allocator, offsets);
+            // any prior bad-path entry whose tag is now finally being removed
+            //  from current_allocator can have its dealloc notification fired
+            if((it->inst != old_inst) && it->deferred_dealloc_notify)
+              deferred_dealloc_notifies.push_back(it->inst);
             // deallocs.push_back(it->inst);
 
             // did this unblock any allocations?
@@ -1427,16 +1462,22 @@ namespace Realm {
           } else {
             // apply this free to the release_allocator - we'll check below
             //  to see if it unblocks one or more allocations AND leaves the
-            //  rest possible
+            //  rest possible.  the tag stays in current_allocator until this
+            //  entry is drained, so defer notify_deallocation() (and the
+            //  inst-slot recycle it triggers) until that happens
             allocated = it->release(release_allocator, offsets);
+            it->deferred_dealloc_notify = true;
+            defer_dealloc_notify = true;
           }
         }
 
         // a couple different ways to get to a state where the ready releases
         //  allow allocations to proceed but we could not be sure above, so
-        //  check now
+        //  check now.  if attempt_release_reordering's swap drains our entry,
+        //  old_inst will appear in deferred_dealloc_notifies and the post-lock
+        //  loop will fire notify_deallocation() exactly once
         if(!pending_allocs.empty()) {
-          attempt_release_reordering(successful_allocs);
+          attempt_release_reordering(successful_allocs, deferred_dealloc_notifies);
         }
       }
 
@@ -1479,7 +1520,10 @@ namespace Realm {
       }
       return ALLOC_CANCELLED;
     } else {
-      old_inst->notify_deallocation();
+      if(!defer_dealloc_notify)
+        old_inst->notify_deallocation();
+      for(RegionInstanceImpl *deferred_inst : deferred_dealloc_notifies)
+        deferred_inst->notify_deallocation();
       for(unsigned idx = 0; idx < local_insts.size(); idx++) {
         assert((offsets[idx] != RegionInstanceImpl::INSTOFFSET_FAILED) ==
                (idx < allocated));
@@ -1568,6 +1612,8 @@ namespace Realm {
 
     std::vector<std::pair<RegionInstanceImpl *, size_t>> successful_allocs;
     std::vector<RegionInstanceImpl *> failed_allocs;
+    std::vector<RegionInstanceImpl *> deferred_dealloc_notifies;
+    bool defer_dealloc_notify = false;
     // std::vector<RegionInstanceImpl *> deallocs;
     {
       AutoLock<> al(allocator_mutex);
@@ -1593,6 +1639,10 @@ namespace Realm {
           // catch up the current state
           do {
             it->release(current_allocator);
+            // any prior bad-path entry whose tag is now finally being removed
+            //  from current_allocator can have its dealloc notification fired
+            if((it->inst != inst) && it->deferred_dealloc_notify)
+              deferred_dealloc_notifies.push_back(it->inst);
             // deallocs.push_back(it->inst);
 
             // did this unblock any allocations?
@@ -1681,16 +1731,25 @@ namespace Realm {
           } else {
             // apply this free to the release_allocator - we'll check below
             //  to see if it unblocks one or more allocations AND leaves the
-            //  rest possible
+            //  rest possible.  the tag stays in current_allocator until this
+            //  entry is drained (either by attempt_release_reordering's swap
+            //  or by becoming the oldest in a later release_storage_immediate
+            //  call), so defer notify_deallocation() until that happens
             it->release(release_allocator);
+            it->deferred_dealloc_notify = true;
+            defer_dealloc_notify = true;
           }
         }
 
         // a couple different ways to get to a state where the ready releases
         //  allow allocations to proceed but we could not be sure above, so
-        //  check now
+        //  check now.  if attempt_release_reordering's swap drains our entry,
+        //  inst will appear in deferred_dealloc_notifies and the post-lock
+        //  loop will fire notify_deallocation() exactly once; otherwise the
+        //  defer_dealloc_notify flag keeps the function-end ack suppressed
+        //  until a later drain fires it for us.
         if(!pending_allocs.empty()) {
-          attempt_release_reordering(successful_allocs);
+          attempt_release_reordering(successful_allocs, deferred_dealloc_notifies);
         }
       } else {
         remove_pending_release(inst, failed_allocs);
@@ -1723,10 +1782,15 @@ namespace Realm {
       }
 
     // even if we don't apply the destruction to the heap state right away,
-    //  we always ack a triggered (but not poisoned) destruction now
-    if(!poisoned) {
+    //  we always ack a triggered (but not poisoned) destruction now - unless
+    //  the destruction had to be queued in pending_releases with its tag
+    //  still live in current_allocator, in which case the ack waits until
+    //  the entry is drained
+    if(!poisoned && !defer_dealloc_notify) {
       inst->notify_deallocation();
     }
+    for(RegionInstanceImpl *deferred_inst : deferred_dealloc_notifies)
+      deferred_inst->notify_deallocation();
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -1752,6 +1816,7 @@ namespace Realm {
     : inst(_inst)
     , is_ready(_ready)
     , seqid(_seqid)
+    , deferred_dealloc_notify(false)
   {}
 
   void LocalManagedMemory::PendingRelease::record_redistrict(

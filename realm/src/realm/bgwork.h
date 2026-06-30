@@ -154,8 +154,10 @@ namespace Realm {
 
 #ifdef DEBUG_REALM
   public:
-    // in debug mode, we'll track the state of a work item to avoid
-    //  duplicate activations or activations after shutdown
+    // in debug mode, we'll track the state of a work item to detect
+    //  activations or work performed after shutdown - duplicate
+    //  activations are permitted and may occur when an external thread
+    //  calls make_active while a worker is between claim and do_work
     enum State
     {
       STATE_IDLE,

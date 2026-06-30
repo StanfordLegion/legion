@@ -93,6 +93,10 @@ namespace Realm {
 
     size_t erase(T *entry);
 
+    // O(n) walk - we don't maintain a running size counter, so use this only
+    //  when the size is needed (e.g. diagnostics, quiescence reporting)
+    size_t size(void) const;
+
     mutable LT lock;
     IntrusiveListLink<T> head;
     IntrusiveListLink<T> *lastlink;

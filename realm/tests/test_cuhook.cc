@@ -50,12 +50,9 @@ void gpu_task(const void *args, size_t arglen, const void *userdata, size_t user
   cudaFree(ptr);
   cudaStream_t stream;
 
-#ifdef REALM_USE_CUDART_HIJACK
-  cudaStreamCreate(&stream);
-#else
   stream = Cuda::get_task_cuda_stream();
   Cuda::set_task_ctxsync_required(false);
-#endif
+
   gpu_kernel_wrapper(stream);
   // cudaStreamSynchronize(stream);
 }

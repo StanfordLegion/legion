@@ -116,6 +116,11 @@ namespace Realm {
   void AddressList::commit_entry(int act_dim, size_t bytes)
   {
     size_t entries_used = detail::count_index(act_dim);
+    // catch callers whose act_dim exceeds the max_dim they reserved with
+    // begin_entry — otherwise the overshoot corrupts adjacent slots (and the
+    // heap if it crosses data.size()) and only surfaces later as a stale
+    // header in read_entry
+    assert(write_pointer + entries_used <= data.size());
     write_pointer += entries_used;
     total_bytes += bytes * (field_block ? field_block->count : 1);
   }

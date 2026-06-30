@@ -21,6 +21,7 @@
 #include "realm/cmdline.h"
 #include "realm/logging.h"
 #include "realm/activemsg.h"
+#include "realm/timers.h"
 
 #ifdef REALM_USE_DLFCN
 #include <dlfcn.h>
@@ -48,6 +49,8 @@ static void aligned_free(void *ptr)
 
 namespace Realm {
 
+  Logger log_quiesce("quiesce");
+
   namespace Network {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID my_node_id = 0;
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeID max_node_id = 0;
@@ -55,18 +58,165 @@ namespace Realm {
     REALM_INTERNAL_API_EXTERNAL_LINKAGE NodeSet shared_peers;
     NetworkModule *single_network = 0;
 
-    bool check_for_quiescence(IncomingMessageManager *message_manager)
+    // Persistent state across calls to check_for_quiescence.  The function
+    //  is only invoked from RuntimeImpl::wait_for_shutdown, single-threaded,
+    //  so a translation-unit-local static is sufficient.  Reset in
+    //  reset_quiescence_state() below if the runtime ever needs to start over.
+    namespace QuiescenceCheck {
+      static NetworkModule::QuiescenceState prev_totals = {};
+      static bool have_prev = false;
+      // wall-clock timestamp (ns) of the last round in which any counter
+      //  changed.  When counters stay frozen for longer than WARN_INTERVAL_NS,
+      //  we emit a warning - but never abort.  If the user's network is
+      //  genuinely slow, we just keep iterating; if it's hung, we just keep
+      //  warning so the user knows where the process is stuck.
+      static long long last_change_time_ns = 0;
+      // wall-clock timestamp (ns) at which the next "no progress" warning
+      //  should fire.  Bumped by WARN_INTERVAL_NS every time a warning is
+      //  emitted, so warnings repeat at a steady cadence rather than
+      //  spamming.
+      static long long next_warn_time_ns = 0;
+      // emit a warning if the counters have been frozen this long.  60 s is
+      //  long enough to outlast any reasonable network round-trip but short
+      //  enough that a CI hang surfaces as actionable log output.
+      static const long long WARN_INTERVAL_NS = 60LL * 1000 * 1000 * 1000;
+    } // namespace QuiescenceCheck
+
+    void reset_quiescence_state(void)
+    {
+      QuiescenceCheck::prev_totals = NetworkModule::QuiescenceState{};
+      QuiescenceCheck::have_prev = false;
+      QuiescenceCheck::last_change_time_ns = 0;
+      QuiescenceCheck::next_warn_time_ns = 0;
+    }
+
+    QuiescenceStatus check_for_quiescence(IncomingMessageManager *message_manager)
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
-        return false;
-      } else
-#endif
-      {
-        size_t messages_received = single_network->sample_messages_received_count();
-        message_manager->drain_incoming_messages(messages_received);
-        return single_network->check_for_quiescence(messages_received);
+        return QuiescenceStatus::DONE;
       }
+#endif
+
+      QuiescenceStatus custom_status;
+      if(single_network->custom_quiescence_check(message_manager, custom_status))
+        return custom_status;
+
+      // Drain the incoming-message queue first, so that any messages already
+      //  delivered by the network layer have been dispatched to their
+      //  handlers (which may queue more local work, also captured by
+      //  queued_items).  The drain target is messages_to_drain - a strict
+      //  subset of packets_received that excludes wire packets that don't
+      //  pass through IMM (UCX remote-completion replies in particular).
+      //  Using packets_received here would hang on UCX since IMM's
+      //  total_messages_handled can never include rcomp arrivals.
+      NetworkModule::QuiescenceState predrain;
+      single_network->sample_quiescence_state(predrain);
+      message_manager->drain_incoming_messages(predrain.messages_to_drain);
+
+      // Now sample the actual local state we'll feed into the allreduce.
+      //  Sampling AFTER the drain matters: drain may have caused handlers to
+      //  fire, which may have changed queued_items and pending counts.
+      NetworkModule::QuiescenceState local;
+      single_network->sample_quiescence_state(local);
+
+      // Allreduce the five fields.  All use SUM:
+      //   queued_items: each rank contributes its current queue-item count;
+      //     sum > 0 means at least one rank has work queued.  Using a count
+      //     rather than a 0/1 boolean lets a draining queue register as
+      //     "progressing" (sum decreasing) instead of looking unchanged
+      //     across rounds while still non-zero
+      //   events_added: monotonic count of items ever added to any queue;
+      //     required to detect activity in cases where queued_items happens
+      //     to be the same value across rounds while contents flowed through
+      //   packets_reserved/received: cumulative counts; sum across ranks
+      //   pending_completions: count per rank; sum > 0 means at least one
+      //     rank is waiting on a remote completion
+      uint64_t local_arr[5] = {local.queued_items, local.events_added,
+                               local.packets_reserved, local.packets_received,
+                               local.pending_completions};
+      uint64_t total_arr[5] = {0, 0, 0, 0, 0};
+      single_network->quiescence_allreduce_sum(local_arr, total_arr, 5);
+
+      NetworkModule::QuiescenceState totals = {total_arr[0], total_arr[1], total_arr[2],
+                                               total_arr[3], total_arr[4]};
+
+      // Quiet means: no rank has anything queued, no rank is waiting on a
+      //  remote completion, and the cumulative sent/received counts balance
+      //  globally (no messages in flight).  These are the conditions Mattern's
+      //  algorithm requires for termination of one round.
+      bool quiet_now = (totals.queued_items == 0) && (totals.pending_completions == 0) &&
+                       (totals.packets_reserved == totals.packets_received);
+
+      // The Mattern's stability check: termination is confirmed only when
+      //  two CONSECUTIVE rounds both observe a quiet state AND the same
+      //  cumulative counts.  If anything changed between rounds - a new send
+      //  was initiated, a queued event was processed and the count dropped,
+      //  etc. - the counters will differ, and we restart.  Two-round
+      //  agreement rules out the ghost-message scenario where a work item
+      //  runs between rounds and produces a send that happens to be in
+      //  flight at exactly the wrong moment.  Using a count for queued_items
+      //  also keeps a slow-but-progressing drain visible (the sum
+      //  decreases monotonically), so the loop keeps iterating
+      //  PROGRESSING rather than appearing stable at a non-zero value.
+      //
+      // ALIASING SAFETY: queued_items and pending_completions are
+      //  snapshot fields (non-monotonic).  Each is checked alongside its
+      //  monotonic mate so that activity which leaves the snapshot field
+      //  unchanged still surfaces:
+      //    queued_items       paired with events_added      (queue activity)
+      //    pending_completions paired with packets_reserved (comp alloc/recycle)
+      //  Joint stability of each pair rules out balanced add+remove
+      //  activity.  See QuiescenceState in network.h for the per-field
+      //  pairing argument.
+      bool stable =
+          QuiescenceCheck::have_prev &&
+          (totals.packets_reserved == QuiescenceCheck::prev_totals.packets_reserved) &&
+          (totals.packets_received == QuiescenceCheck::prev_totals.packets_received) &&
+          (totals.pending_completions ==
+           QuiescenceCheck::prev_totals.pending_completions) &&
+          (totals.queued_items == QuiescenceCheck::prev_totals.queued_items) &&
+          (totals.events_added == QuiescenceCheck::prev_totals.events_added);
+
+      if(quiet_now && stable) {
+        // both rounds agreed on a quiet state - termination confirmed
+        reset_quiescence_state();
+        return QuiescenceStatus::DONE;
+      }
+
+      // Track wall-clock time since counters last moved.  We never abort -
+      //  without a way to introspect the network we cannot distinguish a
+      //  slow-but-progressing in-flight message from a lost one, so any
+      //  timeout-based abort would be a guess.  Instead, we periodically
+      //  emit a warning when counters have been frozen for a while so the
+      //  user knows shutdown is making no observable progress.
+      long long now_ns = Clock::current_time_in_nanoseconds();
+      if(!stable) {
+        // counters changed (or this is the first call) - reset the timer
+        QuiescenceCheck::last_change_time_ns = now_ns;
+        QuiescenceCheck::next_warn_time_ns = now_ns + QuiescenceCheck::WARN_INTERVAL_NS;
+      } else if(now_ns >= QuiescenceCheck::next_warn_time_ns) {
+        // counters frozen for at least WARN_INTERVAL_NS, and we haven't
+        //  warned recently - emit a warning and schedule the next one.  Only
+        //  rank 0 prints to avoid every rank logging the same thing.
+        if(my_node_id == 0) {
+          long long stalled_ns = now_ns - QuiescenceCheck::last_change_time_ns;
+          log_quiesce.warning()
+              << "no progress on quiescence for " << (stalled_ns / 1000000000)
+              << " s; queued=" << totals.queued_items
+              << " events_added=" << totals.events_added
+              << " reserved=" << totals.packets_reserved
+              << " received=" << totals.packets_received
+              << " pending_comps=" << totals.pending_completions
+              << " (this is a warning, not a fatal error - shutdown will keep retrying)";
+        }
+        QuiescenceCheck::next_warn_time_ns += QuiescenceCheck::WARN_INTERVAL_NS;
+      }
+
+      // record state for the next round
+      QuiescenceCheck::prev_totals = totals;
+      QuiescenceCheck::have_prev = true;
+      return QuiescenceStatus::PROGRESSING;
     }
   } // namespace Network
 
@@ -82,6 +232,14 @@ namespace Realm {
   void NetworkModule::parse_command_line(RuntimeImpl *runtime,
                                          std::vector<std::string> &cmdline)
   {}
+
+  bool NetworkModule::custom_quiescence_check(IncomingMessageManager *message_manager,
+                                              Network::QuiescenceStatus &status)
+  {
+    (void)message_manager;
+    (void)status;
+    return false;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -174,8 +332,9 @@ namespace Realm {
     virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
                             std::vector<size_t> &lengths);
 
-    virtual size_t sample_messages_received_count(void);
-    virtual bool check_for_quiescence(size_t sampled_receive_count);
+    virtual void sample_quiescence_state(QuiescenceState &state);
+    virtual void quiescence_allreduce_sum(const uint64_t *local_counts,
+                                          uint64_t *total_counts, size_t count);
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(RuntimeImpl *runtime, Memory m, size_t size,
@@ -227,6 +386,8 @@ namespace Realm {
                                            size_t line_stride,
                                            const RemoteAddress &dest_payload_addr,
                                            bool with_congestion, size_t header_size);
+
+    virtual size_t max_payload_size(size_t header_size, const void *src_payload_addr);
   };
 
   LoopbackNetworkModule::LoopbackNetworkModule()
@@ -318,11 +479,20 @@ namespace Realm {
     memcpy(vals_out.data(), val_in, bytes);
   }
 
-  size_t LoopbackNetworkModule::sample_messages_received_count(void) { return 0; }
-
-  bool LoopbackNetworkModule::check_for_quiescence(size_t sampled_receive_count)
+  void LoopbackNetworkModule::sample_quiescence_state(QuiescenceState &state)
   {
-    return true;
+    // single-rank loopback: nothing to send to anyone, nothing in flight.
+    //  All counters are zero, no queues, no pending.
+    state = QuiescenceState{0, 0, 0, 0, 0, 0};
+  }
+
+  void LoopbackNetworkModule::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                                       uint64_t *total_counts,
+                                                       size_t count)
+  {
+    // single-rank: the "all-reduced sum" is just the local value
+    for(size_t i = 0; i < count; i++)
+      total_counts[i] = local_counts[i];
   }
 
   // used to create a remote proxy for a memory
@@ -434,6 +604,14 @@ namespace Realm {
     // should never be called
     abort();
     return 0;
+  }
+
+  size_t LoopbackNetworkModule::max_payload_size(size_t header_size,
+                                                 const void *src_payload_addr)
+  {
+    // loopback has no real limit
+    (void)src_payload_addr;
+    return std::numeric_limits<size_t>::max();
   }
 
   ////////////////////////////////////////////////////////////////////////

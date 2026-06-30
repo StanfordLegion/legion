@@ -593,14 +593,15 @@ namespace Realm {
     internal->allgatherv(val_in, bytes, vals_out, lengths);
   }
 
-  size_t GASNetEXModule::sample_messages_received_count(void)
+  void GASNetEXModule::sample_quiescence_state(QuiescenceState &state)
   {
-    return internal->sample_messages_received_count();
+    internal->sample_quiescence_state(state);
   }
 
-  bool GASNetEXModule::check_for_quiescence(size_t sampled_receive_count)
+  void GASNetEXModule::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                                uint64_t *total_counts, size_t count)
   {
-    return internal->check_for_quiescence(sampled_receive_count);
+    internal->quiescence_allreduce_sum(local_counts, total_counts, count);
   }
 
   // used to create a remote proxy for a memory
@@ -796,6 +797,17 @@ namespace Realm {
     return internal->recommended_max_payload(
         target, dest_payload_addr.extra, data, bytes_per_line, lines, line_stride,
         with_congestion, header_size, dest_payload_addr.ptr);
+  }
+
+  size_t GASNetEXModule::max_payload_size(size_t header_size,
+                                          const void *src_payload_addr)
+  {
+    // without a RemoteAddress destination, GASNet-EX always uses Medium
+    //  messages regardless of whether the source is in a registered segment
+    //  (Long messages require a dest_payload_addr)
+    (void)src_payload_addr;
+    return recommended_max_payload(Network::my_node_id, false /*with_congestion*/,
+                                   header_size);
   }
 
 }; // namespace Realm

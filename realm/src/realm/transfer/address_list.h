@@ -21,6 +21,7 @@
 #include "realm/realm_config.h"
 #include "realm/indexspace.h"
 #include "realm/id.h"
+#include "realm/deppart/sparsity_impl.h"
 
 #include <array>
 #include <cstring>

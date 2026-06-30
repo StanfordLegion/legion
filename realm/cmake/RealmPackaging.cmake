@@ -30,6 +30,20 @@ install(
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/realm"
 )
 
+# Install the gdb auto-load script next to the library so it can be
+# `source`'d manually if auto-load safe-path declines the embedded copy.
+# Only meaningful when debug info is present, so restrict to Debug and
+# RelWithDebInfo configurations.  ELF only -- the script is a no-op on
+# macOS/Windows anyway.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  install(
+    FILES "${REALM_SOURCE_DIR}/realm-gdb.py"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT Realm_runtime
+    CONFIGURATIONS Debug RelWithDebInfo
+  )
+endif()
+
 # Install the realm_kokkos as well when needed
 if(REALM_USE_KOKKOS)
   install(

@@ -593,12 +593,12 @@ if(REALM_ENABLE_UCX)
       list(APPEND UCX_CONFIG_ARGS "--with-cuda=${CUDAToolkit_LIBRARY_ROOT}")
     endif()
     set(ucx_ROOT_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx-install")
-    set(ucx_VERSION 1.17.0)
+    set(ucx_VERSION 1.20.1)
     # cmake-format: off
     ExternalProject_Add(
       ucx_external
-      URL "https://github.com/openucx/ucx/releases/download/v1.17.0/ucx-1.17.0.tar.gz"
-      URL_HASH SHA256=34658e282f99f89ce7a991c542e9727552734ac6ad408c52f22b4c2653b04276
+      URL "https://github.com/openucx/ucx/releases/download/v1.20.1/ucx-1.20.1.tar.gz"
+      URL_HASH SHA256=545c419a7b5e04643cb8bff5a19b3b5071a8f8f0605f1e8efb36f8f3d7bfb9d3
       SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucx"
       INSTALL_DIR "${ucx_ROOT_DIR}"
       CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
@@ -640,12 +640,12 @@ if(REALM_ENABLE_UCX)
         list(APPEND UCC_CONFIG_ARGS "--with-cuda=${CUDAToolkit_LIBRARY_ROOT}")
       endif()
       set(ucc_ROOT_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install")
-      set(ucc_VERSION 1.3.0)
+      set(ucc_VERSION 1.7.0)
       # cmake-format: off
       ExternalProject_Add(
         ucc_external
-        URL "https://github.com/openucx/ucc/archive/refs/tags/v1.3.0.tar.gz"
-        URL_HASH SHA256=b56379abe5f1c125bfa83be305d78d81a64aa271b7b5fff0ac17b86725ff3acf
+        URL "https://github.com/openucx/ucc/archive/refs/tags/v1.7.0.tar.gz"
+        URL_HASH SHA256=b40df0db75b8505844547574a3a7dad16c9033d7e1ca099ea8508bc57a62b454
         SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc"
         INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/ucc-install"
         CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./autogen.sh
@@ -954,6 +954,13 @@ set_target_properties(
              VISIBILITY_INLINES_HIDDEN ON
              POSITION_INDEPENDENT_CODE ON
 )
+
+# Tell threads.cc to emit the anchor reference only when gdb_script.cc is
+# actually compiled (Debug / RelWithDebInfo on Linux/FreeBSD).  Otherwise
+# the anchor is undefined and static-archive links would fail.
+if(REALM_EMBED_GDB_SCRIPT)
+  target_compile_definitions(realm_obj PRIVATE REALM_EMBED_GDB_SCRIPT=1)
+endif()
 add_library(Realm ${REALM_RC_SOURCES} $<TARGET_OBJECTS:realm_obj> ${REALM_EXTRA_OBJS})
 add_library(Realm::Realm ALIAS Realm)
 set_target_properties(

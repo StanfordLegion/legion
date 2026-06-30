@@ -129,7 +129,8 @@ namespace Realm {
     // the fast path stores several things in a 32-bit word that can be
     //  atomically updated
     typedef uint32_t State;
-    static const State STATE_READER_COUNT_MASK = 0x03ffffff;
+    static const State STATE_READER_COUNT_MASK = 0x01ffffff;
+    static const State STATE_RELEASING = 0x02000000;
     static const State STATE_SLEEPER = 0x04000000;
     static const State STATE_WRITER = 0x08000000;
     static const State STATE_WRITER_WAITING = 0x10000000;

@@ -69,6 +69,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         single_network->broadcast(root, val_in, val_out, bytes);
@@ -78,6 +79,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         single_network->gather(root, val_in, vals_out, bytes);
@@ -91,6 +93,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->create_active_message_impl(
@@ -106,6 +109,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->create_active_message_impl(
@@ -120,6 +124,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->create_active_message_impl(
@@ -134,6 +139,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->create_active_message_impl(
@@ -146,6 +152,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->recommended_max_payload(target, with_congestion,
@@ -157,6 +164,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->recommended_max_payload(targets, with_congestion,
@@ -169,6 +177,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->recommended_max_payload(target, dest_payload_addr,
@@ -182,6 +191,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->recommended_max_payload(target, data, bytes_per_line,
@@ -196,6 +206,7 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->recommended_max_payload(targets, data, bytes_per_line,
@@ -212,11 +223,22 @@ namespace Realm {
     {
 #ifdef REALM_USE_MULTIPLE_NETWORKS
       if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
       } else
 #endif
         return single_network->recommended_max_payload(
             target, src_payload_addr, bytes_per_line, lines, line_stride,
             dest_payload_addr, with_congestion, header_size);
+    }
+
+    inline size_t max_payload_size(size_t header_size, const void *src_payload_addr)
+    {
+#ifdef REALM_USE_MULTIPLE_NETWORKS
+      if(REALM_UNLIKELY(single_network == 0)) {
+        std::abort();
+      } else
+#endif
+        return single_network->max_payload_size(header_size, src_payload_addr);
     }
 
   }; // namespace Network

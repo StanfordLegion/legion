@@ -55,13 +55,10 @@ namespace Realm {
     enum State
     {
       STATE_IDLE,
-      STATE_DATABUF,
       STATE_PKTBUF,
     };
 
     void dec_usecount();
-
-    void databuf_close();
 
     enum PktType
     {
@@ -99,10 +96,6 @@ namespace Realm {
     atomic<OutbufMetadata *> realbuf;
 
     atomic<int> remain_count;
-
-    // dbuf reservations are NOT thread-safe - external serialization is used
-    size_t databuf_rsrv_offset;
-    int databuf_use_count;
 
     // pbuf reservatsions are NOT thread-safe - external serialization is used
     atomic<int> pktbuf_total_packets; // unsynchronized read ok
@@ -373,6 +366,11 @@ namespace Realm {
 
     long long time_since_failure() const;
 
+    // cancels a pending push that was enqueued via request_push but never
+    //  processed by push_packets - used during shutdown to balance the
+    //  push_mutex_check lock
+    void cancel_push();
+
     // used when cfg_am_limit is nonzero
     bool try_consume_am_credit();
     void return_am_credits(int count);
@@ -508,13 +506,26 @@ namespace Realm {
 
     void add_ready_xpair(XmitSrcDestPair *xpair);
 
-    bool has_work_remaining();
+    // drains any xpairs remaining in the ready queue, cancelling their
+    //  pending pushes - called during shutdown
+    void drain_xpairs();
+
+    // Count of items in ready_xpairs plus 1 if a worker has popped an
+    //  xpair and is currently inside push_packets (work_active).  Used by
+    //  GASNetEXInternal::sample_quiescence_state to feed
+    //  QuiescenceState::queued_items; reporting a count rather than a
+    //  boolean lets a draining queue surface as "progressing" across
+    //  Mattern's rounds, and including work_active keeps an in-flight
+    //  push_packets visible so the quiescence check doesn't fire DONE
+    //  mid-push.
+    size_t queue_size();
 
     virtual bool do_work(TimeLimit work_until);
 
   protected:
     GASNetEXInternal *internal;
     Mutex mutex;
+    atomic<bool> work_active; // set during do_work when xpairs are on stack
     XmitSrcDestPair::XmitPairList ready_xpairs;
   };
 
@@ -527,9 +538,16 @@ namespace Realm {
 
     void add_critical_xpair(XmitSrcDestPair *xpair);
 
+    // drains any xpairs remaining in the critical queue, cancelling their
+    //  pending pushes - called during shutdown
+    void drain_xpairs();
+
     void add_pending_event(GASNetEXEvent *event);
 
-    bool has_work_remaining();
+    // Count of items in critical_xpairs + pending_events plus 1 if a
+    //  worker is currently inside do_work with items on its stack.  See
+    //  GASNetEXInjector::queue_size.
+    size_t queue_size();
 
     virtual bool do_work(TimeLimit work_until);
 
@@ -545,6 +563,7 @@ namespace Realm {
     Mutex::CondVar shutdown_cond;
     atomic<bool> pollwait_flag; // set/cleared inside mutex, but tested outside
     Mutex::CondVar pollwait_cond;
+    atomic<bool> work_active; // set during do_work when items are on stack
     XmitSrcDestPair::XmitPairList critical_xpairs;
     GASNetEXEvent::EventList pending_events;
   };
@@ -555,7 +574,10 @@ namespace Realm {
 
     void add_ready_events(GASNetEXEvent::EventList &newly_ready);
 
-    bool has_work_remaining();
+    // Count of items in ready_events; returns 1 instead of 0 when
+    //  has_work is set but ready_events has been swapped to a worker's
+    //  local todo list.  See GASNetEXInjector::queue_size.
+    size_t queue_size();
 
     virtual bool do_work(TimeLimit work_until);
 
@@ -624,7 +646,9 @@ namespace Realm {
                          size_t hdr_bytes, uintptr_t src_ptr, uintptr_t tgt_ptr,
                          size_t payload_bytes);
 
-    bool has_work_remaining();
+    // O(n) walk of the pending-rget list under the mutex.  See
+    //  GASNetEXInjector::queue_size.
+    size_t queue_size();
 
     virtual bool do_work(TimeLimit work_until);
 
@@ -662,8 +686,9 @@ namespace Realm {
     void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
                     std::vector<size_t> &lengths);
 
-    size_t sample_messages_received_count();
-    bool check_for_quiescence(size_t sampled_receive_count);
+    void sample_quiescence_state(NetworkModule::QuiescenceState &state);
+    void quiescence_allreduce_sum(const uint64_t *local_counts, uint64_t *total_counts,
+                                  size_t count);
 
     PendingCompletion *get_available_comp();
     PendingCompletion *early_local_completion(PendingCompletion *comp);
@@ -707,6 +732,7 @@ namespace Realm {
     friend class GASNetEXEvent;
     friend class GASNetEXPoller;
     friend class GASNetEXCompleter;
+    friend class GASNetEXInjector;
 
     // callbacks from IncomingMessageManager
     static void short_message_complete(NodeID sender, uintptr_t objptr,
@@ -752,6 +778,18 @@ namespace Realm {
 
     // TODO: split counter into per-thread values to avoid contention?
     atomic<uint64_t> total_packets_received;
+
+    // Monotonic count of items ever added to any of the four background-work
+    //  queues (injector ready_xpairs, poller critical_xpairs/pending_events,
+    //  completer ready_events, rgetter pending list).  Sampled by
+    //  sample_quiescence_state and reduced via SUM as
+    //  QuiescenceState::events_added.  Required because queued_items is a
+    //  snapshot count that can be the same across rounds while items flow
+    //  through (e.g., a put-completion event firing pops 1 from
+    //  pending_events and adds 1 to ready_xpairs - net change 0 in
+    //  queued_items, but real activity).  Bumped at the same sites that call
+    //  make_active() / push_back into a queue.
+    atomic<uint64_t> total_events_added;
 
     // manage a single open databuf for all endpoints
     Mutex databuf_mutex;

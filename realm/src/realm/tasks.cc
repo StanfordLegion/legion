@@ -783,6 +783,14 @@ namespace Realm {
 
     // hook up the work counter updates for this queue
     queue->add_subscription(&wcu_task_queues);
+
+    // if the queue already has tasks, wake up any sleeping workers
+    // so they can discover the pre-existing work (this handles the
+    // case where tasks were enqueued before the subscription existed,
+    // e.g. a task spawned on a processor group before the group
+    // creation message arrived)
+    if(!queue->empty())
+      work_counter.increment_counter();
   }
 
   void ThreadedTaskScheduler::remove_task_queue(TaskQueue *queue)

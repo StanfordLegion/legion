@@ -20,14 +20,19 @@
 #ifndef REALM_TRANSFER_H
 #define REALM_TRANSFER_H
 
+#include "realm/bgwork.h"
 #include "realm/event.h"
 #include "realm/memory.h"
 #include "realm/indexspace.h"
+#include "realm/inst_impl.h"
 #include "realm/atomics.h"
 #include "realm/network.h"
 #include "realm/operation.h"
+#include "realm/transfer/address_list.h"
 #include "realm/transfer/channel.h"
 #include "realm/profiling.h"
+
+#include <optional>
 
 namespace Realm {
 
@@ -35,6 +40,7 @@ namespace Realm {
   //  type of IndexSpace that is driving the transfer, so we need a widget that
   //  can hold an arbitrary IndexSpace and dispatch based on its type
 
+  struct Node;
   class XferDes;
   class AddressList;
 
@@ -217,6 +223,68 @@ namespace Realm {
     size_t field_idx{0};
   };
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IDIndexedFieldsIterator<N,T>
+  //
+
+  template <int N, typename T>
+  class IDIndexedFieldsIterator : public TransferIteratorBase<N, T> {
+  protected:
+    IDIndexedFieldsIterator(void);
+
+  public:
+    IDIndexedFieldsIterator(const int _dim_order[N], const std::vector<FieldID> &_fields,
+                            size_t _field_size, RegionInstanceImpl *_inst_impl,
+                            const IndexSpace<N, T> &_is, ReplicatedHeap *_repl_heap);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S &deserializer);
+
+    virtual ~IDIndexedFieldsIterator(void);
+
+    Event request_metadata(void) override;
+    void reset(void) override;
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator,
+                                                    IDIndexedFieldsIterator<N, T>>
+        serdez_subclass;
+
+    template <typename S>
+    bool serialize(S &serializer) const;
+
+    bool get_addresses(AddressList &addrlist,
+                       const InstanceLayoutPieceBase *&nonaffine) override;
+
+    size_t step(size_t max_bytes, TransferIterator::AddressInfo &info, unsigned flags,
+                bool tentative = false) override;
+    size_t step_custom(size_t max_bytes, TransferIterator::AddressInfoCustom &info,
+                       bool tentative = false) override;
+    void confirm_step(void) override;
+    void cancel_step(void) override;
+
+  protected:
+    void reset_internal(void);
+
+    bool get_next_rect(Rect<N, T> &r, FieldID &fid, size_t &offset,
+                       size_t &fsize) override;
+
+    IndexSpace<N, T> is;
+    SparsityMapImpl<N, T> *sparsity_impl{nullptr};
+    IndexSpaceIterator<N, T> iter;
+    bool iter_init_deferred{false};
+    std::vector<FieldID> fields;
+
+    // const InstanceLayoutPiece<N, T> *layout_piece{nullptr};
+    const InstanceLayout<N, T> *inst_layout{nullptr};
+
+    size_t field_size{0};
+    size_t rect_idx{0};
+
+    ReplicatedHeap *repl_heap{nullptr};
+    FieldBlock *field_block{nullptr};
+  };
+
   template <int N, typename T>
   class TransferIteratorIndirect : public TransferIteratorBase<N, T> {
   protected:
@@ -294,11 +362,12 @@ namespace Realm {
                                  const std::vector<size_t> &fld_sizes,
                                  std::vector<size_t> &fragments) const = 0;
 
-    virtual TransferIterator *
-    create_iterator(RegionInstance inst, const std::vector<int> &dim_order,
-                    const std::vector<FieldID> &fields,
-                    const std::vector<size_t> &fld_offsets,
-                    const std::vector<size_t> &fld_sizes) const = 0;
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+                                              const std::vector<int> &dim_order,
+                                              const std::vector<FieldID> &fields,
+                                              const std::vector<size_t> &fld_offsets,
+                                              const std::vector<size_t> &fld_sizes,
+                                              bool idindexed_fields = false) const = 0;
 
     virtual TransferIterator *
     create_iterator(RegionInstance inst, RegionInstance peer,
@@ -324,6 +393,7 @@ namespace Realm {
       int scatter_control_input;
       XferDesRedopInfo redop;
       Channel *channel = nullptr;
+      bool idindexed_fields = false;
 
       enum IOType
       {
@@ -410,11 +480,6 @@ namespace Realm {
     void add_reference();
     void remove_reference();
 
-    // returns true if the analysis is complete, and ib allocation can proceed
-    // if the analysis isn't, returns false and op->allocate_ibs() will be
-    //   called once it is
-    bool request_analysis(TransferOperation *op);
-
     struct FieldInfo {
       FieldID id;
       size_t offset, size;
@@ -424,21 +489,8 @@ namespace Realm {
   protected:
     atomic<int> refcount;
 
-    void check_analysis_preconditions();
-    void perform_analysis();
-    void cancel_analysis(Event failed_precondition);
-
-    class DeferredAnalysis : public EventWaiter {
-    public:
-      DeferredAnalysis(TransferDesc *_desc);
-      virtual void event_triggered(bool poisoned, TimeLimit work_until);
-      virtual void print(std::ostream &os) const;
-      virtual Event get_finish_event(void) const;
-
-      TransferDesc *desc;
-      Event precondition;
-    };
-    DeferredAnalysis deferred_analysis;
+    void check_analysis_preconditions(std::vector<Event> &preconditions) const;
+    [[nodiscard]] bool perform_analysis(TransferOperation *op, TimeLimit work_until);
 
     friend class TransferOperation;
 
@@ -448,16 +500,36 @@ namespace Realm {
     ProfilingRequestSet prs;
 
     Mutex mutex;
-    atomic<bool> analysis_complete;
-    bool analysis_successful;
-    std::vector<TransferOperation *> pending_ops;
     TransferGraph graph;
     std::vector<int> dim_order;
     std::vector<FieldInfo> src_fields, dst_fields;
     void *fill_data;
     size_t fill_size;
+    bool analysis_init_done = false;
+    size_t analysis_domain_size = 0;
+    size_t analysis_field_idx = 0;
+    size_t analysis_fld_start = 0;
+    size_t analysis_fill_ofs = 0;
+    std::vector<bool> analysis_field_done;
     ProfilingMeasurements::OperationMemoryUsage prof_usage;
     ProfilingMeasurements::OperationCopyInfo prof_cpinfo;
+  };
+
+  class CopyAnalyzer : public BackgroundWorkItem {
+  public:
+    CopyAnalyzer(void);
+
+    void analyze_copy(TransferOperation *op);
+
+    // push an op that has already begun processing back on the front of the
+    //  queue, e.g. when the tail of the async IB response path hits a timeout
+    void requeue_front(TransferOperation *op);
+
+    virtual bool do_work(TimeLimit work_until) override;
+
+  protected:
+    Mutex mutex;
+    std::deque<TransferOperation *> pending_copies;
   };
 
   class IndirectionInfo {
@@ -588,6 +660,7 @@ namespace Realm {
     IndexSpace<N, T> domain;
     std::vector<IndexSpace<N2, T2>> spaces;
     Channel *addr_split_channel;
+    mutable std::optional<size_t> cached_domain_size;
   };
 
   // a TransferOperation is an application-requested copy/fill/reduce
@@ -599,6 +672,12 @@ namespace Realm {
 
     ~TransferOperation();
 
+    inline int get_priority(void) const { return priority; }
+    inline bool analyze(TimeLimit work_until)
+    {
+      return desc.perform_analysis(this, work_until);
+    }
+
     virtual void print(std::ostream &os) const;
 
     void start_or_defer(void);
@@ -606,12 +685,12 @@ namespace Realm {
     virtual bool mark_ready(void);
     virtual bool mark_started(void);
 
-    void allocate_ibs();
-    void create_xds();
+    bool allocate_ibs(TimeLimit work_until);
+    bool create_xds(TimeLimit work_until);
 
-    void notify_ib_allocation(unsigned ib_index, off_t ib_offset);
-    void notify_ib_allocations(unsigned count, unsigned first_index,
-                               const off_t *offsets);
+    void notify_ib_allocation(unsigned ib_index, off_t ib_offset, TimeLimit work_until);
+    void notify_ib_allocations(unsigned count, unsigned first_index, const off_t *offsets,
+                               TimeLimit work_until);
     void notify_xd_completion(XferDesID xd_id);
 
     class XDLifetimeTracker : public Operation::AsyncWorkItem {
@@ -646,6 +725,15 @@ namespace Realm {
     std::vector<off_t> ib_offsets;
     atomic<unsigned> ib_responses_needed;
     int priority;
+
+    // resume state for incremental allocate_ibs / create_xds across timeouts
+    bool allocate_ibs_init_done{false};
+    bool allocate_ibs_requests_sent{false};
+    unsigned allocate_ibs_immed_count{0};
+    bool create_xds_init_done{false};
+    size_t create_xds_i{0};
+    std::vector<std::pair<XferDesID, int>> ib_pre_ids;
+    std::vector<std::pair<XferDesID, int>> ib_next_ids;
   };
 
   template <int N, typename T>

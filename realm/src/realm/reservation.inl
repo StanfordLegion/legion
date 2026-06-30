@@ -154,7 +154,8 @@ namespace Realm {
 
     if((cur_state & STATE_WRITER) != 0) {
       if(REALM_LIKELY((cur_state & (STATE_READER_COUNT_MASK | STATE_SLEEPER |
-                                    STATE_BASE_RSRV_WAITING)) == 0)) {
+                                    STATE_BASE_RSRV_WAITING |
+                                    STATE_WRITER_WAITING)) == 0)) {
         State new_state = cur_state - STATE_WRITER;
         bool ok = state.compare_exchange(cur_state, new_state);
         if(REALM_LIKELY(ok))
@@ -162,7 +163,8 @@ namespace Realm {
       }
     } else {
       if(REALM_LIKELY(((cur_state & STATE_READER_COUNT_MASK) != 0) &&
-                      ((cur_state & (STATE_WRITER | STATE_BASE_RSRV_WAITING)) == 0))) {
+                      ((cur_state & (STATE_WRITER | STATE_BASE_RSRV_WAITING |
+                                     STATE_WRITER_WAITING)) == 0))) {
         State new_state = cur_state - 1;
         bool ok = state.compare_exchange(cur_state, new_state);
         if(REALM_LIKELY(ok))

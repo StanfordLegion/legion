@@ -25,6 +25,8 @@
 #include "realm/ucx/ucp_module.h"
 #include "realm/ucx/ucp_internal.h"
 
+#include <limits>
+
 #ifdef REALM_UCX_MODULE_DYNAMIC
 REGISTER_REALM_NETWORK_MODULE_DYNAMIC(Realm::UCPModule);
 #endif
@@ -111,10 +113,10 @@ namespace Realm {
     cp.add_option_int("-ucx:rdesc_rel_max", config.rdesc_rel_max);
 
     // pbuf mpool
-    cp.add_option_int("-ucx:pb_init_count", config.pbuf_init_count);
-    cp.add_option_int("-ucx:pb_max_count", config.pbuf_max_count);
-    cp.add_option_int_units("-ucx:pb_max_size", config.pbuf_max_size);
-    cp.add_option_int_units("-ucx:pb_max_chunk_size", config.pbuf_max_chunk_size);
+    cp.add_option_int("-ucx:pb_mp_init_count", config.pbuf_mp_init_count);
+    cp.add_option_int("-ucx:pb_mp_max_count", config.pbuf_mp_max_count);
+    cp.add_option_int_units("-ucx:pb_mp_max_size", config.pbuf_mp_max_size);
+    cp.add_option_int_units("-ucx:pb_mp_max_chunk_size", config.pbuf_mp_max_chunk_size);
     cp.add_option_int_units("-ucx:pb_mp_thresh", config.pbuf_mp_thresh);
 
     // malloc mpool
@@ -203,14 +205,15 @@ namespace Realm {
     internal->allgatherv(val_in, bytes, vals_out, lengths);
   }
 
-  size_t UCPModule::sample_messages_received_count(void)
+  void UCPModule::sample_quiescence_state(QuiescenceState &state)
   {
-    return internal->sample_messages_received_count();
+    internal->sample_quiescence_state(state);
   }
 
-  bool UCPModule::check_for_quiescence(size_t sampled_receive_count)
+  void UCPModule::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                           uint64_t *total_counts, size_t count)
   {
-    return internal->check_for_quiescence(sampled_receive_count);
+    internal->quiescence_allreduce_sum(local_counts, total_counts, count);
   }
 
   MemoryImpl *UCPModule::create_remote_memory(RuntimeImpl *runtime, Memory me,
@@ -331,6 +334,20 @@ namespace Realm {
         static_cast<char *>(src_payload_addr.segment->base) + src_payload_addr.offset;
     return internal->recommended_max_payload(
         data, src_payload_addr.segment, &dest_payload_addr, with_congestion, header_size);
+  }
+
+  size_t UCPModule::max_payload_size(size_t header_size, const void *src_payload_addr)
+  {
+    (void)header_size;
+    (void)src_payload_addr;
+    // UCX can transport messages of any size and pbuf_get can satisfy
+    //  allocation requests of any size, so there is no hard upper bound to
+    //  report here. Note that this is the maximum *supported* size, not the
+    //  most efficient one: payloads larger than config.pbuf_mp_max_size fall
+    //  off the pre-registered fast path and pay on-the-fly UCP memory
+    //  registration, so callers that care about throughput should query
+    //  recommended_max_payload() instead and chunk accordingly.
+    return SIZE_MAX;
   }
 
 }; // namespace Realm

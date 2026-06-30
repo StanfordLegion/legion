@@ -22,6 +22,7 @@
 
 #include "realm/mem_impl.h"
 #include "realm/bgwork.h"
+#include "realm/shm.h"
 #include "realm/transfer/channel.h"
 
 namespace Realm {
