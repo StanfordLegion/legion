@@ -26,7 +26,6 @@ namespace Legion {
         RuntimeCallKind kind, Provenance* provenance)
     //--------------------------------------------------------------------------
     {
-      legion_assert(implicit_reference_tracker == nullptr);
       if (overhead_profiler != nullptr)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -45,11 +44,6 @@ namespace Legion {
         unsigned long long stop)
     //--------------------------------------------------------------------------
     {
-      if (implicit_reference_tracker != nullptr)
-      {
-        delete implicit_reference_tracker;
-        implicit_reference_tracker = nullptr;
-      }
       if (overhead_profiler != nullptr)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
