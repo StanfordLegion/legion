@@ -104,6 +104,7 @@ namespace Realm {
     class UCPInternal {
     public:
       friend class UCPMessageImpl;
+      friend class ::Realm::UCPModule;
       struct Config {
         AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
         bool bind_hostmem{true};
@@ -119,10 +120,10 @@ namespace Realm {
         bool use_wakeup{false};
         size_t priority_size_max{64};
         size_t fp_max{2 << 10 /* 2K */}; // fast path max message size
-        size_t pbuf_max_size{8 << 10 /* 8K */};
-        size_t pbuf_max_chunk_size{4 << 20 /* 4M */};
-        size_t pbuf_max_count{SIZE_MAX};
-        size_t pbuf_init_count{1024};
+        size_t pbuf_mp_max_size{8 << 10 /* 8K */};
+        size_t pbuf_mp_max_chunk_size{4 << 20 /* 4M */};
+        size_t pbuf_mp_max_count{SIZE_MAX};
+        size_t pbuf_mp_init_count{1024};
         size_t pbuf_mp_thresh{2 << 10 /* 2K */};
         size_t mmp_max_obj_size{2 << 10 /* 2K */}; // malloc mpool max object size
         size_t outstanding_reqs_limit{1 << 17 /* 128K (count) */};
@@ -153,8 +154,9 @@ namespace Realm {
                      size_t *lengths);
       void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
                       std::vector<size_t> &lengths);
-      size_t sample_messages_received_count();
-      bool check_for_quiescence(size_t sampled_receive_count);
+      void sample_quiescence_state(NetworkModule::QuiescenceState &state);
+      void quiescence_allreduce_sum(const uint64_t *local_counts, uint64_t *total_counts,
+                                    size_t count);
       size_t recommended_max_payload(const void *data, const NetworkSegment *src_segment,
                                      const RemoteAddress *dest_payload_addr,
                                      bool with_congestion, size_t header_size);
@@ -272,6 +274,12 @@ namespace Realm {
       atomic<uint64_t> total_rcomp_sent;
       atomic<uint64_t> total_rcomp_received;
       atomic<uint64_t> outstanding_reqs;
+      // Monotonic count of requests ever acquired (mirrors
+      //  outstanding_reqs.fetch_add(1) in request_get but never decrements).
+      //  Sampled as QuiescenceState::events_added so the Mattern's stability
+      //  check can detect activity even when outstanding_reqs is the same
+      //  value across rounds while individual requests come and go.
+      atomic<uint64_t> total_reqs_acquired;
       MPool *rcba_mp;
       SpinLock rcba_mp_spinlock;
       size_t ib_seg_size;

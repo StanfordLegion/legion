@@ -36,7 +36,7 @@ namespace Realm {
 
     // old-style allocation used by IB memories
     virtual off_t alloc_bytes_local(size_t size);
-    virtual void free_bytes_local(off_t offset, size_t size);
+    void free_bytes_local(off_t offset, size_t size, TimeLimit work_until);
 
     virtual void *get_direct_ptr(off_t offset, size_t size);
 
@@ -57,16 +57,17 @@ namespace Realm {
                                       const size_t *sizes, off_t *offsets);
 
     // enqueues a batch of PendingIBRequests to be satisfied as soon as possible
-    void enqueue_requests(PendingIBRequests *reqs);
+    void enqueue_requests(PendingIBRequests *reqs, TimeLimit work_until);
 
-    void free_multiple(size_t count, const off_t *offsets, const size_t *sizes);
+    void free_multiple(size_t count, const off_t *offsets, const size_t *sizes,
+                       TimeLimit work_until);
 
   protected:
     // these must be called with the mutex held
     off_t do_alloc(size_t size);
     void do_free(off_t offset, size_t size);
     PendingIBRequests *satisfy_pending_reqs();
-    void forward_satisfied_reqs(PendingIBRequests *reqs);
+    void forward_satisfied_reqs(PendingIBRequests *reqs, TimeLimit work_until);
 
     Mutex mutex; // protection for resizing vectors
     std::map<off_t, off_t> free_blocks;
@@ -76,7 +77,8 @@ namespace Realm {
   };
 
   // helper routine to free IB whether it is local or remote
-  void free_intermediate_buffer(Memory mem, off_t offset, size_t size);
+  void free_intermediate_buffer(Memory mem, off_t offset, size_t size,
+                                TimeLimit work_until);
 
   // active messages related to IB allocation/release
 
@@ -88,7 +90,7 @@ namespace Realm {
     bool immediate;
 
     static void handle_message(NodeID sender, const RemoteIBAllocRequestSingle &args,
-                               const void *data, size_t msglen);
+                               const void *data, size_t msglen, TimeLimit work_until);
   };
 
   struct RemoteIBAllocRequestMultiple {
@@ -98,7 +100,7 @@ namespace Realm {
     bool immediate;
 
     static void handle_message(NodeID sender, const RemoteIBAllocRequestMultiple &args,
-                               const void *data, size_t msglen);
+                               const void *data, size_t msglen, TimeLimit work_until);
   };
 
   struct RemoteIBAllocResponseSingle {
@@ -107,7 +109,7 @@ namespace Realm {
     off_t offset;
 
     static void handle_message(NodeID sender, const RemoteIBAllocResponseSingle &args,
-                               const void *data, size_t msglen);
+                               const void *data, size_t msglen, TimeLimit work_until);
   };
 
   struct RemoteIBAllocResponseMultiple {
@@ -115,7 +117,7 @@ namespace Realm {
     unsigned count, first_index;
 
     static void handle_message(NodeID sender, const RemoteIBAllocResponseMultiple &args,
-                               const void *data, size_t msglen);
+                               const void *data, size_t msglen, TimeLimit work_until);
   };
 
   struct RemoteIBReleaseSingle {
@@ -124,14 +126,14 @@ namespace Realm {
     off_t offset;
 
     static void handle_message(NodeID sender, const RemoteIBReleaseSingle &args,
-                               const void *data, size_t msglen);
+                               const void *data, size_t msglen, TimeLimit work_until);
   };
 
   struct RemoteIBReleaseMultiple {
     unsigned count;
 
     static void handle_message(NodeID sender, const RemoteIBReleaseMultiple &args,
-                               const void *data, size_t msglen);
+                               const void *data, size_t msglen, TimeLimit work_until);
   };
 
 }; // namespace Realm

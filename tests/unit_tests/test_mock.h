@@ -33,6 +33,7 @@ public:
   {
 #ifdef DEBUG_REALM
     event_triggerer.shutdown_work_item();
+    copy_analyzer.shutdown_work_item();
 #endif
   }
 

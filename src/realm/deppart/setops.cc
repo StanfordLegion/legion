@@ -24,6 +24,7 @@
 #include "realm/deppart/inst_helper.h"
 #include "realm/deppart/image.h"
 #include "realm/logging.h"
+#include "realm/runtime_impl.h"
 
 namespace Realm {
 

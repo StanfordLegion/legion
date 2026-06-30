@@ -416,7 +416,8 @@ namespace Realm {
       void launch_batch_affine_fill_kernel(void *fill_info, size_t dim, size_t elemSize,
                                            size_t volume, GPUStream *stream);
       void launch_batch_affine_kernel(void *copy_info, size_t dim, size_t elemSize,
-                                      size_t volume, GPUStream *stream);
+                                      size_t volume, bool multified_optimized,
+                                      GPUStream *stream);
       void launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
                                    size_t elemSize, GPUStream *stream);
 
@@ -426,9 +427,13 @@ namespace Realm {
       bool is_accessible_host_mem(const MemoryImpl *mem) const;
       bool is_accessible_gpu_mem(const MemoryImpl *mem) const;
 
-      bool register_reduction(ReductionOpID redop_id, CUfunction apply_excl,
-                              CUfunction apply_nonexcl, CUfunction fold_excl,
-                              CUfunction fold_nonexcl);
+      bool register_reduction(
+          ReductionOpID redop_id, CUfunction apply_excl, CUfunction apply_nonexcl,
+          CUfunction fold_excl, CUfunction fold_nonexcl, CUfunction apply_excl_advanced,
+          CUfunction apply_nonexcl_advanced, CUfunction fold_excl_advanced,
+          CUfunction fold_nonexcl_advanced, CUfunction apply_excl_transpose,
+          CUfunction apply_nonexcl_transpose, CUfunction fold_excl_transpose,
+          CUfunction fold_nonexcl_transpose);
 
     protected:
       CUmodule load_cuda_module(const void *data);
@@ -466,6 +471,8 @@ namespace Realm {
       GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES]
                                        [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo multi_batch_affine_kernels[REALM_MAX_DIM]
+                                            [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo batch_fill_affine_kernels[REALM_MAX_DIM]
                                            [CUDA_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
       GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM]
@@ -519,6 +526,14 @@ namespace Realm {
         CUfunction apply_excl = nullptr;
         CUfunction fold_nonexcl = nullptr;
         CUfunction fold_excl = nullptr;
+        CUfunction apply_nonexcl_advanced = nullptr;
+        CUfunction apply_excl_advanced = nullptr;
+        CUfunction fold_nonexcl_advanced = nullptr;
+        CUfunction fold_excl_advanced = nullptr;
+        CUfunction apply_nonexcl_transpose = nullptr;
+        CUfunction apply_excl_transpose = nullptr;
+        CUfunction fold_nonexcl_transpose = nullptr;
+        CUfunction fold_excl_transpose = nullptr;
       };
 
       std::unordered_map<ReductionOpID, GPUReductionOpEntry> gpu_reduction_table;
@@ -788,9 +803,28 @@ namespace Realm {
 
       bool progress_xd(GPUChannel *channel, TimeLimit work_until);
 
+      static size_t read_address_entry(AffineCopyInfo<3> &copy_infos, size_t &min_align,
+                                       MemcpyTransposeInfo<size_t> &transpose_info,
+                                       AddressListCursor &in_alc, uintptr_t in_base,
+                                       AddressListCursor &out_alc, uintptr_t out_base,
+                                       size_t bytes_left, size_t max_xfer_fields,
+                                       size_t &fields_total);
+
     private:
       std::vector<GPU *> src_gpus, dst_gpus;
       std::vector<bool> dst_is_ipc;
+
+      // Mininum amount to transfer in a single quantum before returning in order to
+      // ensure forward progress
+      // TODO: make controllable
+      static constexpr size_t min_xfer_size = 4 << 20;
+      // Maximum amount to transfer in a single quantum in order to ensure other requests
+      // have a chance to make forward progress.  This should be large enough that the
+      // overhead of splitting the copy shouldn't be noticable in terms of latency (4GiB
+      // should be good here for most purposes)
+      // TODO: make controllable
+      static constexpr size_t max_xfer_size = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+      static constexpr size_t max_xfer_fields = 2000;
     };
 
     class GPUIndirectChannel;
@@ -907,9 +941,46 @@ namespace Realm {
       long submit(Request **requests, long nr);
       GPU *get_gpu() const { return src_gpu; }
 
+      virtual RemoteChannelInfo *construct_remote_info() const;
+
+      virtual bool support_idindexed_fields(Memory src_mem, Memory dst_mem) const
+      {
+        return true;
+      }
+
     private:
       GPU *src_gpu;
-      // std::deque<Request*> pending_copies;
+    };
+
+    class GPURemoteChannelInfo : public SimpleRemoteChannelInfo {
+    public:
+      GPURemoteChannelInfo(NodeID _owner, XferDesKind _kind, uintptr_t _remote_ptr,
+                           const std::vector<Channel::SupportedPath> &_paths);
+
+      virtual RemoteChannel *create_remote_channel();
+
+      template <typename S>
+      bool serialize(S &serializer) const;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S &deserializer);
+
+    protected:
+      static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      GPURemoteChannelInfo>
+          serdez_subclass;
+    };
+
+    class GPURemoteChannel : public RemoteChannel {
+      friend class GPURemoteChannelInfo;
+
+      GPURemoteChannel(uintptr_t _remote_ptr);
+
+    public:
+      virtual bool support_idindexed_fields(Memory src_mem, Memory dst_mem) const
+      {
+        return true;
+      }
     };
 
     class GPUfillChannel;
@@ -954,6 +1025,11 @@ namespace Realm {
 
     class GPUreduceChannel;
 
+    struct KernelVariantDesc {
+      void *host_proxy;
+      CUfunction GPU::GPUReductionOpEntry::*cache_field;
+    };
+
     class GPUreduceXferDes : public XferDes {
     public:
       GPUreduceXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
@@ -964,12 +1040,30 @@ namespace Realm {
       long get_requests(Request **requests, long nr);
 
       bool progress_xd(GPUreduceChannel *channel, TimeLimit work_until);
+      bool fast_reduction_kernel_mode(GPUreduceChannel *channel, const size_t max_bytes,
+                                      XferPort *in_port, XferPort *out_port,
+                                      const size_t in_span_start,
+                                      const size_t out_span_start);
+
+      void setup_redop_kernel(GPUreduceChannel *channel, void *params,
+                              const size_t in_span_start, const size_t out_span_start,
+                              const size_t in_elem_size, const size_t out_elem_size,
+                              const size_t elems, const bool has_transpose);
+      void record_redop_advanced_kernel(GPU *gpu);
+
+      KernelVariantDesc describe_kernel_variant(GPU *cpu, bool is_advanced);
+      bool resolve_kernel_slot(GPU *gpu, void *host_proxy, CUfunction &kernel_out,
+                               CUfunction GPU::GPUReductionOpEntry::*cache_field);
 
     protected:
       XferDesRedopInfo redop_info;
       const ReductionOpUntyped *redop;
       CUfunction kernel;
+      CUfunction kernel_advanced;
+      CUfunction kernel_transpose;
       const void *kernel_host_proxy;
+      const void *kernel_host_proxy_advanced;
+      const void *kernel_host_proxy_transpose;
       GPUStream *stream;
       std::vector<GPU *> src_gpus;
       std::vector<bool> src_is_ipc;
@@ -1481,7 +1575,10 @@ namespace Realm {
   __op__(cuptiActivityGetNextRecord);                                                    \
   __op__(cuptiActivityRegisterTimestampCallback);                                        \
   __op__(cuptiActivityPushExternalCorrelationId);                                        \
-  __op__(cuptiActivityPopExternalCorrelationId);
+  __op__(cuptiActivityPopExternalCorrelationId);                                         \
+  __op__(cuptiSubscribe);                                                                \
+  __op__(cuptiEnableCallback);                                                           \
+  __op__(cuptiUnsubscribe);
 
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
     CUPTI_APIS(DECL_FNPTR_EXTERN)

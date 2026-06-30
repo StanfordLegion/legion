@@ -45,6 +45,7 @@ namespace Realm {
     atomic<unsigned> data_tags_used(0);
     atomic<size_t> messages_sent(0);
     atomic<size_t> messages_rcvd(0);
+    atomic<size_t> messages_delivered_to_imm(0);
 
     int AM_Init(int *p_node_this, int *p_node_size)
     {
@@ -191,6 +192,7 @@ namespace Realm {
               msg->payload_size, payload_mode,
               ((msg->comp_ptr != 0) ? incoming_message_handled : 0), msg->comp_ptr, 0,
               TimeLimit());
+          messages_delivered_to_imm.fetch_add(1);
           if(handled)
             completion = msg->comp_ptr;
         }

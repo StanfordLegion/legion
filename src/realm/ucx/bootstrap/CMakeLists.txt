@@ -29,7 +29,8 @@ if(NOT Realm_VERSION_MAJOR)
   set(Realm_VERSION_MAJOR ${CMAKE_MATCH_1})
 endif()
 
-option(UCX_BOOTSTRAP_ENABLE_MPI "Compile with MPI support" OFF)
+find_package(MPI QUIET)
+option(UCX_BOOTSTRAP_ENABLE_MPI "Compile with MPI support" ${MPI_FOUND})
 option(UCX_BOOTSTRAP_INSTALL "Enable installation support" OFF)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -64,13 +65,11 @@ function(add_backend_plugin backend)
 endfunction()
 
 if(UCX_BOOTSTRAP_ENABLE_MPI)
-  find_package(MPI)
-  if (MPI_FOUND)
-    add_backend_plugin(
-      NAME realm_ucp_bootstrap_mpi SOURCES ${UCX_BOOTSTRAP_ROOT_DIR}/bootstrap_mpi.c LIBRARIES
-      MPI::MPI_C
-    )
-  endif()
+  find_package(MPI REQUIRED)
+  add_backend_plugin(
+    NAME realm_ucp_bootstrap_mpi SOURCES ${UCX_BOOTSTRAP_ROOT_DIR}/bootstrap_mpi.c LIBRARIES
+    MPI::MPI_C
+  )
 endif()
 add_backend_plugin(
   NAME realm_ucp_bootstrap_p2p

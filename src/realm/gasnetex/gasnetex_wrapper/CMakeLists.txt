@@ -65,6 +65,7 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/exports>
 )
 target_link_libraries(realm_gex_wrapper_objs PUBLIC GASNet::GASNet)
+target_link_libraries(realm_gex_wrapper PRIVATE GASNet::GASNet)
 set_target_properties(realm_gex_wrapper_objs PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(realm_gex_wrapper_objs PROPERTIES CXX_VISIBILITY_PRESET hidden)
 set_target_properties(realm_gex_wrapper_objs PROPERTIES VISIBILITY_INLINES_HIDDEN YES)

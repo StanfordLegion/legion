@@ -31,10 +31,15 @@ namespace Realm {
 
     template <size_t N, typename Offset_t = size_t>
     struct alignas(8) AffineSubRect {
+      using FieldID = int;
       // Extent of the ND array
       Offset_t strides[N - 1];
       // Address of the ND array
       uintptr_t addr;
+
+      const FieldID *fields;
+      size_t num_fields;
+      Offset_t field_stride;
     };
 
     template <size_t N, typename Offset_t = size_t>

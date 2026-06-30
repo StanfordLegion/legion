@@ -381,9 +381,13 @@ namespace Realm {
 
     // attempts to satisfy pending allocations based on reordering releases to
     //  move the ready ones first - assumes 'release_allocator' has been
-    //  properly maintained
+    //  properly maintained.  Any pending_releases entries with
+    //  deferred_dealloc_notify set that get erased here are appended to
+    //  'deferred_dealloc_notifies' so the caller can fire their
+    //  notify_deallocation() once the allocator_mutex has been released.
     bool attempt_release_reordering(
-        std::vector<std::pair<RegionInstanceImpl *, size_t>> &successful_allocs);
+        std::vector<std::pair<RegionInstanceImpl *, size_t>> &successful_allocs,
+        std::vector<RegionInstanceImpl *> &deferred_dealloc_notifies);
 
     void remove_pending_release(RegionInstanceImpl *inst,
                                 std::vector<RegionInstanceImpl *> &failed_allocs);
@@ -420,6 +424,16 @@ namespace Realm {
       std::vector<size_t> redistrict_alignments;
       bool is_ready;
       unsigned seqid;
+      // True when the inst's destroy is fully acknowledged from a
+      //  release_allocator/future_allocator perspective, but its tag still
+      //  lives in current_allocator because attempt_release_reordering could
+      //  not (yet) drop it.  notify_deallocation() (and the inst-slot recycle
+      //  it triggers) must be delayed until this entry is drained from
+      //  pending_releases - otherwise the slot can be handed back out by
+      //  new_instance() while the allocator still tracks the stale tag,
+      //  producing double-tracking that surfaces as assertion failures in
+      //  BasicRangeAllocator::deallocate / split_range.
+      bool deferred_dealloc_notify;
 
       PendingRelease(RegionInstanceImpl *_inst, bool _ready, unsigned _seqid);
       void record_redistrict(const std::vector<RegionInstanceImpl *> &insts);

@@ -389,22 +389,24 @@ namespace Realm {
                        << " slot=" << index;
 #ifdef DEBUG_REALM
     State old_state = state.exchange(STATE_ACTIVE);
-    if(old_state != STATE_IDLE) {
-      log_bgwork.debug() << "double make_active: item=" << ((void *)this) << " name='"
-                         << name << "' oldstate=" << old_state;
+    if(old_state == STATE_SHUTDOWN) {
+      log_bgwork.fatal() << "make_active on shutdown item: item=" << ((void *)this)
+                         << " name='" << name << "'";
+      abort();
     }
 #endif
     manager->advertise_work(index);
   }
 
 #ifdef DEBUG_REALM
-  // called immediately before 'do_work'
+  // called immediately before 'do_work' - may observe STATE_IDLE if
+  //  an external make_active raced with another worker's make_inactive
   void BackgroundWorkItem::make_inactive(void)
   {
     State old_state = state.exchange(STATE_IDLE);
-    if(old_state != STATE_ACTIVE) {
-      log_bgwork.fatal() << "invalid make_inactive: item=" << ((void *)this) << " name='"
-                         << name << "' oldstate=" << old_state;
+    if(old_state == STATE_SHUTDOWN) {
+      log_bgwork.fatal() << "make_inactive on shutdown item: item=" << ((void *)this)
+                         << " name='" << name << "'";
       abort();
     }
   }

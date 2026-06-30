@@ -157,6 +157,19 @@ namespace Realm {
   }
 
   template <typename T, REALM_PMTA_DECL(T, IntrusiveListLink<T>, LINK), typename LT>
+  inline size_t IntrusiveList<T, LINK, LT>::size(void) const
+  {
+    // Caller is responsible for any external synchronization needed - this
+    //  walks the list head-to-tail without taking the lock.  Intended for
+    //  diagnostic / quiescence-counting use; do not put it on a hot path.
+    size_t n = 0;
+    for(T *p = head.next; p; p = REALM_PMTA_DEREF(p, LINK).next) {
+      n++;
+    }
+    return n;
+  }
+
+  template <typename T, REALM_PMTA_DECL(T, IntrusiveListLink<T>, LINK), typename LT>
   inline void IntrusiveList<T, LINK, LT>::push_back(T *new_entry)
   {
     lock.lock();

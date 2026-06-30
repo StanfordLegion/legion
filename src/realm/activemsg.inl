@@ -51,6 +51,16 @@ namespace Realm {
                                               size_t _max_payload_size /*= 0*/)
   {
     assert(impl == 0);
+    if constexpr(!is_wrapped_with_frag_info<T>::value) {
+      if(_max_payload_size > 0) {
+        size_t net_max = Network::max_payload_size(sizeof(T), nullptr);
+        if(_max_payload_size > net_max) {
+          init_chunked(_target, _max_payload_size);
+          return;
+        }
+      }
+    }
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl = Network::create_active_message_impl(_target, msgid, sizeof(T),
                                                _max_payload_size, 0, 0, 0,
@@ -73,6 +83,7 @@ namespace Realm {
                                               const RemoteAddress &_dest_payload_addr)
   {
     assert(impl == 0);
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl = Network::create_active_message_impl(_target, msgid, sizeof(T),
                                                _max_payload_size, _dest_payload_addr,
@@ -94,6 +105,16 @@ namespace Realm {
                                               size_t _max_payload_size /*= 0*/)
   {
     assert(impl == 0);
+    if constexpr(!is_wrapped_with_frag_info<T>::value) {
+      if(_max_payload_size > 0) {
+        size_t net_max = Network::max_payload_size(sizeof(T), nullptr);
+        if(_max_payload_size > net_max) {
+          init_chunked(_targets, _max_payload_size);
+          return;
+        }
+      }
+    }
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl = Network::create_active_message_impl(_targets, msgid, sizeof(T),
                                                _max_payload_size, 0, 0, 0,
@@ -115,6 +136,16 @@ namespace Realm {
                                               size_t _datalen)
   {
     assert(impl == 0);
+    if constexpr(!is_wrapped_with_frag_info<T>::value) {
+      if(_datalen > 0) {
+        size_t net_max = Network::max_payload_size(sizeof(T), _data);
+        if(_datalen > net_max) {
+          init_chunked_data(_target, _data, _datalen);
+          return;
+        }
+      }
+    }
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl =
         Network::create_active_message_impl(_target, msgid, sizeof(T), _datalen, _data, 0,
@@ -139,6 +170,7 @@ namespace Realm {
                                               const RemoteAddress &_dest_payload_addr)
   {
     assert(impl == 0);
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl = Network::create_active_message_impl(
         _target, msgid, sizeof(T), _datalen, _src_payload_addr, 0, 0, _dest_payload_addr,
@@ -159,32 +191,20 @@ namespace Realm {
                                               const void *_data, size_t _datalen)
   {
     assert(impl == 0);
+    if constexpr(!is_wrapped_with_frag_info<T>::value) {
+      if(_datalen > 0) {
+        size_t net_max = Network::max_payload_size(sizeof(T), _data);
+        if(_datalen > net_max) {
+          init_chunked_data(_targets, _data, _datalen);
+          return;
+        }
+      }
+    }
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl = Network::create_active_message_impl(_targets, msgid, sizeof(T), _datalen,
                                                _data, 0, 0, &inline_capacity,
                                                sizeof(inline_capacity));
-    header = new(impl->header_base) T;
-  }
-
-  template <typename T, size_t INLINE_STORAGE>
-  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(NodeID _target, const void *_data,
-                                                  size_t _bytes_per_line, size_t _lines,
-                                                  size_t _line_stride)
-    : impl(0)
-  {
-    init(_target, _data, _bytes_per_line, _lines, _line_stride);
-  }
-
-  template <typename T, size_t INLINE_STORAGE>
-  void ActiveMessage<T, INLINE_STORAGE>::init(NodeID _target, const void *_data,
-                                              size_t _bytes_per_line, size_t _lines,
-                                              size_t _line_stride)
-  {
-    assert(impl == 0);
-    unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
-    impl = Network::create_active_message_impl(
-        _target, msgid, sizeof(T), _bytes_per_line * _lines, _data, _lines, _line_stride,
-        &inline_capacity, sizeof(inline_capacity));
     header = new(impl->header_base) T;
   }
 
@@ -208,6 +228,7 @@ namespace Realm {
                                               const RemoteAddress &_dest_payload_addr)
   {
     assert(impl == 0);
+    network_max_payload_ = 0;
     unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
     impl = Network::create_active_message_impl(
         _target, msgid, sizeof(T), _bytes_per_line * _lines, _src_payload_addr, _lines,
@@ -216,32 +237,9 @@ namespace Realm {
   }
 
   template <typename T, size_t INLINE_STORAGE>
-  ActiveMessage<T, INLINE_STORAGE>::ActiveMessage(const Realm::NodeSet &_targets,
-                                                  const void *_data,
-                                                  size_t _bytes_per_line, size_t _lines,
-                                                  size_t _line_stride)
-    : impl(0)
-  {
-    init(_targets, _data, _bytes_per_line, _lines, _line_stride);
-  }
-
-  template <typename T, size_t INLINE_STORAGE>
-  void ActiveMessage<T, INLINE_STORAGE>::init(const Realm::NodeSet &_targets,
-                                              const void *_data, size_t _bytes_per_line,
-                                              size_t _lines, size_t _line_stride)
-  {
-    assert(impl == 0);
-    unsigned short msgid = activemsg_handler_table.lookup_message_id<T>();
-    impl = Network::create_active_message_impl(
-        _targets, msgid, sizeof(T), _bytes_per_line * _lines, _data, _lines, _line_stride,
-        &inline_capacity, sizeof(inline_capacity));
-    header = new(impl->header_base) T;
-  }
-
-  template <typename T, size_t INLINE_STORAGE>
   ActiveMessage<T, INLINE_STORAGE>::~ActiveMessage(void)
   {
-    assert(impl == 0);
+    assert((impl == 0) && (network_max_payload_ == 0));
   }
 
   template <typename T, size_t INLINE_STORAGE>
@@ -356,6 +354,15 @@ namespace Realm {
   template <typename T, size_t INLINE_STORAGE>
   void *ActiveMessage<T, INLINE_STORAGE>::payload_ptr(size_t datalen)
   {
+    if(network_max_payload_ != 0) {
+      assert(!chunk_alloc_.empty());
+      char *buf_begin = reinterpret_cast<char *>(chunk_alloc_.data());
+      char *eob = buf_begin + chunk_src_datalen_;
+      char *curpos = eob - fbs.bytes_left();
+      char *nextpos = curpos + datalen;
+      fbs.reset(nextpos, eob - nextpos);
+      return curpos;
+    }
     char *eob = reinterpret_cast<char *>(impl->payload_base) + impl->payload_size;
     char *curpos = eob - fbs.bytes_left();
     char *nextpos = curpos + datalen;
@@ -395,6 +402,11 @@ namespace Realm {
   template <typename T, size_t INLINE_STORAGE>
   void ActiveMessage<T, INLINE_STORAGE>::commit(void)
   {
+    if(network_max_payload_ != 0) {
+      commit_chunked();
+      return;
+    }
+
     assert(impl != 0);
 
     size_t act_payload_len;
@@ -414,6 +426,19 @@ namespace Realm {
   template <typename T, size_t INLINE_STORAGE>
   void ActiveMessage<T, INLINE_STORAGE>::cancel(void)
   {
+    if(network_max_payload_ != 0) {
+      // chunked mode - just clean up the local state
+      header->~T();
+      header = 0;
+      chunk_alloc_.clear();
+      chunk_alloc_.shrink_to_fit();
+      chunk_targets_.clear();
+      chunk_src_data_ = nullptr;
+      chunk_src_datalen_ = 0;
+      network_max_payload_ = 0;
+      // impl is 0 in chunked mode, so match the normal-path postcondition
+      return;
+    }
     assert(impl != 0);
     impl->cancel();
 
@@ -539,6 +564,14 @@ namespace Realm {
     }
 
     ActiveMessageHandlerTable::append_handler_reg(this);
+
+    // automatically register a WrappedWithFragInfo<T> handler so that
+    //  fragmented messages of any type can be reassembled
+    if constexpr(!is_wrapped_with_frag_info<T>::value &&
+                 std::is_same<T, T2>::value) {
+      auto *wrapped_reg = new ActiveMessageHandlerReg<WrappedWithFragInfo<T>, T>();
+      (void)wrapped_reg; // leaked intentionally - lives for program lifetime
+    }
   }
 
   template <typename T, typename T2>
@@ -550,70 +583,146 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ActiveMessageAuto<UserHdr, Builder>
+  // ActiveMessage<T> chunked mode helpers
   //
 
-  template <typename UserHdr, template <typename> class Builder>
-  ActiveMessageAuto<UserHdr, Builder>::ActiveMessageAuto(NodeID target,
-                                                         size_t max_payload_size)
-    : target_(target)
-    , max_payload_size_(max_payload_size)
-  {}
-
-  template <typename UserHdr, template <typename> class Builder>
-  UserHdr *ActiveMessageAuto<UserHdr, Builder>::operator->()
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init_chunked(NodeID _target,
+                                                      size_t _max_payload_size)
   {
-    return &user_header_;
-  }
+    if constexpr(is_wrapped_with_frag_info<T>::value) {
+      assert(0 && "init_chunked called on WrappedWithFragInfo type");
+    } else {
+      size_t wrapped_hdr_size = sizeof(WrappedWithFragInfo<T>);
+      network_max_payload_ = Network::max_payload_size(wrapped_hdr_size, nullptr);
+      assert(network_max_payload_ > 0);
 
-  template <typename UserHdr, template <typename> class Builder>
-  UserHdr &ActiveMessageAuto<UserHdr, Builder>::operator*()
-  {
-    return user_header_;
-  }
-
-  template <typename UserHdr, template <typename> class Builder>
-  void ActiveMessageAuto<UserHdr, Builder>::add_payload(const void *data, size_t size)
-  {
-    payload_.insert(payload_.end(), static_cast<const char *>(data),
-                    static_cast<const char *>(data) + size);
-  }
-
-  template <typename UserHdr, template <typename> class Builder>
-  void ActiveMessageAuto<UserHdr, Builder>::commit()
-  {
-    if(payload_.empty()) {
-      abort();
-    }
-
-    auto send_single = [&](uint32_t chunk_id, uint32_t total_chunks, uint64_t msg_id,
-                           const void *data, size_t size) {
-      Builder<UserHdr> msg(target_, size);
-      msg->frag_info = {chunk_id, total_chunks, msg_id};
-      msg->user = user_header_;
-      msg.add_payload(data, size);
-      msg.commit();
-    };
-
-    if(payload_.size() <= max_payload_size_) {
-      uint64_t msg_id = next_message_id(target_);
-      send_single(0, 1, msg_id, payload_.data(), payload_.size());
-      return;
-    }
-
-    uint64_t msg_id = next_message_id(target_);
-    size_t total_chunks = (payload_.size() + max_payload_size_ - 1) / max_payload_size_;
-    size_t offset = 0;
-    for(uint32_t chunk_id = 0; chunk_id < total_chunks; ++chunk_id) {
-      size_t chunk_size = std::min(max_payload_size_, payload_.size() - offset);
-      send_single(chunk_id, static_cast<uint32_t>(total_chunks), msg_id,
-                  payload_.data() + offset, chunk_size);
-      offset += chunk_size;
+      chunk_targets_.add(_target);
+      chunk_alloc_.resize(_max_payload_size);
+      chunk_src_data_ = chunk_alloc_.data();
+      chunk_src_datalen_ = _max_payload_size;
+      header = new(&inline_capacity) T;
+      fbs.reset(chunk_alloc_.data(), _max_payload_size);
     }
   }
 
-  template <typename UserHdr, template <typename> class Builder>
-  uint64_t ActiveMessageAuto<UserHdr, Builder>::next_message_id(NodeID node_id)
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init_chunked(const NodeSet &_targets,
+                                                      size_t _max_payload_size)
+  {
+    if constexpr(is_wrapped_with_frag_info<T>::value) {
+      assert(0 && "init_chunked called on WrappedWithFragInfo type");
+    } else {
+      size_t wrapped_hdr_size = sizeof(WrappedWithFragInfo<T>);
+      network_max_payload_ = Network::max_payload_size(wrapped_hdr_size, nullptr);
+      assert(network_max_payload_ > 0);
+
+      chunk_targets_ = _targets;
+      chunk_alloc_.resize(_max_payload_size);
+      chunk_src_data_ = chunk_alloc_.data();
+      chunk_src_datalen_ = _max_payload_size;
+      header = new(&inline_capacity) T;
+      fbs.reset(chunk_alloc_.data(), _max_payload_size);
+    }
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init_chunked_data(NodeID _target,
+                                                           const void *_data,
+                                                           size_t _datalen)
+  {
+    if constexpr(is_wrapped_with_frag_info<T>::value) {
+      assert(0 && "init_chunked_data called on WrappedWithFragInfo type");
+    } else {
+      // compute the per-chunk payload capacity using the wrapped header size
+      // pass the caller's data pointer so the backend can check registration
+      size_t wrapped_hdr_size = sizeof(WrappedWithFragInfo<T>);
+      network_max_payload_ = Network::max_payload_size(wrapped_hdr_size, _data);
+      assert(network_max_payload_ > 0);
+
+      chunk_targets_.add(_target);
+      chunk_src_data_ = _data;
+      chunk_src_datalen_ = _datalen;
+      // place the header in inline_capacity (it's not sent to the network yet)
+      header = new(&inline_capacity) T;
+      // no fbs/chunk_buffer_ needed - data is referenced directly
+      // impl stays null in chunked mode
+    }
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::init_chunked_data(const NodeSet &_targets,
+                                                           const void *_data,
+                                                           size_t _datalen)
+  {
+    if constexpr(is_wrapped_with_frag_info<T>::value) {
+      assert(0 && "init_chunked_data called on WrappedWithFragInfo type");
+    } else {
+      size_t wrapped_hdr_size = sizeof(WrappedWithFragInfo<T>);
+      network_max_payload_ = Network::max_payload_size(wrapped_hdr_size, _data);
+      assert(network_max_payload_ > 0);
+
+      chunk_targets_ = _targets;
+      chunk_src_data_ = _data;
+      chunk_src_datalen_ = _datalen;
+      header = new(&inline_capacity) T;
+    }
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  void ActiveMessage<T, INLINE_STORAGE>::commit_chunked(void)
+  {
+    if constexpr(is_wrapped_with_frag_info<T>::value) {
+      assert(0 && "commit_chunked called on WrappedWithFragInfo type");
+    } else {
+      assert(chunk_src_data_ != nullptr);
+      if(!chunk_alloc_.empty()) {
+        // buffer mode: actual payload is what was written via fbs
+        chunk_src_datalen_ -= fbs.bytes_left();
+      }
+      const char *payload_data = static_cast<const char *>(chunk_src_data_);
+      size_t total_payload = chunk_src_datalen_;
+
+      // msg_id only needs to be unique per-sender, so using my_node_id is fine
+      //  for both unicast and multicast chunked sends
+      uint64_t msg_id = next_chunk_message_id(Network::my_node_id);
+      size_t max_chunk = network_max_payload_;
+      uint32_t total_chunks =
+          static_cast<uint32_t>((total_payload + max_chunk - 1) / max_chunk);
+      if(total_chunks == 0) {
+        total_chunks = 1;
+      }
+
+      size_t offset = 0;
+      for(uint32_t chunk_id = 0; chunk_id < total_chunks; ++chunk_id) {
+        size_t chunk_size = std::min(max_chunk, total_payload - offset);
+
+        ActiveMessage<WrappedWithFragInfo<T>> chunk_msg(chunk_targets_, chunk_size);
+        chunk_msg->frag_info = {chunk_id, total_chunks, msg_id};
+        chunk_msg->user = *header;
+        if(chunk_size > 0) {
+          chunk_msg.add_payload(payload_data + offset, chunk_size);
+        }
+        chunk_msg.commit();
+
+        offset += chunk_size;
+      }
+
+      // clean up
+      header->~T();
+      header = 0;
+      chunk_alloc_.clear();
+      chunk_alloc_.shrink_to_fit();
+      chunk_targets_.clear();
+      chunk_src_data_ = nullptr;
+      chunk_src_datalen_ = 0;
+      network_max_payload_ = 0;
+    }
+  }
+
+  template <typename T, size_t INLINE_STORAGE>
+  /*static*/ uint64_t
+  ActiveMessage<T, INLINE_STORAGE>::next_chunk_message_id(NodeID node_id)
   {
     static std::atomic<uint64_t> counter{0};
     uint64_t local = counter.fetch_add(1, std::memory_order_relaxed);

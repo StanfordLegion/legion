@@ -217,15 +217,6 @@ namespace Realm {
   void OutbufMetadata::set_state(State new_state)
   {
     switch(new_state) {
-    case STATE_DATABUF:
-    {
-      assert(state == STATE_IDLE);
-      databuf_rsrv_offset = 0;
-      databuf_use_count = 0;
-      remain_count.store(0);
-      state = STATE_DATABUF;
-      break;
-    }
     case STATE_PKTBUF:
     {
       assert(state == STATE_IDLE);
@@ -258,19 +249,9 @@ namespace Realm {
 
   void OutbufMetadata::dec_usecount()
   {
-    assert((state == STATE_DATABUF) || (state == STATE_PKTBUF));
+    assert(state == STATE_PKTBUF);
     int prev = remain_count.fetch_sub(1);
     if(prev == 1)
-      manager->free_outbuf(this);
-  }
-
-  void OutbufMetadata::databuf_close()
-  {
-    assert(state == STATE_DATABUF);
-    // if the result of adding use_count to remain_count is 0, all uses have
-    //  already been completed and we can free ourselves
-    int prev = remain_count.fetch_add(databuf_use_count);
-    if((prev + databuf_use_count) == 0)
       manager->free_outbuf(this);
   }
 
@@ -294,12 +275,19 @@ namespace Realm {
   void OutbufMetadata::pktbuf_close()
   {
     assert(state == STATE_PKTBUF);
+    // snapshot use_count before the atomic op - the field is non-atomic and is
+    //  reset to 0 by set_state(STATE_PKTBUF) when the buffer is recycled.  if
+    //  this thread is preempted after the fetch_add and the buffer completes
+    //  a free/realloc cycle before we resume, a re-read of pktbuf_use_count
+    //  would see the new cycle's 0 and cause (prev + use_count) to compare
+    //  equal to 0 spuriously, freeing a buffer that's actively in use.
+    const int saved_use_count = pktbuf_use_count;
     if(is_overflow) {
       // update the use count on the realbuf, and then we can just delete
       //  ourselves
       assert(realbuf.load());
-      int prev = realbuf.load()->remain_count.fetch_add(pktbuf_use_count);
-      if((prev + pktbuf_use_count) == 0)
+      int prev = realbuf.load()->remain_count.fetch_add(saved_use_count);
+      if((prev + saved_use_count) == 0)
         manager->free_outbuf(realbuf.load());
 
       log_gex_obmgr.info() << "delete overflow: ovbuf=" << this << " baseptr=" << std::hex
@@ -313,8 +301,8 @@ namespace Realm {
     } else {
       // if the result of adding use_count to remain_count is 0, all uses have
       //  already been completed and we can free ourselves
-      int prev = remain_count.fetch_add(pktbuf_use_count);
-      if((prev + pktbuf_use_count) == 0)
+      int prev = remain_count.fetch_add(saved_use_count);
+      if((prev + saved_use_count) == 0)
         manager->free_outbuf(this);
     }
   }
@@ -899,9 +887,17 @@ namespace Realm {
         assert(grp_index < (1 << LOG2_MAXGROUPS));
       }
     }
-    // increment the num_groups - it's ok if these increments happen out of
-    //  order
-    num_groups.fetch_add(1);
+    // monotonically advance num_groups to at least grp_index + 1.  fetch_add
+    //  is incorrect here: when a concurrent allocator is preempted between
+    //  its successful CAS into groups[] and its update of num_groups, a later
+    //  allocator can read the stale num_groups, collide on the lower slot, and
+    //  win CAS at a higher grp_index.  if that higher-index thread then
+    //  finishes (with fetch_add it would advance num_groups by only 1) and
+    //  hands its newly-indexed completion to a caller that sends an AM, the
+    //  reply's lookup_completion sees grp_index >= num_groups and aborts even
+    //  though groups[grp_index] is fully populated.  fetch_max ensures
+    //  num_groups always covers the highest populated slot.
+    num_groups.fetch_max(grp_index + 1);
 
     // give all these new completions their indices and pointer to us
     for(size_t i = 0; i < (1 << PendingCompletionGroup::LOG2_GROUPSIZE); i++) {
@@ -1848,12 +1844,25 @@ namespace Realm {
     }
 
     // get the head of our pbuf list - if it's empty, something's wrong because
-    //  we shouldn't have gotten here
-    OutbufMetadata *head = first_pbuf.load_acquire();
-    assert(head);
+    //  we shouldn't have gotten here.  the load and state check happen under
+    //  the mutex so that they're serialized against any concurrent pop in
+    //  reserve_pbuf_helper - without this, an unsynchronized load_acquire can
+    //  race with the reserver's pop+close (which runs outside the mutex) and
+    //  observe a buffer whose state has been transitioned to STATE_IDLE
+    OutbufMetadata *head;
+    {
+      AutoLock<> al(mutex);
+      // we should only reach this point with has_ready_packets true - the
+      //  comp_reply and put_head paths above are supposed to return early
+      //  otherwise.  assert it so we catch any path that violates the
+      //  invariant the lifetime guarantee depends on
+      assert(has_ready_packets);
+      head = first_pbuf.load();
+      assert(head);
+      assert(head->state == OutbufMetadata::STATE_PKTBUF);
+    }
 
     while(true) {
-      assert(head->state == OutbufMetadata::STATE_PKTBUF);
 
       OutbufMetadata *realbuf;
       if(head->is_overflow) {
@@ -2483,9 +2492,15 @@ namespace Realm {
             requeue = put_head.load() || (comp_reply_count.load() != 0);
             push_mutex_check.unlock();
           } else {
-            // we can remove the head and work on the next one
+            // we can remove the head and work on the next one - verify the
+            //  successor's state under the same mutex that serializes pops,
+            //  so that the iter-N+1 invariant check is race-free (the old
+            //  top-of-loop assert at line 1856 has been removed for the same
+            //  reason)
             new_head = head->nextbuf;
             first_pbuf.store(new_head);
+            assert(new_head);
+            assert(new_head->state == OutbufMetadata::STATE_PKTBUF);
           }
         } else {
           // more stuff in this pktbuf - requeue if we see any have become
@@ -2545,6 +2560,8 @@ namespace Realm {
     log_gex_amcredit.debug() << "return: tgt=" << tgt_rank << "/" << tgt_ep_index
                              << " old=" << prev << " new=" << (prev + count);
   }
+
+  void XmitSrcDestPair::cancel_push() { push_mutex_check.unlock(); }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -2690,6 +2707,7 @@ namespace Realm {
   GASNetEXInjector::GASNetEXInjector(GASNetEXInternal *_internal)
     : BackgroundWorkItem("gex-inj")
     , internal(_internal)
+    , work_active(false)
   {}
 
   void GASNetEXInjector::add_ready_xpair(XmitSrcDestPair *xpair)
@@ -2703,15 +2721,34 @@ namespace Realm {
       new_work = ready_xpairs.empty();
       ready_xpairs.push_back(xpair);
     }
+    internal->total_events_added.fetch_add(1);
 
     if(new_work)
       make_active();
   }
 
-  bool GASNetEXInjector::has_work_remaining()
+  void GASNetEXInjector::drain_xpairs()
   {
     AutoLock<> al(mutex);
-    return !ready_xpairs.empty();
+    while(!ready_xpairs.empty()) {
+      XmitSrcDestPair *xpair = ready_xpairs.pop_front();
+      xpair->cancel_push();
+    }
+  }
+
+  size_t GASNetEXInjector::queue_size()
+  {
+    // Include work_active so that an xpair that has been popped from
+    //  ready_xpairs but is currently being processed by push_packets is
+    //  still counted as in-flight work.  Without this, the quiescence check
+    //  can declare DONE while a worker has the xpair on its stack, and a
+    //  subsequent re-enqueue from push_packets ends up in a queue that
+    //  detach() has already drained - the locked push_mutex_check then
+    //  trips the MutexChecker assertion at xpair destruction.  This was
+    //  the exact failure that commit 30da2be37b ("Fix GASNet Races") fixed
+    //  by tracking work_active alongside the queue.
+    AutoLock<> al(mutex);
+    return ready_xpairs.size() + (work_active.load() ? 1 : 0);
   }
 
   bool GASNetEXInjector::do_work(TimeLimit work_until)
@@ -2728,6 +2765,7 @@ namespace Realm {
       AutoLock<> al(mutex);
       xpair = ready_xpairs.pop_front();
       more_work = !ready_xpairs.empty();
+      work_active.store(true);
     }
     assert(xpair);
     if(more_work)
@@ -2738,6 +2776,8 @@ namespace Realm {
     // now tell the xpair to inject as many packets as it can until it
     //   runs out of time or hits backpressure
     xpair->push_packets(true /*immediate_mode*/, work_until);
+
+    work_active.store(false);
 
     ThreadLocal::gex_work_until = nullptr;
 
@@ -2757,6 +2797,7 @@ namespace Realm {
     , shutdown_cond(mutex)
     , pollwait_flag(false)
     , pollwait_cond(mutex)
+    , work_active(false)
   {}
 
   void GASNetEXPoller::begin_polling()
@@ -2785,7 +2826,17 @@ namespace Realm {
       AutoLock<> al(mutex);
       critical_xpairs.push_back(xpair);
     }
+    internal->total_events_added.fetch_add(1);
     // no need to signal because the poller is always awake
+  }
+
+  void GASNetEXPoller::drain_xpairs()
+  {
+    AutoLock<> al(mutex);
+    while(!critical_xpairs.empty()) {
+      XmitSrcDestPair *xpair = critical_xpairs.pop_front();
+      xpair->cancel_push();
+    }
   }
 
   void GASNetEXPoller::add_pending_event(GASNetEXEvent *event)
@@ -2795,13 +2846,17 @@ namespace Realm {
       AutoLock<> al(mutex);
       pending_events.push_back(event);
     }
+    internal->total_events_added.fetch_add(1);
     // no need to signal because the poller is always awake
   }
 
-  bool GASNetEXPoller::has_work_remaining()
+  size_t GASNetEXPoller::queue_size()
   {
+    // See GASNetEXInjector::queue_size: work_active covers the window
+    //  between "items dequeued from critical_xpairs/pending_events" and
+    //  "do_work returns".
     AutoLock<> al(mutex);
-    return (!critical_xpairs.empty() || !pending_events.empty());
+    return critical_xpairs.size() + pending_events.size() + (work_active.load() ? 1 : 0);
   }
 
   bool GASNetEXPoller::do_work(TimeLimit work_until)
@@ -2825,6 +2880,8 @@ namespace Realm {
       if(mutex.trylock()) {
         to_check.swap(pending_events);
         have_crit_xpairs = !critical_xpairs.empty();
+        if(!to_check.empty() || have_crit_xpairs)
+          work_active.store(true);
         mutex.unlock();
       }
 
@@ -2914,6 +2971,10 @@ namespace Realm {
         break;
     }
 
+    // all dequeued work items have been processed or handed off - clear
+    //  the work_active flag so that quiescence checks can see we're idle
+    work_active.store(false);
+
     // sample pollwait flag before we perform gasnet_AMPoll
     bool pollwait_snapshot = pollwait_flag.load();
 
@@ -2961,20 +3022,39 @@ namespace Realm {
   void GASNetEXCompleter::add_ready_events(GASNetEXEvent::EventList &newly_ready)
   {
     bool enqueue = false;
+    size_t added = 0;
 
     if(!newly_ready.empty()) {
       AutoLock<> al(mutex);
       // use has_work rather than list emptiness to decide whether to enqueue
       enqueue = !has_work.load();
       has_work.store(true);
+      added = newly_ready.size();
       ready_events.absorb_append(newly_ready);
     }
+    if(added > 0)
+      internal->total_events_added.fetch_add(added);
 
     if(enqueue)
       make_active();
   }
 
-  bool GASNetEXCompleter::has_work_remaining() { return has_work.load(); }
+  size_t GASNetEXCompleter::queue_size()
+  {
+    // do_work swaps ready_events into a worker-local todo before processing,
+    //  so during a trigger run ready_events is empty even though events are
+    //  in flight on the worker's stack.  has_work captures that window: it
+    //  stays true from add_ready_events until do_work observes both
+    //  ready_events and todo empty.  Count the in-flight events so the
+    //  quiescence check doesn't declare DONE mid-trigger.  See
+    //  GASNetEXInjector::queue_size for the full rationale (this is the
+    //  completer-equivalent of the work_active flag added in 30da2be37b).
+    AutoLock<> al(mutex);
+    size_t n = ready_events.size();
+    if(has_work.load() && n == 0)
+      n = 1;
+    return n;
+  }
 
   bool GASNetEXCompleter::do_work(TimeLimit work_until)
   {
@@ -3056,14 +3136,18 @@ namespace Realm {
       *tailp = rget;
       tailp = &rget->next_rget;
     }
+    internal->total_events_added.fetch_add(1);
     if(was_empty)
       make_active();
   }
 
-  bool ReverseGetter::has_work_remaining()
+  size_t ReverseGetter::queue_size()
   {
     AutoLock<> al(mutex);
-    return (head != nullptr);
+    size_t n = 0;
+    for(PendingReverseGet *p = head; p; p = p->next_rget)
+      n++;
+    return n;
   }
 
   bool ReverseGetter::do_work(TimeLimit work_until)
@@ -3161,6 +3245,7 @@ namespace Realm {
     , completer(this)
     , rgetter(this)
     , total_packets_received(0)
+    , total_events_added(0)
     , databuf_md(nullptr)
   {}
 
@@ -3423,6 +3508,12 @@ namespace Realm {
   {
     poller.end_polling();
 
+    // drain any xpairs that were enqueued (via request_push) but never
+    //  had push_packets called - this balances the push_mutex_check lock
+    //  that request_push acquired
+    poller.drain_xpairs();
+    injector.drain_xpairs();
+
 #ifdef DEBUG_REALM
     poller.shutdown_work_item();
     injector.shutdown_work_item();
@@ -3505,47 +3596,28 @@ namespace Realm {
                                            offsets.data(), 0);
   }
 
-  size_t GASNetEXInternal::sample_messages_received_count()
+  void GASNetEXInternal::sample_quiescence_state(NetworkModule::QuiescenceState &state)
   {
-    return total_packets_received.load();
-  }
+    // queued_items: total count across all four background-work queues
+    //  (injector ready_xpairs, completer ready_events, poller
+    //  critical_xpairs + pending_events, rgetter pending list).  Each
+    //  queue_size() method adds 1 when its work_active / has_work flag
+    //  shows that an item has been popped from the visible queue but is
+    //  still being processed on a worker's stack - without that the
+    //  quiescence check would declare DONE mid-trigger and a subsequent
+    //  re-enqueue from push_packets could leak a locked push_mutex_check
+    //  past detach() (see commit 30da2be37b).  Reporting an actual count
+    //  rather than a 0/1 boolean also keeps a slow drain visible: as
+    //  items are processed the sum decreases across rounds, so the
+    //  Mattern's stability check correctly classifies the system as
+    //  PROGRESSING instead of treating an unchanging non-zero value as
+    //  steady state.
+    uint64_t queued = (poller.queue_size() + injector.queue_size() +
+                       completer.queue_size() + rgetter.queue_size());
 
-  bool GASNetEXInternal::check_for_quiescence(size_t sampled_receive_count)
-  {
-    // in order to be quiescent, the following things should be true:
-    // 1) no unsent packets in any xpair
-    // 2) no unsent completions in any xpair
-    // 3) no pending complations remain
-    // 4) no reverse gets in progress
-    // 5) all packets sent have been received
-
-    // we handle 1-4 by having each count how many of 1-4 are violated locally
-    //  and then doing a reduction sum over all nodes
-    // we handle 5 by having each rank determine the total packets it has sent
-    //  and received (regardless of which xpair), summing those over all ranks,
-    //  and demanding that the sum of packets sent matches the sum of received
-    uint64_t local_counts[3] = {0, 0, 0};
-
-    if(poller.has_work_remaining()) {
-      log_gex_quiesce.debug() << "poller busy";
-      local_counts[0]++;
-    }
-    if(injector.has_work_remaining()) {
-      log_gex_quiesce.debug() << "injector busy";
-      local_counts[0]++;
-    }
-    if(completer.has_work_remaining()) {
-      log_gex_quiesce.debug() << "completer busy";
-      local_counts[0]++;
-    }
-    if(rgetter.has_work_remaining()) {
-      log_gex_quiesce.debug() << "rgetter busy";
-      local_counts[0]++;
-    }
-    if(compmgr.num_completions_pending() > 0) {
-      log_gex_quiesce.debug() << "compmgr busy";
-      local_counts[0]++;
-    }
+    // packets_reserved: cumulative count of network messages this rank has
+    //  originated.  Sum across all xpairs (per src/dst endpoint pair).
+    uint64_t reserved = 0;
     for(gex_ep_index_t src_ep_index = 0; src_ep_index < xmitsrcs.size(); src_ep_index++) {
       atomic<XmitSrcDestPair *> *pairptrs = xmitsrcs[src_ep_index]->pairs;
       for(gex_ep_index_t tgt_ep_index = 0; tgt_ep_index < gex_wrapper_handle.max_eps;
@@ -3554,32 +3626,43 @@ namespace Realm {
           XmitSrcDestPair *xpair = (pairptrs++)->load_acquire();
           if(!xpair)
             continue;
-          size_t num_rsrvd = xpair->packets_reserved.load();
-          if(num_rsrvd > 0) {
-            log_gex_quiesce.debug()
-                << "xpair reserved: " << src_ep_index << "->" << tgt_rank << "/"
-                << tgt_ep_index << " " << num_rsrvd;
-            local_counts[1] += num_rsrvd;
-          }
+          reserved += xpair->packets_reserved.load();
         }
     }
-    // use the receive count that was sampled before the incoming message
-    //  manager was drained - if the actual 'total_packets_received' has
-    //  increased since, we're obviously not quiescent, but we need every
-    //  other rank to know that too
-    local_counts[2] = sampled_receive_count;
 
-    log_gex_quiesce.debug() << "local counts: " << local_counts[0] << " "
-                            << local_counts[1] << " " << local_counts[2];
+    state.queued_items = queued;
+    state.events_added = total_events_added.load();
+    state.packets_reserved = reserved;
+    state.packets_received = total_packets_received.load();
+    state.pending_completions = compmgr.num_completions_pending();
+    // total_packets_received is bumped only in handle_short/medium/long
+    //  (which all use add_incoming_message), not in handle_completion_reply
+    //  or handle_reverse_get, so every packet counted here passes through
+    //  IMM and the drain target equals packets_received.
+    state.messages_to_drain = state.packets_received;
 
-    uint64_t total_counts[3];
+    log_gex_quiesce.debug() << "quiescence sample:"
+                            << " queued=" << state.queued_items
+                            << " (inj=" << injector.queue_size()
+                            << " comp=" << completer.queue_size()
+                            << " poll=" << poller.queue_size()
+                            << " rget=" << rgetter.queue_size() << ")"
+                            << " events_added=" << state.events_added
+                            << " reserved=" << state.packets_reserved
+                            << " received=" << state.packets_received
+                            << " pending_comps=" << state.pending_completions;
+  }
+
+  void GASNetEXInternal::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                                  uint64_t *total_counts, size_t count)
+  {
     gex_flags_t flags = 0;
     gex_event_opaque_t done = gex_wrapper_handle.gex_coll_ireduce(
-        prim_tm, total_counts, local_counts, GEX_WRAPPER_DT_U64, sizeof(uint64_t), 3,
-        GEX_WRAPPER_OP_ADD, flags);
+        prim_tm, total_counts, const_cast<uint64_t *>(local_counts), GEX_WRAPPER_DT_U64,
+        sizeof(uint64_t), count, GEX_WRAPPER_OP_ADD, flags);
 
-    // wait on completion of the collective reduction, but keep track of time
-    //  and complain if it takes too long
+    // Wait on completion of the collective reduction, polling so the network
+    //  can make progress.  Complain if it takes too long.
     long long t_start = Clock::current_time_in_nanoseconds();
     long long t_complain = t_start;
     do {
@@ -3589,19 +3672,10 @@ namespace Realm {
                                << " ns";
         t_complain = t_now;
       }
-      // we can't perform the poll ourselves, but make sure at least one full
-      //  poll succeeds before we continue
+      // We can't perform the poll ourselves; make sure at least one full
+      //  poll cycle has succeeded before we re-check the event.
       poller.wait_for_full_poll_cycle();
     } while(gex_wrapper_handle.gex_event_test(done) != GEX_WRAPPER_OK);
-
-    if(prim_rank == 0)
-      log_gex_quiesce.info() << "total counts: " << total_counts[0] << " "
-                             << total_counts[1] << " " << total_counts[2];
-    else
-      log_gex_quiesce.debug() << "total counts: " << total_counts[0] << " "
-                              << total_counts[1] << " " << total_counts[2];
-
-    return ((total_counts[0] == 0) && (total_counts[1] == total_counts[2]));
   }
 
   PendingCompletion *GASNetEXInternal::get_available_comp()

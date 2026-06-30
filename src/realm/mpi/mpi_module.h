@@ -62,8 +62,9 @@ namespace Realm {
     virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
                             std::vector<size_t> &lengths);
 
-    virtual size_t sample_messages_received_count(void);
-    virtual bool check_for_quiescence(size_t sampled_receive_count);
+    virtual void sample_quiescence_state(QuiescenceState &state);
+    virtual void quiescence_allreduce_sum(const uint64_t *local_counts,
+                                          uint64_t *total_counts, size_t count);
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(RuntimeImpl *runtime, Memory m, size_t size,
@@ -115,6 +116,8 @@ namespace Realm {
                                            size_t line_stride,
                                            const RemoteAddress &dest_payload_addr,
                                            bool with_congestion, size_t header_size);
+
+    virtual size_t max_payload_size(size_t header_size, const void *src_payload_addr);
 
   protected:
     MPI_Win g_am_win; /* global window for RMA memory */

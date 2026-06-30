@@ -146,6 +146,18 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...)
   } while(0)
 #endif
 
+// Force the linker to keep gdb_script.cc (which contributes the embedded
+// gdb auto-load script via the .debug_gdb_scripts section) when librealm
+// is consumed as a static archive.  Has no effect for shared-library
+// builds.  REALM_EMBED_GDB_SCRIPT is defined by CMake only when
+// gdb_script.cc is actually compiled (Debug / RelWithDebInfo on
+// Linux/FreeBSD), so the anchor symbol is guaranteed to be defined.
+#ifdef REALM_EMBED_GDB_SCRIPT
+extern "C" int realm_gdb_script_anchor;
+static int *const realm_gdb_script_anchor_ref __attribute__((used)) =
+    &realm_gdb_script_anchor;
+#endif
+
 namespace Realm {
 
   Logger log_thread("threads");
@@ -1400,7 +1412,22 @@ namespace Realm {
     size_t stack_size;
     bool ok_to_delete;
     bool running;
+
+    // intrusive doubly-linked list used by the gdb auto-load script to
+    // enumerate parked user threads; manipulated only under
+    // user_thread_registry_mutex.  in_registry distinguishes "linked at head
+    // with no successors" from "never inserted" (both have null link ptrs).
+    UserThread *registry_next;
+    UserThread *registry_prev;
+    bool in_registry;
   };
+
+  // Registry of live user threads, walked by the gdb auto-load script
+  // (src/realm/realm-gdb.py) to print backtraces of parked threads.  Only
+  // touched on UserThread construction/destruction, so it adds no cost to
+  // user_switch or task execution.
+  Mutex user_thread_registry_mutex;
+  UserThread *user_thread_registry_head = nullptr;
 
   UserThread::UserThread(void *_target, void (*_entry_wrapper)(void *),
                          ThreadScheduler *_scheduler)
@@ -1414,12 +1441,27 @@ namespace Realm {
     , stack_size(0)
     , ok_to_delete(false)
     , running(false)
+    , registry_next(nullptr)
+    , registry_prev(nullptr)
+    , in_registry(false)
   {}
 
   UserThread::~UserThread(void)
   {
     // cannot delete an active thread...
     assert(!running);
+
+    // remove from the debug registry if start_thread() ever added us
+    if(in_registry) {
+      AutoLock<> al(user_thread_registry_mutex);
+      if(registry_prev)
+        registry_prev->registry_next = registry_next;
+      else
+        user_thread_registry_head = registry_next;
+      if(registry_next)
+        registry_next->registry_prev = registry_prev;
+      in_registry = false;
+    }
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
     if(stack_base != nullptr) {
@@ -1549,6 +1591,17 @@ namespace Realm {
 #ifdef REALM_ON_WINDOWS
     log_thread.debug() << "thread stack: " << this << " size=" << stack_size;
 #endif
+
+    // add to the debug registry now that ctx (or fiber) is fully initialized
+    {
+      AutoLock<> al(user_thread_registry_mutex);
+      registry_next = user_thread_registry_head;
+      registry_prev = nullptr;
+      if(user_thread_registry_head)
+        user_thread_registry_head->registry_prev = this;
+      user_thread_registry_head = this;
+      in_registry = true;
+    }
   }
 
   void UserThread::join(void)
