@@ -242,8 +242,11 @@ namespace Legion {
       inline bool remove_base_resource_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
     public:
-      void pack_global_ref(unsigned cnt = 1);
-      void unpack_global_ref(unsigned cnt = 1);
+      void pack_global_ref(Serializer& rez, unsigned cnt = 1);
+      void pack_global_ref(LamportClock& lamport_clock, unsigned cnt = 1);
+      void unpack_global_ref(Deserializer& derez, unsigned cnt = 1);
+      void unpack_global_ref(LamportClock lamport_clock, unsigned cnt = 1);
+      static LamportClock unpack_global_ref_clock(Deserializer& derez);
     public:
       inline bool has_gc_reference(void) const;
       template<bool NEED_LOCK = true>
@@ -264,7 +267,8 @@ namespace Legion {
       bool remove_gc_reference(int cnt);
       bool acquire_global(int cnt);
       bool acquire_global_remote(
-          AddressSpaceID& forward, int count, AddressSpaceID source);
+          AddressSpaceID& forward, int count, AddressSpaceID source,
+          LamportClock& lamport_clock);
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
@@ -293,10 +297,8 @@ namespace Legion {
       inline bool is_registered(void) const { return registered_with_runtime; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
-      void filter_remote_instances(AddressSpaceID remote_space);
     public:
       inline bool has_remote_instances(void) const;
-      inline size_t count_remote_instances(void) const;
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR& functor);
     public:
@@ -305,24 +307,28 @@ namespace Legion {
       // This for remote nodes only
       void unregister_collectable(std::set<RtEvent>& done_events);
     public:
-      // Can ignore return result if you hold a global reference
-      RtEvent send_remote_registration(bool has_global_reference);
+      void send_remote_registration(void);
     protected:
       bool can_delete(AutoLock& gc);
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock& gc);
-      virtual void process_downgrade_update(AutoLock& gc, State to_check);
+      virtual void process_downgrade_update(
+          AutoLock& gc, State to_check, LamportClock lamport_clock);
       virtual void accumulate_local_references(void);
       virtual void record_pending_downgrade(void);
-      void check_for_downgrade(AddressSpaceID downgrade_owner);
-      void check_for_downgrade_restart(AddressSpaceID new_owner);
-      void process_downgrade_request(AddressSpaceID owner, State to_check);
+      void check_for_downgrade(
+          AddressSpaceID downgrade_owner, LamportClock lamport_clock);
+      void check_for_downgrade_restart(
+          AddressSpaceID new_owner, LamportClock lamport_clock);
+      void process_downgrade_request(
+          AddressSpaceID owner, State to_check, LamportClock lamport_clock);
       bool process_downgrade_response(
-          AddressSpaceID notready, uint64_t total_sent,
-          uint64_t total_received);
+          AddressSpaceID notready, uint64_t total_sent, uint64_t total_received,
+          LamportClock lamport_clock);
       void send_downgrade_notifications(State to_downgrade);
       void process_downgrade_success(State old_state);
       AddressSpaceID get_downgrade_target(AddressSpaceID owner) const;
+      void finalize_remote_iterators(void);
     public:
       const DistributedID did;
       const AddressSpaceID owner_space;
@@ -350,11 +356,26 @@ namespace Legion {
     protected:
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet<LONG_LIFETIME> remote_instances;
+      // Event for recording when we've registered with the owner node
+      // This has to have triggered before we pack any kind of references
+      // or the downgrade protocol can fail by getting a spurious
+      // matching sum of the packed and unpacked references
+      RtEvent remote_registered;
+      // Track if we're iterating over the remote instances
+      std::atomic<unsigned> remote_iterators = 0;
+      // Valid while an update_remote_instances is waiting for the iterators to
+      // drain. A value member (not a pointer-to-stack-local) so it can't
+      // dangle; concurrent waiters share it by value.
+      RtUserEvent remote_iteration_waiter;
     protected:
       AddressSpaceID downgrade_owner, notready_owner;
       uint64_t sent_global_references, received_global_references;
       uint64_t total_sent_references, total_received_references;
+      LamportClock downgrade_lamport_clock = 0;
+      LamportClock pending_downgrade_lamport_clock = 0;
       unsigned remaining_responses;
+      // Whether we need to bump the downgrade lamport clock on a pack
+      bool bump_downgrade_lamport_clock = false;
       // Set when an unpack_*_ref happens while we hold references (so the
       // downgrade owner can't act on the notification immediately anyway).
       // Drained when the relevant reference count returns to zero so the
@@ -398,7 +419,8 @@ namespace Legion {
       bool remove_valid_reference(int cnt);
       bool acquire_valid(int cnt);
       bool acquire_valid_remote(
-          AddressSpaceID& forward, int count, AddressSpaceID source);
+          AddressSpaceID& forward, int count, AddressSpaceID source,
+          LamportClock& lamport_clock);
 #else
     public:
       void add_valid_reference(int cnt);
@@ -409,16 +431,17 @@ namespace Legion {
       template<typename T>
       bool acquire_valid(int cnt, T source, std::map<T, int>& valid_references);
       bool acquire_valid_remote(
-          AddressSpaceID& forward, int count, AddressSpaceID source);
+          AddressSpaceID& forward, int count, AddressSpaceID source,
+          LamportClock& lamport_clock);
 #endif
     public:
-      void pack_valid_ref(unsigned cnt = 1);
-      void unpack_valid_ref(unsigned cnt = 1);
+      void pack_valid_ref(Serializer& rez, unsigned cnt = 1);
+      void unpack_valid_ref(Deserializer& derez, unsigned cnt = 1);
     protected:
       virtual bool can_downgrade(void) const override;
       virtual bool perform_downgrade(AutoLock& gc) override;
       virtual void process_downgrade_update(
-          AutoLock& gc, State to_check) override;
+          AutoLock& gc, State to_check, LamportClock lamport_clock) override;
       virtual void accumulate_local_references(void) override;
       virtual void record_pending_downgrade(void) override;
     public:

@@ -30,7 +30,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MultiTask::MultiTask(void)
-      : PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >()
+      : PointwiseAnalyzable<CollectiveViewCreator<TaskOp>>()
     //--------------------------------------------------------------------------
     { }
 
@@ -43,7 +43,7 @@ namespace Legion {
     void MultiTask::activate(void)
     //--------------------------------------------------------------------------
     {
-      PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >::activate();
+      PointwiseAnalyzable<CollectiveViewCreator<TaskOp>>::activate();
       launch_space = nullptr;
       future_map_coordinate = 0;
       future_handles = nullptr;
@@ -89,7 +89,7 @@ namespace Legion {
       if (!temporary_futures.empty())
       {
         for (const std::pair<
-                 const DomainPoint, std::pair<FutureInstance*, ApEvent> >&
+                 const DomainPoint, std::pair<FutureInstance*, ApEvent>>&
                  temp_future : temporary_futures)
           delete temp_future.second.first;
         temporary_futures.clear();
@@ -103,7 +103,7 @@ namespace Legion {
       predicate_false_result.clear();
       predicate_false_future = Future();
       point_mapped_events.clear();
-      PointwiseAnalyzable<CollectiveViewCreator<TaskOp> >::deactivate(freeop);
+      PointwiseAnalyzable<CollectiveViewCreator<TaskOp>>::deactivate(freeop);
     }
 
     //--------------------------------------------------------------------------
@@ -436,7 +436,7 @@ namespace Legion {
       if (!check_collective_regions.empty())
         return false;
       return PointwiseAnalyzable<
-          CollectiveViewCreator<TaskOp> >::is_pointwise_analyzable();
+          CollectiveViewCreator<TaskOp>>::is_pointwise_analyzable();
     }
 
     //--------------------------------------------------------------------------
@@ -457,27 +457,37 @@ namespace Legion {
         Domain local_domain = node->get_tight_domain();
         size_t local_size = local_domain.get_volume();
         rez.serialize(local_size);
-        const std::map<DomainPoint, DistributedID>& handles =
+        const std::map<DomainPoint, PackedFutureHandle>& handles =
             future_handles->handles;
         legion_assert(local_size <= handles.size());
         if (local_size < handles.size())
         {
           for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
           {
-            std::map<DomainPoint, DistributedID>::const_iterator finder =
+            std::map<DomainPoint, PackedFutureHandle>::const_iterator finder =
                 handles.find(itr.p);
             legion_assert(finder != handles.end());
             rez.serialize(finder->first);
-            rez.serialize(finder->second);
+            rez.serialize(finder->second.future_did);
+            rez.serialize(finder->second.lamport_clock);
+#ifdef LEGION_DEBUG
+            // Sent packed reference
+            finder->second.released = true;
+#endif
           }
         }
         else
         {
-          for (const std::pair<const DomainPoint, DistributedID>& handle_pair :
-               handles)
+          for (const std::pair<const DomainPoint, PackedFutureHandle>&
+                   handle_pair : handles)
           {
             rez.serialize(handle_pair.first);
-            rez.serialize(handle_pair.second);
+            rez.serialize(handle_pair.second.future_did);
+            rez.serialize(handle_pair.second.lamport_clock);
+#ifdef LEGION_DEBUG
+            // Sent packed reference
+            handle_pair.second.released = true;
+#endif
           }
         }
         rez.serialize(future_map_coordinate);
@@ -509,7 +519,7 @@ namespace Legion {
       if (!is_origin_mapped())
       {
         rez.serialize<size_t>(pointwise_dependences.size());
-        for (const std::pair<const unsigned, std::vector<PointwiseDependence> >&
+        for (const std::pair<const unsigned, std::vector<PointwiseDependence>>&
                  pit : pointwise_dependences)
         {
           rez.serialize(pit.first);
@@ -554,13 +564,15 @@ namespace Legion {
         {
           future_handles = new FutureHandles;
           future_handles->add_reference();
-          std::map<DomainPoint, DistributedID>& handles =
+          std::map<DomainPoint, PackedFutureHandle>& handles =
               future_handles->handles;
           for (unsigned idx = 0; idx < num_handles; idx++)
           {
             DomainPoint point;
             derez.deserialize(point);
-            derez.deserialize(handles[point]);
+            PackedFutureHandle& handle = handles[point];
+            derez.deserialize(handle.future_did);
+            derez.deserialize(handle.lamport_clock);
           }
           derez.deserialize(future_map_coordinate);
         }

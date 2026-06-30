@@ -731,6 +731,7 @@ namespace Legion {
     typedef Realm::CopySrcDstField CopySrcDstField;
     typedef unsigned long long CollectiveID;
     typedef unsigned long long IndexSpaceExprID;
+    typedef uint64_t LamportClock;
     struct ContextCoordinate;
     typedef ContextCoordinate TraceLocalID;
     class TaskTreeCoordinates;

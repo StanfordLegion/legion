@@ -595,12 +595,12 @@ namespace Legion {
       }
       else
       {
-        pack_valid_ref();
         IndexSpaceReleaseColor rez;
         {
           RezCheck z(rez);
           rez.serialize(handle);
           rez.serialize(color);
+          pack_valid_ref(rez);
         }
         rez.dispatch(owner_space);
       }
@@ -648,14 +648,14 @@ namespace Legion {
       }
       RtUserEvent ready_event = Runtime::create_rt_user_event();
 
-      DistributedID child_id = 0;
+      std::pair<DistributedID, LamportClock> child_result(0, 0);
       IndexSpaceChildRequest rez;
       {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(c);
         if (defer == nullptr)
-          rez.serialize(&child_id);
+          rez.serialize(&child_result);
         else
           rez.serialize<DistributedID*>(nullptr);
         rez.serialize(ready_event);
@@ -664,7 +664,7 @@ namespace Legion {
       if (defer == nullptr)
       {
         ready_event.wait();
-        if (child_id == 0)
+        if (child_result.first == 0)
         {
           if (can_fail)
             return nullptr;
@@ -674,12 +674,12 @@ namespace Legion {
           error.raise();
         }
         IndexPartition child_handle(
-            child_id, handle.get_tree_id(), handle.get_type_tag());
+            child_result.first, handle.get_tree_id(), handle.get_type_tag());
         IndexPartNode* result = runtime->get_node(child_handle);
         if (can_fail)
           result->add_base_resource_ref(REGION_TREE_REF);
         // Always unpack the global ref that got sent back with this
-        result->unpack_global_ref();
+        result->unpack_global_ref(child_result.second);
         return result;
       }
       else
@@ -868,6 +868,21 @@ namespace Legion {
         return;
       if (target == source)
         return;
+      IndexSpaceSet rez;
+      {
+        RezCheck z(rez);
+        if (node->parent != nullptr)
+        {
+          rez.serialize(node->parent->handle);
+          rez.serialize(node->color);
+        }
+        else
+        {
+          rez.serialize(IndexPartition::NO_PART);
+          rez.serialize(node->handle);
+        }
+        node->pack_index_space(rez, 1 /*reference count*/);
+      }
       rez.dispatch(target);
     }
 
@@ -1121,13 +1136,7 @@ namespace Legion {
         if (target->parent == nullptr)
         {
           if (target->check_valid_and_increment(REGION_TREE_REF))
-          {
             valid = true;
-            target->pack_valid_ref();
-            target->remove_base_valid_ref(REGION_TREE_REF);
-          }
-          else
-            target->pack_global_ref();
         }
         else
         {
@@ -1137,21 +1146,13 @@ namespace Legion {
           {
             valid = true;
             recurse = true;
-            target->parent->pack_valid_ref();
-            target->parent->remove_base_valid_ref(REGION_TREE_REF);
           }
           else
           {
             // We need the state to remain the same while we are in
             // transit so see if this can still be made valid
             if (target->check_valid_and_increment(REGION_TREE_REF))
-            {
               valid = true;
-              target->pack_valid_ref();
-              target->remove_base_valid_ref(REGION_TREE_REF);
-            }
-            else
-              target->pack_global_ref();
           }
         }
         target->send_node(source, recurse, valid);
@@ -1163,6 +1164,21 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(valid);
           rez.serialize(recurse);
+          if (valid)
+          {
+            if (recurse)
+            {
+              target->parent->pack_valid_ref(rez);
+              target->parent->remove_base_valid_ref(REGION_TREE_REF);
+            }
+            else
+            {
+              target->pack_valid_ref(rez);
+              target->remove_base_valid_ref(REGION_TREE_REF);
+            }
+          }
+          else
+            target->pack_global_ref(rez);
         }
         rez.dispatch(source);
       }
@@ -1189,12 +1205,12 @@ namespace Legion {
       if (valid)
       {
         if (recurse)
-          node->parent->unpack_valid_ref();
+          node->parent->unpack_valid_ref(derez);
         else
-          node->unpack_valid_ref();
+          node->unpack_valid_ref(derez);
       }
       else
-        node->unpack_global_ref();
+        node->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -1207,7 +1223,7 @@ namespace Legion {
       derez.deserialize(handle);
       LegionColor child_color;
       derez.deserialize(child_color);
-      DistributedID* target;
+      std::pair<DistributedID, LamportClock>* target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -1236,7 +1252,7 @@ namespace Legion {
             rez.serialize(child->handle);
             rez.serialize(target);
             rez.serialize(to_trigger);
-            child->pack_global_ref();
+            child->pack_global_ref(rez);
           }
           rez.dispatch(source);
           if (child->remove_base_gc_ref(REGION_TREE_REF))
@@ -1267,7 +1283,7 @@ namespace Legion {
             rez.serialize(child->handle);
             rez.serialize(target);
             rez.serialize(to_trigger);
-            child->pack_global_ref();
+            child->pack_global_ref(rez);
           }
           rez.dispatch(source);
           if (child->remove_base_gc_ref(REGION_TREE_REF))
@@ -1290,7 +1306,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      DistributedID* target;
+      std::pair<DistributedID, LamportClock>* target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -1300,7 +1316,7 @@ namespace Legion {
         // unpack the global reference we added on the remote node
         // since there's nothing on the local node that is going to do it
         IndexPartNode* child = runtime->get_node(handle);
-        child->unpack_global_ref();
+        child->unpack_global_ref(derez);
         Runtime::trigger_event(to_trigger);
       }
       else
@@ -1309,7 +1325,8 @@ namespace Legion {
         runtime->get_node(handle, &defer);
         // We'll update references and unpack the remote reference on
         // the requester here so there's no need to block waiting
-        *target = handle.get_id(false /*filter*/);
+        target->first = handle.get_id(false /*filter*/);
+        target->second = IndexSpaceNode::unpack_global_ref_clock(derez);
         Runtime::trigger_event(to_trigger, defer);
       }
     }
@@ -1456,7 +1473,7 @@ namespace Legion {
 
       IndexSpaceNode* node = runtime->get_node(handle);
       node->release_color(color);
-      node->unpack_valid_ref();
+      node->unpack_valid_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -1483,7 +1500,7 @@ namespace Legion {
         rez.serialize<bool>(false /*local*/);
         rez.serialize<bool>(true /*index space*/);
         rez.serialize(handle);
-        pack_global_ref();
+        pack_global_ref(rez);
       }
       else
       {
@@ -3363,15 +3380,15 @@ namespace Legion {
                 target->collective_mapping->find_nearest(source));
           }
         }
-        target->pack_valid_ref();
-        target->send_node(source, true /*recurse*/);
         // Now send back the results
         IndexPartitionReturn rez;
         {
           RezCheck z(rez);
           rez.serialize(to_trigger);
           rez.serialize(handle);
+          target->pack_valid_ref(rez);
         }
+        target->send_node(source, true /*recurse*/);
         rez.dispatch(source);
       }
       else
@@ -3390,7 +3407,7 @@ namespace Legion {
       IndexPartition handle;
       derez.deserialize(handle);
       IndexPartNode* node = runtime->get_node(handle);
-      node->unpack_valid_ref();
+      node->unpack_valid_ref(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -127,6 +127,7 @@ namespace Legion {
     protected:
       // At most one expression per field
       ViewExprs conditions;
+      mutable std::map<LogicalView*, LamportClock> lamport_clocks;
       bool has_collective_views;
     };
 

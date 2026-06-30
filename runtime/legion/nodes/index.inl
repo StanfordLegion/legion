@@ -409,22 +409,7 @@ namespace Legion {
         {
           // We're the owner, send messages to everyone else that we've
           // sent this node to except the source
-          IndexSpaceSet rez;
-          {
-            RezCheck z(rez);
-            if (parent != nullptr)
-            {
-              rez.serialize(parent->handle);
-              rez.serialize(color);
-            }
-            else
-            {
-              rez.serialize(IndexPartition::NO_PART);
-              rez.serialize(handle);
-            }
-            pack_index_space(rez, count_remote_instances());
-          }
-          IndexSpaceSetFunctor functor(source, rez);
+          IndexSpaceSetFunctor functor(source, this);
           map_over_remote_instances(functor);
         }
       }

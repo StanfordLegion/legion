@@ -151,8 +151,10 @@ namespace Legion {
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
     public:
-      void pack_valid_ref(void);
-      void unpack_valid_ref(void);
+      void pack_valid_ref(Serializer& rez);
+      void pack_valid_ref(LamportClock& lamport_clock);
+      void unpack_valid_ref(Deserializer& derez);
+      void unpack_valid_ref(LamportClock lamport_clock);
     protected:
       friend class GarbageCollectionAcquireResponse;
       // Internal valid reference counting
@@ -179,7 +181,8 @@ namespace Legion {
       bool can_collect(bool& already_collected) const;
       bool acquire_collect(
           std::set<ApEvent>& gc_events, uint64_t& sent_valid,
-          uint64_t& received_valid);
+          uint64_t& received_valid, LamportClock lamport_clock,
+          LamportClock& collect_clock);
       bool collect(
           RtEvent& collected, PhysicalInstance* hole = nullptr,
           AutoLock* i_lock = nullptr);
@@ -223,7 +226,8 @@ namespace Legion {
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode* privilege_node);
       void record_instance_user(ApEvent term_event, std::set<RtEvent>& applied);
-      void process_remote_reference_mismatch(uint64_t sent, uint64_t received);
+      void process_remote_reference_mismatch(
+          uint64_t sent, uint64_t received, LamportClock lamport_clock);
       void find_shutdown_preconditions(std::set<ApEvent>& preconditions);
     public:
       bool meets_regions(
@@ -310,6 +314,21 @@ namespace Legion {
       std::atomic<int> valid_references;
 #endif
       uint64_t sent_valid_references, received_valid_references;
+      // Lamport clock for the valid-reference instance-collection protocol
+      // (analogous to DistributedCollectable::downgrade_lamport_clock, but for
+      // this separate protocol and guarded by inst_lock). Stamped onto packed
+      // valid references and merged on unpack so that a valid reference packed
+      // after a node has committed its contribution to a collection round can
+      // be detected and force the round to fail and retry.
+      LamportClock collect_lamport_clock;
+      // Snapshot of collect_lamport_clock for the in-progress collection round
+      // (the round's cutoff). The round is only allowed to succeed if no node
+      // observed a packed valid reference newer than this snapshot, i.e. if
+      // collect_lamport_clock <= pending_collect_lamport_clock.
+      LamportClock pending_collect_lamport_clock;
+      // Whether the next packed valid reference must bump the clock (armed once
+      // we accumulate/freeze our counts for a collection round).
+      bool bump_collect_lamport_clock;
       std::map<unsigned, Reservation>* padded_reservations;
 #ifdef LEGION_DEBUG_GC
     private:

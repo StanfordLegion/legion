@@ -76,8 +76,14 @@ namespace Legion {
       FillView& operator=(const FillView& rhs) = delete;
     public:
       virtual void notify_local(void) override { /*nothing to do*/ }
-      virtual void pack_valid_ref(void) override;
-      virtual void unpack_valid_ref(void) override;
+      virtual void pack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
+      virtual void unpack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
     public:
       virtual void send_view(AddressSpaceID target) override;
     public:

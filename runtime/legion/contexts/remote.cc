@@ -317,9 +317,9 @@ namespace Legion {
         rez.serialize(source_space);
         rez.serialize(req_index);
         rez.serialize(set->did);
-        set->pack_global_ref();
         rez.serialize(mask);
         rez.serialize(recorded);
+        set->pack_global_ref(rez);
       }
       rez.dispatch(owner_space);
       return recorded;
@@ -561,7 +561,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < created_nodes.size(); idx++)
         {
           RegionNode* region = created_nodes[idx];
-          region->pack_global_ref();
           rez.serialize(region->handle);
           local::FieldMaskMap<EquivalenceSet> eq_sets;
           created_trees[idx]->find_local_equivalence_sets(
@@ -571,14 +570,16 @@ namespace Legion {
                    eq_sets.begin();
                it != eq_sets.end(); it++)
           {
-            it->first->pack_global_ref();
             rez.serialize(it->first->did);
             rez.serialize(it->second);
+            it->first->pack_global_ref(rez);
           }
         }
         rez.serialize(done_event);
+        for (unsigned idx = 0; idx < created_nodes.size(); idx++)
+          created_nodes[idx]->pack_global_ref(rez);
+        pack_global_ref(rez);
       }
-      pack_global_ref();
       rez.dispatch(owner_space);
       applied_events.insert(done_event);
     }
@@ -612,7 +613,6 @@ namespace Legion {
         // happy here. In release mode we know we're safe because we
         // still have the packed reference we were sent with
         legion_no_skip_assert(node->check_global_and_increment(META_TASK_REF));
-        node->unpack_global_ref();
 #endif
         created_nodes[idx1] = node;
         EqKDTree* tree = node->row_source->create_equivalence_set_kd_tree(
@@ -632,7 +632,7 @@ namespace Legion {
             ready.wait();
           set->set_expr->initialize_equivalence_set_kd_tree(
               tree, set, mask, source_shard, true /*current*/);
-          set->unpack_global_ref();
+          set->unpack_global_ref(derez);
         }
         tree->add_reference();
         created_trees[idx1] = tree;
@@ -650,17 +650,16 @@ namespace Legion {
             done_event, Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(done_event);
+      for (RegionNode* node : created_nodes) node->unpack_global_ref(derez);
 #ifdef LEGION_DEBUG
       for (RegionNode* node : created_nodes)
         if (node->remove_base_gc_ref(META_TASK_REF))
           delete node;
-#else
-      for (RegionNode* node : created_nodes) node->unpack_global_ref();
 #endif
       for (EqKDTree* it : created_trees)
         if ((it != nullptr) && it->remove_reference())
           delete it;
-      context->unpack_global_ref();
+      context->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -797,7 +796,7 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
-      context->unpack_global_ref();
+      context->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------

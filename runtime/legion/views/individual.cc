@@ -1155,19 +1155,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualView::pack_valid_ref(void)
+    void IndividualView::pack_valid_ref(
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
     //--------------------------------------------------------------------------
     {
-      pack_global_ref();
-      manager->pack_valid_ref();
+      if (view_lamport_clocks.find(this) == view_lamport_clocks.end())
+        pack_global_ref(view_lamport_clocks[this]);
+      if (inst_lamport_clocks.find(manager) == inst_lamport_clocks.end())
+        manager->pack_valid_ref(inst_lamport_clocks[manager]);
     }
 
     //--------------------------------------------------------------------------
-    void IndividualView::unpack_valid_ref(void)
+    void IndividualView::unpack_valid_ref(
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
     //--------------------------------------------------------------------------
     {
-      manager->unpack_valid_ref();
-      unpack_global_ref();
+      shrt::map<LogicalView*, LamportClock>::iterator view_finder =
+          view_lamport_clocks.find(this);
+      if (view_finder != view_lamport_clocks.end())
+      {
+        unpack_global_ref(view_finder->second);
+        view_lamport_clocks.erase(view_finder);
+      }
+      shrt::map<PhysicalManager*, LamportClock>::iterator inst_finder =
+          inst_lamport_clocks.find(manager);
+      if (inst_finder != inst_lamport_clocks.end())
+      {
+        manager->unpack_valid_ref(inst_finder->second);
+        inst_lamport_clocks.erase(inst_finder);
+      }
     }
 
     //--------------------------------------------------------------------------

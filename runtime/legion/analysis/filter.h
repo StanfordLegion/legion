@@ -37,7 +37,8 @@ namespace Legion {
           unsigned index, RegionNode* node, const PhysicalTraceInfo& trace_info,
           const op::FieldMaskMap<InstanceView>& filter_views,
           CollectiveMapping* mapping, const bool first_local,
-          const bool remove_restriction);
+          const bool remove_restriction,
+          std::map<InstanceView*, LamportClock>&& clocks);
       FilterAnalysis(const FilterAnalysis& rhs) = delete;
       virtual ~FilterAnalysis(void);
     public:
@@ -56,6 +57,7 @@ namespace Legion {
           const bool already_deferred = false) override;
     public:
       op::FieldMaskMap<InstanceView> filter_views;
+      const std::map<InstanceView*, LamportClock> remote_lamport_clocks;
       const bool remove_restriction;
     };
 

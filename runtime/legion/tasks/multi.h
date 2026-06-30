@@ -31,9 +31,23 @@ namespace Legion {
     class MultiTask
       : public PointwiseAnalyzable<CollectiveViewCreator<TaskOp> > {
     public:
+      struct PackedFutureHandle {
+      public:
+        PackedFutureHandle(void) = default;
+        PackedFutureHandle(const PackedFutureHandle&) = delete;
+        ~PackedFutureHandle(void) { legion_assert(released); }
+      public:
+        PackedFutureHandle& operator=(const PackedFutureHandle&) = delete;
+      public:
+        DistributedID future_did = 0;
+        LamportClock lamport_clock = 0;
+#ifdef LEGION_DEBUG
+        mutable std::atomic<bool> released = false;
+#endif
+      };
       struct FutureHandles : public Collectable {
       public:
-        std::map<DomainPoint, DistributedID> handles;
+        std::map<DomainPoint, PackedFutureHandle> handles;
       };
       struct ConcurrentGroup {
         ConcurrentGroup(void)

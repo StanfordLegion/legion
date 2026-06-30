@@ -737,14 +737,13 @@ namespace Legion {
       else
       {
         legion_assert(future_handles != nullptr);
-        std::map<DomainPoint, DistributedID>::const_iterator finder =
+        std::map<DomainPoint, PackedFutureHandle>::const_iterator finder =
             future_handles->handles.find(point);
         legion_assert(finder != future_handles->handles.end());
         const ContextCoordinate coordinate(future_map_coordinate, point);
-        RtEvent registered;
         FutureImpl* impl = runtime->find_or_create_future(
-            finder->second, parent_ctx->did, coordinate, get_provenance(),
-            false /*has global reference*/, registered);
+            finder->second.future_did, parent_ctx->did, coordinate,
+            get_provenance());
         if (functor != nullptr)
         {
           legion_assert(instance == nullptr);
@@ -753,11 +752,8 @@ namespace Legion {
         }
         else
           impl->set_result(effects, instance, metadata, metasize);
-        if (registered.exists())
-        {
-          AutoLock o_lock(op_lock);
-          commit_preconditions.insert(registered);
-        }
+        legion_assert(!finder->second.released.exchange(true));
+        impl->unpack_global_ref(finder->second.lamport_clock);
       }
     }
 
@@ -884,14 +880,13 @@ namespace Legion {
       if (elide_future_return || (redop > 0))
         return;
       legion_assert(future_handles != nullptr);
-      std::map<DomainPoint, DistributedID>::const_iterator finder =
+      std::map<DomainPoint, PackedFutureHandle>::const_iterator finder =
           future_handles->handles.find(point);
       legion_assert(finder != future_handles->handles.end());
       const ContextCoordinate coordinate(future_map_coordinate, point);
-      RtEvent registered;
       FutureImpl* impl = runtime->find_or_create_future(
-          finder->second, parent_ctx->did, coordinate, get_provenance(),
-          false /*has global reference*/, registered);
+          finder->second.future_did, parent_ctx->did, coordinate,
+          get_provenance());
       if (predicate_false_future.impl == nullptr)
       {
         if (predicate_false_result.get_size() > 0)
@@ -903,11 +898,8 @@ namespace Legion {
       }
       else
         impl->set_result(execution_context, predicate_false_future.impl);
-      if (registered.exists())
-      {
-        AutoLock o_lock(op_lock);
-        commit_preconditions.insert(registered);
-      }
+      legion_assert(!finder->second.released.exchange(true));
+      impl->unpack_global_ref(finder->second.lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -1060,22 +1052,18 @@ namespace Legion {
         return;
       legion_assert(!elide_future_return);
       legion_assert(future_handles != nullptr);
-      const std::map<DomainPoint, DistributedID>& handles =
+      const std::map<DomainPoint, PackedFutureHandle>& handles =
           future_handles->handles;
-      std::map<DomainPoint, DistributedID>::const_iterator finder =
+      std::map<DomainPoint, PackedFutureHandle>::const_iterator finder =
           handles.find(point);
       legion_assert(finder != handles.end());
       const ContextCoordinate coordinate(future_map_coordinate, point);
-      RtEvent registered;
       FutureImpl* impl = runtime->find_or_create_future(
-          finder->second, parent_ctx->did, coordinate, get_provenance(),
-          false /*has global reference*/, registered);
+          finder->second.future_did, parent_ctx->did, coordinate,
+          get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
-      if (registered.exists())
-      {
-        AutoLock o_lock(op_lock);
-        commit_preconditions.insert(registered);
-      }
+      // Keep holding the packed reference until the future itself is set
+      legion_assert(!finder->second.released);
     }
 
     //--------------------------------------------------------------------------
