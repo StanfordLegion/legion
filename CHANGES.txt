@@ -1,6 +1,31 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 26.06.0 (June 30, 2026)
+  * Legion
+    - The emphasis on this release was fixing stability bugs. Legion
+      has been aggressively fuzzed all quarter to identify and fix
+      correctness bugs. 
+    - After doing detailed profiling of Legion's critical path logging
+      for the profiler, we decided to switch the polarity of the 
+      default setting so that it is off and must now be opted into
+      by clients. Critical path logging was routinely adding a 50-100%
+      overhead to execution. You can still manually opt into crtical
+      path logging with -lg:prof_critical_paths flag.
+  * Realm
+    - Realm has also been aggressively fuzzed to fix a number of 
+      correctness bugs. This includes a significant fix for Realm's
+      FastReservation locking mechanism.
+    - Realm now will run planning for copies on its background worker
+      threads if planning cannot be completed within a responsive 
+      time budget (default 10us).
+    - Realm has a new internal active message infrastructure that will
+      automatically fragment active messages with large payloads whenever
+      necessary. This fixes a number of crashes that have been observed
+      where GASNet or UCX would complain about overly large payloads.
+    - Realm's networking layer has a new quiescence algorithm for 
+      identifying when it is safe to shutdown the network.
+
 Version 26.03.0 (March 27, 2026)
   * Legion
     - Legion now logs geometry information about index spaces for 
