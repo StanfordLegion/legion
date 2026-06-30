@@ -1985,17 +1985,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceUnion<DIM, T>::invalidate_operation(void)
+    void IndexSpaceUnion<DIM, T>::invalidate_operation(
+        IndexSpaceExpression* source)
     //--------------------------------------------------------------------------
     {
-      // Make sure we only do this one time
-      if (this->invalidated.fetch_add(1) > 0)
-        return false;
       // Remove the parent operation from all the sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        sub_expressions[idx]->remove_derived_operation(this);
-      // We were successfully removed
-      return true;
+        if (sub_expressions[idx] != source)
+          sub_expressions[idx]->remove_derived_operation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2113,17 +2110,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceIntersection<DIM, T>::invalidate_operation(void)
+    void IndexSpaceIntersection<DIM, T>::invalidate_operation(
+        IndexSpaceExpression* source)
     //--------------------------------------------------------------------------
     {
-      // Make sure we only do this one time
-      if (this->invalidated.fetch_add(1) > 0)
-        return false;
       // Remove the parent operation from all the sub expressions
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
-        sub_expressions[idx]->remove_derived_operation(this);
-      // We were successfully removed
-      return true;
+        if (sub_expressions[idx] != source)
+          sub_expressions[idx]->remove_derived_operation(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2250,19 +2244,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceDifference<DIM, T>::invalidate_operation(void)
+    void IndexSpaceDifference<DIM, T>::invalidate_operation(
+        IndexSpaceExpression* source)
     //--------------------------------------------------------------------------
     {
-      // Make sure we only do this one time
-      if (this->invalidated.fetch_add(1) > 0)
-        return false;
       // Remove the parent operation from all the sub expressions
-      if (lhs != nullptr)
+      if ((lhs != nullptr) && (lhs != source))
         lhs->remove_derived_operation(this);
-      if ((rhs != nullptr) && (lhs != rhs))
+      if ((rhs != nullptr) && (lhs != rhs) && (rhs != source))
         rhs->remove_derived_operation(this);
-      // We were successfully removed
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2350,7 +2340,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool InternalExpression<DIM, T>::invalidate_operation(void)
+    void InternalExpression<DIM, T>::invalidate_operation(
+        IndexSpaceExpression* source)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2408,7 +2399,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool RemoteExpression<DIM, T>::invalidate_operation(void)
+    void RemoteExpression<DIM, T>::invalidate_operation(
+        IndexSpaceExpression* source)
     //--------------------------------------------------------------------------
     {
       // should never be called

@@ -174,27 +174,29 @@ namespace Legion {
      */
     class ImplicitReferenceTracker {
     public:
-      ImplicitReferenceTracker(void) { }
+      ImplicitReferenceTracker(bool push = true);
       ImplicitReferenceTracker(const ImplicitReferenceTracker&) = delete;
       ~ImplicitReferenceTracker(void);
     public:
       ImplicitReferenceTracker& operator=(const ImplicitReferenceTracker&) =
           delete;
     public:
-      static inline void record_live_expression(IndexSpaceExpression* expr)
-      {
-        if (implicit_reference_tracker == nullptr)
-        {
-          // Should always be inside a Legion/Realm task for this
-          // If we're not we might not check at the end of the task
-          // to clean up these references so this avoids leaking
-          legion_assert(Processor::get_executing_processor().exists());
-          implicit_reference_tracker = new ImplicitReferenceTracker;
-        }
-        implicit_reference_tracker->live_expressions.emplace_back(expr);
-      }
+      static inline void record_live_expression(IndexSpaceExpression* expr);
+      static inline void record_invalid_operation(IndexSpaceOperation* op);
+      void push_reference_tracker(void);
+      void pop_reference_tracker(void);
+      void handoff_reference_tracker(ImplicitReferenceTracker& next);
+      void invalidate_operations(void);
+    public:
+      size_t count_invalid_operations(void) const;
+      IndexSpaceOperation* get_invalid_operation(unsigned index) const;
+    private:
+      void drain_tracked_references(void);
     private:
       std::vector<IndexSpaceExpression*> live_expressions;
+      std::vector<IndexSpaceOperation*> invalid_operations;
+      ImplicitReferenceTracker* previous = nullptr;
+      bool pending_invalidation = false;
     };
 
     /**

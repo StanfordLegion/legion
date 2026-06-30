@@ -40,7 +40,8 @@ namespace Legion {
    * context when they pass in a non-nullptr one.
    */
   template<Internal::RuntimeCallKind KIND>
-  class AutoCall : public Internal::AutoProvenance {
+  class AutoCall : public Internal::AutoProvenance,
+                   public Internal::ImplicitReferenceTracker {
   public:
     // no string versions
     inline AutoCall(void)

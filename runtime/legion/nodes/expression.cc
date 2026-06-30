@@ -89,41 +89,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock e_lock(expr_lock);
-      legion_assert(derived_operations.find(op) != derived_operations.end());
+      legion_assert(
+          derived_operations.empty() ||
+          (derived_operations.find(op) != derived_operations.end()));
       derived_operations.erase(op);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceExpression::invalidate_derived_operations(DistributedID did)
+    void IndexSpaceExpression::invalidate_derived_operations(void)
     //--------------------------------------------------------------------------
     {
       // Traverse upwards for any derived operations and invalidate them
-      std::vector<IndexSpaceOperation*> derived;
+      const size_t previous_operations =
+          implicit_reference_tracker->count_invalid_operations();
       {
-        AutoLock e_lock(expr_lock, false /*exclusive*/);
-        if (!derived_operations.empty())
-        {
-          derived.reserve(derived_operations.size());
-          for (IndexSpaceOperation* const operation : derived_operations)
-          {
-            operation->add_nested_resource_ref(did);
-            derived.emplace_back(operation);
-          }
-        }
+        AutoLock e_lock(expr_lock);
+        for (IndexSpaceOperation* const operation : derived_operations)
+          if (operation->own_invalidation())
+            // Note the REGION_TREE_REF keeps this alive until the implicit
+            // reference counter is able to reclaim it
+            ImplicitReferenceTracker::record_invalid_operation(operation);
+        derived_operations.clear();
       }
-      if (!derived.empty())
+      for (unsigned idx = previous_operations;
+           idx < implicit_reference_tracker->count_invalid_operations(); idx++)
       {
-        for (IndexSpaceOperation* const operation : derived)
-        {
-          // Try to invalidate it and remove the tree reference if we did
-          if (operation->invalidate_operation() &&
-              operation->remove_base_gc_ref(REGION_TREE_REF))
-            std::abort();  // should never delete since we have a resource ref
-          // Remove any references that we have on the parents
-          if (operation->remove_nested_resource_ref(did))
-            delete operation;
-        }
+        IndexSpaceOperation* operation =
+            implicit_reference_tracker->get_invalid_operation(idx);
+        operation->invalidate_operation(this);
       }
+      implicit_reference_tracker->invalidate_operations();
     }
 
     //--------------------------------------------------------------------------
@@ -264,7 +259,7 @@ namespace Legion {
       : IndexSpaceExpression(tag, inter_lock),
         DistributedCollectable(LEGION_DISTRIBUTED_HELP_ENCODE(
             runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC)),
-        origin_expr(this), op_kind(kind), invalidated(0)
+        origin_expr(this), op_kind(kind)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -279,7 +274,7 @@ namespace Legion {
         TypeTag tag, IndexSpaceExprID eid, DistributedID did,
         IndexSpaceOperation* origin)
       : IndexSpaceExpression(tag, eid, inter_lock), DistributedCollectable(did),
-        origin_expr(origin), op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
+        origin_expr(origin), op_kind(REMOTE_EXPRESSION_KIND)
     //--------------------------------------------------------------------------
     {
       legion_assert(!is_owner());
@@ -302,7 +297,7 @@ namespace Legion {
       if (!is_owner())
         runtime->unregister_remote_expression(expr_id);
       // Invalidate any derived operations
-      invalidate_derived_operations(did);
+      invalidate_derived_operations();
       // Remove this operation from the region tree
       remove_operation();
       IndexSpaceExpression* canon = canonical.load();
@@ -390,6 +385,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return remove_nested_resource_ref(id, count);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceOperation::own_invalidation(void)
+    //--------------------------------------------------------------------------
+    {
+      return !invalidated.exchange(true);
     }
 
     /////////////////////////////////////////////////////////////

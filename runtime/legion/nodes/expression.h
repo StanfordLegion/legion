@@ -184,7 +184,7 @@ namespace Legion {
     public:
       void add_derived_operation(IndexSpaceOperation* op);
       void remove_derived_operation(IndexSpaceOperation* op);
-      void invalidate_derived_operations(DistributedID did);
+      void invalidate_derived_operations(void);
     public:
       inline bool is_empty(void)
       {
@@ -353,7 +353,8 @@ namespace Legion {
       virtual bool remove_tree_expression_reference(
           DistributedID source, unsigned count = 1) override;
     public:
-      virtual bool invalidate_operation(void) = 0;
+      bool own_invalidation(void);
+      virtual void invalidate_operation(IndexSpaceExpression* source) = 0;
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(
           IndexSpace handle, RtEvent initialized, Provenance* provenance,
@@ -365,7 +366,7 @@ namespace Legion {
     protected:
       mutable LocalLock inter_lock;
       std::deque<ApEvent> index_space_users;
-      std::atomic<int> invalidated;
+      std::atomic<bool> invalidated = false;
     };
 
     template<int DIM, typename T>
@@ -388,7 +389,8 @@ namespace Legion {
       virtual void pack_expression(
           Serializer& rez, AddressSpaceID target) override;
       virtual void skip_unpack_expression(Deserializer& derez) const override;
-      virtual bool invalidate_operation(void) override = 0;
+      virtual void invalidate_operation(
+          IndexSpaceExpression* source) override = 0;
       virtual void remove_operation(void) override = 0;
       virtual IndexSpaceNode* create_node(
           IndexSpace handle, RtEvent initialized, Provenance* provenance,
@@ -497,7 +499,7 @@ namespace Legion {
     public:
       IndexSpaceUnion& operator=(const IndexSpaceUnion& rhs) = delete;
     public:
-      virtual bool invalidate_operation(void) override;
+      virtual void invalidate_operation(IndexSpaceExpression* source) override;
       virtual void remove_operation(void) override;
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
@@ -538,7 +540,7 @@ namespace Legion {
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection& rhs) =
           delete;
     public:
-      virtual bool invalidate_operation(void) override;
+      virtual void invalidate_operation(IndexSpaceExpression* source) override;
       virtual void remove_operation(void) override;
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
@@ -579,7 +581,7 @@ namespace Legion {
     public:
       IndexSpaceDifference& operator=(const IndexSpaceDifference& rhs) = delete;
     public:
-      virtual bool invalidate_operation(void) override;
+      virtual void invalidate_operation(IndexSpaceExpression* source) override;
       virtual void remove_operation(void) override;
     protected:
       IndexSpaceExpression* const lhs;
@@ -629,7 +631,7 @@ namespace Legion {
     public:
       InternalExpression& operator=(const InternalExpression& rhs) = delete;
     public:
-      virtual bool invalidate_operation(void) override;
+      virtual void invalidate_operation(IndexSpaceExpression* source) override;
       virtual void remove_operation(void) override;
     };
 
@@ -686,7 +688,7 @@ namespace Legion {
     public:
       RemoteExpression& operator=(const RemoteExpression& op) = delete;
     public:
-      virtual bool invalidate_operation(void) override;
+      virtual void invalidate_operation(IndexSpaceExpression* source) override;
       virtual void remove_operation(void) override;
     };
 

@@ -39,10 +39,11 @@ namespace Legion {
       : DistributedCollectable(id, perform_registration, mapping),
         owner_task(owner), regions(reqs), output_reqs(out_reqs), depth(d),
         executing_processor(Processor::NO_PROC), inlined_tasks(0),
-        total_tunable_count(0), overhead_profiler(nullptr),
-        implicit_task_profiler(nullptr), implicit_effects(nullptr),
-        safe_cast_semaphore(0), task_executed(false), mutable_priority(false),
-        inline_task(inline_t), implicit_task(implicit_t)
+        total_tunable_count(0), reference_tracker(false),
+        overhead_profiler(nullptr), implicit_task_profiler(nullptr),
+        implicit_effects(nullptr), safe_cast_semaphore(0), task_executed(false),
+        mutable_priority(false), inline_task(inline_t),
+        implicit_task(implicit_t)
     //--------------------------------------------------------------------------
     {
       if (implicit_task && (runtime->profiler != nullptr))
@@ -568,6 +569,7 @@ namespace Legion {
       implicit_enclosing_context = did;
       implicit_provenance = 0;
       implicit_unique_op_id = owner_task->get_unique_op_id();
+      reference_tracker.push_reference_tracker();
       if (overhead_profiler != nullptr)
         overhead_profiler->previous_profiling_time =
             Realm::Clock::current_time_in_nanoseconds();
@@ -756,6 +758,10 @@ namespace Legion {
       // are recorded to this context when we wait on events
       implicit_context = nullptr;
       implicit_enclosing_context = 0;
+      // Move tracking off the context before post_end_task, which can delete
+      // us.
+      ImplicitReferenceTracker end_tracker(false /*push*/);
+      reference_tracker.handoff_reference_tracker(end_tracker);
       // If this is an implicit top-level task then we need to finish
       // the implicit profiling of the execution of that top-level task
       // now that everything else is done running
@@ -1082,6 +1088,28 @@ namespace Legion {
       else
         task_local_variables[id] = std::pair<void*, void (*)(void*)>(
             const_cast<void*>(value), destructor);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::bind(void)
+    //--------------------------------------------------------------------------
+    {
+      implicit_context = this;
+      implicit_enclosing_context = did;
+      implicit_fevent = owner_task->get_completion_event();
+      implicit_unique_op_id = owner_task->get_unique_op_id();
+      reference_tracker.push_reference_tracker();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::unbind(void)
+    //--------------------------------------------------------------------------
+    {
+      implicit_context = nullptr;
+      implicit_enclosing_context = 0;
+      implicit_unique_op_id = 0;
+      implicit_fevent = LgEvent::NO_LG_EVENT;
+      reference_tracker.pop_reference_tracker();
     }
 
     //--------------------------------------------------------------------------

@@ -11633,11 +11633,7 @@ namespace Legion {
         fatal << "Need support for profiling unbind implicit top-level tasks";
         fatal.raise();
       }
-      else
-        implicit_fevent = LgEvent::NO_LG_EVENT;
-      implicit_context = nullptr;
-      implicit_enclosing_context = 0;
-      implicit_unique_op_id = 0;
+      ctx->unbind();
     }
 
     //--------------------------------------------------------------------------
@@ -11676,10 +11672,7 @@ namespace Legion {
         fatal << "Need support for profiling binding implicit top-level tasks";
         fatal.raise();
       }
-      implicit_context = ctx;
-      implicit_enclosing_context = ctx->did;
-      implicit_fevent = ctx->owner_task->get_completion_event();
-      implicit_unique_op_id = ctx->owner_task->get_unique_op_id();
+      ctx->bind();
     }
 
     //--------------------------------------------------------------------------
@@ -13126,9 +13119,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::legion_runtime_task(
-        const void* args, size_t arglen, const void* userdata, size_t userlen,
-        Processor p)
+    Runtime::AutoMetaTask::AutoMetaTask(LgTaskID t, bool app_proc_task) : tid(t)
     //--------------------------------------------------------------------------
     {
       // Make sure implicit_context is a nullptr so that we know that
@@ -13139,15 +13130,12 @@ namespace Legion {
         implicit_context = nullptr;
         // We should only have an implicit context if we're on an application
         // processor and that should only happen if we don't have any
-        // utility processors
-        legion_assert(runtime->local_utils.empty());
+        // utility processors for non-application-processor tasks
+        legion_assert(app_proc_task || runtime->local_utils.empty());
       }
-      legion_assert(implicit_reference_tracker == nullptr);
       // We immediately bump the priority of all meta-tasks once they start
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
-      LgTaskID tid;
-      std::memcpy(&tid, args, sizeof(tid));
       if (runtime->profiler != nullptr)
       {
         implicit_fevent = LgEvent(Processor::get_current_finish_event());
@@ -13158,20 +13146,34 @@ namespace Legion {
         if (tid == LG_MESSAGE_ID)
           runtime->profiler->increment_outstanding_message_request();
       }
-      legion_assert(tid < LG_LAST_TASK_ID);
-      void (*handler)(const void*, size_t) = meta_task_table[tid];
-      legion_assert(handler != nullptr);
-      (*handler)(args, arglen);
-      if (implicit_reference_tracker != nullptr)
-      {
-        delete implicit_reference_tracker;
-        implicit_reference_tracker = nullptr;
-      }
-      if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
-        runtime->decrement_total_outstanding_tasks(tid, true /*meta*/);
+    }
+
+    //--------------------------------------------------------------------------
+    Runtime::AutoMetaTask::~AutoMetaTask(void)
+    //--------------------------------------------------------------------------
+    {
 #ifdef LEGION_DEBUG_SHUTDOWN_HANG
       runtime->outstanding_counts[tid].fetch_sub(1);
 #endif
+      if (tid < LG_BEGIN_SHUTDOWN_TASK_IDS)
+        runtime->decrement_total_outstanding_tasks(tid, true /*meta*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_runtime_task(
+        const void* args, size_t arglen, const void* userdata, size_t userlen,
+        Processor p)
+    //--------------------------------------------------------------------------
+    {
+      LgTaskID tid;
+      std::memcpy(&tid, args, sizeof(tid));
+      legion_assert(tid < LG_LAST_TASK_ID);
+      AutoMetaTask task(tid, false /*application task*/);
+      legion_assert(implicit_reference_tracker == nullptr);
+      ImplicitReferenceTracker tracker;
+      void (*handler)(const void*, size_t) = meta_task_table[tid];
+      legion_assert(handler != nullptr);
+      (*handler)(args, arglen);
     }
 
     //--------------------------------------------------------------------------
@@ -13297,33 +13299,15 @@ namespace Legion {
         Processor p)
     //--------------------------------------------------------------------------
     {
-      if (implicit_context != nullptr)
-        implicit_context = nullptr;
-      legion_assert(implicit_reference_tracker == nullptr);
-      if (runtime->profiler != nullptr)
-      {
-        implicit_fevent = LgEvent(Processor::get_current_finish_event());
-        if (implicit_profiler == nullptr)
-          runtime->profiler->instantiate_profiling_instance();
-      }
-      // We immediately bump the priority of all meta-tasks once they start
-      // up to the highest level to ensure that they drain once they begin
-      Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
       LgTaskID tid;
       std::memcpy(&tid, args, sizeof(tid));
       legion_assert(tid < LG_LAST_TASK_ID);
+      AutoMetaTask task(tid, true /*application task*/);
+      legion_assert(implicit_reference_tracker == nullptr);
+      ImplicitReferenceTracker tracker;
       void (*handler)(const void*, size_t) = meta_task_table[tid];
       legion_assert(handler != nullptr);
       (*handler)(args, arglen);
-      if (implicit_reference_tracker != nullptr)
-      {
-        delete implicit_reference_tracker;
-        implicit_reference_tracker = nullptr;
-      }
-      runtime->decrement_total_outstanding_tasks(tid, true /*meta*/);
-#ifdef LEGION_DEBUG_SHUTDOWN_HANG
-      runtime->outstanding_counts[tid].fetch_sub(1);
-#endif
     }
 
     //--------------------------------------------------------------------------

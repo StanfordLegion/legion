@@ -293,6 +293,17 @@ namespace Legion {
         ProcessorGroup processor_group;
         ProcessorMask processor_mask;
       };
+    private:
+      class AutoMetaTask {
+      public:
+        AutoMetaTask(LgTaskID tid, bool app_proc_task);
+        AutoMetaTask(const AutoMetaTask&) = delete;
+        ~AutoMetaTask(void);
+      public:
+        AutoMetaTask& operator=(const AutoMetaTask&) = delete;
+      private:
+        const LgTaskID tid;
+      };
     public:
       Runtime(
           Machine m, const LegionConfiguration& config, bool background,

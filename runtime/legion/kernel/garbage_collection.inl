@@ -22,6 +22,30 @@ namespace Legion {
   namespace Internal {
 
     //--------------------------------------------------------------------------
+    /*static*/ inline void ImplicitReferenceTracker::record_live_expression(
+        IndexSpaceExpression* expr)
+    //--------------------------------------------------------------------------
+    {
+      // We should always be inside of a meta-task or an API call for this
+      // so there should be no need to create an implicit reference tracker
+      // on the fly in this case
+      legion_assert(implicit_reference_tracker != nullptr);
+      implicit_reference_tracker->live_expressions.emplace_back(expr);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void ImplicitReferenceTracker::record_invalid_operation(
+        IndexSpaceOperation* op)
+    //--------------------------------------------------------------------------
+    {
+      // Should always be inside a Legion/Realm task for this
+      // If we're not we might not check at the end of the task
+      // to clean up these references so this avoids leaking
+      legion_assert(implicit_reference_tracker != nullptr);
+      implicit_reference_tracker->invalid_operations.emplace_back(op);
+    }
+
+    //--------------------------------------------------------------------------
     template<bool ADD>
     static inline void log_base_ref(
         ReferenceKind kind, DistributedID did, AddressSpaceID local_space,

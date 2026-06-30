@@ -282,7 +282,7 @@ namespace Legion {
       if (!is_owner())
         runtime->unregister_remote_expression(expr_id);
       // Invalidate any derived operations
-      invalidate_derived_operations(did);
+      invalidate_derived_operations();
       IndexSpaceExpression* canon = canonical.load();
       if (canon != nullptr)
       {

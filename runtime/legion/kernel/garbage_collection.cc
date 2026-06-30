@@ -26,12 +26,114 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    ImplicitReferenceTracker::ImplicitReferenceTracker(bool push)
+    //--------------------------------------------------------------------------
+    {
+      if (push)
+        push_reference_tracker();
+    }
+
+    //--------------------------------------------------------------------------
     ImplicitReferenceTracker::~ImplicitReferenceTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      if (implicit_reference_tracker == this)
+        pop_reference_tracker();
+      legion_assert(live_expressions.empty());
+      legion_assert(invalid_operations.empty());
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitReferenceTracker::push_reference_tracker(void)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(implicit_reference_tracker != this);
+      previous = implicit_reference_tracker;
+      implicit_reference_tracker = this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitReferenceTracker::pop_reference_tracker(void)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(implicit_reference_tracker == this);
+      drain_tracked_references();
+      implicit_reference_tracker = previous;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitReferenceTracker::handoff_reference_tracker(
+        ImplicitReferenceTracker& next)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(implicit_reference_tracker == this);
+      legion_assert(&next != this);
+      legion_assert(next.live_expressions.empty());
+      legion_assert(next.invalid_operations.empty());
+      legion_assert(next.previous == nullptr);
+      legion_assert(!next.pending_invalidation);
+      drain_tracked_references();
+      next.previous = previous;
+      previous = nullptr;
+      implicit_reference_tracker = &next;
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitReferenceTracker::drain_tracked_references(void)
     //--------------------------------------------------------------------------
     {
       for (IndexSpaceExpression* const & expr_ptr : live_expressions)
         if (expr_ptr->remove_base_expression_reference(LIVE_EXPR_REF))
           delete expr_ptr;
+      live_expressions.clear();
+      invalidate_operations();
+    }
+
+    //--------------------------------------------------------------------------
+    void ImplicitReferenceTracker::invalidate_operations(void)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do if something higher up the stack is already doing it
+      // We don't want to recurse and cause a stack overflow
+      if (pending_invalidation)
+        return;
+      struct MarkPending {
+        MarkPending(bool& pending) : pending_invalidation(pending)
+        {
+          pending_invalidation = true;
+        }
+        ~MarkPending(void) { pending_invalidation = false; }
+      private:
+        bool& pending_invalidation;
+      } pending(pending_invalidation);
+      // Iterate this until converged
+      // Note that because making an invalid operation local by removing
+      // this reference then we can also cause other operations to become
+      // invalid and get added to this list hence this assertion ensuring
+      // that we're still the implicit_reference_tracker
+      while (!invalid_operations.empty())
+      {
+        IndexSpaceOperation* next = invalid_operations.back();
+        invalid_operations.pop_back();
+        if (next->remove_base_gc_ref(REGION_TREE_REF))
+          delete next;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ImplicitReferenceTracker::count_invalid_operations(void) const
+    //--------------------------------------------------------------------------
+    {
+      return invalid_operations.size();
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation* ImplicitReferenceTracker::get_invalid_operation(
+        unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(index < invalid_operations.size());
+      return invalid_operations[index];
     }
 
     /////////////////////////////////////////////////////////////

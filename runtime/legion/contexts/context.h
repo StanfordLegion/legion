@@ -539,6 +539,8 @@ namespace Legion {
       void set_local_task_variable(
           LocalVariableID id, const void* value, void (*destructor)(void*));
     public:
+      void bind(void);
+      void unbind(void);
       void yield(void);
       void record_asynchronous_effect(ApEvent effect, const char* provenance);
       void concurrent_task_barrier(void);
@@ -580,6 +582,8 @@ namespace Legion {
       RtUserEvent inlining_done;
     protected:
       uint64_t total_tunable_count;
+    protected:
+      ImplicitReferenceTracker reference_tracker;
     protected:
       class OverheadProfiler
         : public Mapping::ProfilingMeasurements::RuntimeOverhead {
