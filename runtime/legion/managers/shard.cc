@@ -444,7 +444,6 @@ namespace Legion {
           collective_mapping->get_children(owner_space, local_space, children);
           if (!children.empty())
           {
-            pack_global_ref(children.size());
             for (const AddressSpaceID& child : children)
             {
               ReplicateVirtualRendezvous rez;
@@ -455,6 +454,7 @@ namespace Legion {
                 rez.serialize<size_t>(virtual_mappings.size());
                 for (unsigned idx = 0; idx < virtual_mappings.size(); idx++)
                   rez.serialize<bool>(virtual_mappings[idx]);
+                pack_global_ref(rez);
               }
               rez.dispatch(child);
             }
@@ -2730,7 +2730,7 @@ namespace Legion {
       ShardManager* manager = runtime->find_shard_manager(did);
       manager->rendezvous_check_virtual_mappings(
           shard, nullptr, virtual_mappings);
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -44,12 +44,17 @@ namespace Legion {
             LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID;
       public:
         DeferPhiViewRegistrationArgs(void) = default;
-        DeferPhiViewRegistrationArgs(PhiView* v)
-          : LgTaskArgs<DeferPhiViewRegistrationArgs>(false, true), view(v)
-        { }
+        DeferPhiViewRegistrationArgs(
+            PhiView* v, shrt::map<DeferredView*, LamportClock>& clocks)
+          : LgTaskArgs<DeferPhiViewRegistrationArgs>(false, true), view(v),
+            lamport_clocks(new shrt::map<DeferredView*, LamportClock>())
+        {
+          lamport_clocks->swap(clocks);
+        }
         void execute(void) const;
       public:
         PhiView* view;
+        shrt::map<DeferredView*, LamportClock>* lamport_clocks;
       };
     public:
       PhiView(
@@ -63,8 +68,14 @@ namespace Legion {
       PhiView& operator=(const PhiView& rhs) = delete;
     public:
       virtual void notify_local(void) override;
-      virtual void pack_valid_ref(void) override;
-      virtual void unpack_valid_ref(void) override;
+      virtual void pack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
+      virtual void unpack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
     public:
       virtual void send_view(AddressSpaceID target) override;
     public:
@@ -74,7 +85,8 @@ namespace Legion {
           PredEvent pred_guard, const PhysicalTraceInfo& trace_info,
           EquivalenceSet* tracign_eq, CopyAcrossHelper* helper) override;
     public:
-      void add_initial_references(bool unpack_references);
+      void add_initial_references(
+          shrt::map<DeferredView*, LamportClock>& lamport_clocks);
     public:
       const PredEvent true_guard;
       const PredEvent false_guard;

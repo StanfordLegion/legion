@@ -1577,9 +1577,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_shared_ownership(
-        IndexSpace handle, const bool total_sharding_collective,
-        const bool unpack_reference)
+    IndexSpaceNode* Runtime::create_shared_ownership(
+        IndexSpace handle, const bool total_sharding_collective)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode* node = runtime->get_node(handle);
@@ -1592,28 +1591,25 @@ namespace Legion {
       }
       if (!node->is_owner())
       {
-        legion_assert(!unpack_reference);
         if (!total_sharding_collective)
         {
-          node->pack_valid_ref();
           SharedOwnershipMessage rez;
           {
             RezCheck z(rez);
             rez.serialize<int>(0);
             rez.serialize(handle);
+            node->pack_valid_ref(rez);
           }
-          rez.serialize(node->owner_space);
+          rez.dispatch(node->owner_space);
         }
         node->remove_base_valid_ref(APPLICATION_REF);
       }
-      else if (unpack_reference)
-        node->unpack_valid_ref();
+      return node;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_shared_ownership(
-        IndexPartition handle, const bool total_sharding_collective,
-        const bool unpack_reference)
+    IndexPartNode* Runtime::create_shared_ownership(
+        IndexPartition handle, const bool total_sharding_collective)
     //--------------------------------------------------------------------------
     {
       IndexPartNode* node = runtime->get_node(handle);
@@ -1626,28 +1622,25 @@ namespace Legion {
       }
       if (!node->is_owner())
       {
-        legion_assert(!unpack_reference);
         if (!total_sharding_collective)
         {
-          node->pack_valid_ref();
           SharedOwnershipMessage rez;
           {
             RezCheck z(rez);
             rez.serialize<int>(1);
             rez.serialize(handle);
+            node->pack_valid_ref(rez);
           }
           rez.dispatch(node->owner_space);
         }
         node->remove_base_valid_ref(APPLICATION_REF);
       }
-      else if (unpack_reference)
-        node->unpack_valid_ref();
+      return node;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_shared_ownership(
-        FieldSpace handle, const bool total_sharding_collective,
-        const bool unpack_reference)
+    FieldSpaceNode* Runtime::create_shared_ownership(
+        FieldSpace handle, const bool total_sharding_collective)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode* node = runtime->get_node(handle);
@@ -1660,28 +1653,25 @@ namespace Legion {
       }
       if (!node->is_owner())
       {
-        legion_assert(!unpack_reference);
         if (!total_sharding_collective)
         {
-          node->pack_global_ref();
           SharedOwnershipMessage rez;
           {
             RezCheck z(rez);
             rez.serialize<int>(2);
             rez.serialize(handle);
+            node->pack_global_ref(rez);
           }
           rez.dispatch(node->owner_space);
         }
         node->remove_base_gc_ref(APPLICATION_REF);
       }
-      else if (unpack_reference)
-        node->unpack_global_ref();
+      return node;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_shared_ownership(
-        LogicalRegion handle, const bool total_sharding_collective,
-        const bool unpack_reference)
+    RegionNode* Runtime::create_shared_ownership(
+        LogicalRegion handle, const bool total_sharding_collective)
     //--------------------------------------------------------------------------
     {
       RegionNode* node = runtime->get_node(handle);
@@ -1696,22 +1686,20 @@ namespace Legion {
       }
       if (!node->is_owner())
       {
-        legion_assert(!unpack_reference);
         if (!total_sharding_collective)
         {
-          node->pack_global_ref();
           SharedOwnershipMessage rez;
           {
             RezCheck z(rez);
             rez.serialize<int>(3);
             rez.serialize(handle);
+            node->pack_global_ref(rez);
           }
           rez.dispatch(node->owner_space);
         }
         node->remove_base_gc_ref(APPLICATION_REF);
       }
-      else if (unpack_reference)
-        node->unpack_global_ref();
+      return node;
     }
 
     //--------------------------------------------------------------------------
@@ -5578,28 +5566,28 @@ namespace Legion {
           {
             IndexSpace handle;
             derez.deserialize(handle);
-            runtime->create_shared_ownership(handle, false, true);
+            runtime->create_shared_ownership(handle)->unpack_valid_ref(derez);
             break;
           }
         case 1:
           {
             IndexPartition handle;
             derez.deserialize(handle);
-            runtime->create_shared_ownership(handle, false, true);
+            runtime->create_shared_ownership(handle)->unpack_valid_ref(derez);
             break;
           }
         case 2:
           {
             FieldSpace handle;
             derez.deserialize(handle);
-            runtime->create_shared_ownership(handle, false, true);
+            runtime->create_shared_ownership(handle)->unpack_global_ref(derez);
             break;
           }
         case 3:
           {
             LogicalRegion handle;
             derez.deserialize(handle);
-            runtime->create_shared_ownership(handle, false, true);
+            runtime->create_shared_ownership(handle)->unpack_global_ref(derez);
             break;
           }
         default:
@@ -6309,8 +6297,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(
         DistributedID did, DistributedID ctx_did,
-        const ContextCoordinate& coord, Provenance* provenance,
-        bool has_global_reference, RtEvent& registered, Operation* op,
+        const ContextCoordinate& coord, Provenance* provenance, Operation* op,
         GenerationID gen, UniqueID op_uid, int op_depth,
         CollectiveMapping* mapping)
     //--------------------------------------------------------------------------
@@ -6341,7 +6328,7 @@ namespace Legion {
         result = legion_safe_cast<FutureImpl*>(finder->second);
         return result;
       }
-      registered = result->record_future_registered(has_global_reference);
+      result->record_future_registered();
       dist_collectables[did] = result;
       return result;
     }
@@ -10063,7 +10050,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* Runtime::find_or_create_remote_expression(
-        IndexSpaceExprID remote_expr_id, Deserializer& derez, bool& created)
+        IndexSpaceExprID remote_expr_id, Deserializer& derez,
+        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // See if we can find it with the read-only lock first
@@ -10073,7 +10061,6 @@ namespace Legion {
             finder = remote_expressions.find(remote_expr_id);
         if (finder != remote_expressions.end())
         {
-          created = false;
           finder->second->skip_unpack_expression(derez);
           return finder->second;
         }
@@ -10084,18 +10071,18 @@ namespace Legion {
           remote_expressions.find(remote_expr_id);
       if (finder != remote_expressions.end())
       {
-        created = false;
         finder->second->skip_unpack_expression(derez);
         return finder->second;
       }
       // If we didn't lose the lock then we can make the instance
-      created = true;
       TypeTag type_tag;
       derez.deserialize(type_tag);
       RemoteExpressionCreator creator(remote_expr_id, type_tag, derez);
       NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
       legion_assert(creator.operation != nullptr);
       remote_expressions[remote_expr_id] = creator.operation;
+      if (source != creator.operation->owner_space)
+        creator.operation->send_remote_registration();
       return creator.operation;
     }
 

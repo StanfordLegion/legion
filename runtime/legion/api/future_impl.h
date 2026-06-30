@@ -263,8 +263,7 @@ namespace Legion {
       // must be holding lock
       void pack_future_result(Serializer& rez, AddressSpaceID target);
     public:
-      RtEvent record_future_registered(bool has_global_reference);
-      bool needs_remote_instance_update(AddressSpaceID source) const;
+      void record_future_registered(void);
     public:
       void contribute_to_collective(
           const DynamicCollective& dc, unsigned count);

@@ -1669,8 +1669,8 @@ namespace Legion {
               rez.serialize(done_event);
               rez.serialize(fid);
               rez.serialize(field_size);
+              pack_global_ref(rez);
             }
-            pack_global_ref();
             rez.dispatch(it);
             update_events.insert(done_event);
           }
@@ -1692,8 +1692,8 @@ namespace Legion {
             rez.serialize(done_event);
             rez.serialize(fid);
             rez.serialize(field_size);
+            pack_global_ref(rez);
           }
-          pack_global_ref();
           rez.dispatch(owner_space);
           update_events.insert(done_event);
         }
@@ -2651,7 +2651,7 @@ namespace Legion {
       FieldSpaceNode* node = runtime->get_node(handle);
       std::set<RtEvent> applied;
       node->invalidate_layouts(index, applied, source);
-      node->unpack_global_ref();
+      node->unpack_global_ref(derez);
       if (!applied.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(applied));
       else
@@ -2772,7 +2772,7 @@ namespace Legion {
       FieldSpaceNode* node = runtime->get_node(handle);
       std::set<RtEvent> done_events;
       node->update_field_size(fid, field_size, done_events, source);
-      node->unpack_global_ref();
+      node->unpack_global_ref(derez);
       if (!done_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(done_events));
       else
@@ -3571,8 +3571,8 @@ namespace Legion {
             rez.serialize(handle);
             rez.serialize(index);
             rez.serialize(remote_done);
+            pack_global_ref(rez);
           }
-          pack_global_ref();
           rez.dispatch(target);
           applied.insert(remote_done);
         }

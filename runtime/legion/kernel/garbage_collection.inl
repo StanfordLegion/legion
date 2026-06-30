@@ -99,19 +99,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline size_t DistributedCollectable::count_remote_instances(void) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock, false /*exclusive*/);
-      return remote_instances.pop_count();
-    }
-
-    //--------------------------------------------------------------------------
     template<typename FUNCTOR>
     void DistributedCollectable::map_over_remote_instances(FUNCTOR& functor)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock, false /*exclusive*/);
+      // We can't iterate the remote_instances data structure while holding
+      // the lock since the functor might call back in here so we need to
+      // synchronize with updates to the remote instances separately
+      // INVARIANT: the functor must never (transitively) call
+      // update_remote_instances on this object. update_remote_instances waits
+      // for remote_iterators to drain to zero, but this iteration keeps the
+      // count > 0 until the functor returns, so such a call self-deadlocks.
+      // Calling back in to pack references (pack_global_ref, etc.) is fine.
+      //
+      // Track the in-flight iteration with an RAII guard so the count can
+      // never leak -- a leaked count would permanently wedge
+      // update_remote_instances -- if the functor or map() exits non-locally.
+      struct IterationGuard {
+        IterationGuard(DistributedCollectable* d) : dc(d)
+        {
+          AutoLock gc(dc->gc_lock, false /*exclusive*/);
+          dc->remote_iterators++;
+        }
+        ~IterationGuard(void)
+        {
+          if (--dc->remote_iterators == 0)
+            dc->finalize_remote_iterators();
+        }
+        DistributedCollectable* const dc;
+      } guard(this);
       remote_instances.map(functor);
     }
 

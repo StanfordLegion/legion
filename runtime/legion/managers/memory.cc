@@ -1589,9 +1589,10 @@ namespace Legion {
       coordinates.serialize(rez);
       rez.serialize<size_t>(captured_instances.size());
       for (PhysicalManager* const & physical_manager : captured_instances)
-      {
         rez.serialize(physical_manager->did);
-        physical_manager->pack_valid_ref();
+      for (PhysicalManager* const & physical_manager : captured_instances)
+      {
+        physical_manager->pack_valid_ref(rez);
         if (physical_manager->remove_base_valid_ref(UNBOUNDED_POOL_REF))
           delete physical_manager;
       }
@@ -1631,7 +1632,7 @@ namespace Legion {
 #else
         physical_manager->add_base_valid_ref(UNBOUNDED_POOL_REF);
 #endif
-        physical_manager->unpack_valid_ref();
+        physical_manager->unpack_valid_ref(derez);
       }
     }
 
@@ -1872,6 +1873,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MemoryManager::ManagerResult::~ManagerResult(void)
+    //--------------------------------------------------------------------------
+    {
+      if (manager != nullptr)
+        manager->unpack_global_ref(lamport_clock);
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager::ManagerResult::ManagerResult(ManagerResult&& rhs)
+      : manager(rhs.manager), lamport_clock(rhs.lamport_clock)
+    //--------------------------------------------------------------------------
+    {
+      rhs.manager = nullptr;
+      rhs.lamport_clock = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager::ManagerResult& MemoryManager::ManagerResult::operator=(
+        ManagerResult&& rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (manager != nullptr)
+        manager->unpack_global_ref(lamport_clock);
+      manager = rhs.manager;
+      lamport_clock = rhs.lamport_clock;
+      rhs.manager = nullptr;
+      rhs.lamport_clock = 0;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager::ManagerResult::operator MappingInstance(void) const
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(manager != nullptr);
+      return MappingInstance(manager);
+    }
+
+    //--------------------------------------------------------------------------
     bool MemoryManager::create_physical_instance(
         const LayoutConstraintSet& constraints,
         const std::vector<LogicalRegion>& regions,
@@ -1886,8 +1926,8 @@ namespace Legion {
       {
         // Not the owner, send a meessage to the owner to request the creation
         InstanceRequest rez;
+        ManagerResult target;
         std::atomic<bool> success(false);
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -1907,22 +1947,18 @@ namespace Legion {
           rez.serialize(footprint);
           rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
           rez.serialize(&success);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* manager = remote_manager.load();
-        if (manager != nullptr)
-        {
-          result = MappingInstance(manager);
-          manager->unpack_global_ref();
-          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
-            return false;
-          else
-            return true;
-        }
-        return success.load();
+        if (!success.load())
+          return false;
+        result = target;
+        if (acquire && !target.manager->acquire_instance(MAPPING_ACQUIRE_REF))
+          return false;
+        else
+          return true;
       }
       else
       {
@@ -1972,8 +2008,8 @@ namespace Legion {
       {
         // Not the owner, send a meessage to the owner to request the creation
         InstanceRequest rez;
+        ManagerResult target;
         std::atomic<bool> success(false);
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -1993,22 +2029,18 @@ namespace Legion {
           rez.serialize(footprint);
           rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
           rez.serialize(&success);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* manager = remote_manager.load();
-        if (manager != nullptr)
-        {
-          result = MappingInstance(manager);
-          manager->unpack_global_ref();
-          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
-            return false;
-          else
-            return true;
-        }
-        return success.load();
+        if (!success.load())
+          return false;
+        result = target;
+        if (acquire && !target.manager->acquire_instance(MAPPING_ACQUIRE_REF))
+          return false;
+        else
+          return true;
       }
       else
       {
@@ -2065,8 +2097,8 @@ namespace Legion {
           return true;
         // Not the owner, send a message to the owner to request creation
         InstanceRequest rez;
+        ManagerResult target;
         std::atomic<bool> remote_created(created);
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2086,16 +2118,15 @@ namespace Legion {
           rez.serialize(footprint);
           rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
           rez.serialize(&remote_created);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* manager = remote_manager.load();
+        PhysicalManager* manager = target.manager;
         if (manager != nullptr)
         {
-          result = MappingInstance(manager);
-          manager->unpack_global_ref();
+          result = target;
           created = remote_created.load();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
@@ -2172,8 +2203,8 @@ namespace Legion {
           return true;
         // Not the owner, send a message to the owner to request creation
         InstanceRequest rez;
+        ManagerResult target;
         std::atomic<bool> remote_created(created);
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2193,16 +2224,15 @@ namespace Legion {
           rez.serialize(footprint);
           rez.serialize(safe_for_unbounded_pools);
           rez.serialize(creator_id);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
           rez.serialize(&remote_created);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* manager = remote_manager.load();
+        PhysicalManager* manager = target.manager;
         if (manager != nullptr)
         {
-          result = MappingInstance(manager);
-          manager->unpack_global_ref();
+          result = target;
           created = remote_created.load();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
@@ -2273,8 +2303,8 @@ namespace Legion {
       {
         // Not the owner, send a meessage to the owner to request the redistrict
         InstanceRequest rez;
+        ManagerResult target;
         std::atomic<bool> success(false);
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2291,16 +2321,15 @@ namespace Legion {
           rez.serialize(priority);
           rez.serialize<bool>(tight_bounds);
           rez.serialize(creator_id);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
           rez.serialize(&success);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* new_manager = remote_manager.load();
+        PhysicalManager* new_manager = target.manager;
         if (new_manager != nullptr)
         {
-          instance = MappingInstance(new_manager);
-          new_manager->unpack_global_ref();
+          instance = target;
           if (acquire && !new_manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -2374,8 +2403,8 @@ namespace Legion {
       {
         // Not the owner, send a meessage to the owner to request the redistrict
         InstanceRequest rez;
+        ManagerResult target;
         std::atomic<bool> success(false);
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2392,16 +2421,15 @@ namespace Legion {
           rez.serialize(priority);
           rez.serialize<bool>(tight_bounds);
           rez.serialize(creator_id);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
           rez.serialize(&success);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* new_manager = remote_manager.load();
+        PhysicalManager* new_manager = target.manager;
         if (new_manager != nullptr)
         {
-          instance = MappingInstance(new_manager);
-          new_manager->unpack_global_ref();
+          instance = target;
           if (acquire && !new_manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -2478,7 +2506,7 @@ namespace Legion {
           return true;
         // Not the owner, send a message to the owner to try and find it
         InstanceRequest rez;
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
+        ManagerResult target;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2490,15 +2518,14 @@ namespace Legion {
             rez.serialize(regions[idx]);
           constraints.serialize(rez);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* manager = remote_manager.load();
+        PhysicalManager* manager = target.manager;
         if (manager != nullptr)
         {
-          result = MappingInstance(manager);
-          manager->unpack_global_ref();
+          result = target;
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -2530,7 +2557,7 @@ namespace Legion {
                 remote))
           return true;
         InstanceRequest rez;
-        std::atomic<PhysicalManager*> remote_manager(nullptr);
+        ManagerResult target;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2542,15 +2569,14 @@ namespace Legion {
             rez.serialize(regions[idx]);
           rez.serialize(constraints->layout_id);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&remote_manager);
+          rez.serialize(&target);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        PhysicalManager* manager = remote_manager.load();
+        PhysicalManager* manager = target.manager;
         if (manager != nullptr)
         {
-          result = MappingInstance(manager);
-          manager->unpack_global_ref();
+          result = target;
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -2580,7 +2606,7 @@ namespace Legion {
       {
         // Not the owner, send a message to the owner to try and find it
         InstanceRequest rez;
-        std::atomic<std::vector<PhysicalManager*>*> remote_managers(nullptr);
+        std::vector<ManagerResult> target;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2592,23 +2618,16 @@ namespace Legion {
             rez.serialize(regions[idx]);
           constraints.serialize(rez);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&remote_managers);
+          rez.serialize(&target);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        std::vector<PhysicalManager*>* managers = remote_managers.load();
-        if (managers != nullptr)
+        for (const ManagerResult& res : target)
         {
-          for (unsigned idx = 0; idx < managers->size(); idx++)
-          {
-            PhysicalManager* manager = managers->at(idx);
-            legion_assert(manager != nullptr);
-            results.emplace_back(MappingInstance(manager));
-            manager->unpack_global_ref();
-            if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
-              results.pop_back();
-          }
-          delete managers;
+          PhysicalManager* manager = res.manager;
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            continue;
+          results.emplace_back(res);
         }
       }
       else
@@ -2628,7 +2647,7 @@ namespace Legion {
       if (!is_owner)
       {
         InstanceRequest rez;
-        std::atomic<std::vector<PhysicalManager*>*> remote_managers(nullptr);
+        std::vector<ManagerResult> target;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         {
           RezCheck z(rez);
@@ -2640,23 +2659,16 @@ namespace Legion {
             rez.serialize(regions[idx]);
           rez.serialize(constraints->layout_id);
           rez.serialize<bool>(tight_region_bounds);
-          rez.serialize(&remote_managers);
+          rez.serialize(&target);
         }
         rez.dispatch(owner_space);
         ready_event.wait();
-        std::vector<PhysicalManager*>* managers = remote_managers.load();
-        if (managers != nullptr)
+        for (const ManagerResult& res : target)
         {
-          for (unsigned idx = 0; idx < managers->size(); idx++)
-          {
-            PhysicalManager* manager = managers->at(idx);
-            legion_assert(manager != nullptr);
-            results.emplace_back(MappingInstance(manager));
-            manager->unpack_global_ref();
-            if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
-              results.pop_back();
-          }
-          delete managers;
+          PhysicalManager* manager = res.manager;
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            continue;
+          results.emplace_back(res);
         }
       }
       else
@@ -2777,7 +2789,7 @@ namespace Legion {
             derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             std::atomic<bool>* remote_success;
             derez.deserialize(remote_success);
@@ -2809,9 +2821,9 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager* manager = result.impl;
-                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
+                  manager->pack_global_ref(rez);
                   rez.serialize(remote_success);
                 }
                 rez.serialize(remote_kind);
@@ -2855,7 +2867,7 @@ namespace Legion {
             derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             std::atomic<bool>* remote_success;
             derez.deserialize(remote_success);
@@ -2885,12 +2897,12 @@ namespace Legion {
                 rez.serialize(to_trigger);
                 rez.serialize(kind);
                 rez.serialize<bool>(success);
+                InstanceManager* manager = result.impl;
                 if (success)
                 {
-                  InstanceManager* manager = result.impl;
-                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
+                  manager->pack_global_ref(rez);
                   rez.serialize(remote_success);
                 }
                 rez.serialize(remote_kind);
@@ -2934,7 +2946,7 @@ namespace Legion {
             derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             std::atomic<bool>* remote_created;
             derez.deserialize(remote_created);
@@ -2963,12 +2975,12 @@ namespace Legion {
                 rez.serialize(to_trigger);
                 rez.serialize(kind);
                 rez.serialize<bool>(success);
+                InstanceManager* manager = result.impl;
                 if (success)
                 {
-                  InstanceManager* manager = result.impl;
-                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
+                  manager->pack_global_ref(rez);
                   rez.serialize(remote_created);
                   rez.serialize<bool>(created);
                 }
@@ -3013,7 +3025,7 @@ namespace Legion {
             derez.deserialize(remote_safe_for_unbounded_pools);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             std::atomic<bool>* remote_created;
             derez.deserialize(remote_created);
@@ -3044,12 +3056,12 @@ namespace Legion {
                 rez.serialize(to_trigger);
                 rez.serialize(kind);
                 rez.serialize<bool>(success);
+                InstanceManager* manager = result.impl;
                 if (success)
                 {
-                  InstanceManager* manager = result.impl;
-                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
+                  manager->pack_global_ref(rez);
                   rez.serialize(remote_created);
                   rez.serialize<bool>(created);
                 }
@@ -3089,7 +3101,7 @@ namespace Legion {
             derez.deserialize<bool>(tight_region_bounds);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             std::atomic<bool>* remote_success;
             derez.deserialize(remote_success);
@@ -3109,9 +3121,9 @@ namespace Legion {
                 rez.serialize(kind);
                 rez.serialize<bool>(true);
                 InstanceManager* manager = result.impl;
-                manager->pack_global_ref();
                 rez.serialize(manager->did);
                 rez.serialize(remote_target);
+                manager->pack_global_ref(rez);
                 rez.serialize(remote_success);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(nullptr);
@@ -3142,7 +3154,7 @@ namespace Legion {
             derez.deserialize<bool>(tight_region_bounds);
             UniqueID creator_id;
             derez.deserialize(creator_id);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             std::atomic<bool>* remote_success;
             derez.deserialize(remote_success);
@@ -3164,9 +3176,9 @@ namespace Legion {
                 rez.serialize(kind);
                 rez.serialize<bool>(true);
                 InstanceManager* manager = result.impl;
-                manager->pack_global_ref();
                 rez.serialize(manager->did);
                 rez.serialize(remote_target);
+                manager->pack_global_ref(rez);
                 rez.serialize(remote_success);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(nullptr);
@@ -3186,7 +3198,7 @@ namespace Legion {
             constraints.deserialize(derez);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             MappingInstance result;
             bool success = find_physical_instance(
@@ -3195,7 +3207,6 @@ namespace Legion {
             if (success)
             {
               InstanceManager* manager = result.impl;
-              manager->pack_global_ref();
               InstanceResponse rez;
               {
                 RezCheck z(rez);
@@ -3205,6 +3216,7 @@ namespace Legion {
                 rez.serialize<bool>(true);  // success
                 rez.serialize(manager->did);
                 rez.serialize(remote_target);
+                manager->pack_global_ref(rez);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(nullptr);
                 rez.serialize<unsigned*>(nullptr);
@@ -3223,7 +3235,7 @@ namespace Legion {
             derez.deserialize(layout_id);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::atomic<PhysicalManager*>* remote_target;
+            ManagerResult* remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints* constraints =
                 runtime->find_layout_constraints(layout_id);
@@ -3234,7 +3246,6 @@ namespace Legion {
             if (success)
             {
               InstanceManager* manager = result.impl;
-              manager->pack_global_ref();
               InstanceResponse rez;
               {
                 RezCheck z(rez);
@@ -3244,6 +3255,7 @@ namespace Legion {
                 rez.serialize<bool>(true);  // success
                 rez.serialize(manager->did);
                 rez.serialize(remote_target);
+                manager->pack_global_ref(rez);
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(nullptr);
                 rez.serialize<unsigned*>(nullptr);
@@ -3262,7 +3274,7 @@ namespace Legion {
             constraints.deserialize(derez);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::atomic<std::vector<PhysicalManager*>*>* remote_target;
+            std::vector<ManagerResult>* remote_target;
             derez.deserialize(remote_target);
             std::vector<MappingInstance> results;
             find_physical_instances(
@@ -3282,8 +3294,8 @@ namespace Legion {
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
                   InstanceManager* manager = results[idx].impl;
-                  manager->pack_global_ref();
                   rez.serialize(manager->did);
+                  manager->pack_global_ref(rez);
                 }
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(nullptr);
@@ -3303,7 +3315,7 @@ namespace Legion {
             derez.deserialize(layout_id);
             bool tight_bounds;
             derez.deserialize(tight_bounds);
-            std::atomic<std::vector<PhysicalManager*>*>* remote_target;
+            std::vector<ManagerResult>* remote_target;
             derez.deserialize(remote_target);
             LayoutConstraints* constraints =
                 runtime->find_layout_constraints(layout_id);
@@ -3325,8 +3337,8 @@ namespace Legion {
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
                   InstanceManager* manager = results[idx].impl;
-                  manager->pack_global_ref();
                   rez.serialize(manager->did);
+                  manager->pack_global_ref(rez);
                 }
                 // No things for us to pass back here
                 rez.serialize<LayoutConstraintKind*>(nullptr);
@@ -3361,7 +3373,7 @@ namespace Legion {
       {
         DistributedID did;
         derez.deserialize(did);
-        std::atomic<PhysicalManager*>* target;
+        ManagerResult* target;
         derez.deserialize(target);
         legion_assert(
             (CREATE_INSTANCE_CONSTRAINTS <= kind) &&
@@ -3369,12 +3381,13 @@ namespace Legion {
         if (did > 0)
         {
           RtEvent manager_ready = RtEvent::NO_RT_EVENT;
-          PhysicalManager* manager =
+          target->manager =
               runtime->find_or_request_instance_manager(did, manager_ready);
           // If the manager isn't ready yet, then we need to wait for it
           if (manager_ready.exists())
             preconditions.emplace_back(manager_ready);
-          target->store(manager);
+          target->lamport_clock =
+              PhysicalManager::unpack_global_ref_clock(derez);
         }
         if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
             (kind == CREATE_INSTANCE_LAYOUT) ||
@@ -3400,13 +3413,11 @@ namespace Legion {
       {
         if ((kind == FIND_MANY_CONSTRAINTS) || (kind == FIND_MANY_LAYOUT))
         {
-          std::atomic<std::vector<PhysicalManager*>*>* target;
+          std::vector<ManagerResult>* target;
           derez.deserialize(target);
           size_t num_insts;
           derez.deserialize(num_insts);
-          std::vector<PhysicalManager*>* results =
-              new std::vector<PhysicalManager*>();
-          results->reserve(num_insts);
+          target->reserve(num_insts);
           for (unsigned idx = 0; idx < num_insts; idx++)
           {
             DistributedID did;
@@ -3417,9 +3428,10 @@ namespace Legion {
             // If the manager isn't ready yet, then we need to wait for it
             if (manager_ready.exists())
               preconditions.emplace_back(manager_ready);
-            results->emplace_back(manager);
+            LamportClock lamport_clock =
+                PhysicalManager::unpack_global_ref_clock(derez);
+            target->emplace_back(ManagerResult(manager, lamport_clock));
           }
-          target->store(results);
         }
       }
       // Unpack the constraint responses
@@ -3821,7 +3833,7 @@ namespace Legion {
       {
         // Send the request to the owner node for this memory to make
         // the manager and then get back to the response
-        PhysicalManager* result = nullptr;
+        std::pair<PhysicalManager*, LamportClock> result(nullptr, 0);
         const RtUserEvent ready = Runtime::create_rt_user_event();
         CreateUnboundRequest rez;
         {
@@ -3836,11 +3848,12 @@ namespace Legion {
         }
         rez.dispatch(owner_space);
         ready.wait();
-        legion_assert(result != nullptr);
-        legion_no_skip_assert(result->acquire_instance(MAPPING_ACQUIRE_REF));
+        legion_assert(result.first != nullptr);
+        legion_no_skip_assert(
+            result.first->acquire_instance(MAPPING_ACQUIRE_REF));
         // Remove the packed valid reference that came back with the response
-        result->unpack_valid_ref();
-        return result;
+        result.first->unpack_valid_ref(result.second);
+        return result.first;
       }
       // We don't need to acquire allocation privilege as this function
       // doesn't eagerly perform any instance collections.
@@ -3912,20 +3925,20 @@ namespace Legion {
       derez.deserialize(producer_event);
       GCPriority priority;
       derez.deserialize(priority);
-      PhysicalManager** target;
+      std::pair<PhysicalManager*, LamportClock>* target;
       derez.deserialize(target);
       RtUserEvent done;
       derez.deserialize(done);
       MemoryManager* memory_manager = runtime->find_memory_manager(memory);
       PhysicalManager* manager = memory_manager->create_unbound_instance(
           region, constraints, producer_event, priority);
-      manager->pack_valid_ref();
       CreateUnboundResponse rez;
       {
         RezCheck z2(rez);
         rez.serialize(target);
         rez.serialize(manager->did);
         rez.serialize(done);
+        manager->pack_valid_ref(rez);
       }
       rez.dispatch(source);
       if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
@@ -3938,14 +3951,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      PhysicalManager** target;
+      std::pair<PhysicalManager*, LamportClock>* target;
       derez.deserialize(target);
       DistributedID did;
       derez.deserialize(did);
       RtUserEvent done;
       derez.deserialize(done);
       RtEvent ready;
-      *target = runtime->find_or_request_instance_manager(did, ready);
+      target->first = runtime->find_or_request_instance_manager(did, ready);
+      derez.deserialize(target->second);
       Runtime::trigger_event(done, ready);
     }
 
@@ -4539,10 +4553,9 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize<size_t>(instances.size());
           for (PhysicalManager* manager : instances)
-          {
             rez.serialize(manager->did);
-            manager->pack_global_ref();
-          }
+          for (PhysicalManager* manager : instances)
+            manager->pack_global_ref(rez);
         }
         rez.dispatch(owner_space);
       }
@@ -4577,7 +4590,7 @@ namespace Legion {
       }
       manager->notify_collected_instances(instances);
       for (unsigned idx = 0; idx < num_instances; idx++)
-        instances[idx]->unpack_global_ref();
+        instances[idx]->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -5485,8 +5498,8 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(memory);
           rez.serialize(manager->did);
+          manager->pack_valid_ref(rez);
         }
-        manager->pack_valid_ref();
         rez.dispatch(manager->owner_space);
       }
       else
@@ -5956,7 +5969,7 @@ namespace Legion {
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
       memory_manager->detach_external_instance(manager);
-      manager->unpack_valid_ref();
+      manager->unpack_valid_ref(derez);
     }
 
     //--------------------------------------------------------------------------

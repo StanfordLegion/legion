@@ -299,6 +299,24 @@ namespace Legion {
         MemoryManager* manager;
         PhysicalInstance instance;
       };
+    private:
+      struct ManagerResult {
+      public:
+        ManagerResult(void) = default;
+        ManagerResult(PhysicalManager* m, LamportClock c)
+          : manager(m), lamport_clock(c)
+        { }
+        ManagerResult(const ManagerResult&) = delete;
+        ManagerResult(ManagerResult&&);
+        ~ManagerResult(void);
+      public:
+        ManagerResult& operator=(const ManagerResult&) = delete;
+        ManagerResult& operator=(ManagerResult&&);
+        operator MappingInstance(void) const;
+      public:
+        PhysicalManager* manager = nullptr;
+        LamportClock lamport_clock = 0;
+      };
     public:
       MemoryManager(Memory mem);
       MemoryManager(const MemoryManager& rhs) = delete;

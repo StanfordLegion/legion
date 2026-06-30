@@ -42,11 +42,13 @@ namespace Legion {
         AddressSpaceID src, AddressSpaceID prev, Operation* o, unsigned idx,
         RegionNode* node, const PhysicalTraceInfo& t_info,
         const op::FieldMaskMap<InstanceView>& views, CollectiveMapping* mapping,
-        const bool first, const bool remove_restrict)
+        const bool first, const bool remove_restrict,
+        std::map<InstanceView*, LamportClock>&& clocks)
       : RegistrationAnalysis(
             src, prev, o, idx, node, true /*on heap*/, t_info, mapping, first,
             true /*exclusive*/),
-        filter_views(views), remove_restriction(remove_restrict)
+        filter_views(views), remote_lamport_clocks(std::move(clocks)),
+        remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     { }
 
@@ -54,13 +56,9 @@ namespace Legion {
     FilterAnalysis::~FilterAnalysis(void)
     //--------------------------------------------------------------------------
     {
-      // If we're "remote" then unpack the references we sent
-      if ((runtime->address_space != original_source) ||
-          (previous != original_source))
-      {
-        for (const std::pair<InstanceView* const, FieldMask>& it : filter_views)
-          it.first->unpack_global_ref();
-      }
+      for (const std::pair<InstanceView* const, LamportClock>& it :
+           remote_lamport_clocks)
+        it.first->unpack_global_ref(it.second);
     }
 
     //--------------------------------------------------------------------------
@@ -129,9 +127,9 @@ namespace Legion {
           for (const std::pair<InstanceView* const, FieldMask>& it :
                filter_views)
           {
-            it.first->pack_global_ref();
             rez.serialize(it.first->did);
             rez.serialize(it.second);
+            it.first->pack_global_ref(rez);
           }
           rez.serialize(remove_restriction);
           trace_info.pack_trace_info(rez);
@@ -186,6 +184,7 @@ namespace Legion {
       op::FieldMaskMap<InstanceView> filter_views;
       size_t num_views;
       derez.deserialize(num_views);
+      std::map<InstanceView*, LamportClock> lamport_clocks;
       for (unsigned idx = 0; idx < num_views; idx++)
       {
         DistributedID view_did;
@@ -198,6 +197,8 @@ namespace Legion {
         filter_views.insert(inst_view, mask);
         if (view_ready.exists())
           ready_events.insert(view_ready);
+        lamport_clocks[inst_view] =
+            InstanceView::unpack_global_ref_clock(derez);
       }
       bool remove_restriction;
       derez.deserialize(remove_restriction);
@@ -219,7 +220,8 @@ namespace Legion {
       // This takes ownership of the remote operation
       FilterAnalysis* analysis = new FilterAnalysis(
           original_source, previous, op, index, region, trace_info,
-          filter_views, collective_mapping, first_local, remove_restriction);
+          filter_views, collective_mapping, first_local, remove_restriction,
+          std::move(lamport_clocks));
       analysis->add_reference();
       // Make sure that all our pointers are ready
       RtEvent ready_event;

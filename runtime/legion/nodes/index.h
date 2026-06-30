@@ -280,8 +280,9 @@ namespace Legion {
       public:
         DeferChildArgs(void) = default;
         DeferChildArgs(
-            IndexSpaceNode* proxy, LegionColor child, DistributedID* tar,
-            RtUserEvent trig, AddressSpaceID src)
+            IndexSpaceNode* proxy, LegionColor child,
+            std::pair<DistributedID, LamportClock>* tar, RtUserEvent trig,
+            AddressSpaceID src)
           : LgTaskArgs<DeferChildArgs>(false, false), proxy_this(proxy),
             child_color(child), target(tar), to_trigger(trig), source(src)
         { }
@@ -289,20 +290,20 @@ namespace Legion {
       public:
         IndexSpaceNode* proxy_this;
         LegionColor child_color;
-        DistributedID* target;
+        std::pair<DistributedID, LamportClock>* target;
         RtUserEvent to_trigger;
         AddressSpaceID source;
       };
       class IndexSpaceSetFunctor {
       public:
-        IndexSpaceSetFunctor(AddressSpaceID src, IndexSpaceSet& r)
-          : source(src), rez(r)
+        IndexSpaceSetFunctor(AddressSpaceID src, IndexSpaceNode* n)
+          : source(src), node(n)
         { }
       public:
         void apply(AddressSpaceID target);
       public:
         const AddressSpaceID source;
-        IndexSpaceSet& rez;
+        IndexSpaceNode* node;
       };
     public:
       IndexSpaceNode(

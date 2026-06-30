@@ -266,7 +266,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::acquire_global_remote(
-        AddressSpaceID& current, int count, AddressSpaceID source)
+        AddressSpaceID& current, int count, AddressSpaceID source,
+        LamportClock& lamport_clock)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -285,7 +286,17 @@ namespace Legion {
 #endif
           }
           else  // Otherwise pack a reference to send back
+          {
+            if (bump_downgrade_lamport_clock &&
+                (current_state != VALID_REF_STATE) &&
+                (current_state != PENDING_GLOBAL_REF_STATE))
+            {
+              downgrade_lamport_clock++;
+              bump_downgrade_lamport_clock = false;
+            }
+            lamport_clock = downgrade_lamport_clock;
             sent_global_references++;
+          }
           return true;
         }
         else
@@ -317,8 +328,10 @@ namespace Legion {
           runtime->weak_find_distributed_collectable(did);
       if (dc != nullptr)
       {
+        LamportClock lamport_clock = 0;
         AddressSpaceID current_owner = dc->local_space;
-        if (dc->acquire_global_remote(current_owner, count, source))
+        if (dc->acquire_global_remote(
+                current_owner, count, source, lamport_clock))
         {
           // Successfully acquired (packed) a global reference
           if (source != dc->local_space)
@@ -330,6 +343,7 @@ namespace Legion {
               rez.serialize(count);
               rez.serialize(result);
               rez.serialize(ready);
+              rez.serialize(lamport_clock);
             }
             rez.dispatch(source);
           }
@@ -384,7 +398,7 @@ namespace Legion {
       // Just add the valid reference for now
       local->add_gc_reference(count);
       // Unpack the global reference added by acquire_global_remote
-      local->unpack_global_ref();
+      local->unpack_global_ref(derez);
       result->store(true);
       Runtime::trigger_event(ready);
     }
@@ -551,6 +565,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::finalize_remote_iterators(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if ((remote_iterators == 0) && remote_iteration_waiter.exists())
+      {
+        Runtime::trigger_event(remote_iteration_waiter);
+        remote_iteration_waiter = RtUserEvent::NO_RT_USER_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::update_remote_instances(
         AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
@@ -568,6 +594,20 @@ namespace Legion {
           is_owner() || ((collective_mapping != nullptr) &&
                          collective_mapping->contains(local_space)));
       AutoLock gc(gc_lock);
+      // Wait for any remote iterators to finish before updating the remote
+      // instances. This can be delayed -- or, under a steady stream of
+      // iterators, starved -- for the duration of the in-flight iterations.
+      // Acceptable since registration is far rarer than these broadcasts, but
+      // worth revisiting if it shows up in profiling.
+      while (remote_iterators > 0)
+      {
+        if (!remote_iteration_waiter.exists())
+          remote_iteration_waiter = Runtime::create_rt_user_event();
+        const RtEvent wait_on = remote_iteration_waiter;
+        gc.release();
+        wait_on.wait();
+        gc.reacquire();
+      }
       // Handle a very unusual case here were we weren't able to perform the
       // deletion because there was a packed reference, but we didn't know
       // where to send it to yet
@@ -582,6 +622,7 @@ namespace Legion {
         DistributedDowngradeUpdate rez;
         rez.serialize(did);
         rez.serialize(current_state);
+        rez.serialize(downgrade_lamport_clock);
         rez.dispatch(remote_inst);
         downgrade_owner = remote_inst;
       }
@@ -597,15 +638,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::filter_remote_instances(
-        AddressSpaceID remote_inst)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_lock);
-      remote_instances.remove(remote_inst);
-    }
-
-    //--------------------------------------------------------------------------
     void DistributedCollectable::register_with_runtime(void)
     //--------------------------------------------------------------------------
     {
@@ -615,17 +647,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_remote_registration(
-        bool has_global_reference)
+    void DistributedCollectable::send_remote_registration(void)
     //--------------------------------------------------------------------------
     {
+      // This function must be invoked by the caller before the distributed
+      // collectable is discoverable by anybody else so we don't need to
+      // take a lock to handle races with packed valid references
       legion_assert(!is_owner());
       legion_assert(registered_with_runtime);
-      RtUserEvent registered_event;
-      if (has_global_reference)
-        pack_global_ref();
-      else
-        registered_event = Runtime::create_rt_user_event();
+      legion_assert(!remote_registered.exists());
+      legion_assert(sent_global_references == 0);
+      const RtUserEvent registered_event = Runtime::create_rt_user_event();
+      remote_registered = registered_event;
       DistributedRemoteRegistration rez;
       {
         RezCheck z(rez);
@@ -633,7 +666,6 @@ namespace Legion {
         rez.serialize(registered_event);
       }
       rez.dispatch(owner_space);
-      return registered_event;
     }
 
     //--------------------------------------------------------------------------
@@ -649,14 +681,21 @@ namespace Legion {
       DistributedCollectable* target =
           runtime->find_distributed_collectable(did);
       target->update_remote_instances(source);
-      if (done_event.exists())
-        Runtime::trigger_event(done_event);
-      else
-        target->unpack_global_ref();
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::pack_global_ref(unsigned cnt)
+    void DistributedCollectable::pack_global_ref(Serializer& rez, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock = 0;
+      pack_global_ref(lamport_clock, cnt);
+      rez.serialize(lamport_clock);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::pack_global_ref(
+        LamportClock& lamport_clock, unsigned cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -678,13 +717,35 @@ namespace Legion {
           std::abort();
         gc.reacquire();
       }
-      else
 #endif
-        // Must be in a global state when packing a reference
+      legion_assert(
+          (current_state == VALID_REF_STATE) ||
+          (current_state == GLOBAL_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE));
+      // Only permitted to pack a global reference if we've registered
+      // with the owner node otherwise we need to wait for that
+      // registration to succeed before we can pack in order to avoid
+      // spurious successful downgrades
+      if (remote_registered.exists())
+      {
+        const RtEvent wait_on = remote_registered;
+        gc.release();
+        wait_on.wait();
+        gc.reacquire();
+        remote_registered = RtEvent::NO_RT_EVENT;
+        // Should still be global state
         legion_assert(
             (current_state == VALID_REF_STATE) ||
             (current_state == GLOBAL_REF_STATE) ||
             (current_state == PENDING_GLOBAL_REF_STATE));
+      }
+      if (bump_downgrade_lamport_clock && (current_state != VALID_REF_STATE) &&
+          (current_state != PENDING_GLOBAL_REF_STATE))
+      {
+        downgrade_lamport_clock++;
+        bump_downgrade_lamport_clock = false;
+      }
+      lamport_clock = downgrade_lamport_clock;
       sent_global_references += cnt;
 #ifdef LEGION_DEBUG
       gc.release();
@@ -695,12 +756,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::unpack_global_ref(unsigned cnt)
+    void DistributedCollectable::unpack_global_ref(
+        Deserializer& derez, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
+      unpack_global_ref(lamport_clock, cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::unpack_global_ref(
+        LamportClock lamport_clock, unsigned cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
       legion_assert(is_global<false /*need lock*/>());
       received_global_references += cnt;
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, lamport_clock);
       // No need to send any notifications if a downgrade is in process
       if (remaining_responses == 0)
       {
@@ -708,7 +782,7 @@ namespace Legion {
         {
           // We're the downgrade owner so check to see if we can resume
           // doing collections or we can wait for the next removal
-          check_for_downgrade_restart(local_space);
+          check_for_downgrade_restart(local_space, downgrade_lamport_clock);
         }
         else if (
             (current_state == PENDING_LOCAL_REF_STATE) || (gc_references == 0))
@@ -724,6 +798,7 @@ namespace Legion {
           // to notify the downgrade owner about the unpacked references
           DistributedDowngradeRestart rez;
           rez.serialize(did);
+          rez.serialize(downgrade_lamport_clock);
           rez.dispatch(downgrade_owner);
         }
         else
@@ -740,6 +815,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ LamportClock DistributedCollectable::unpack_global_ref_clock(
+        Deserializer& derez)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
+      return lamport_clock;
+    }
+
+    //--------------------------------------------------------------------------
     bool DistributedCollectable::can_delete(AutoLock& gc)
     //--------------------------------------------------------------------------
     {
@@ -753,6 +838,7 @@ namespace Legion {
         {
           DistributedDowngradeRestart rez;
           rez.serialize(did);
+          rez.serialize(downgrade_lamport_clock);
           rez.dispatch(downgrade_owner);
         }
       }
@@ -780,7 +866,7 @@ namespace Legion {
               if (remaining_responses > 0)
                 return false;
               // Send messages to see if we can perform the deletion
-              check_for_downgrade(downgrade_owner);
+              check_for_downgrade(downgrade_owner, downgrade_lamport_clock + 1);
               return false;
             }
             else
@@ -913,14 +999,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::check_for_downgrade(AddressSpaceID owner)
+    void DistributedCollectable::check_for_downgrade(
+        AddressSpaceID owner, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(remaining_responses == 0);
       // Update the downgrade owner
       downgrade_owner = owner;
-      if (can_downgrade())
+      if (can_downgrade() && (downgrade_lamport_clock <= lamport_clock))
       {
+        pending_downgrade_lamport_clock = lamport_clock;
+        // Don't need to bump this new lamport clock until we do the accumulate
+        bump_downgrade_lamport_clock = false;
         // We're ready to be downgraded
         // Send messages and count how many responses we expect to see
         if (is_owner() || ((collective_mapping != nullptr) &&
@@ -948,6 +1038,7 @@ namespace Legion {
                 else
                   rez.serialize(current_state);
                 rez.serialize(owner);
+                rez.serialize(pending_downgrade_lamport_clock);
               }
               for (const AddressSpaceID& child_id : children)
                 rez.dispatch(child_id);
@@ -968,6 +1059,7 @@ namespace Legion {
               else
                 rez.serialize(current_state);
               rez.serialize(owner);
+              rez.serialize(pending_downgrade_lamport_clock);
             }
             struct {
               void apply(AddressSpaceID space)
@@ -1003,6 +1095,7 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(current_state);
             rez.serialize(owner);
+            rez.serialize(pending_downgrade_lamport_clock);
           }
           rez.dispatch(owner_space);
           remaining_responses++;
@@ -1026,6 +1119,7 @@ namespace Legion {
               rez.serialize(owner);  // owner is special bottom value
               rez.serialize(total_sent_references);
               rez.serialize(total_received_references);
+              rez.serialize(downgrade_lamport_clock);
             }
             rez.dispatch(target);
             record_pending_downgrade();
@@ -1050,8 +1144,9 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(local_space);
-          rez.serialize<uint64_t>(0);  // sent global references
-          rez.serialize<uint64_t>(0);  // received global references
+          rez.serialize<uint64_t>(0);              // sent global references
+          rez.serialize<uint64_t>(0);              // received global references
+          rez.serialize(downgrade_lamport_clock);  // doesn't matter
         }
         rez.dispatch(target);
       }
@@ -1059,9 +1154,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::check_for_downgrade_restart(
-        AddressSpaceID new_owner)
+        AddressSpaceID new_owner, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
+      // We can always safely update the lamport clock
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, lamport_clock);
       // If we're no longer the downgrade owner there is nothing to do
       if (downgrade_owner != local_space)
         return;
@@ -1097,10 +1195,11 @@ namespace Legion {
         DistributedDowngradeUpdate rez;
         rez.serialize(did);
         rez.serialize(current_state);
+        rez.serialize(downgrade_lamport_clock);
         rez.dispatch(new_owner);
       }
       else
-        check_for_downgrade(new_owner);
+        check_for_downgrade(new_owner, downgrade_lamport_clock + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -1109,6 +1208,12 @@ namespace Legion {
     {
       total_sent_references += sent_global_references;
       total_received_references += received_global_references;
+      // Incorporate the pending downgrade clock
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, pending_downgrade_lamport_clock);
+      // Once we accumulate references then we need to bump the downgrade
+      // lamport clock for any pack to detect them
+      bump_downgrade_lamport_clock = true;
     }
 
     //--------------------------------------------------------------------------
@@ -1134,16 +1239,18 @@ namespace Legion {
       derez.deserialize(to_check);
       AddressSpaceID downgrade_owner;
       derez.deserialize(downgrade_owner);
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
 
       // It's possible for this to race with the creation of this
       // distributed collectable so wait until it is ready
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
-      dc->process_downgrade_request(downgrade_owner, to_check);
+      dc->process_downgrade_request(downgrade_owner, to_check, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::process_downgrade_request(
-        AddressSpaceID owner, State to_check)
+        AddressSpaceID owner, State to_check, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(owner != local_space);  // we should be remote here
@@ -1156,7 +1263,7 @@ namespace Legion {
       // perform our local down grade to reflect that first
       while (to_check < current_state) perform_downgrade(gc);
       legion_assert(LOCAL_REF_STATE < current_state);
-      check_for_downgrade(owner);
+      check_for_downgrade(owner, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -1189,11 +1296,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::process_downgrade_response(
-        AddressSpaceID notready, uint64_t total_sent, uint64_t total_received)
+        AddressSpaceID notready, uint64_t total_sent, uint64_t total_received,
+        LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
       legion_assert(remaining_responses > 0);
+      // Merge in the lamport clock
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, lamport_clock);
       if (notready != downgrade_owner)
         notready_owner = notready;
       else if (notready_owner == downgrade_owner)
@@ -1215,7 +1326,8 @@ namespace Legion {
           // Make sure to check ourselves again to handle any
           // check_*_and_increment methods
           if (can_downgrade() && (notready_owner == downgrade_owner) &&
-              (total_sent_references == total_received_references))
+              (total_sent_references == total_received_references) &&
+              (downgrade_lamport_clock <= pending_downgrade_lamport_clock))
           {
             // Then perform our local downgrade
             return perform_downgrade(gc);
@@ -1230,6 +1342,7 @@ namespace Legion {
               DistributedDowngradeUpdate rez;
               rez.serialize(did);
               rez.serialize(current_state);
+              rez.serialize(downgrade_lamport_clock);
               rez.dispatch(notready_owner);
             }
             // else: we used to do this, but the polling aspect of continuing
@@ -1240,14 +1353,11 @@ namespace Legion {
             // do an unpack that might need to restart this process. The first
             // one to get here will restart the downgrade process.
             // See the calls to check_for_downgrade_restart to see where
-            // progress comes from now
-            //{
-            // This is a strange case: all the nodes are ready to downgrade
-            // but there are still packed references in flight so we need
-            // to keep trying to perform the downgrade until we find one
-            // of these nodes and find the reference
-            // check_for_downgrade(downgrade_owner);
-            //}
+            // progress comes from now. The one exception here is in the case
+            // where we had a causality violation in which case it is ok to
+            // retry
+            else if (pending_downgrade_lamport_clock < downgrade_lamport_clock)
+              check_for_downgrade(downgrade_owner, downgrade_lamport_clock);
           }
         }
         else
@@ -1258,13 +1368,15 @@ namespace Legion {
           // perform the downgrade on this node or not atomically with
           // accumulating our sent and received references
           DistributedDowngradeResponse rez;
-          if (can_downgrade())
+          if (can_downgrade() &&
+              (downgrade_lamport_clock <= pending_downgrade_lamport_clock))
           {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(notready_owner);
             rez.serialize(total_sent_references);
             rez.serialize(total_received_references);
+            rez.serialize(downgrade_lamport_clock);
             // Record that we're in the pending downgrade state
             record_pending_downgrade();
           }
@@ -1275,6 +1387,7 @@ namespace Legion {
             rez.serialize(local_space);
             rez.serialize<uint64_t>(0);  // sent global references
             rez.serialize<uint64_t>(0);  // received global references
+            rez.serialize(downgrade_lamport_clock);
           }
           rez.dispatch(target);
         }
@@ -1293,11 +1406,14 @@ namespace Legion {
       AddressSpaceID notready;
       derez.deserialize(notready);
       uint64_t total_sent, total_received;
+      LamportClock lamport_clock;
       derez.deserialize(total_sent);
       derez.deserialize(total_received);
+      derez.deserialize(lamport_clock);
 
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
-      if (dc->process_downgrade_response(notready, total_sent, total_received))
+      if (dc->process_downgrade_response(
+              notready, total_sent, total_received, lamport_clock))
         delete dc;
     }
 
@@ -1340,7 +1456,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::process_downgrade_update(
-        AutoLock& gc, State to_check)
+        AutoLock& gc, State to_check, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(downgrade_owner != local_space);
@@ -1352,8 +1468,10 @@ namespace Legion {
       if (current_state < to_check)
         current_state = to_check;
       downgrade_owner = local_space;
+      downgrade_lamport_clock =
+          std::max(downgrade_lamport_clock, lamport_clock);
       if (gc_references == 0)
-        check_for_downgrade(downgrade_owner);
+        check_for_downgrade(downgrade_owner, downgrade_lamport_clock + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -1365,12 +1483,14 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable::State state;
       derez.deserialize(state);
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
 
       // It's possible for this to race with the creation and registration
       // of this distributed collectable so wait for it to be ready
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
       AutoLock gc(dc->gc_lock);
-      dc->process_downgrade_update(gc, state);
+      dc->process_downgrade_update(gc, state, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -1380,6 +1500,8 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
       // It's possible for these messages to race with actual downgrades and
       // destruction of the collectable object so we have to check to see if
       // it is still here, if it's not then it's already been cleaned up and
@@ -1390,7 +1512,7 @@ namespace Legion {
       {
         {
           AutoLock gc(dc->gc_lock);
-          dc->check_for_downgrade_restart(source);
+          dc->check_for_downgrade_restart(source, lamport_clock);
         }
         if (dc->remove_base_resource_ref(RUNTIME_REF))
           delete dc;
@@ -1656,7 +1778,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ValidDistributedCollectable::acquire_valid_remote(
-        AddressSpaceID& current, int count, AddressSpaceID source)
+        AddressSpaceID& current, int count, AddressSpaceID source,
+        LamportClock& lamport_clock)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1675,7 +1798,15 @@ namespace Legion {
 #endif
           }
           else  // Otherwise pack a reference to send back
+          {
+            if (bump_downgrade_lamport_clock)
+            {
+              downgrade_lamport_clock++;
+              bump_downgrade_lamport_clock = false;
+            }
+            lamport_clock = downgrade_lamport_clock;
             sent_valid_references++;
+          }
           return true;
         }
         else
@@ -1708,8 +1839,10 @@ namespace Legion {
               runtime->weak_find_distributed_collectable(did));
       if (dc != nullptr)
       {
+        LamportClock lamport_clock = 0;
         AddressSpaceID current_owner = dc->local_space;
-        if (dc->acquire_valid_remote(current_owner, count, source))
+        if (dc->acquire_valid_remote(
+                current_owner, count, source, lamport_clock))
         {
           if (source != dc->local_space)
           {
@@ -1743,6 +1876,7 @@ namespace Legion {
             rez.serialize(count);
             rez.serialize(result);
             rez.serialize(ready);
+            rez.serialize(lamport_clock);
           }
           rez.dispatch(current_owner);
         }
@@ -1775,13 +1909,14 @@ namespace Legion {
       // Just add the valid reference for now
       local->add_valid_reference(count);
       // Unpack the valid reference packed by acquire_valid_remote
-      local->unpack_valid_ref();
+      local->unpack_valid_ref(derez);
       result->store(true);
       Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::pack_valid_ref(unsigned cnt)
+    void ValidDistributedCollectable::pack_valid_ref(
+        Serializer& rez, unsigned cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1803,10 +1938,29 @@ namespace Legion {
           std::abort();
         gc.reacquire();
       }
-      else
 #endif
-        // Must be valid when packing a reference
+      // Must be valid when packing a reference
+      legion_assert(current_state == VALID_REF_STATE);
+      // Only permitted to pack a valid reference if we've registered
+      // with the owner node otherwise we need to wait for that
+      // registration to succeed before we can pack in order to avoid
+      // spurious successful downgrades
+      if (remote_registered.exists())
+      {
+        const RtEvent wait_on = remote_registered;
+        gc.release();
+        wait_on.wait();
+        gc.reacquire();
+        remote_registered = RtEvent::NO_RT_EVENT;
+        // Should still be valid
         legion_assert(current_state == VALID_REF_STATE);
+      }
+      if (bump_downgrade_lamport_clock)
+      {
+        downgrade_lamport_clock++;
+        bump_downgrade_lamport_clock = false;
+      }
+      rez.serialize(downgrade_lamport_clock);
       sent_valid_references += cnt;
 #ifdef LEGION_DEBUG
       gc.release();
@@ -1817,12 +1971,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::unpack_valid_ref(unsigned cnt)
+    void ValidDistributedCollectable::unpack_valid_ref(
+        Deserializer& derez, unsigned cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
       legion_assert(is_valid<false /*need lock*/>());
       received_valid_references += cnt;
+      LamportClock prev_clock;
+      derez.deserialize(prev_clock);
+      downgrade_lamport_clock = std::max(downgrade_lamport_clock, prev_clock);
       // No need to send any notifications if a downgrade is in process
       if (remaining_responses == 0)
       {
@@ -1830,7 +1988,7 @@ namespace Legion {
         {
           // We're the downgrade owner so check to see if we can resume
           // doing collections or we can wait for the next removal
-          check_for_downgrade_restart(local_space);
+          check_for_downgrade_restart(local_space, downgrade_lamport_clock);
         }
         else if (
             (current_state == PENDING_GLOBAL_REF_STATE) ||
@@ -1847,6 +2005,7 @@ namespace Legion {
           // to notify the downgrade owner about the unpacked references
           DistributedDowngradeRestart rez;
           rez.serialize(did);
+          rez.serialize(downgrade_lamport_clock);
           rez.dispatch(downgrade_owner);
         }
         else
@@ -1918,7 +2077,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ValidDistributedCollectable::process_downgrade_update(
-        AutoLock& gc, State to_check)
+        AutoLock& gc, State to_check, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(downgrade_owner != local_space);
@@ -1932,12 +2091,15 @@ namespace Legion {
           (current_state == PENDING_GLOBAL_REF_STATE))
       {
         downgrade_owner = local_space;
+        downgrade_lamport_clock =
+            std::max(downgrade_lamport_clock, lamport_clock);
         current_state = VALID_REF_STATE;
         if (valid_references == 0)
-          check_for_downgrade(downgrade_owner);
+          check_for_downgrade(downgrade_owner, downgrade_lamport_clock + 1);
       }
       else
-        DistributedCollectable::process_downgrade_update(gc, to_check);
+        DistributedCollectable::process_downgrade_update(
+            gc, to_check, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -1949,6 +2111,12 @@ namespace Legion {
       {
         total_sent_references += sent_valid_references;
         total_received_references += received_valid_references;
+        // Incorporate the pending downgrade clock
+        downgrade_lamport_clock =
+            std::max(downgrade_lamport_clock, pending_downgrade_lamport_clock);
+        // Once we accumulate references then we need to bump the downgrade
+        // lamport clock for any pack to detect them
+        bump_downgrade_lamport_clock = true;
       }
       else
         DistributedCollectable::accumulate_local_references();

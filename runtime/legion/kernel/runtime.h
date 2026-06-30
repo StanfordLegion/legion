@@ -401,18 +401,14 @@ namespace Legion {
           MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs* args);
     public:
-      void create_shared_ownership(
-          IndexSpace handle, const bool total_sharding_collective = false,
-          const bool unpack_reference = false);
-      void create_shared_ownership(
-          IndexPartition handle, const bool total_sharding_collective = false,
-          const bool unpack_reference = false);
-      void create_shared_ownership(
-          FieldSpace handle, const bool total_sharding_collective = false,
-          const bool unpack_reference = false);
-      void create_shared_ownership(
-          LogicalRegion handle, const bool total_sharding_collective = false,
-          const bool unpack_reference = false);
+      IndexSpaceNode* create_shared_ownership(
+          IndexSpace handle, const bool total_sharding_collective = false);
+      IndexPartNode* create_shared_ownership(
+          IndexPartition handle, const bool total_sharding_collective = false);
+      FieldSpaceNode* create_shared_ownership(
+          FieldSpace handle, const bool total_sharding_collective = false);
+      RegionNode* create_shared_ownership(
+          LogicalRegion handle, const bool total_sharding_collective = false);
     public:
       size_t get_domain_volume(IndexSpace handle);
       void find_domain(IndexSpace handle, Domain& launch_domain);
@@ -723,7 +719,8 @@ namespace Legion {
     public:
       // Remote expression methods
       IndexSpaceExpression* find_or_create_remote_expression(
-          IndexSpaceExprID remote_expr_id, Deserializer& derez, bool& created);
+          IndexSpaceExprID remote_expr_id, Deserializer& derez,
+          AddressSpaceID source);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
     public:
       TraceID generate_dynamic_trace_id(bool check_context = true);
@@ -1054,11 +1051,8 @@ namespace Legion {
       FutureImpl* find_or_create_future(
           DistributedID did, DistributedID ctx_did,
           const ContextCoordinate& coordinate, Provenance* provenance,
-          bool has_global_reference,
-          // Can be ignored with global ref
-          RtEvent& registered, Operation* op = nullptr, GenerationID op_gen = 0,
-          UniqueID op_uid = 0, int op_depth = 0,
-          CollectiveMapping* mapping = nullptr);
+          Operation* op = nullptr, GenerationID op_gen = 0, UniqueID op_uid = 0,
+          int op_depth = 0, CollectiveMapping* mapping = nullptr);
       FutureMapImpl* find_or_create_future_map(
           DistributedID did, TaskContext* ctx, uint64_t coord,
           IndexSpace domain, Provenance* provenance,

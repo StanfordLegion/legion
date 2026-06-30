@@ -149,6 +149,7 @@ namespace Legion {
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {
+      legion_assert(lamport_clocks.empty());
       for (ViewExprs::const_iterator vit = conditions.begin();
            vit != conditions.end(); vit++)
       {
@@ -1401,6 +1402,7 @@ namespace Legion {
         const bool pack_references) const
     //--------------------------------------------------------------------------
     {
+      legion_assert(pack_references == lamport_clocks.empty());
       rez.serialize<size_t>(conditions.size());
       for (ViewExprs::const_iterator vit = conditions.begin();
            vit != conditions.end(); ++vit)
@@ -1414,8 +1416,16 @@ namespace Legion {
           it->first->pack_expression(rez, target);
           rez.serialize(it->second);
         }
-        if (pack_references)
-          vit->first->pack_global_ref();
+        if (!pack_references)
+        {
+          std::map<LogicalView*, LamportClock>::iterator finder =
+              lamport_clocks.find(vit->first);
+          legion_assert(finder != lamport_clocks.end());
+          rez.serialize(finder->second);
+          lamport_clocks.erase(finder);
+        }
+        else
+          vit->first->pack_global_ref(rez);
       }
     }
 
@@ -1425,6 +1435,7 @@ namespace Legion {
         std::set<RtEvent>& ready_events)
     //--------------------------------------------------------------------------
     {
+      legion_assert(lamport_clocks.empty());
       for (unsigned idx1 = 0; idx1 < num_views; idx1++)
       {
         DistributedID did;
@@ -1447,6 +1458,7 @@ namespace Legion {
           ready_events.insert(ready);
         if (LogicalView::is_collective_did(did))
           has_collective_views = true;
+        lamport_clocks[view] = LogicalView::unpack_global_ref_clock(derez);
       }
     }
 
@@ -1458,7 +1470,11 @@ namespace Legion {
            vit != conditions.end(); vit++)
       {
         vit->first->add_nested_gc_ref(owner_did);
-        vit->first->unpack_global_ref();
+        std::map<LogicalView*, LamportClock>::iterator finder =
+            lamport_clocks.find(vit->first);
+        legion_assert(finder != lamport_clocks.end());
+        vit->first->unpack_global_ref(finder->second);
+        lamport_clocks.erase(finder);
       }
     }
 

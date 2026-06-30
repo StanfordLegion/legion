@@ -65,8 +65,12 @@ namespace Legion {
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
     public:
-      virtual void pack_valid_ref(void) = 0;
-      virtual void unpack_valid_ref(void) = 0;
+      virtual void pack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks) = 0;
+      virtual void unpack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks) = 0;
     protected:
 #ifndef LEGION_DEBUG_GC
       void add_valid_reference(int cnt);

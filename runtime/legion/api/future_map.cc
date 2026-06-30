@@ -415,7 +415,7 @@ namespace Legion {
       }
       else
         rez.serialize<bool>(false);  // cannot make it, need to wait
-      pack_global_ref();
+      pack_global_ref(rez);
     }
 
     //--------------------------------------------------------------------------
@@ -440,7 +440,7 @@ namespace Legion {
             ((result.impl->collective_mapping == nullptr) ||
              (!result.impl->collective_mapping->contains(source))))
           result.impl->update_remote_instances(source);
-        result.impl->unpack_global_ref();
+        result.impl->unpack_global_ref(derez);
         return result;
       }
       IndexSpace future_map_domain;
@@ -454,7 +454,7 @@ namespace Legion {
       FutureMap result(runtime->find_or_create_future_map(
           future_map_did, ctx, coordinate, future_map_domain, provenance,
           index));
-      result.impl->unpack_global_ref();
+      result.impl->unpack_global_ref(derez);
       return result;
     }
 
@@ -602,7 +602,7 @@ namespace Legion {
       // distributed collectable cannot collect itself until it finds
       // the unpacked global reference
       if (!is_owner())
-        send_remote_registration(true /*has global reference*/);
+        send_remote_registration();
     }
 
     //--------------------------------------------------------------------------
@@ -632,7 +632,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(point);
         rez.serialize(f.impl->did);
-        f.impl->pack_global_ref();
+        f.impl->pack_global_ref(rez);
         rez.serialize(done);
       }
       rez.dispatch(source);
@@ -646,12 +646,11 @@ namespace Legion {
       derez.deserialize(coordinate.index_point);
       DistributedID future_did;
       derez.deserialize(future_did);
-      RtEvent dummy;
       FutureImpl* impl = runtime->find_or_create_future(
-          future_did, context->did, coordinate, provenance,
-          true /*has global ref*/, dummy, op, op_gen, op_uid, op_depth);
+          future_did, context->did, coordinate, provenance, op, op_gen, op_uid,
+          op_depth);
       set_future(coordinate.index_point, impl);
-      impl->unpack_global_ref();
+      impl->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------

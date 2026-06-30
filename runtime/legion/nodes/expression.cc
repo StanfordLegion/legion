@@ -217,7 +217,7 @@ namespace Legion {
               legion_safe_cast<IndexSpaceOperation*>(result);
           if (!op->try_add_live_reference())
             std::abort();
-          op->unpack_global_ref();
+          op->unpack_global_ref(derez);
         }
         else
           // LIVE_EXPR_REF was added by the pack_expression call
@@ -235,26 +235,22 @@ namespace Legion {
         if (!node->try_add_live_reference())
           std::abort();
         // Now we can unpack the global expression reference
-        node->unpack_global_ref();
+        node->unpack_global_ref(derez);
         return node;
       }
       else
       {
         IndexSpaceExprID remote_expr_id;
         derez.deserialize(remote_expr_id);
-        bool created = false;
         IndexSpaceExpression* result =
             runtime->find_or_create_remote_expression(
-                remote_expr_id, derez, created);
+                remote_expr_id, derez, source);
         IndexSpaceOperation* op =
             legion_safe_cast<IndexSpaceOperation*>(result);
         if (!result->try_add_live_reference())
           std::abort();
-        if (created && (source != op->owner_space))
-          // Notify the owner of the new instance
-          op->send_remote_registration(true /*has global ref*/);
         // Unpack the global reference that we had
-        op->unpack_global_ref();
+        op->unpack_global_ref(derez);
         return result;
       }
     }

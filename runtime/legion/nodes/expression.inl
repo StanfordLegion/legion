@@ -1551,7 +1551,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->pack_global_ref();
+        this->pack_global_ref(rez);
       }
       else
       {
@@ -1573,7 +1573,7 @@ namespace Legion {
           this->update_remote_instances(target);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->pack_global_ref();
+        this->pack_global_ref(rez);
       }
     }
 

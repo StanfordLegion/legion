@@ -257,8 +257,14 @@ namespace Legion {
       virtual void notify_valid(void) override;
       virtual bool notify_invalid(void) override;
     public:
-      virtual void pack_valid_ref(void) override;
-      virtual void unpack_valid_ref(void) override;
+      virtual void pack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
+      virtual void unpack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
     public:
       virtual ApEvent fill_from(
           FillView* fill_view, ApEvent precondition, PredEvent predicate_guard,

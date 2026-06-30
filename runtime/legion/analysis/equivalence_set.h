@@ -416,12 +416,14 @@ namespace Legion {
         static constexpr LgTaskID TASK_ID = LG_DEFER_MAKE_OWNER_TASK_ID;
       public:
         DeferMakeOwnerArgs(void) = default;
-        DeferMakeOwnerArgs(EquivalenceSet* s)
-          : LgTaskArgs<DeferMakeOwnerArgs>(false, true), set(s)
+        DeferMakeOwnerArgs(EquivalenceSet* s, LamportClock clock)
+          : LgTaskArgs<DeferMakeOwnerArgs>(false, true), set(s),
+            lamport_clock(clock)
         { }
         void execute(void) const;
       public:
         EquivalenceSet* set;
+        LamportClock lamport_clock;
       };
       struct DeferApplyStateArgs : public LgTaskArgs<DeferApplyStateArgs> {
       public:
@@ -452,7 +454,9 @@ namespace Legion {
             TraceViewSet* precondition_updates,
             TraceViewSet* anticondition_updates,
             TraceViewSet* postcondition_updates,
-            shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates);
+            shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates,
+            shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+            shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks);
         void execute(void) const;
         void release_references(void) const;
       public:
@@ -469,6 +473,8 @@ namespace Legion {
         TraceViewSet* anticondition_updates;
         TraceViewSet* postcondition_updates;
         shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates;
+        shrt::map<LogicalView*, LamportClock>* view_lamport_clocks;
+        shrt::map<PhysicalManager*, LamportClock>* inst_lamport_clocks;
         std::set<IndexSpaceExpression*>* expr_references;
         RtUserEvent done_event;
         bool forward_to_owner;
@@ -558,7 +564,9 @@ namespace Legion {
           std::vector<RtEvent>& applied_events);
       bool filter_partial_invalidations(
           const FieldMask& mask, RtUserEvent& filtered);
-      void make_owner(RtEvent precondition = RtEvent::NO_RT_EVENT);
+      void make_owner(
+          LamportClock lamport_clock,
+          RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       // View that was read by a task during a trace
       void update_tracing_read_only_view(
@@ -827,8 +835,11 @@ namespace Legion {
           shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates,
           shrt::FieldMaskMap<CopyFillGuard>* read_only_guard_updates,
           shrt::FieldMaskMap<CopyFillGuard>* reduction_fill_guard_updates,
-          std::vector<RtEvent>& applied_events, const bool needs_lock,
-          const bool forward_to_owner, const bool unpack_tracing_references);
+          std::vector<RtEvent>& applied_events,
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks,
+          const bool needs_lock, const bool forward_to_owner,
+          const bool unpack_tracing_references);
       static void pack_updates(
           Serializer& rez, const AddressSpaceID target,
           const MapView<
@@ -852,7 +863,9 @@ namespace Legion {
           const TraceViewSet* anticondition_updates,
           const TraceViewSet* postcondition_updates,
           const shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates,
-          const bool pack_references, const bool pack_tracing_references);
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks,
+          const bool pack_tracing_references);
     public:
       // Note this context refers to the context from which the views are
       // created in. Normally this is the same as the context in which the

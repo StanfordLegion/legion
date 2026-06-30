@@ -56,8 +56,14 @@ namespace Legion {
       virtual void notify_valid(void) override;
       virtual bool notify_invalid(void) override;
     public:
-      virtual void pack_valid_ref(void) override;
-      virtual void unpack_valid_ref(void) override;
+      virtual void pack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
+      virtual void unpack_valid_ref(
+          shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+          shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
+          override;
     public:
       virtual ApEvent fill_from(
           FillView* fill_view, ApEvent precondition, PredEvent predicate_guard,
@@ -274,10 +280,10 @@ namespace Legion {
     public:
       void make_valid(bool need_lock);
       bool make_invalid(bool need_lock);
-      bool perform_invalidate_request(uint64_t generation, bool need_lock);
+      bool perform_invalidate_request(LamportClock snapshot, bool need_lock);
       bool perform_invalidate_response(
-          uint64_t generation, uint64_t sent, uint64_t received, bool failed,
-          bool need_lock);
+          LamportClock snapshot, uint64_t sent, uint64_t received,
+          LamportClock clock, bool failed, bool need_lock);
     public:
       static void process_nearest_instances(
           std::atomic<size_t>* target, std::vector<DistributedID>* instances,
@@ -338,7 +344,18 @@ namespace Legion {
       // For valid state tracking
       ValidState valid_state;
       uint32_t remaining_invalidation_responses;
-      uint64_t invalidation_generation;
+      // Lamport clock for this view's valid-reference invalidation protocol.
+      // collect_lamport_clock is the view's logical clock (stamped onto packed
+      // valid references, merged on unpack and on invalidate responses).
+      // pending_collect_lamport_clock is the in-progress round's snapshot and
+      // also the round identifier (it replaces the old invalidation generation
+      // counter). bump_collect_lamport_clock arms the clock so the first valid
+      // reference packed after we commit to a round advances it past the
+      // snapshot, which lets the owner detect a causality violation that would
+      // otherwise hide behind aliased sent/received counts.
+      LamportClock collect_lamport_clock;
+      LamportClock pending_collect_lamport_clock;
+      bool bump_collect_lamport_clock;
       uint64_t total_valid_sent, total_valid_received;
       uint64_t sent_valid_references, received_valid_references;
       bool invalidation_failed;

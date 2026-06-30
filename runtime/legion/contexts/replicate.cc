@@ -1263,15 +1263,17 @@ namespace Legion {
                sit.second)
           {
             rez.serialize(rit.first->handle);
-            rit.first->pack_global_ref();
             rez.serialize(rit.second.size());
             for (const std::pair<EquivalenceSet* const, FieldMask>& it :
                  rit.second)
             {
-              it.first->pack_global_ref();
               rez.serialize(it.first->did);
               rez.serialize(it.second);
             }
+            for (const std::pair<EquivalenceSet* const, FieldMask>& it :
+                 rit.second)
+              it.first->pack_global_ref(rez);
+            rit.first->pack_global_ref(rez);
           }
           shard_manager->send_created_region_contexts(
               sit.first, rez, applied_events);
@@ -1294,7 +1296,6 @@ namespace Legion {
           {
             RegionNode* region = created_nodes[idx];
             rez.serialize(region->handle);
-            region->pack_global_ref();
             local::FieldMaskMap<EquivalenceSet> eq_sets;
             if (created_trees[idx] != nullptr)
               created_trees[idx]->find_local_equivalence_sets(
@@ -1304,10 +1305,14 @@ namespace Legion {
                      eq_sets.begin();
                  it != eq_sets.end(); it++)
             {
-              it->first->pack_global_ref();
               rez.serialize(it->first->did);
               rez.serialize(it->second);
             }
+            for (local::FieldMaskMap<EquivalenceSet>::const_iterator it =
+                     eq_sets.begin();
+                 it != eq_sets.end(); it++)
+              it->first->pack_global_ref(rez);
+            region->pack_global_ref(rez);
           }
           shard_manager->send_created_region_contexts(
               source_shard, rez, applied_events);
@@ -8651,10 +8656,10 @@ namespace Legion {
         {
           it->first->set_expr->initialize_equivalence_set_kd_tree(
               current, it->first, it->second, local_shard, false /*current*/);
-          it->first->unpack_global_ref();
+          it->first->unpack_global_ref(derez);
         }
         // Remove the global reference that we held on the node
-        node->unpack_global_ref();
+        node->unpack_global_ref(derez);
       }
     }
 
@@ -9689,7 +9694,6 @@ namespace Legion {
         rez.serialize(source_space);
         rez.serialize(req_index);
         rez.serialize(set->did);
-        set->pack_global_ref();
         rez.serialize<size_t>(sit->second.size());
         for (op::map<Domain, FieldMask>::const_iterator it =
                  sit->second.begin();
@@ -9699,6 +9703,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
         rez.serialize(ready);
+        set->pack_global_ref(rez);
         shard_manager->send_output_equivalence_set(sit->first, rez);
         recorded_events.emplace_back(ready);
       }
@@ -10043,7 +10048,7 @@ namespace Legion {
           recorded_event,
           report_output_registrations(
               source, source_space, references, new_subscriptions));
-      set->unpack_global_ref();
+      set->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -1006,11 +1006,15 @@ namespace Legion {
       legion_assert(future_handles == nullptr);
       future_handles = new FutureHandles;
       future_handles->add_reference();
-      std::map<DomainPoint, DistributedID>& handles = future_handles->handles;
+      std::map<DomainPoint, PackedFutureHandle>& handles =
+          future_handles->handles;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
         Future f = future_map.impl->get_future(itr.p, true /*internal only*/);
-        handles[itr.p] = f.impl->did;
+        PackedFutureHandle& handle = handles[itr.p];
+        handle.future_did = f.impl->did;
+        // Pack a reference that will be unpacked once the future is set
+        f.impl->pack_global_ref(handle.lamport_clock);
       }
     }
 

@@ -1432,23 +1432,23 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(size);
+          pack_global_ref(rez);
         }
-        pack_global_ref();
         rez.dispatch(owner_space);
       }
       if (!subscribers.empty())
       {
-        FutureSizeMessage rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(size);
-        }
         for (const AddressSpaceID& subscriber : subscribers)
         {
           if ((subscriber == source) || (subscriber == local_space))
             continue;
-          pack_global_ref();
+          FutureSizeMessage rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(size);
+            pack_global_ref(rez);
+          }
           rez.dispatch(subscriber);
         }
       }
@@ -2045,7 +2045,7 @@ namespace Legion {
             // Send a request to the owner node to subscribe
             FutureSubscription rez;
             rez.serialize(did);
-            pack_global_ref();
+            pack_global_ref(rez);
             if ((collective_mapping != nullptr) &&
                 collective_mapping->contains(local_space))
               rez.dispatch(
@@ -2102,12 +2102,12 @@ namespace Legion {
     void FutureImpl::pack_future(Serializer& rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      pack_global_ref();
       rez.serialize<DistributedID>(did);
       if ((collective_mapping != nullptr) &&
           collective_mapping->contains(target))
       {
         rez.serialize<bool>(true);  // collective
+        pack_global_ref(rez);
         return;
       }
       else
@@ -2122,6 +2122,7 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
+      pack_global_ref(rez);
     }
 
     //--------------------------------------------------------------------------
@@ -2141,7 +2142,7 @@ namespace Legion {
         // Wait until we find it here
         Future result(static_cast<FutureImpl*>(
             runtime->find_distributed_collectable(future_did)));
-        result.impl->unpack_global_ref();
+        result.impl->unpack_global_ref(derez);
         return result;
       }
       derez.deserialize(ctx_did);
@@ -2157,11 +2158,10 @@ namespace Legion {
         collective_mapping->add_reference();
       AutoProvenance provenance(
           Provenance::deserialize(derez), true /*has ref*/);
-      RtEvent dummy;
       Future result(runtime->find_or_create_future(
-          future_did, ctx_did, coordinate, provenance, true /*has global ref*/,
-          dummy, op, op_gen, op_uid, op_depth, collective_mapping));
-      result.impl->unpack_global_ref();
+          future_did, ctx_did, coordinate, provenance, op, op_gen, op_uid,
+          op_depth, collective_mapping));
+      result.impl->unpack_global_ref(derez);
       if ((collective_mapping != nullptr) &&
           collective_mapping->remove_reference())
         delete collective_mapping;
@@ -2306,7 +2306,7 @@ namespace Legion {
         // events for each future instance being packed
         FutureResultMessage rez;
         pack_future_result(rez, subscriber);
-        pack_global_ref();
+        pack_global_ref(rez);
         rez.dispatch(subscriber);
       }
       subscribers.clear();
@@ -2334,8 +2334,8 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(future_size);
+            pack_global_ref(rez);
           }
-          pack_global_ref();
           rez.dispatch(subscriber);
         }
         legion_assert(subscribers.find(subscriber) == subscribers.end());
@@ -2419,7 +2419,7 @@ namespace Legion {
             // We can send the result right now
             FutureResultMessage rez;
             pack_future_result(rez, subscriber);
-            pack_global_ref();
+            pack_global_ref(rez);
             rez.dispatch(subscriber);
           }
         }
@@ -2428,7 +2428,7 @@ namespace Legion {
           // Send the result back to the subscriber since right away
           FutureResultMessage rez;
           pack_future_result(rez, subscriber);
-          pack_global_ref();
+          pack_global_ref(rez);
           rez.dispatch(subscriber);
         }
       }
@@ -2548,7 +2548,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::record_future_registered(bool has_global_reference)
+    void FutureImpl::record_future_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -2556,28 +2556,8 @@ namespace Legion {
       // it has already been done
       legion_assert(!registered_with_runtime);
       registered_with_runtime = true;
-      RtEvent result;
       if (!is_owner())
-        result = send_remote_registration(has_global_reference);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool FutureImpl::needs_remote_instance_update(AddressSpaceID source) const
-    //--------------------------------------------------------------------------
-    {
-      // This function helps resource a really hairy case where messages that
-      // pack and unpack references from nodes can race with the registration
-      // message send by record_future_registered. In such cases the owner
-      // node can see unpacks of references from a remote node that isn't
-      // registered yet and then the counts for packs and unpack incorrectly
-      // balance without new remote node having been consulted yet. To address
-      // this we always do extra remote registrations on messages from remote
-      // nodes just to be safe since we can do it multiple times without
-      // causing any issues
-      return (
-          is_owner() && ((collective_mapping == nullptr) ||
-                         !collective_mapping->contains(source)));
+        send_remote_registration();
     }
 
     //--------------------------------------------------------------------------
@@ -2589,8 +2569,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
       FutureImpl* future = legion_safe_cast<FutureImpl*>(dc);
-      if (future->needs_remote_instance_update(source))
-        future->update_remote_instances(source);
 #ifdef LEGION_DEBUG
       // A little bit strange, but if we go to do the broadcast when
       // unpacking the result, we might need to pack other global references
@@ -2601,13 +2579,13 @@ namespace Legion {
       // works so we have at least one concrete reference on this node in
       // case we need to pack any global references.
       legion_no_skip_assert(future->check_global_and_increment(RUNTIME_REF));
-      future->unpack_global_ref();
       future->unpack_future_result(derez);
+      future->unpack_global_ref(derez);
       if (future->remove_base_gc_ref(RUNTIME_REF))
         delete future;
 #else
       future->unpack_future_result(derez);
-      future->unpack_global_ref();
+      future->unpack_global_ref(derez);
 #endif
     }
 
@@ -2625,18 +2603,16 @@ namespace Legion {
       FutureImpl* future = legion_safe_cast<FutureImpl*>(dc);
       size_t future_size;
       derez.deserialize(future_size);
-      if (future->needs_remote_instance_update(source))
-        future->update_remote_instances(source);
 #ifdef LEGION_DEBUG
       // Same case here as above to avoid overzealous assertions
       legion_no_skip_assert(future->check_global_and_increment(RUNTIME_REF));
-      future->unpack_global_ref();
+      future->unpack_global_ref(derez);
       future->set_future_result_size(future_size, source);
       if (future->remove_base_gc_ref(RUNTIME_REF))
         delete future;
 #else
       future->set_future_result_size(future_size, source);
-      future->unpack_global_ref();
+      future->unpack_global_ref(derez);
 #endif
     }
 
@@ -2649,18 +2625,16 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable* dc = runtime->find_distributed_collectable(did);
       FutureImpl* future = legion_safe_cast<FutureImpl*>(dc);
-      if (future->needs_remote_instance_update(source))
-        future->update_remote_instances(source);
 #ifdef LEGION_DEBUG
       // Same case here as above to avoid overzealous assertions
       legion_no_skip_assert(future->check_global_and_increment(RUNTIME_REF));
-      future->unpack_global_ref();
+      future->unpack_global_ref(derez);
       future->record_subscription(source, true /*need lock*/);
       if (future->remove_base_gc_ref(RUNTIME_REF))
         delete future;
 #else
       future->record_subscription(source, true /*need lock*/);
-      future->unpack_global_ref();
+      future->unpack_global_ref(derez);
 #endif
     }
 

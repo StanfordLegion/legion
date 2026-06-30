@@ -66,7 +66,9 @@ namespace Legion {
         kind(k), producer_event(p_event), gc_state(init), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
-        received_valid_references(0), padded_reservations(nullptr)
+        received_valid_references(0), collect_lamport_clock(0),
+        pending_collect_lamport_clock(0), bump_collect_lamport_clock(false),
+        padded_reservations(nullptr)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,
@@ -532,8 +534,8 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(user_event);
           rez.serialize(applied);
+          pack_global_ref(rez);
         }
-        pack_global_ref();
         rez.dispatch(owner_space);
         applied_events.insert(applied);
       }
@@ -556,7 +558,7 @@ namespace Legion {
           runtime->find_distributed_collectable(did));
       std::set<RtEvent> applied;
       manager->record_instance_user(user_event, applied);
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
       else
@@ -623,22 +625,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::pack_valid_ref(void)
+    void PhysicalManager::pack_valid_ref(Serializer& rez)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock = 0;
+      pack_valid_ref(lamport_clock);
+      rez.serialize(lamport_clock);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::pack_valid_ref(LamportClock& lamport_clock)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
       // We should always be holding a valid reference when we
       // pack a valid reference so the state should always be valid
       legion_assert(gc_state == VALID_GC_STATE);
+      // If we've committed our counts to a collection round then the first
+      // pack afterwards must advance the clock so that a reference packed
+      // after the commit is detectable when it is unpacked elsewhere
+      if (bump_collect_lamport_clock)
+      {
+        collect_lamport_clock++;
+        bump_collect_lamport_clock = false;
+      }
+      lamport_clock = collect_lamport_clock;
       sent_valid_references++;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::unpack_valid_ref(void)
+    void PhysicalManager::unpack_valid_ref(Deserializer& derez)
+    //--------------------------------------------------------------------------
+    {
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
+      unpack_valid_ref(lamport_clock);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unpack_valid_ref(LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
+
       received_valid_references++;
+      collect_lamport_clock = std::max(collect_lamport_clock, lamport_clock);
     }
 
 #ifdef LEGION_DEBUG_GC
@@ -777,8 +808,8 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(&result);
           rez.serialize(done);
+          pack_global_ref(rez);
         }
-        pack_global_ref();
         rez.dispatch(owner_space);
         if (!done.has_triggered())
           done.wait();
@@ -839,7 +870,7 @@ namespace Legion {
         }
         rez.dispatch(source);
       }
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
 #else
       std::abort();  // should never get this in release mode
 #endif
@@ -1089,7 +1120,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool PhysicalManager::acquire_collect(
         std::set<ApEvent>& remote_events, uint64_t& sent_valid,
-        uint64_t& received_valid)
+        uint64_t& received_valid, LamportClock lamport_clock,
+        LamportClock& collect_clock)
     //--------------------------------------------------------------------------
     {
       legion_assert(!is_owner());
@@ -1102,6 +1134,15 @@ namespace Legion {
       remote_events.swap(gc_events);
       sent_valid = sent_valid_references;
       received_valid = received_valid_references;
+      // Commit our contribution to this collection round: fold in the round's
+      // snapshot clock and arm the bump so that any valid reference packed
+      // after this point advances our clock and is therefore detectable as a
+      // causality violation. Report our clock back to the owner so it can tell
+      // when we observed a post-snapshot packed reference (collect_clock >
+      // round snapshot) even in the case where the sent/received counts alias.
+      collect_lamport_clock = std::max(collect_lamport_clock, lamport_clock);
+      bump_collect_lamport_clock = true;
+      collect_clock = collect_lamport_clock;
       return true;
     }
 
@@ -1143,7 +1184,7 @@ namespace Legion {
       }
       else  // Couldn't collect so we are done
         Runtime::trigger_event(done);
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -1180,6 +1221,8 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent done;
       derez.deserialize(done);
+      LamportClock lamport_clock;
+      derez.deserialize(lamport_clock);
 
       RtEvent ready;
       PhysicalManager* manager =
@@ -1189,7 +1232,10 @@ namespace Legion {
       std::set<ApEvent> gc_events;
       const AddressSpaceID owner = manager->owner_space;
       uint64_t sent_valid = 0, received_valid = 0;
-      if (!manager->acquire_collect(gc_events, sent_valid, received_valid))
+      LamportClock collect_clock = 0;
+      if (!manager->acquire_collect(
+              gc_events, sent_valid, received_valid, lamport_clock,
+              collect_clock))
       {
         GarbageCollectionFailed rez;
         {
@@ -1212,8 +1258,11 @@ namespace Legion {
             manager->record_instance_user(remote, ready_events);
         }
         // If we have different numbers of sent and received valid
-        // references then we need to tell the owner that too
-        if (sent_valid != received_valid)
+        // references then we need to tell the owner that too. We must also
+        // report when we observed a packed valid reference newer than this
+        // round's snapshot (collect_clock > lamport_clock), since that is a
+        // causality violation that can otherwise hide behind aliased counts.
+        if ((sent_valid != received_valid) || (collect_clock > lamport_clock))
         {
           const RtUserEvent notified = Runtime::create_rt_user_event();
           GarbageCollectionMismatch rez;
@@ -1222,6 +1271,7 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(sent_valid);
             rez.serialize(received_valid);
+            rez.serialize(collect_clock);
             rez.serialize(notified);
           }
           rez.dispatch(owner);
@@ -1246,6 +1296,7 @@ namespace Legion {
                 rez.serialize(did);
                 rez.serialize(target);
                 rez.serialize(child_done);
+                rez.serialize(lamport_clock);
               }
               rez.dispatch(child);
               ready_events.insert(child_done);
@@ -1276,7 +1327,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalManager::process_remote_reference_mismatch(
-        uint64_t sent, uint64_t received)
+        uint64_t sent, uint64_t received, LamportClock lamport_clock)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
@@ -1284,6 +1335,9 @@ namespace Legion {
       legion_assert(gc_state != COLLECTED_GC_STATE);
       sent_valid_references += sent;
       received_valid_references += received;
+      // Aggregate the remote node's clock so the owner's collection decision
+      // can detect a packed valid reference newer than this round's snapshot
+      collect_lamport_clock = std::max(collect_lamport_clock, lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -1295,14 +1349,17 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       uint64_t remote_sent, remote_received;
+      LamportClock remote_clock;
       derez.deserialize(remote_sent);
       derez.deserialize(remote_received);
+      derez.deserialize(remote_clock);
       RtUserEvent done;
       derez.deserialize(done);
       // Should still be able to find this manager here
       PhysicalManager* manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
-      manager->process_remote_reference_mismatch(remote_sent, remote_received);
+      manager->process_remote_reference_mismatch(
+          remote_sent, remote_received, remote_clock);
       Runtime::trigger_event(done);
     }
 
@@ -1319,7 +1376,7 @@ namespace Legion {
       PhysicalManager* manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
       manager->notify_remote_deletion();
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -1339,12 +1396,9 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
+            pack_global_ref(rez, children.size());
           }
-          for (const AddressSpaceID& child : children)
-          {
-            pack_global_ref();
-            rez.dispatch(child);
-          }
+          for (const AddressSpaceID& child : children) rez.dispatch(child);
         }
       }
       std::set<InstanceDeletionSubscriber*> to_notify;
@@ -1438,6 +1492,12 @@ namespace Legion {
         {
           gc_state = PENDING_COLLECTED_GC_STATE;
           failed_collection_count.store(0);
+          // Start a new collection round: advance our clock to obtain this
+          // round's snapshot and arm the bump so that any valid reference we
+          // pack after freezing our counts advances the clock past the
+          // snapshot and is therefore detectable as a causality violation.
+          pending_collect_lamport_clock = ++collect_lamport_clock;
+          bump_collect_lamport_clock = true;
           // Pull a copy of these onto the stack in case we fail to
           // collect and we need to restore them
           local_valid_sent = sent_valid_references;
@@ -1460,19 +1520,19 @@ namespace Legion {
                 rez.serialize(did);
                 rez.serialize(&failed_collection_count);
                 rez.serialize(ready_event);
+                rez.serialize(pending_collect_lamport_clock);
               }
               rez.dispatch(child);
               ready_events.emplace_back(ready_event);
             }
           }
-          const size_t needed_guards = count_remote_instances();
-          if (needed_guards > 0)
+          if (has_remote_instances())
           {
             struct AcquireFunctor {
               AcquireFunctor(
                   DistributedID d, std::vector<RtEvent>& r,
-                  std::atomic<unsigned>* c)
-                : did(d), ready_events(r), count(c)
+                  std::atomic<unsigned>* c, LamportClock clk)
+                : did(d), ready_events(r), count(c), clock(clk)
               { }
               inline void apply(AddressSpaceID target)
               {
@@ -1485,6 +1545,7 @@ namespace Legion {
                   rez.serialize(did);
                   rez.serialize(count);
                   rez.serialize(ready_event);
+                  rez.serialize(clock);
                 }
                 rez.dispatch(target);
                 ready_events.emplace_back(ready_event);
@@ -1492,8 +1553,11 @@ namespace Legion {
               const DistributedID did;
               std::vector<RtEvent>& ready_events;
               std::atomic<unsigned>* const count;
+              const LamportClock clock;
             };
-            AcquireFunctor functor(did, ready_events, &failed_collection_count);
+            AcquireFunctor functor(
+                did, ready_events, &failed_collection_count,
+                pending_collect_lamport_clock);
             map_over_remote_instances(functor);
           }
           if (!ready_events.empty())
@@ -1538,9 +1602,13 @@ namespace Legion {
               // were unable to acquire on remote nodes or whether there
               // are still packed valid reference outstanding
               if ((failed_collection_count.load() > 0) ||
-                  (sent_valid_references != received_valid_references))
+                  (sent_valid_references != received_valid_references) ||
+                  (collect_lamport_clock > pending_collect_lamport_clock))
               {
-                // Restore our local sent/received counts
+                // Restore our local sent/received counts (but not the clock,
+                // which stays monotonic so the next round's snapshot exceeds
+                // any reference that caused this round to fail, guaranteeing
+                // forward progress once the traffic quiesces).
                 if (has_local_references)
                 {
                   sent_valid_references = local_valid_sent;
@@ -1578,23 +1646,22 @@ namespace Legion {
                       owner_space, local_space, children);
                   if (!children.empty())
                   {
-                    pack_global_ref(children.size());
-                    for (const AddressSpaceID& child : children)
+                    GarbageCollectionNotification rez;
                     {
-                      GarbageCollectionNotification rez;
-                      {
-                        RezCheck z(rez);
-                        rez.serialize(did);
-                      }
-                      rez.dispatch(child);
+                      RezCheck z(rez);
+                      rez.serialize(did);
+                      pack_global_ref(rez, children.size());
                     }
+                    for (const AddressSpaceID& child : children)
+                      rez.dispatch(child);
                   }
                 }
-                const size_t needed_guards = count_remote_instances();
-                if (needed_guards > 0)
+                if (has_remote_instances())
                 {
                   struct NotifyFunctor {
-                    NotifyFunctor(DistributedID d) : did(d), count(0) { }
+                    NotifyFunctor(DistributedID d, PhysicalManager* m)
+                      : did(d), manager(m)
+                    { }
                     inline void apply(AddressSpaceID target)
                     {
                       if (target == runtime->address_space)
@@ -1603,17 +1670,16 @@ namespace Legion {
                       {
                         RezCheck z(rez);
                         rez.serialize(did);
+                        manager->pack_global_ref(rez);
                       }
                       rez.dispatch(target);
-                      count++;
                     }
                     const DistributedID did;
+                    PhysicalManager* manager;
                     unsigned count;
                   };
-                  NotifyFunctor functor(did);
+                  NotifyFunctor functor(did, this);
                   map_over_remote_instances(functor);
-                  if (functor.count > 0)
-                    pack_global_ref(functor.count);
                 }
                 // Now that the lock is released we can notify the subscribers
                 if (!to_notify.empty())
@@ -1655,8 +1721,8 @@ namespace Legion {
           rez.serialize(&ready);
           rez.serialize(hole);
           rez.serialize(done);
+          pack_global_ref(rez);
         }
-        pack_global_ref();
         rez.dispatch(owner_space);
         done.wait();
         i_lock->reacquire();
@@ -1834,8 +1900,8 @@ namespace Legion {
           rez.serialize(priority);
           rez.serialize(done);
           rez.serialize<bool>(false);  // broadcast
+          pack_global_ref(rez);
         }
-        pack_global_ref();
         rez.dispatch(owner_space);
         updated = done;
       }
@@ -1883,7 +1949,7 @@ namespace Legion {
         Runtime::trigger_event(
             done,
             manager->broadcast_garbage_collection_priority_update(priority));
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -2358,13 +2424,13 @@ namespace Legion {
             rez.serialize(priority);
             rez.serialize(done);
             rez.serialize<bool>(true);  // broadcast
+            pack_global_ref(rez);
           }
-          pack_global_ref();
           rez.dispatch(child);
           done_events.emplace_back(done);
         }
       }
-      if (is_owner() && (count_remote_instances() > 0))
+      if (is_owner() && has_remote_instances())
       {
         struct UpdateFunctor {
           UpdateFunctor(
@@ -2383,8 +2449,8 @@ namespace Legion {
               rez.serialize(priority);
               rez.serialize(done);
               rez.serialize<bool>(true);  // broadcast
+              manager->pack_global_ref(rez);
             }
-            manager->pack_global_ref();
             rez.dispatch(target);
             done_events.emplace_back(done);
           }

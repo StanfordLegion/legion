@@ -74,17 +74,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::pack_valid_ref(void)
+    void FillView::pack_valid_ref(
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
     //--------------------------------------------------------------------------
     {
-      pack_global_ref();
+      if (view_lamport_clocks.find(this) == view_lamport_clocks.end())
+        pack_global_ref(view_lamport_clocks[this]);
     }
 
     //--------------------------------------------------------------------------
-    void FillView::unpack_valid_ref(void)
+    void FillView::unpack_valid_ref(
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
     //--------------------------------------------------------------------------
     {
-      unpack_global_ref();
+      shrt::map<LogicalView*, LamportClock>::iterator finder =
+          view_lamport_clocks.find(this);
+      if (finder == view_lamport_clocks.end())
+        return;
+      unpack_global_ref(finder->second);
+      view_lamport_clocks.erase(finder);
     }
 
     //--------------------------------------------------------------------------

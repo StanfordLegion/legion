@@ -39,7 +39,8 @@ namespace Legion {
         CollectiveMapping* mapping)
       : InstanceView(id, register_now, mapping), context_did(ctx_did),
         instances(insts), local_views(views), valid_state(NOT_VALID_STATE),
-        invalidation_generation(0), sent_valid_references(0),
+        collect_lamport_clock(0), pending_collect_lamport_clock(0),
+        bump_collect_lamport_clock(false), sent_valid_references(0),
         received_valid_references(0), deletion_notified(false),
         multiple_local_memories(has_multiple_local_memories(local_views))
     //--------------------------------------------------------------------------
@@ -103,21 +104,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveView::pack_valid_ref(void)
+    void CollectiveView::pack_valid_ref(
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
     //--------------------------------------------------------------------------
     {
+      // Deduplicate so that a view packed more than once in a single message
+      // only contributes a single sent valid reference and a single stamp
+      if (view_lamport_clocks.find(this) != view_lamport_clocks.end())
+        return;
       AutoLock v_lock(view_lock);
       legion_assert(valid_state == FULL_VALID_STATE);
+      // If we've committed our counts to an invalidation round then the first
+      // pack afterwards must advance the clock so that a reference packed after
+      // the commit is detectable as a causality violation when it is unpacked
+      if (bump_collect_lamport_clock)
+      {
+        collect_lamport_clock++;
+        bump_collect_lamport_clock = false;
+      }
+      view_lamport_clocks[this] = collect_lamport_clock;
       sent_valid_references++;
     }
 
     //--------------------------------------------------------------------------
-    void CollectiveView::unpack_valid_ref(void)
+    void CollectiveView::unpack_valid_ref(
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks)
     //--------------------------------------------------------------------------
     {
-      AutoLock v_lock(view_lock);
-      legion_assert(valid_state == FULL_VALID_STATE);
-      received_valid_references++;
+      shrt::map<LogicalView*, LamportClock>::iterator finder =
+          view_lamport_clocks.find(this);
+      if (finder == view_lamport_clocks.end())
+        return;
+      {
+        AutoLock v_lock(view_lock);
+        legion_assert(valid_state == FULL_VALID_STATE);
+        received_valid_references++;
+        collect_lamport_clock = std::max(collect_lamport_clock, finder->second);
+      }
+      view_lamport_clocks.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -268,17 +294,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool CollectiveView::perform_invalidate_request(
-        uint64_t generation, bool need_lock)
+        LamportClock snapshot, bool need_lock)
     //--------------------------------------------------------------------------
     {
       if (need_lock)
       {
         AutoLock v_lock(view_lock);
-        return perform_invalidate_request(generation, false /*need lock*/);
+        return perform_invalidate_request(snapshot, false /*need lock*/);
       }
       else
       {
-        legion_assert((invalidation_generation < generation) || is_owner());
+        legion_assert((pending_collect_lamport_clock < snapshot) || is_owner());
         // See if we're going to fail right away
         if (valid_state == FULL_VALID_STATE)
         {
@@ -286,8 +312,10 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(generation);
+            rez.serialize(snapshot);
             rez.serialize<bool>(true /*fail*/);
+            // Carry our clock even on failure so the owner stays monotonic
+            rez.serialize(collect_lamport_clock);
           }
           if ((collective_mapping != nullptr) &&
               collective_mapping->contains(local_space))
@@ -298,7 +326,13 @@ namespace Legion {
           return false;
         }
         invalidation_failed = false;
-        invalidation_generation = generation;
+        // Commit to this invalidation round: record the round's snapshot, fold
+        // it into our clock, and arm the bump so that the first valid reference
+        // packed after this point advances our clock past the snapshot and is
+        // detectable as a causality violation.
+        pending_collect_lamport_clock = snapshot;
+        collect_lamport_clock = std::max(collect_lamport_clock, snapshot);
+        bump_collect_lamport_clock = true;
         total_valid_sent = 0;
         total_valid_received = 0;
         remaining_invalidation_responses = 1;
@@ -313,7 +347,7 @@ namespace Legion {
           {
             CollectiveViewInvalidateRequest rez;
             rez.serialize(did);
-            rez.serialize(invalidation_generation);
+            rez.serialize(pending_collect_lamport_clock);
             for (const AddressSpaceID& child : children) rez.dispatch(child);
             remaining_invalidation_responses += children.size();
           }
@@ -322,7 +356,7 @@ namespace Legion {
         {
           CollectiveViewInvalidateRequest rez;
           rez.serialize(did);
-          rez.serialize(invalidation_generation);
+          rez.serialize(pending_collect_lamport_clock);
           struct InvalidFunctor {
             InvalidFunctor(CollectiveViewInvalidateRequest& z, unsigned& cnt)
               : rez(z), count(cnt)
@@ -342,8 +376,8 @@ namespace Legion {
         }
         // Now we can perform our local arrival
         return perform_invalidate_response(
-            generation, sent_valid_references, received_valid_references,
-            false /*fail*/, false /*need lock*/);
+            snapshot, sent_valid_references, received_valid_references,
+            collect_lamport_clock, false /*fail*/, false /*need lock*/);
       }
     }
 
@@ -354,33 +388,38 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
-      uint64_t generation;
-      derez.deserialize(generation);
+      LamportClock snapshot;
+      derez.deserialize(snapshot);
 
       CollectiveView* view = static_cast<CollectiveView*>(
           runtime->find_distributed_collectable(did));
-      if (view->perform_invalidate_request(generation, true /*need lock*/))
+      if (view->perform_invalidate_request(snapshot, true /*need lock*/))
         delete view;
     }
 
     //--------------------------------------------------------------------------
     bool CollectiveView::perform_invalidate_response(
-        uint64_t generation, uint64_t total_sent, uint64_t total_received,
-        bool failed, bool need_lock)
+        LamportClock snapshot, uint64_t total_sent, uint64_t total_received,
+        LamportClock clock, bool failed, bool need_lock)
     //--------------------------------------------------------------------------
     {
       if (need_lock)
       {
         AutoLock v_lock(view_lock);
         return perform_invalidate_response(
-            generation, total_sent, total_received, failed,
+            snapshot, total_sent, total_received, clock, failed,
             false /*need lock*/);
       }
       else
       {
         // If this response is stale then we don't need to do anything
-        if (generation < invalidation_generation)
+        if (snapshot < pending_collect_lamport_clock)
           return false;
+        // Always merge the responder's clock: this lets us detect a valid
+        // reference packed newer than this round's snapshot, and keeps our
+        // clock monotonic so the next round's snapshot exceeds any reference
+        // that caused this round to fail (guaranteeing forward progress).
+        collect_lamport_clock = std::max(collect_lamport_clock, clock);
         if (!failed)
         {
           total_valid_sent += total_sent;
@@ -401,8 +440,11 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(generation);
+              rez.serialize(snapshot);
               rez.serialize(invalidation_failed);
+              // Carry our clock unconditionally so the owner can both detect
+              // post-snapshot packs and stay monotonic across rounds
+              rez.serialize(collect_lamport_clock);
               if (!invalidation_failed)
               {
                 rez.serialize(total_valid_sent);
@@ -416,7 +458,15 @@ namespace Legion {
             else
               rez.dispatch(owner_space);
           }
-          else if (!invalidation_failed)
+          // Only invalidate if no node re-validated, the packed and unpacked
+          // valid reference counts balance (no reference in flight), and no
+          // node observed a valid reference packed after this round's snapshot
+          // (a causality violation that could otherwise hide behind aliased
+          // counts).
+          else if (
+              !invalidation_failed &&
+              (total_valid_sent == total_valid_received) &&
+              (collect_lamport_clock <= pending_collect_lamport_clock))
             return make_invalid(false /*need lock*/);
         }
       }
@@ -431,10 +481,12 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      uint64_t generation, total_sent = 0, total_received = 0;
-      derez.deserialize(generation);
+      LamportClock snapshot, clock;
+      uint64_t total_sent = 0, total_received = 0;
+      derez.deserialize(snapshot);
       bool failed;
       derez.deserialize(failed);
+      derez.deserialize(clock);
       if (!failed)
       {
         derez.deserialize(total_sent);
@@ -443,7 +495,7 @@ namespace Legion {
       CollectiveView* view = static_cast<CollectiveView*>(
           runtime->find_distributed_collectable(did));
       if (view->perform_invalidate_response(
-              generation, total_sent, total_received, failed,
+              snapshot, total_sent, total_received, clock, failed,
               true /*need lock*/))
         delete view;
     }
@@ -485,9 +537,10 @@ namespace Legion {
         // We're the owner so we need to see if it is safe to actually
         // downgrade the valid state of this collective view which means
         // checking that none of our copies are valid on any node
-        // Start by bumping the collection generation
+        // Start a new round using a fresh, strictly-increasing Lamport-clock
+        // snapshot (this replaces the old monotonic generation counter)
         return perform_invalidate_request(
-            ++invalidation_generation, false /*need lock*/);
+            ++collect_lamport_clock, false /*need lock*/);
       }
       else
       {
@@ -1736,8 +1789,8 @@ namespace Legion {
             rez.serialize(best);
             rez.serialize<bool>(bandwidth);
             rez.serialize(done);
+            pack_global_ref(rez);
           }
-          pack_global_ref();
           rez.dispatch(space);
           return done;
         }
@@ -1767,8 +1820,8 @@ namespace Legion {
                 rez.serialize(best);
                 rez.serialize<bool>(bandwidth);
                 rez.serialize(done);
+                pack_global_ref(rez);
               }
-              pack_global_ref();
               rez.dispatch(child);
               done_events.emplace_back(done);
             }
@@ -1821,8 +1874,8 @@ namespace Legion {
               rez.serialize(best);
               rez.serialize<bool>(bandwidth);
               rez.serialize(done);
+              pack_global_ref(rez);
             }
-            pack_global_ref();
             rez.dispatch(origin);
             return done;
           }
@@ -1980,7 +2033,7 @@ namespace Legion {
           done,
           manager->find_instances_nearest_memory(
               memory, source, instances, target, origin, best, bandwidth));
-      manager->unpack_global_ref();
+      manager->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -2078,7 +2131,7 @@ namespace Legion {
       {
         // Pack the instance points for these instances so we can check to
         // see if we already fetched them on the remote node
-        std::set<DistributedID> to_send;
+        std::map<DistributedID, IndividualView*> to_send;
         for (const CopySrcDstField& field : fields)
         {
           bool found = false;
@@ -2087,8 +2140,7 @@ namespace Legion {
             PhysicalManager* manager = local_views[idx]->get_manager();
             if (manager->instance != field.inst)
               continue;
-            if (to_send.insert(local_views[idx]->did).second)
-              local_views[idx]->pack_global_ref();
+            to_send.emplace(local_views[idx]->did, local_views[idx]);
             found = true;
             break;
           }
@@ -2100,8 +2152,7 @@ namespace Legion {
             {
               if (remote_entry.first->instance != field.inst)
                 continue;
-              if (to_send.insert(remote_entry.second->did).second)
-                remote_entry.second->pack_global_ref();
+              to_send.emplace(remote_entry.second->did, remote_entry.second);
               found = true;
               break;
             }
@@ -2110,8 +2161,12 @@ namespace Legion {
         }
         legion_assert(!to_send.empty());
         rez.serialize<size_t>(to_send.size());
-        for (const DistributedID& distributed_id : to_send)
-          rez.serialize(distributed_id);
+        for (const std::pair<const DistributedID, IndividualView*>&
+                 distributed_id : to_send)
+          rez.serialize(distributed_id.first);
+        for (const std::pair<const DistributedID, IndividualView*>& view :
+             to_send)
+          view.second->pack_global_ref(rez);
       }
     }
 
@@ -2177,7 +2232,8 @@ namespace Legion {
           else if (view_ready.exists() && !view_ready.has_triggered())
             view_ready.wait();
           view->record_remote_instances(views);
-          for (IndividualView* const view : views) view->unpack_global_ref();
+          for (IndividualView* const view : views)
+            view->unpack_global_ref(derez);
         }
         else
         {

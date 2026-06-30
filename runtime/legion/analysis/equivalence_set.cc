@@ -2653,7 +2653,7 @@ namespace Legion {
         pack_state(
             rez, new_logical_owner, did, set_expr, set_expr, true /*covers*/,
             all_ones, true /*pack guards*/, true /*pack invalids*/);
-        pack_global_ref();
+        pack_global_ref(rez);
       }
       rez.dispatch(new_logical_owner);
       invalidate_state(set_expr, true /*covers*/, all_ones, false /*record*/);
@@ -8437,13 +8437,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::make_owner(RtEvent pre)
+    void EquivalenceSet::make_owner(LamportClock lamport_clock, RtEvent pre)
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
       if (pre.exists() && !pre.has_triggered())
       {
-        const DeferMakeOwnerArgs args(this);
+        const DeferMakeOwnerArgs args(this, lamport_clock);
         runtime->issue_runtime_meta_task(
             args, LG_LATENCY_DEFERRED_PRIORITY, pre);
       }
@@ -8467,7 +8467,7 @@ namespace Legion {
           to_trigger = replicated_owner_state->ready;
           replicated_owner_state->ready = RtUserEvent::NO_RT_USER_EVENT;
         }
-        unpack_global_ref();
+        unpack_global_ref(lamport_clock);
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -8477,7 +8477,7 @@ namespace Legion {
     void EquivalenceSet::DeferMakeOwnerArgs::execute(void) const
     //--------------------------------------------------------------------------
     {
-      set->make_owner();
+      set->make_owner(lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -8518,11 +8518,13 @@ namespace Legion {
         ready.wait();
       set->unpack_state_and_apply(
           derez, source, ready_events, false /*forward*/);
+      LamportClock lamport_clock =
+          EquivalenceSet::unpack_global_ref_clock(derez);
       // Check to see if we're ready or we need to defer this
       if (!ready_events.empty())
-        set->make_owner(Runtime::merge_events(ready_events));
+        set->make_owner(lamport_clock, Runtime::merge_events(ready_events));
       else
-        set->make_owner();
+        set->make_owner(lamport_clock);
     }
 
     //--------------------------------------------------------------------------
@@ -8555,12 +8557,15 @@ namespace Legion {
           pack_guards ? &reduction_fill_guards : nullptr, precondition_updates,
           anticondition_updates, postcondition_updates, dirty_updates,
           target_did, target_expr);
+      shrt::map<LogicalView*, LamportClock> view_lamport_clocks;
+      shrt::map<PhysicalManager*, LamportClock> inst_lamport_clocks;
       pack_updates(
           rez, target, valid_updates, initialized_updates, invalid_updates,
           reduction_updates, restricted_updates, released_updates,
           &read_only_guards, &reduction_fill_guards, precondition_updates,
           anticondition_updates, postcondition_updates, dirty_updates,
-          true /*pack refs*/, true /*pack tracing reference*/);
+          view_lamport_clocks, inst_lamport_clocks,
+          true /*pack tracing reference*/);
       if (precondition_updates != nullptr)
         delete precondition_updates;
       if (anticondition_updates != nullptr)
@@ -8592,7 +8597,9 @@ namespace Legion {
         const TraceViewSet* anticondition_updates,
         const TraceViewSet* postcondition_updates,
         const shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates,
-        const bool pack_references, const bool pack_tracing_references)
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks,
+        const bool pack_tracing_references)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(valid_updates.size());
@@ -8608,8 +8615,7 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           rez.serialize(it->second);
-          if (pack_references)
-            it->first->pack_valid_ref();
+          it->first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
       }
       rez.serialize<size_t>(initialized_updates.size());
@@ -8641,8 +8647,7 @@ namespace Legion {
         {
           rez.serialize(it.first->did);
           it.second->pack_expression(rez, target);
-          if (pack_references)
-            it.first->pack_valid_ref();
+          it.first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
       }
       rez.serialize<size_t>(restricted_updates.size());
@@ -8658,8 +8663,7 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           rez.serialize(it->second);
-          if (pack_references)
-            it->first->pack_valid_ref();
+          it->first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
       }
       rez.serialize<size_t>(released_updates.size());
@@ -8675,8 +8679,7 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           rez.serialize(it->second);
-          if (pack_references)
-            it->first->pack_valid_ref();
+          it->first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
       }
       if ((read_only_updates != nullptr) && !read_only_updates->empty())
@@ -8731,6 +8734,20 @@ namespace Legion {
       }
       else
         rez.serialize<size_t>(0);
+      rez.serialize<size_t>(view_lamport_clocks.size());
+      for (const std::pair<LogicalView* const, LamportClock>& view_clock :
+           view_lamport_clocks)
+      {
+        rez.serialize(view_clock.first->did);
+        rez.serialize(view_clock.second);
+      }
+      rez.serialize<size_t>(inst_lamport_clocks.size());
+      for (const std::pair<PhysicalManager* const, LamportClock>& inst_clock :
+           inst_lamport_clocks)
+      {
+        rez.serialize(inst_clock.first->did);
+        rez.serialize(inst_clock.second);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8948,6 +8965,33 @@ namespace Legion {
           dirty_updates->insert(expr, mask);
         }
       }
+      size_t num_view_clocks;
+      derez.deserialize(num_view_clocks);
+      shrt::map<LogicalView*, LamportClock> view_lamport_clocks;
+      for (unsigned idx = 0; idx < num_view_clocks; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        LogicalView* view = runtime->find_or_request_logical_view(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+        derez.deserialize(view_lamport_clocks[view]);
+      }
+      size_t num_inst_clocks;
+      derez.deserialize(num_inst_clocks);
+      shrt::map<PhysicalManager*, LamportClock> inst_lamport_clocks;
+      for (unsigned idx = 0; idx < num_inst_clocks; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        PhysicalManager* manager =
+            runtime->find_or_request_instance_manager(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+        derez.deserialize(inst_lamport_clocks[manager]);
+      }
       if (!ready_events.empty())
       {
         const RtEvent ready_event = Runtime::merge_events(ready_events);
@@ -8959,7 +9003,8 @@ namespace Legion {
               initialized_updates, invalid_updates, reduction_updates,
               restricted_updates, released_updates, read_only_updates,
               reduction_fill_updates, precondition_updates,
-              anticondition_updates, postcondition_updates, dirty_updates);
+              anticondition_updates, postcondition_updates, dirty_updates,
+              view_lamport_clocks, inst_lamport_clocks);
           runtime->issue_runtime_meta_task(
               args, LG_LATENCY_DEFERRED_PRIORITY, ready_event);
           return;
@@ -8971,7 +9016,8 @@ namespace Legion {
           reduction_updates, restricted_updates, released_updates,
           precondition_updates, anticondition_updates, postcondition_updates,
           dirty_updates, &read_only_updates, &reduction_fill_updates,
-          applied_events, true /*need lock*/, forward_to_owner,
+          applied_events, view_lamport_clocks, inst_lamport_clocks,
+          true /*need lock*/, forward_to_owner,
           true /*unpack tracing references*/);
     }
 
@@ -8986,7 +9032,9 @@ namespace Legion {
         shrt::FieldMaskMap<CopyFillGuard>& reduc_fill,
         TraceViewSet* preconditions, TraceViewSet* anticonditions,
         TraceViewSet* postconditions,
-        shrt::FieldMaskMap<IndexSpaceExpression>* dirt)
+        shrt::FieldMaskMap<IndexSpaceExpression>* dirt,
+        shrt::map<LogicalView*, LamportClock>& view_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_clocks)
       : LgTaskArgs<DeferApplyStateArgs>(false, true), set(s),
         valid_updates(
             new shrt::map<
@@ -9008,6 +9056,8 @@ namespace Legion {
         precondition_updates(preconditions),
         anticondition_updates(anticonditions),
         postcondition_updates(postconditions), dirty_updates(dirt),
+        view_lamport_clocks(new shrt::map<LogicalView*, LamportClock>()),
+        inst_lamport_clocks(new shrt::map<PhysicalManager*, LamportClock>()),
         expr_references(new std::set<IndexSpaceExpression*>()),
         done_event(Runtime::create_rt_user_event()), forward_to_owner(forward)
     //--------------------------------------------------------------------------
@@ -9061,6 +9111,8 @@ namespace Legion {
           if (expr_references->insert(it->first).second)
             it->first->add_base_expression_reference(META_TASK_REF);
       }
+      view_lamport_clocks->swap(view_clocks);
+      inst_lamport_clocks->swap(inst_clocks);
       applied_events.emplace_back(done_event);
     }
 
@@ -9074,8 +9126,8 @@ namespace Legion {
           *reduction_updates, *restricted_updates, *released_updates,
           precondition_updates, anticondition_updates, postcondition_updates,
           dirty_updates, read_only_updates, reduction_fill_updates,
-          applied_events, true /*needs lock*/, forward_to_owner,
-          true /*unpack tracing refs*/);
+          applied_events, *view_lamport_clocks, *inst_lamport_clocks,
+          true /*needs lock*/, forward_to_owner, true /*unpack tracing refs*/);
       if (!applied_events.empty())
         Runtime::trigger_event(
             done_event, Runtime::merge_events(applied_events));
@@ -9093,6 +9145,8 @@ namespace Legion {
       delete read_only_updates;
       delete reduction_fill_updates;
       delete expr_references;
+      delete view_lamport_clocks;
+      delete inst_lamport_clocks;
     }
 
     //--------------------------------------------------------------------------
@@ -9285,6 +9339,8 @@ namespace Legion {
       TraceViewSet* anticondition_updates = nullptr;
       TraceViewSet* postcondition_updates = nullptr;
       shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates = nullptr;
+      shrt::map<LogicalView*, LamportClock> view_lamport_clocks;
+      shrt::map<PhysicalManager*, LamportClock> inst_lamport_clocks;
       std::vector<IndexSpaceExpression*> temp_refs;
       {
         // Lock in exclusive mode since we're doing an invalidate
@@ -9352,7 +9408,7 @@ namespace Legion {
           for (shrt::FieldMaskMap<LogicalView>::const_iterator it =
                    vit->second.begin();
                it != vit->second.end(); it++)
-            it->first->pack_valid_ref();
+            it->first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
         for (shrt::FieldMaskMap<IndexSpaceExpression>::const_iterator it =
                  initialized_updates.begin();
@@ -9386,7 +9442,7 @@ namespace Legion {
           for (const std::pair<InstanceView*, IndexSpaceExpression*>& it :
                rit.second)
           {
-            it.first->pack_valid_ref();
+            it.first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
             if (!std::binary_search(
                     temp_refs.begin(), temp_refs.end(), it.second))
             {
@@ -9412,7 +9468,7 @@ namespace Legion {
           for (shrt::FieldMaskMap<InstanceView>::const_iterator it =
                    rit->second.begin();
                it != rit->second.end(); it++)
-            it->first->pack_valid_ref();
+            it->first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
         for (shrt::map<
                  IndexSpaceExpression*,
@@ -9430,7 +9486,7 @@ namespace Legion {
           for (shrt::FieldMaskMap<InstanceView>::const_iterator it =
                    rit->second.begin();
                it != rit->second.end(); it++)
-            it->first->pack_valid_ref();
+            it->first->pack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
         }
         // No need to do anything for the tracing data structures as they
         // are already keeping their own references to everything
@@ -9461,7 +9517,8 @@ namespace Legion {
           reduction_updates, restricted_updates, released_updates,
           precondition_updates, anticondition_updates, postcondition_updates,
           dirty_updates, nullptr /*guards*/, nullptr /*guards*/, applied_events,
-          need_dst_lock, true /*forward to owner*/, false /*unpack tracing*/);
+          view_lamport_clocks, inst_lamport_clocks, need_dst_lock,
+          true /*forward to owner*/, false /*unpack tracing*/);
       // Remove the temporary references that we added to keep everything alive
       for (IndexSpaceExpression* it : temp_refs)
         if (it->remove_nested_expression_reference(did))
@@ -9942,8 +9999,11 @@ namespace Legion {
         shrt::FieldMaskMap<IndexSpaceExpression>* dirty_updates,
         shrt::FieldMaskMap<CopyFillGuard>* read_only_guard_updates,
         shrt::FieldMaskMap<CopyFillGuard>* reduction_fill_guard_updates,
-        std::vector<RtEvent>& applied_events, const bool needs_lock,
-        const bool forward_to_owner, const bool unpack_tracing_references)
+        std::vector<RtEvent>& applied_events,
+        shrt::map<LogicalView*, LamportClock>& view_lamport_clocks,
+        shrt::map<PhysicalManager*, LamportClock>& inst_lamport_clocks,
+        const bool needs_lock, const bool forward_to_owner,
+        const bool unpack_tracing_references)
     //--------------------------------------------------------------------------
     {
       if (needs_lock)
@@ -9954,8 +10014,9 @@ namespace Legion {
             reduction_updates, restricted_updates, released_updates,
             precondition_updates, anticondition_updates, postcondition_updates,
             dirty_updates, read_only_guard_updates,
-            reduction_fill_guard_updates, applied_events, false /*needs lock*/,
-            forward_to_owner, unpack_tracing_references);
+            reduction_fill_guard_updates, applied_events, view_lamport_clocks,
+            inst_lamport_clocks, false /*needs lock*/, forward_to_owner,
+            unpack_tracing_references);
         return;
       }
       if (!is_logical_owner() && forward_to_owner)
@@ -10006,7 +10067,8 @@ namespace Legion {
               released_updates, read_only_guard_updates,
               reduction_fill_guard_updates, precondition_updates,
               anticondition_updates, postcondition_updates, dirty_updates,
-              false /*pack references*/, !unpack_tracing_references);
+              view_lamport_clocks, inst_lamport_clocks,
+              !unpack_tracing_references);
         }
         rez.dispatch(logical_owner_space);
         applied_events.emplace_back(done_event);
@@ -10025,10 +10087,6 @@ namespace Legion {
           record_instances(
               it->first, false /*covers*/, it->second.get_valid_mask(),
               FieldMapView(it->second));
-        for (shrt::FieldMaskMap<LogicalView>::const_iterator vit =
-                 it->second.begin();
-             vit != it->second.end(); vit++)
-          vit->first->unpack_valid_ref();
       }
       for (shrt::FieldMaskMap<IndexSpaceExpression>::const_iterator it =
                initialized_updates.begin();
@@ -10064,8 +10122,6 @@ namespace Legion {
           local_reductions.emplace_back(vit.first);
         // Update the reductions
         update_reductions(rit.first, rit.second);
-        // Then unpack our valid references
-        for (InstanceView* vit : local_reductions) vit->unpack_valid_ref();
       }
       for (shrt::map<IndexSpaceExpression*, shrt::FieldMaskMap<InstanceView>>::
                const_iterator rit = restricted_updates.begin();
@@ -10078,7 +10134,6 @@ namespace Legion {
         {
           record_restriction(
               covers ? set_expr : rit->first, covers, it->second, it->first);
-          it->first->unpack_valid_ref();
         }
       }
       for (shrt::map<IndexSpaceExpression*, shrt::FieldMaskMap<InstanceView>>::
@@ -10087,10 +10142,6 @@ namespace Legion {
       {
         update_released(
             it->first, (it->first->get_volume() == dst_volume), it->second);
-        for (shrt::FieldMaskMap<InstanceView>::const_iterator vit =
-                 it->second.begin();
-             vit != it->second.end(); vit++)
-          vit->first->unpack_valid_ref();
       }
       if (precondition_updates != nullptr)
       {
@@ -10168,6 +10219,12 @@ namespace Legion {
               it->first->add_nested_expression_reference(did);
         }
       }
+      while (!view_lamport_clocks.empty())
+      {
+        LogicalView* view = view_lamport_clocks.begin()->first;
+        view->unpack_valid_ref(view_lamport_clocks, inst_lamport_clocks);
+      }
+      legion_assert(inst_lamport_clocks.empty());
     }
 
     //--------------------------------------------------------------------------

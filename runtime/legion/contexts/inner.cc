@@ -1424,7 +1424,7 @@ namespace Legion {
       Runtime::trigger_event(
           recorded, context->record_output_equivalence_set(
                         source, source_space, req_index, set, mask));
-      set->unpack_global_ref();
+      set->unpack_global_ref(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -4039,10 +4039,10 @@ namespace Legion {
       struct Functor {
       public:
         Functor(
-            DistributedID id, FieldSpace sp, Provenance* prov,
-            const LocalFieldInfo& in, std::set<RtEvent>& done)
-          : did(id), space(sp), provenance(prov), info(in), done_events(done),
-            count(0)
+            DistributedID id, InnerContext* ctx, FieldSpace sp,
+            Provenance* prov, const LocalFieldInfo& in, std::set<RtEvent>& done)
+          : did(id), context(ctx), space(sp), provenance(prov), info(in),
+            done_events(done)
         { }
         void apply(AddressSpaceID target)
         {
@@ -4060,23 +4060,21 @@ namespace Legion {
             rez.serialize<size_t>(1);  // field count
             rez.serialize(info);
             rez.serialize(done_event);
+            context->pack_global_ref(rez);
           }
           rez.dispatch(target);
           done_events.insert(done_event);
-          count++;
         };
       public:
         DistributedID did;
+        InnerContext* context;
         FieldSpace space;
         Provenance* provenance;
         const LocalFieldInfo& info;
         std::set<RtEvent>& done_events;
-        unsigned count;
       };
-      Functor functor(did, space, provenance, infos.back(), done_events);
+      Functor functor(did, this, space, provenance, infos.back(), done_events);
       map_over_remote_instances(functor);
-      if (functor.count > 0)
-        pack_global_ref(functor.count);
     }
 
     //--------------------------------------------------------------------------
@@ -4184,11 +4182,11 @@ namespace Legion {
       struct Functor {
       public:
         Functor(
-            DistributedID id, FieldSpace sp, Provenance* prov, size_t s,
-            unsigned off, const std::vector<LocalFieldInfo>& in,
-            std::set<RtEvent>& done)
-          : did(id), space(sp), provenance(prov), size(s), offset(off),
-            infos(in), done_events(done), count(0)
+            DistributedID id, InnerContext* ctx, FieldSpace sp,
+            Provenance* prov, size_t s, unsigned off,
+            const std::vector<LocalFieldInfo>& in, std::set<RtEvent>& done)
+          : did(id), context(ctx), space(sp), provenance(prov), size(s),
+            offset(off), infos(in), done_events(done)
         { }
         void apply(AddressSpaceID target)
         {
@@ -4207,27 +4205,25 @@ namespace Legion {
             for (unsigned idx = 0; idx < size; idx++)
               rez.serialize(infos[offset + idx]);
             rez.serialize(done_event);
+            context->pack_global_ref(rez);
           }
           rez.dispatch(target);
           done_events.insert(done_event);
-          count++;
         }
       public:
         DistributedID did;
+        InnerContext* context;
         FieldSpace space;
         Provenance* provenance;
         size_t size;
         unsigned offset;
         const std::vector<LocalFieldInfo>& infos;
         std::set<RtEvent>& done_events;
-        unsigned count;
       };
       Functor functor(
-          did, space, provenance, resulting_fields.size(), offset, infos,
+          did, this, space, provenance, resulting_fields.size(), offset, infos,
           done_events);
       map_over_remote_instances(functor);
-      if (functor.count > 0)
-        pack_global_ref(functor.count);
     }
 
     //--------------------------------------------------------------------------
