@@ -635,12 +635,12 @@ namespace Realm {
     return Event::merge_events(preconditions);
   }
 
-  void XferDes::mark_completed()
+  void XferDes::mark_completed(TimeLimit work_until)
   {
     for(std::vector<XferPort>::const_iterator it = input_ports.begin();
         it != input_ports.end(); ++it) {
       if(it->ib_size > 0) {
-        free_intermediate_buffer(it->mem->me, it->ib_offset, it->ib_size);
+        free_intermediate_buffer(it->mem->me, it->ib_offset, it->ib_size, work_until);
       }
     }
 
@@ -4195,7 +4195,7 @@ namespace Realm {
   {
     unsigned bw = 5000;            // HACK - estimate at 5 GB/s
     unsigned latency = 2000;       // HACK - estimate at 2 us
-    unsigned frag_overhead = 1000; // HACK - estimate at 1 us
+    unsigned frag_overhead = 2000; // HACK - estimate at 2 us
     // any combination of SYSTEM/REGDMA/Z_COPY/SOCKET_MEM
     // for(size_t i = 0; i < num_cpu_mem_kinds; i++)
     //   add_path(cpu_mem_kinds[i], false,

@@ -77,7 +77,10 @@ namespace Realm {
     //  to look up the actual kernels
     void *cuda_apply_excl_fn, *cuda_apply_nonexcl_fn;
     void *cuda_fold_excl_fn, *cuda_fold_nonexcl_fn;
-
+    void *cuda_apply_excl_fn_advanced, *cuda_apply_nonexcl_fn_advanced;
+    void *cuda_fold_excl_fn_advanced, *cuda_fold_nonexcl_fn_advanced;
+    void *cuda_apply_excl_fn_transpose, *cuda_apply_nonexcl_fn_transpose;
+    void *cuda_fold_excl_fn_transpose, *cuda_fold_nonexcl_fn_transpose;
     // These function pointers make the connection to the app's runtime
     // instance in order to properly translate and capture the correct
     // function to launch.
@@ -111,6 +114,14 @@ namespace Realm {
       , cuda_apply_nonexcl_fn(0)
       , cuda_fold_excl_fn(0)
       , cuda_fold_nonexcl_fn(0)
+      , cuda_apply_excl_fn_advanced(0)
+      , cuda_apply_nonexcl_fn_advanced(0)
+      , cuda_fold_excl_fn_advanced(0)
+      , cuda_fold_nonexcl_fn_advanced(0)
+      , cuda_apply_excl_fn_transpose(0)
+      , cuda_apply_nonexcl_fn_transpose(0)
+      , cuda_fold_excl_fn_transpose(0)
+      , cuda_fold_nonexcl_fn_transpose(0)
       , cudaLaunchKernel_fn(0)
       , cudaGetFuncBySymbol_fn(0)
 #endif

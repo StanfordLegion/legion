@@ -30,8 +30,12 @@
 #include "realm/atomics.h"
 #include "realm/threads.h"
 #include "realm/bgwork.h"
+#include <atomic>
+#include <cstddef>
+#include <limits>
 #include <type_traits>
 #include <mutex>
+#include <vector>
 
 #include <optional>
 
@@ -76,20 +80,18 @@ namespace Realm {
                   const RemoteAddress &_dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets, size_t _max_payload_size = 0);
 
-    // providing the payload (as a 1D or 2D reference, which must be PAYLOAD_KEEP)
+    // providing the payload (as a 1D reference, which must be PAYLOAD_KEEP)
     //  up front can avoid a copy if the source location is directly accessible
     //  by the networking hardware
+    //  Per the semantics of PAYLOAD_KEEP, you must keep the payload buffer
+    //  alive and unmodified until the call to commit or cancel returns
     ActiveMessage(NodeID _target, const void *_data, size_t _datalen);
     ActiveMessage(NodeID _target, const LocalAddress &_src_payload_addr, size_t _datalen,
                   const RemoteAddress &_dest_payload_addr);
     ActiveMessage(const Realm::NodeSet &_targets, const void *_data, size_t _datalen);
-    ActiveMessage(NodeID _target, const void *_data, size_t _bytes_per_line,
-                  size_t _lines, size_t _line_stride);
     ActiveMessage(NodeID _target, const LocalAddress &_src_payload_addr,
                   size_t _bytes_per_line, size_t _lines, size_t _line_stride,
                   const RemoteAddress &_dest_payload_addr);
-    ActiveMessage(const Realm::NodeSet &_targets, const void *_data,
-                  size_t _bytes_per_line, size_t _lines, size_t _line_stride);
 
     ~ActiveMessage(void);
 
@@ -102,13 +104,9 @@ namespace Realm {
     void init(NodeID _target, const LocalAddress &_src_payload_addr, size_t _datalen,
               const RemoteAddress &_dest_payload_addr);
     void init(const Realm::NodeSet &_targets, const void *_data, size_t _datalen);
-    void init(NodeID _target, const void *_data, size_t _bytes_per_line, size_t _lines,
-              size_t _line_stride);
     void init(NodeID _target, const LocalAddress &_src_payload_addr,
               size_t _bytes_per_line, size_t _lines, size_t _line_stride,
               const RemoteAddress &_dest_payload_addr);
-    void init(const Realm::NodeSet &_targets, const void *_data, size_t _bytes_per_line,
-              size_t _lines, size_t _line_stride);
 
     // large messages may need to be fragmented, so use cases that can
     //  handle the fragmentation at a higher level may want to know the
@@ -169,7 +167,25 @@ namespace Realm {
     ActiveMessageImpl *impl;
     T *header;
     Realm::Serialization::FixedBufferSerializer fbs;
-    uint64_t inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
+    alignas(alignof(T) > alignof(uint64_t) ? alignof(T) : alignof(uint64_t)) uint64_t
+        inline_capacity[INLINE_STORAGE / sizeof(uint64_t)];
+
+  private:
+    // chunked-mode state: only used when the requested payload exceeds the
+    //  network's hard limit for a single message
+    size_t network_max_payload_{0}; // 0 = normal (non-chunked) mode
+    NodeSet chunk_targets_;
+    const void *chunk_src_data_{nullptr};
+    size_t chunk_src_datalen_{0};
+    std::vector<std::byte>
+        chunk_alloc_; // owned buffer for network-allocated chunked mode
+
+    void init_chunked(NodeID _target, size_t _max_payload_size);
+    void init_chunked(const NodeSet &_targets, size_t _max_payload_size);
+    void init_chunked_data(NodeID _target, const void *_data, size_t _datalen);
+    void init_chunked_data(const NodeSet &_targets, const void *_data, size_t _datalen);
+    void commit_chunked(void);
+    static uint64_t next_chunk_message_id(NodeID node_id);
   };
 
   // type-erased wrappers for completion callbacks
@@ -455,76 +471,11 @@ namespace Realm {
     const UserHdr &operator*() const { return user; }
   };
 
-  template <typename Hdr>
-  using DefaultActiveMessageBuilder = ActiveMessage<WrappedWithFragInfo<Hdr>>;
-
-  //////////////////////////////////////////////////////////////////////////////
-  //
-  // class ActiveMessageAuto
-  //
-  // A thin convenience wrapper that hides the decision of whether a payload
-  // must be transmitted as a *single* ActiveMessage or split across multiple
-  // FragmentedActiveMessages – hence the name "Auto".  The public interface
-  // mirrors that of `ActiveMessage` so that existing call-sites can switch to
-  // the automatic behaviour with only a type alias change.
-  //
-  // Behaviour
-  // ---------
-  // 1.  When `commit()` is called and the aggregated payload size is **less
-  //     than or equal to** the `max_payload_size` provided to the
-  //     constructor, the object internally constructs a single
-  //     `ActiveMessage<WrappedWithFragInfo<UserHdr>>` (via the `Builder`
-  //     template parameter) and sends it.
-  // 2.  Otherwise the payload is automatically split into the minimum number
-  //     of fragments.  Each fragment is sent with a compact `FragmentInfo`
-  //     header and the remote side stitches them back together transparently
-  //     via `FragmentedMessage`.
-  //
-  // Template Parameters
-  // -------------------
-  //  * `UserHdr` – the user-defined struct that forms the logical AM header.
-  //  * `Builder` – meta-function that, given a *wire* header type, produces
-  //               the concrete ActiveMessage builder to use.  The default
-  //               simply wraps `UserHdr` with `FragmentInfo` so that the
-  //               fragmentation metadata travels on the wire.
-  //
-  // Example
-  // -------
-  //   struct MyHdr { int value; };
-  //   ActiveMessageAuto<MyHdr> msg(target_node,
-  //                                 ActiveMessage<MyHdr>::recommended_max_payload(
-  //                                     target_node, /*with_congestion=*/false));
-  //   msg->value = 123;
-  //   msg.add_payload(data_ptr, data_bytes);
-  //   msg.commit();
-  //
-
-  template <typename UserHdr,
-            template <typename> class Builder = DefaultActiveMessageBuilder>
-  class ActiveMessageAuto {
-  public:
-    ActiveMessageAuto(NodeID target, size_t max_payload_size);
-
-    UserHdr *operator->();
-    UserHdr &operator*();
-
-    void add_payload(const void *data, size_t size);
-    void commit();
-
-  private:
-    using WireHdr = WrappedWithFragInfo<UserHdr>;
-    uint64_t next_message_id(NodeID node_id);
-
-    NodeID target_;
-    size_t max_payload_size_;
-    std::vector<char> payload_;
-    UserHdr user_header_{};
-  };
-
-  template <typename UserHdr>
-  struct AutoMessageRegistrar {
-    ActiveMessageHandlerReg<WrappedWithFragInfo<UserHdr>, UserHdr> reg;
-  };
+  // trait to detect WrappedWithFragInfo types
+  template <typename T>
+  struct is_wrapped_with_frag_info : std::false_type {};
+  template <typename U>
+  struct is_wrapped_with_frag_info<WrappedWithFragInfo<U>> : std::true_type {};
 
 } // namespace Realm
 

@@ -852,23 +852,22 @@ namespace Realm {
   {
     nonaffine = 0;
 
-    // add a very tall 2d "rectangle" that uses a stride of 0 for the
-    //  line pitch (flow control will prevent any given copy from touching
-    //  the same location twice)
+    // represent the FIFO as a 2D "rectangle": `size` contiguous bytes per
+    // line, with `lines` copies all sharing the same base (stride 0).  Flow
+    // control prevents any single copy from touching the same byte twice.
+    // We use 2D unconditionally — even when `lines == 1` (a FIFO larger than
+    // ~1 GiB), a 2D entry with count=1, stride=0 is equivalent to a 1D span
+    // and keeps the header / slot layout uniform with begin_entry(2).
     size_t lines = std::max<size_t>((1 << 30) / size, 1);
-    int dim = (lines > 1) ? 2 : 1;
-    size_t *data = addrlist.begin_entry(dim);
+    size_t *data = addrlist.begin_entry(2);
     if(!data)
       return true; // can't add more until some is consumed
 
-    // 1-D span from [base,base+size)
-    data[0] = (size << 4) + 2 /*dim*/;
+    data[0] = (size << 4) + 2;
     data[1] = base;
-    if(dim == 2) {
-      data[2] = lines;
-      data[3] = 0; // stride
-    }
-    addrlist.commit_entry(dim, size * lines);
+    data[2] = lines;
+    data[3] = 0; // stride 0 — all "lines" alias the same FIFO buffer
+    addrlist.commit_entry(2, size * lines);
 
     return false; // we can add more if asked
   }

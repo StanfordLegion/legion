@@ -15,8 +15,8 @@
  * limitations under the License.
  */
 
+#include "realm/runtime_impl.h"
 #include "realm/transfer/transfer.h"
-
 #include "realm/transfer/ib_memory.h"
 #include <tuple>
 #include <gtest/gtest.h>

@@ -778,14 +778,37 @@ namespace Realm {
     }
   }
 
-  size_t GASNet1Module::sample_messages_received_count(void)
+  void GASNet1Module::sample_quiescence_state(QuiescenceState &state)
   {
-    return quiescence_checker.sample_messages_received_count();
+    // Unused by gasnet1: custom_quiescence_check preserves the backend's
+    //  legacy active-message protocol, which does not expose per-rank sampled
+    //  counters for the generic Mattern-shaped algorithm.
+    state.queued_items = 0;
+    state.events_added = 0;
+    state.packets_reserved = 0;
+    state.packets_received = 0;
+    state.pending_completions = 0;
+    state.messages_to_drain = 0;
   }
 
-  bool GASNet1Module::check_for_quiescence(size_t sampled_receive_count)
+  bool GASNet1Module::custom_quiescence_check(IncomingMessageManager *message_manager,
+                                              Network::QuiescenceStatus &status)
   {
-    return quiescence_checker.perform_check(sampled_receive_count);
+    size_t messages_received = quiescence_checker.sample_messages_received_count();
+    message_manager->drain_incoming_messages(messages_received);
+    bool done = quiescence_checker.perform_check(messages_received);
+    status =
+        (done ? Network::QuiescenceStatus::DONE : Network::QuiescenceStatus::PROGRESSING);
+    return true;
+  }
+
+  void GASNet1Module::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                               uint64_t *total_counts, size_t count)
+  {
+    // Not used - gasnet1 provides custom_quiescence_check instead.
+    (void)local_counts;
+    for(size_t i = 0; i < count; i++)
+      total_counts[i] = 0;
   }
 
   // used to create a remote proxy for a memory
@@ -924,6 +947,15 @@ namespace Realm {
     //  line of the source data
     size_t maxlong = gasnet_AMMaxLongRequest();
     return std::min(maxlong, std::min(bytes_per_line, size_t(4 << 20)));
+  }
+
+  size_t GASNet1Module::max_payload_size(size_t header_size, const void *src_payload_addr)
+  {
+    // without a RemoteAddress destination, GASNet-1 always uses Medium
+    //  messages regardless of source registration (Long messages require
+    //  a dest_payload_addr)
+    (void)src_payload_addr;
+    return gasnet_AMMaxMedium();
   }
 
 }; // namespace Realm

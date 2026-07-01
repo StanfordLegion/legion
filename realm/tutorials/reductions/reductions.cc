@@ -179,16 +179,16 @@ bool do_reduction(IndexSpace<N, T> domain, IndexSpace<N, T> bloat, Memory dst_me
                                         /*dst_fid=*/FID_INT,
                                         /*src_fsize=*/sizeof(int),
                                         /*dst_fsize*/ sizeof(int),
-                                        /*exclusive=*/false,
-                                        /*fold=*/true, fill_event);
+                                        /*fold=*/true,
+                                        /*exclusive=*/false, fill_event);
 
   Event fold_event2 = reduce<2, T, int>(src_inst, dst_inst0, domain,
                                         /*src_fid=*/FID_INT,
                                         /*dst_fid=*/FID_INT,
                                         /*src_fsize=*/sizeof(int),
                                         /*dst_fsize*/ sizeof(int),
-                                        /*exclusive=*/false,
-                                        /*fold=*/true, fill_event);
+                                        /*fold=*/true,
+                                        /*exclusive=*/false, fill_event);
 
   Event fold_event = Event::merge_events(fold_event1, fold_event2);
 
@@ -201,8 +201,8 @@ bool do_reduction(IndexSpace<N, T> domain, IndexSpace<N, T> bloat, Memory dst_me
                                                 /*dst_fid=*/FID_COMPLEX_TYPE,
                                                 /*src_fsize=*/sizeof(int),
                                                 /*dst_fsize=*/sizeof(StructType),
-                                                /*exclusive=*/true,
-                                                /*fold=*/false, resrv_event1);
+                                                /*fold=*/false,
+                                                /*exclusive=*/true, resrv_event1);
   resrv.release(apply_event1);
 
   Event resrv_event2 = resrv.acquire(0, true, fold_event);
@@ -211,8 +211,8 @@ bool do_reduction(IndexSpace<N, T> domain, IndexSpace<N, T> bloat, Memory dst_me
                                                 /*dst_fid=*/FID_COMPLEX_TYPE,
                                                 /*src_fsize=*/sizeof(int),
                                                 /*dst_fsize=*/sizeof(StructType),
-                                                /*exclusive=*/true,
-                                                /*fold=*/false, resrv_event2);
+                                                /*fold=*/false,
+                                                /*exclusive=*/true, resrv_event2);
   resrv.release(apply_event2);
 
   start_event.trigger();

@@ -180,7 +180,7 @@ namespace Realm {
                xd->nb_update_pre_bytes_total_calls_expected) {
           xd->flush();
           log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
-          xd->mark_completed();
+          xd->mark_completed(work_until);
           break;
         }
 

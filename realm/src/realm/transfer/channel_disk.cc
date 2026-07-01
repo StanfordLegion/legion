@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include "realm/runtime_impl.h"
 #include "realm/transfer/channel_common.h"
 #include "realm/transfer/memcpy_channel.h"
 #include "realm/transfer/channel_disk.h"

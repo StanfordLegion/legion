@@ -900,9 +900,12 @@ namespace Realm {
         if(free_event) {
           get_runtime()->local_event_free_list->free_entry(event_impl);
         }
-      }
-
-      {
+        // NOTE: do NOT access event_impl after this point - it may have
+        // been returned to the free list and recycled by another thread
+      } else {
+        // an early poison already triggered this event while the merger
+        // was still active, which deferred the free-list insertion -
+        // handle that deferred insertion now
         AutoLock<> a(event_impl->mutex);
         if(event_impl->free_list_insertion_delayed) {
           event_impl->free_list_insertion_delayed = false;

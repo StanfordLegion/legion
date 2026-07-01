@@ -23,8 +23,6 @@
 // NOP, but useful for IDEs
 #include "realm/deppart/sparsity_impl.h"
 
-#include "realm/runtime_impl.h"
-
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////

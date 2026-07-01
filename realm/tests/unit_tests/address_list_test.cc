@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include "realm/runtime_impl.h"
 #include "realm/transfer/address_list.h"
 #include <gtest/gtest.h>
 #include <cstdlib>

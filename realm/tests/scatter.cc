@@ -614,7 +614,20 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id, DST &d
                                      bool aliasing_possible, CustomSerdezID serdez_id,
                                      Event wait_on, Processor p) const
 {
+  // ref-data accessors hoisted so the per-piece update below can write as
+  // each copy is issued (last-writer-wins matches the serialized dispatch
+  // order when aliasing_possible is true).
+  const std::map<Point<N, T>, Maybe<Point<DST::_N, typename DST::_T>>> &ptrref =
+      get_ref_data<Point<DST::_N, typename DST::_T>>(ptr_id);
+  const std::map<Point<N, T>, Maybe<FT>> &srcref = get_ref_data<FT>(src_id);
+  std::map<Point<DST::_N, typename DST::_T>, Maybe<FT>> &dstref =
+      dst.template get_ref_data<FT>(dst_id);
+
   std::vector<Event> events;
+  // When aliasing_possible is true, two source pieces may write the same
+  // destination word; chain per-piece copies so their MemcpyXferDes writes
+  // don't race (plain scatter writes have no atomic fallback).
+  Event prev = wait_on;
   for(typename std::vector<Piece>::const_iterator it = pieces.begin(); it != pieces.end();
       ++it) {
     IndexSpace<N, T> isect;
@@ -640,6 +653,9 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id, DST &d
       srcs[0].set_serdez(serdez_id);
       dsts[0].set_serdez(serdez_id);
     }
+
+    const Event dep = aliasing_possible ? prev : wait_on;
+    std::vector<Event> iter_events;
 
     if(TestConfig::splitcopies) {
       indirect.spaces.resize(1);
@@ -673,9 +689,10 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id, DST &d
         Event e = isect.copy(
             srcs, dsts,
             std::vector<const typename CopyIndirection<N, T>::Base *>(1, &indirect), prs,
-            wait_on);
+            dep);
         events.push_back(e);
         events.push_back(profile_done_event);
+        iter_events.push_back(e);
       }
     } else {
       for(typename std::vector<typename DST::Piece>::const_iterator it2 =
@@ -707,37 +724,34 @@ Event DistributedData<N, T>::scatter(IndexSpace<N, T> is, FieldID ptr_id, DST &d
       Event e = isect.copy(
           srcs, dsts,
           std::vector<const typename CopyIndirection<N, T>::Base *>(1, &indirect), prs,
-          wait_on);
+          dep);
       events.push_back(e);
       events.push_back(profile_done_event);
+      iter_events.push_back(e);
     }
-  }
 
-  // update reference data
-  const std::map<Point<N, T>, Maybe<Point<DST::_N, typename DST::_T>>> &ptrref =
-      get_ref_data<Point<DST::_N, typename DST::_T>>(ptr_id);
-  const std::map<Point<N, T>, Maybe<FT>> &srcref = get_ref_data<FT>(src_id);
-  std::map<Point<DST::_N, typename DST::_T>, Maybe<FT>> &dstref =
-      dst.template get_ref_data<FT>(dst_id);
-  std::set<Point<DST::_N, typename DST::_T>> touched; // to detect aliasing
-  IndexSpaceIterator<N, T> it(is);
-  while(it.valid) {
-    PointInRectIterator<N, T> pit(it.rect);
-    while(pit.valid) {
-      Point<DST::_N, typename DST::_T> p2 = ptrref.at(pit.p).get_value();
-      if(dstref.count(p2) > 0) {
-        if(touched.count(p2) > 0) {
-          assert(aliasing_possible);
-          dstref[p2] = Maybe<FT>();
-        } else {
+    if(aliasing_possible && !iter_events.empty())
+      prev = Event::merge_events(iter_events);
+
+    // Mirror this piece's writes into the reference map in dispatch order.
+    // When aliasing_possible is true the chain above guarantees that a later
+    // piece's copy runs strictly after this one, so repeated writes to the
+    // same destination end up with the last piece's source value as the
+    // expected result.
+    IndexSpaceIterator<N, T> rit(isect);
+    while(rit.valid) {
+      PointInRectIterator<N, T> pit(rit.rect);
+      while(pit.valid) {
+        Point<DST::_N, typename DST::_T> p2 = ptrref.at(pit.p).get_value();
+        if(dstref.count(p2) > 0) {
           dstref[p2] = srcref.at(pit.p);
-          touched.insert(p2);
+        } else {
+          assert(oor_possible); // make sure we didn't lie to Realm
         }
-      } else
-        assert(oor_possible); // make sure we didn't lie to Realm
-      pit.step();
+        pit.step();
+      }
+      rit.step();
     }
-    it.step();
   }
 
   return Event::merge_events(events);
@@ -753,7 +767,24 @@ Event DistributedData<N, T>::range_copy(IndexSpace<N, T> is, FieldID srcptr_id,
                                         bool dst_oor_possible, bool dst_aliasing_possible,
                                         Event wait_on, Processor p) const
 {
+  // ref-data accessors hoisted so the per-copy update below can write in
+  // dispatch order (last-writer-wins matches the serialized execution when
+  // dst_aliasing_possible is true).
+  const std::map<Point<N, T>, Maybe<Rect<SRC::_N, typename SRC::_T>>> &srcptrref =
+      get_ref_data<Rect<SRC::_N, typename SRC::_T>>(srcptr_id);
+  const std::map<Point<N, T>, Maybe<Rect<DST::_N, typename DST::_T>>> &dstptrref =
+      dstptr.template get_ref_data<Rect<DST::_N, typename DST::_T>>(dstptr_id);
+  const std::map<Point<SRC::_N, typename SRC::_T>, Maybe<FT>> &srcref =
+      src.template get_ref_data<FT>(src_id);
+  std::map<Point<DST::_N, typename DST::_T>, Maybe<FT>> &dstref =
+      dst.template get_ref_data<FT>(dst_id);
+
   std::vector<Event> events;
+  // When dst_aliasing_possible is true, different indirection points may
+  // resolve to overlapping dst rects across independent copies; chain them
+  // so their MemcpyXferDes writes don't race (plain writes, no atomic
+  // fallback).  src_aliasing_possible only affects reads, not the chain.
+  Event prev = wait_on;
   for(typename std::vector<Piece>::const_iterator it = pieces.begin(); it != pieces.end();
       ++it) {
     IndexSpace<N, T> isect;
@@ -839,55 +870,46 @@ Event DistributedData<N, T>::range_copy(IndexSpace<N, T> is, FieldID srcptr_id,
       prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
           .add_measurement<ProfilingMeasurements::OperationCopyInfo>();
 
-      Event e = isect2.copy(srcs, dsts, indirects, prs, wait_on);
+      const Event dep = dst_aliasing_possible ? prev : wait_on;
+      Event e = isect2.copy(srcs, dsts, indirects, prs, dep);
       events.push_back(e);
       events.push_back(profile_done_event);
-    }
-  }
+      if(dst_aliasing_possible)
+        prev = e;
 
-  // update reference data
-  const std::map<Point<N, T>, Maybe<Rect<SRC::_N, typename SRC::_T>>> &srcptrref =
-      get_ref_data<Rect<SRC::_N, typename SRC::_T>>(srcptr_id);
-  const std::map<Point<N, T>, Maybe<Rect<DST::_N, typename DST::_T>>> &dstptrref =
-      dstptr.template get_ref_data<Rect<DST::_N, typename DST::_T>>(dstptr_id);
-  const std::map<Point<SRC::_N, typename SRC::_T>, Maybe<FT>> &srcref =
-      src.template get_ref_data<FT>(src_id);
-  std::map<Point<DST::_N, typename DST::_T>, Maybe<FT>> &dstref =
-      dst.template get_ref_data<FT>(dst_id);
-  std::set<Point<DST::_N, typename DST::_T>> touched; // to detect aliasing
-  IndexSpaceIterator<N, T> it(is);
-  while(it.valid) {
-    PointInRectIterator<N, T> pit(it.rect);
-    while(pit.valid) {
-      Rect<SRC::_N, typename SRC::_T> srect = srcptrref.at(pit.p).get_value();
-      Rect<DST::_N, typename DST::_T> drect = dstptrref.at(pit.p).get_value();
-      PointInRectIterator<SRC::_N, typename SRC::_T> sit(srect);
-      PointInRectIterator<DST::_N, typename DST::_T> dit(drect);
-      while(sit.valid && dit.valid) {
-        if(srcref.count(sit.p) > 0) {
-          if(dstref.count(dit.p) > 0) {
-            if(touched.count(dit.p) > 0) {
-              assert(dst_aliasing_possible);
-              dstref[dit.p] = Maybe<FT>();
+      // Mirror this copy's writes into the reference map in dispatch order.
+      // When dst_aliasing_possible is true the chain above guarantees later
+      // copies run strictly after this one, so overlapping dst rects end up
+      // holding the last copy's source value.
+      IndexSpaceIterator<N, T> rit(isect2);
+      while(rit.valid) {
+        PointInRectIterator<N, T> pit(rit.rect);
+        while(pit.valid) {
+          Rect<SRC::_N, typename SRC::_T> srect = srcptrref.at(pit.p).get_value();
+          Rect<DST::_N, typename DST::_T> drect = dstptrref.at(pit.p).get_value();
+          PointInRectIterator<SRC::_N, typename SRC::_T> sit(srect);
+          PointInRectIterator<DST::_N, typename DST::_T> dit(drect);
+          while(sit.valid && dit.valid) {
+            if(srcref.count(sit.p) > 0) {
+              if(dstref.count(dit.p) > 0) {
+                dstref[dit.p] = srcref.at(sit.p);
+              } else {
+                assert(dst_oor_possible);
+                assert(0);
+              }
             } else {
-              dstref[dit.p] = srcref.at(sit.p);
-              touched.insert(dit.p);
+              assert(src_oor_possible);
+              assert(0);
             }
-          } else {
-            assert(dst_oor_possible);
-            assert(0);
+            sit.step();
+            dit.step();
           }
-        } else {
-          assert(src_oor_possible);
-          assert(0);
+          assert(!sit.valid && !dit.valid);
+          pit.step();
         }
-        sit.step();
-        dit.step();
+        rit.step();
       }
-      assert(!sit.valid && !dit.valid);
-      pit.step();
     }
-    it.step();
   }
 
   return Event::merge_events(events);

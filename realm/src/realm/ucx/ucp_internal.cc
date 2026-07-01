@@ -69,6 +69,12 @@ namespace Realm {
     static constexpr unsigned AM_ID_RDMA = 2;
     static constexpr unsigned AM_ID_REPLY = 3;
     static constexpr size_t AM_ALIGNMENT = 8;
+
+    static constexpr char PBUF_TAG_MMP = 0; // worker->mmp_release
+    static constexpr char PBUF_TAG_PMP =
+        1; // worker->pbuf_release (pbuf_mp: pre-registered mpool)
+    static constexpr char PBUF_TAG_MALLOC = 2; // free
+
     static constexpr size_t GET_ZCOPY_MAX = (1 << 30);     // 1G
     static constexpr size_t IB_SEG_SIZE = (8 << 10);       // 8K
     static constexpr size_t ZCOPY_THRESH_HOST = (2 << 10); // 2K
@@ -370,6 +376,7 @@ namespace Realm {
       , total_rcomp_sent(0)
       , total_rcomp_received(0)
       , outstanding_reqs(0)
+      , total_reqs_acquired(0)
     {}
 
     UCPInternal::~UCPInternal() { assert(!initialized_ucp && !initialized_boot); }
@@ -535,9 +542,9 @@ namespace Realm {
               config.prog_itr_max, config.rdesc_rel_max,
               (wt == UCPWorker::WORKER_TX) ? UCS_THREAD_MODE_MULTI
                                            : UCS_THREAD_MODE_SERIALIZED,
-              sizeof(Request), alignof(Request), config.pbuf_max_size + AM_ALIGNMENT,
-              config.pbuf_max_chunk_size, config.pbuf_max_count, config.pbuf_init_count,
-              config.mmp_max_obj_size, config.mpool_leakcheck);
+              sizeof(Request), alignof(Request), config.pbuf_mp_max_size + AM_ALIGNMENT,
+              config.pbuf_mp_max_chunk_size, config.pbuf_mp_max_count,
+              config.pbuf_mp_init_count, config.mmp_max_obj_size, config.mpool_leakcheck);
 
           CHKERR_JUMP(!worker->init(),
                       "failed to init worker for host context " << context, log_ucp, err);
@@ -684,17 +691,17 @@ namespace Realm {
       assert(!initialized_ucp);
 
       // payload buffer mpool config
-      if(config.pbuf_init_count > config.pbuf_max_count) {
-        log_ucp.info() << "pbuf_init_count " << config.pbuf_init_count
-                       << " gt pbuf_max_count " << config.pbuf_max_count
-                       << "; decreased it to " << config.pbuf_max_count;
-        config.pbuf_init_count = config.pbuf_max_count;
+      if(config.pbuf_mp_init_count > config.pbuf_mp_max_count) {
+        log_ucp.info() << "pbuf_mp_init_count " << config.pbuf_mp_init_count
+                       << " gt pbuf_mp_max_count " << config.pbuf_mp_max_count
+                       << "; decreased it to " << config.pbuf_mp_max_count;
+        config.pbuf_mp_init_count = config.pbuf_mp_max_count;
       }
-      if(config.pbuf_max_size > config.pbuf_max_chunk_size) {
-        log_ucp.info() << "pbuf_max_size " << config.pbuf_max_size
-                       << " gt pbuf_max_chunk_size " << config.pbuf_max_chunk_size
-                       << "; decreased it to " << config.pbuf_max_chunk_size;
-        config.pbuf_max_size = config.pbuf_max_chunk_size;
+      if(config.pbuf_mp_max_size > config.pbuf_mp_max_chunk_size) {
+        log_ucp.info() << "pbuf_mp_max_size " << config.pbuf_mp_max_size
+                       << " gt pbuf_mp_max_chunk_size " << config.pbuf_mp_max_chunk_size
+                       << "; decreased it to " << config.pbuf_mp_max_chunk_size;
+        config.pbuf_mp_max_size = config.pbuf_mp_max_chunk_size;
       }
       if(config.mmp_max_obj_size < config.pbuf_mp_thresh) {
         log_ucp.warning() << "WARNING: mmp_max_obj_size " << config.mmp_max_obj_size
@@ -1699,62 +1706,85 @@ namespace Realm {
       }
     }
 
-    size_t UCPInternal::sample_messages_received_count()
+    void UCPInternal::sample_quiescence_state(NetworkModule::QuiescenceState &state)
     {
-      return total_msg_received.load();
+      // queued_items: number of UCX-level requests still in flight (things
+      //  we've handed to UCX that haven't completed yet).  outstanding_reqs
+      //  is decremented in request_release() at request completion time, so
+      //  it captures both queued sends and unfinished receive operations.
+      //  Reporting the actual count rather than a 0/1 boolean lets the
+      //  Mattern's-loop stability check see a draining queue (count
+      //  decreasing across rounds) as PROGRESSING, instead of treating an
+      //  unchanging non-zero value as steady state.
+      state.queued_items = outstanding_reqs.load();
+
+      // events_added: monotonic count of requests ever acquired.  Bumped in
+      //  request_get alongside outstanding_reqs.fetch_add(1), but never
+      //  decremented, so even when outstanding_reqs returns to the same
+      //  value across two Mattern's rounds (e.g., a request finished and
+      //  another started), this counter shows the activity.
+      state.events_added = total_reqs_acquired.load();
+
+      // packets_reserved/received: cumulative wire-packet counters.  UCX
+      //  separately tracks ordinary AMs (total_msg_*) and remote completion
+      //  replies (total_rcomp_*), each of which is an independently balanced
+      //  send-vs-receive pair at the global level.  We fold both into the
+      //  reserved/received counts so the Mattern's-loop equality check
+      //  catches imbalances in either category.
+      //
+      // It is NOT correct to derive a per-rank "pending_completions" value
+      //  from (rcomp_sent - rcomp_received): per-rank rcomp_sent and
+      //  rcomp_received can legitimately differ in either direction (peers
+      //  don't have to send the same number of completions both ways), and
+      //  clamping the negative case to zero produces a permanent positive
+      //  cross-rank sum that never drains - even when global rcomp_sent ==
+      //  global rcomp_received.  Only the SUM-reduced equality is correct.
+      uint64_t msg_sent = total_msg_sent.load();
+      uint64_t msg_received = total_msg_received.load();
+      uint64_t rcomp_sent = total_rcomp_sent.load();
+      uint64_t rcomp_received = total_rcomp_received.load();
+      state.packets_reserved = msg_sent + rcomp_sent;
+      state.packets_received = msg_received + rcomp_received;
+
+      // pending_completions is unused on UCX - everything that needs
+      //  balancing is already in the reserved/received pair above.
+      state.pending_completions = 0;
+
+      // Only AM-style messages (msg_received) flow through
+      //  IncomingMessageManager; rcomp replies are handled directly by the
+      //  UCP completion callback and bypass IMM, so they must NOT be
+      //  included in the drain target.  Including them would deadlock
+      //  drain_incoming_messages since total_messages_handled in IMM never
+      //  counts rcomps.
+      state.messages_to_drain = msg_received;
+
+      log_ucp.debug() << "quiescence sample:"
+                      << " queued=" << state.queued_items
+                      << " events_added=" << state.events_added
+                      << " reserved=" << state.packets_reserved << " (msg=" << msg_sent
+                      << "+rcomp=" << rcomp_sent << ")"
+                      << " received=" << state.packets_received
+                      << " (msg=" << msg_received << "+rcomp=" << rcomp_received << ")";
+
+      // Give the poller threads a chance to make progress before the caller
+      //  proceeds to the allreduce.  Mirrors the old "wait_polling on failure"
+      //  gating but applied unconditionally on every sample so the system has
+      //  a chance to settle between Mattern's rounds.
+      for(auto &poller : pollers) {
+        poller.wait_polling();
+      }
     }
 
-    bool UCPInternal::check_for_quiescence(size_t sampled_receive_count)
+    void UCPInternal::quiescence_allreduce_sum(const uint64_t *local_counts,
+                                               uint64_t *total_counts, size_t count)
     {
-      /* The check for outstanding_reqs must be collective. Otherwise,
-       * the rank(s) with outstanding requests will return false too quickly,
-       * which will consume quiescence-check iterations too quickly without
-       * giving communications a chance to be progressed.
-       */
-
-      static constexpr int num_counters = 6;
-      uint64_t total_counts[num_counters] = {0, 0, 0, 0, 0, 0};
-      uint64_t local_counts[num_counters] = {
-          total_msg_sent.load(),   total_msg_received.load(),   sampled_receive_count,
-          total_rcomp_sent.load(), total_rcomp_received.load(), outstanding_reqs.load(),
-      };
-
-      log_ucp.debug() << "local quiescence counters:"
-                      << " total_msg_sent " << local_counts[0] << " total_msg_received "
-                      << local_counts[1] << " sampled_receive_count " << local_counts[2]
-                      << " total_rcomp_sent " << local_counts[3]
-                      << " total_rcomp_received " << local_counts[4]
-                      << " outstanding_reqs " << local_counts[5];
-
-      ucc_status_t rc = ucc_comm->UCC_Allreduce(local_counts, total_counts, num_counters,
-                                                UCC_DT_UINT64, UCC_OP_SUM);
+      ucc_status_t rc =
+          ucc_comm->UCC_Allreduce(const_cast<uint64_t *>(local_counts), total_counts,
+                                  count, UCC_DT_UINT64, UCC_OP_SUM);
       if(rc != UCC_OK) {
-        log_ucp.error() << "allreduce failed in check_for_quiescence";
-        return false;
+        log_ucp.fatal() << "allreduce failed in quiescence_allreduce_sum";
+        abort();
       }
-
-      log_ucp.debug() << "reduced quiescence counters:"
-                      << " total_msg_sent " << total_counts[0] << " total_msg_received "
-                      << total_counts[1] << " sampled_receive_count " << total_counts[2]
-                      << " total_rcomp_sent " << total_counts[3]
-                      << " total_rcomp_received " << total_counts[4]
-                      << " outstanding_reqs " << total_counts[5];
-
-      bool ret = ((total_counts[0] == total_counts[1]) && // msg_sent == msg_recv
-                  (total_counts[1] == total_counts[2]) && // msg_recv == sampled
-                  (total_counts[3] == total_counts[4]) && // rcomp_sent == rcomp_recv
-                  (total_counts[5] == 0));                // outstanding_reqs == 0
-
-      if(!ret) {
-        // wait until the poller threads get a chance to
-        // progress communications before returning. Otherwise,
-        // we might consume quiescence-check iterations too quickly.
-        for(auto &poller : pollers) {
-          poller.wait_polling();
-        }
-      }
-
-      return ret;
     }
 
     bool UCPInternal::is_congested()
@@ -1804,10 +1834,10 @@ namespace Realm {
         // source buffer is not given
         if(dest_payload_addr) {
           // rndv is enforced
-          ret = config.pbuf_max_size;
+          ret = config.pbuf_mp_max_size;
         } else {
           // eager may be used
-          ret = std::min(eager_max, config.pbuf_max_size);
+          ret = std::min(eager_max, config.pbuf_mp_max_size);
         }
       }
 
@@ -1815,8 +1845,8 @@ namespace Realm {
         log_ucp.warning() << "recommended max payload 0 without congestion"
                           << " zcopy_thresh_host " << zcopy_thresh_host << " ib_seg_size "
                           << ib_seg_size << " header_size " << header_size
-                          << " GET_ZCOPY_MAX " << GET_ZCOPY_MAX << " pbuf_max_size "
-                          << config.pbuf_max_size;
+                          << " GET_ZCOPY_MAX " << GET_ZCOPY_MAX << " pbuf_mp_max_size "
+                          << config.pbuf_mp_max_size;
       }
 
       return ret;
@@ -1897,6 +1927,7 @@ namespace Realm {
       req->internal = this;
       req->worker = worker;
       (void)outstanding_reqs.fetch_add(1);
+      (void)total_reqs_acquired.fetch_add(1);
       log_ucp_ar.debug() << "acquired request " << req;
 
       return req;
@@ -1936,30 +1967,44 @@ namespace Realm {
     void *UCPInternal::pbuf_get(UCPWorker *worker, size_t size)
     {
       char *buf;
-      assert(size <= ib_seg_size);
 #ifdef REALM_USE_CUDA
       // we should never ask for a payload buffer from a GPU ucp context
       assert(!worker->get_context()->gpu);
 #endif
-      // use one extra byte at the beginning of the buffer
-      // to determine whether the buffer is from context mpool or malloc.
-      // But, for alignment's sake, allocate AM_ALIGNMENT extra bytes.
+      // Reserve a leading PBUF_TAG_* byte so pbuf_release can tell which
+      // allocator owns the buffer. AM_ALIGNMENT extra bytes (rather than
+      // just one) are used so the returned payload pointer stays aligned.
       size += AM_ALIGNMENT;
 
       if(size < config.pbuf_mp_thresh) {
         if(config.pbuf_malloc) {
           buf = reinterpret_cast<char *>(malloc(size));
+          CHKERR_JUMP(!buf, "", log_ucp, err);
+          *buf = PBUF_TAG_MALLOC;
         } else {
           buf = reinterpret_cast<char *>(worker->mmp_get(size));
+          CHKERR_JUMP(!buf, "", log_ucp, err);
+          *buf = PBUF_TAG_MMP;
         }
-        CHKERR_JUMP(!buf, "", log_ucp, err);
-        *buf = 0;
-      } else {
+      } else if(size <= config.pbuf_mp_max_size + AM_ALIGNMENT) {
         // TODO: put an upper bound on the mpool size
         //       context->pbuf_mp->has(size, false /* with_expand */)
         buf = reinterpret_cast<char *>(worker->pbuf_get(size));
         CHKERR_JUMP(!buf, "", log_ucp, err);
-        *buf = 1;
+        *buf = PBUF_TAG_PMP;
+      } else {
+        // Oversize payload: cannot use pbuf_mp (fixed element size) and cannot
+        // use mmp (capped at mmp_max_obj_size). Fall back to plain malloc.
+        // The buffer will not be pre-registered with UCP, so transfers
+        // using it will pay an on-the-fly registration cost (once).
+        log_ucp.warning() << "payload size " << size - AM_ALIGNMENT
+                          << " exceeds pbuf_mp_max_size " << config.pbuf_mp_max_size
+                          << "; falling back to malloc (consider increasing "
+                          << "-ucx:pb_mp_max_size)";
+        buf = reinterpret_cast<char *>(malloc(size));
+        CHKERR_JUMP(!buf, "failed to malloc payload buffer of size " << size, log_ucp,
+                    err);
+        *buf = PBUF_TAG_MALLOC;
       }
 
       log_ucp_ar.debug() << "acquired payload buffer " << buf + AM_ALIGNMENT << " size "
@@ -1973,14 +2018,20 @@ namespace Realm {
     void UCPInternal::pbuf_release(UCPWorker *worker, void *buf)
     {
       char *alloc = reinterpret_cast<char *>(buf) - AM_ALIGNMENT;
-      if(*alloc == 0) {
-        if(config.pbuf_malloc) {
-          free(alloc);
-        } else {
-          worker->mmp_release(alloc);
-        }
-      } else {
+      switch(*alloc) {
+      case PBUF_TAG_MMP:
+        worker->mmp_release(alloc);
+        break;
+      case PBUF_TAG_PMP:
         worker->pbuf_release(alloc);
+        break;
+      case PBUF_TAG_MALLOC:
+        free(alloc);
+        break;
+      default:
+        log_ucp.error() << "pbuf_release: unknown allocator tag "
+                        << static_cast<int>(*alloc) << " for buffer " << buf;
+        abort();
       }
 
       log_ucp_ar.debug() << "released payload buffer " << buf;

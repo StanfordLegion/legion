@@ -80,9 +80,33 @@ namespace Realm {
     // and a few "global" operations that abstract over any/all networks
     void barrier(void);
 
-    // a quiescence check across all nodes (i.e. has anybody sent anything
-    //  since the previous quiescence check)
-    bool check_for_quiescence(IncomingMessageManager *message_manager);
+    // result of a single quiescence-check round.  The runtime's shutdown loop
+    //  calls Network::check_for_quiescence repeatedly and stops when it sees
+    //  DONE.  We deliberately do not have a "stuck" status: without
+    //  introspection into the network layer there is no way to tell a slow
+    //  in-flight message from a lost one, so any timeout-based abort would
+    //  produce spurious failures.  If the system is genuinely hung, the
+    //  shutdown loop hangs (which is debuggable - attach gdb).  A periodic
+    //  warning is emitted while counters are frozen, but the function never
+    //  fails the run.
+    enum class QuiescenceStatus
+    {
+      // confirmed quiescent: two consecutive rounds agreed on the global state
+      //  AND the state is "no in-flight messages, no queued work, no pending
+      //  completions".  The runtime can safely proceed with detach.
+      DONE,
+      // not yet quiescent - counters may or may not have changed this round,
+      //  but the system is not in a confirmed-quiet state.  Caller should call
+      //  again.
+      PROGRESSING,
+    };
+
+    // a quiescence check across all nodes - returns DONE when the global system
+    //  is confirmed quiescent, otherwise PROGRESSING.  The implementation is a
+    //  Mattern's-shaped two-round stability check; correctness requires that
+    //  the application has already promised it will not initiate new work
+    //  (e.g., post-precondition during shutdown).
+    QuiescenceStatus check_for_quiescence(IncomingMessageManager *message_manager);
 
     // collective communication across all nodes (TODO: subcommunicators?)
     template <typename T>
@@ -137,6 +161,21 @@ namespace Realm {
                                    size_t line_stride,
                                    const RemoteAddress &dest_payload_addr,
                                    bool with_congestion, size_t header_size);
+
+    // returns the strict upper bound on payload size for a single active
+    //  message - payloads larger than this CANNOT be sent without
+    //  fragmentation
+    // if src_payload_addr is non-null, the limit may be higher because the
+    //  backend can use the caller's buffer directly (e.g. UCX rendezvous);
+    //  if null, the network must allocate the buffer internally
+    // network backends that handle fragmentation internally (e.g. UCX with
+    //  caller-provided buffers) may return SIZE_MAX to indicate no
+    //  practical limit
+    // NOTE: sending payloads up to this limit is safe but may not be
+    //  optimal - use recommended_max_payload() to query the size that
+    //  avoids performance penalties such as protocol downgrades, extra
+    //  copies, or increased latency
+    size_t max_payload_size(size_t header_size, const void *src_payload_addr);
   }; // namespace Network
 
   // a network module provides additional functionality on top of a normal Realm
@@ -180,8 +219,111 @@ namespace Realm {
     virtual void allgatherv(const char *val_in, size_t bytes, std::vector<char> &vals_out,
                             std::vector<size_t> &lengths) = 0;
 
-    virtual size_t sample_messages_received_count(void) = 0;
-    virtual bool check_for_quiescence(size_t sampled_receive_count) = 0;
+    // Per-rank state used by the quiescence-detection algorithm in
+    //  Network::check_for_quiescence.  Each backend exposes its current local
+    //  state, the algorithm sums across ranks, and termination is declared
+    //  when two consecutive rounds agree on a quiet state.
+    //
+    // Correctness depends on every source of "future messages from this rank"
+    //  being captured by either:
+    //   - queued_items > 0 (anything queued that could spontaneously
+    //     produce a send when it runs), or
+    //   - packets_reserved exceeding packets_received globally (anything
+    //     in flight on the wire), or
+    //   - pending_completions > 0 (any local-completion bookkeeping that
+    //     could fire and produce comp replies)
+    //
+    // MONOTONICITY INVARIANT: the two-round stability check requires that
+    //  any real activity between rounds shows up as a counter change.  Two
+    //  of the five reduced fields below are snapshot counters (rises AND
+    //  falls): queued_items and pending_completions.  Snapshot counters
+    //  can alias - the same value across rounds while items flowed
+    //  through.  Each one is therefore paired with a monotonic field in
+    //  the same allreduce array, so the joint stability of the pair rules
+    //  out aliased activity:
+    //    queued_items       <- paired with -> events_added (monotonic)
+    //    pending_completions <- paired with -> packets_reserved (monotonic)
+    //  The monotonic fields packets_reserved, packets_received, and
+    //  events_added are themselves never decremented (paths that would
+    //  decrement them - e.g., cancel_pbuf in GASNet-EX - are stubbed to
+    //  abort).  See per-field comments for the pairing argument.
+    struct QuiescenceState {
+      // total number of items currently queued on this rank that could
+      //  produce a future network operation: work-item queues (injector,
+      //  completer, poller, rgetter), pending in-flight requests, etc.
+      //  This is a SNAPSHOT (rises and falls); for stability detection it
+      //  must be combined with events_added (monotonic) so that a queue
+      //  whose count happens to stay the same across rounds while items
+      //  flow through still registers as activity.  Reduced via SUM.
+      uint64_t queued_items;
+      // Monotonic count of items ever added to any queue on this rank;
+      //  the monotonic mate of queued_items.  REQUIRED for stability
+      //  detection: queued_items alone can be the same value across two
+      //  consecutive rounds while the queue contents change (e.g., a
+      //  put-completion event firing pops 1 from pending_events and adds
+      //  1 to ready_xpairs - net change in queued_items is zero, but
+      //  real work happened).  events_added goes up whenever any queue
+      //  gains an entry, so concurrent add+remove activity that nets to
+      //  zero in queued_items still shows as a change in events_added.
+      //  Together with queued_items (snapshot) this fully captures
+      //  queue-level activity: pure pops show up as queued_items
+      //  decreasing, pure adds show up in both, and balanced add+pop
+      //  shows up in events_added.  Reduced via SUM.
+      uint64_t events_added;
+      // Monotonic cumulative count of network messages this rank has
+      //  originated.  At quiescence, sum across ranks must equal sum of
+      //  packets_received.  Also serves as the monotonic mate of
+      //  pending_completions (see below): every alloc of a
+      //  PendingCompletion is co-located with a packets_reserved++ at the
+      //  same send site, so balanced alloc+recycle activity that leaves
+      //  pending_completions unchanged still shows up here.
+      uint64_t packets_reserved;
+      // Monotonic cumulative count of network messages this rank has
+      //  received and counted - sampled post-drain so the count reflects
+      //  every received message that has been dispatched to handlers as
+      //  of the call.
+      uint64_t packets_received;
+      // Snapshot count of pending remote completions on this rank waiting
+      //  for replies to arrive; rises on PendingCompletion alloc, falls
+      //  on recycle (comp_reply receipt or local-completion firing).
+      //  Reduced via SUM.  Although non-monotonic, the stability check is
+      //  aliasing-safe because every alloc is paired with packets_reserved++
+      //  at the same send site: between two rounds, if N allocs and M
+      //  recycles happened then Δpending = N-M and Δreserved = N.  Joint
+      //  stability of pending_completions AND packets_reserved forces
+      //  N = M = 0, ruling out balanced alloc+recycle activity that
+      //  pending_completions alone would miss.
+      uint64_t pending_completions;
+      // local-only (NOT reduced) count of messages this rank has received
+      //  that pass through IncomingMessageManager and need to be drained
+      //  before the post-drain sample is taken.  Must be a subset of
+      //  packets_received: any wire packet that bypasses IMM (e.g., UCX
+      //  remote-completion replies handled directly, GASNet-EX
+      //  comp_reply/rget control AMs that are processed inline) MUST be
+      //  excluded, otherwise drain_incoming_messages waits forever for
+      //  total_messages_handled to reach a target it cannot.  For backends
+      //  where every received packet goes through IMM (GASNet-EX), this
+      //  equals packets_received.  MPI has a separate subset counter because
+      //  completion replies bypass IMM.
+      uint64_t messages_to_drain;
+    };
+
+    // Sample the current quiescence state of this network.  Called after the
+    //  IncomingMessageManager has been drained, so 'packets_received' reflects
+    //  every received message that has been dispatched as of the call.
+    virtual void sample_quiescence_state(QuiescenceState &state) = 0;
+
+    // Optional escape hatch for backends with an existing quiescence protocol
+    //  that does not naturally expose the sampled counters above.  Return true
+    //  after setting 'status' if the backend handled the check itself.
+    virtual bool custom_quiescence_check(IncomingMessageManager *message_manager,
+                                         Network::QuiescenceStatus &status);
+
+    // Sum-reduce a small array of uint64_t across all ranks.  Used by the
+    //  Mattern's-shaped Network::check_for_quiescence loop to combine
+    //  per-rank QuiescenceState samples into a global tally.
+    virtual void quiescence_allreduce_sum(const uint64_t *local_counts,
+                                          uint64_t *total_counts, size_t count) = 0;
 
     // used to create a remote proxy for a memory
     virtual MemoryImpl *create_remote_memory(RuntimeImpl *runtime, Memory m, size_t size,
@@ -235,6 +377,11 @@ namespace Realm {
                                            size_t line_stride,
                                            const RemoteAddress &dest_payload_addr,
                                            bool with_congestion, size_t header_size) = 0;
+
+    // returns the hard upper bound on payload size - see Network::max_payload_size
+    //  for full documentation; callers wanting optimal performance should use
+    //  recommended_max_payload() instead
+    virtual size_t max_payload_size(size_t header_size, const void *src_payload_addr) = 0;
   };
 
   namespace NetworkSegmentInfo {

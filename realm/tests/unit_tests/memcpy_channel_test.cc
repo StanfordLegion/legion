@@ -16,6 +16,7 @@
  */
 
 #include "realm/bgwork.h"
+#include "realm/runtime_impl.h"
 #include "realm/transfer/channel.h"
 #include "realm/transfer/memcpy_channel.h"
 #include "test_common.h"
