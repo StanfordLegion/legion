@@ -13,6 +13,7 @@ Version 26.06.0 (June 30, 2026)
        overhead to execution. You can still manually opt into crtical
        path logging with `-lg:prof_critical_paths` flag.
   * Realm
+    - Update Realm to version 76631cdb7380033619958ad37ec3c94e7129095b
     - Realm has also been aggressively fuzzed to fix a number of
        correctness bugs. This includes a significant fix for Realm's
        FastReservation locking mechanism, as well as some GASNet races.
