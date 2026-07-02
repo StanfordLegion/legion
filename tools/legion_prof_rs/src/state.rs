@@ -25,7 +25,7 @@ use serde::Serialize;
 use slice_group_by::GroupBy;
 
 use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
-use crate::geometry::{EquivalenceSet, ISpace, ISpaceID};
+use crate::geometry::{ISpace, ISpaceID, compute_covering_signatures};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
 
@@ -5292,6 +5292,30 @@ impl State {
             )
             .unwrap(),
         );
+        let mut inst_expr_keys: HashMap<ProfUID, Vec<ISpaceID>> = HashMap::new();
+        let mut signature_cache: HashMap<Vec<ISpaceID>, HashMap<ISpaceID, Vec<usize>>> =
+            HashMap::new();
+        for (inst_uid, inst) in mems.values().flat_map(|mem| mem.insts.iter()) {
+            if !inst.is_logged() {
+                continue;
+            }
+            let Some(users) = instance_users.get(inst_uid) else {
+                continue;
+            };
+            let mut exprs: Vec<_> = users.iter().filter_map(|user| user.expr).collect();
+            exprs.sort();
+            exprs.dedup();
+            if exprs.is_empty() {
+                continue;
+            }
+            if !signature_cache.contains_key(&exprs) {
+                let mut signatures: HashMap<ISpaceID, Vec<usize>> =
+                    exprs.iter().map(|expr| (*expr, Vec::new())).collect();
+                self.compute_equivalence_sets(&mut signatures);
+                signature_cache.insert(exprs.clone(), signatures);
+            }
+            inst_expr_keys.insert(*inst_uid, exprs);
+        }
         // Compute liveness ranges for each of the instances
         mems.par_iter_mut()
             .flat_map(|(_, mem)| mem.insts.par_iter_mut())
@@ -5304,15 +5328,11 @@ impl State {
             let Some(users) = instance_users.get(&inst_uid) else {
                 return;
             };
-            // First compute the equivalence sets for the spaces of users of this instance
-            let mut eq_sets = HashMap::new();
-            // Find all the unique index spaces referenced
-            for user in users {
-                if let Some(expr) = user.expr {
-                    eq_sets.entry(expr).or_default();
-                }
-            }
-            self.compute_equivalence_sets(&mut eq_sets);
+            let eq_sets = if let Some(exprs) = inst_expr_keys.get(inst_uid) {
+                signature_cache.get(exprs).unwrap().clone()
+            } else {
+                HashMap::new()
+            };
             // Next compute the def-use chains for each equivalence set-field pair
             // Start by getting all the users for each set-field pair
             #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -5544,54 +5564,13 @@ impl State {
     }
 
     pub fn compute_equivalence_sets(&self, eq_sets: &mut HashMap<ISpaceID, Vec<usize>>) {
-        // For each index space traverse the existing equivalence sets and
-        // update them or add them to the list
-        let mut equivalence_sets: Vec<EquivalenceSet> = Vec::new();
-        for space_id in eq_sets.keys() {
-            let space = self.index_spaces.get(&space_id).unwrap();
-            if space.is_empty() {
-                continue;
-            }
-            let mut new_set = EquivalenceSet::new(space);
-            let mut to_add = Vec::new();
-            for set in equivalence_sets.iter_mut() {
-                if let Some(overlap) = set.overlaps(&new_set) {
-                    if overlap.volume() == set.volume() {
-                        // New set is dominating
-                        if new_set.volume() == overlap.volume() {
-                            new_set.clear();
-                            *set = overlap;
-                            break;
-                        } else {
-                            new_set.subtract(&overlap);
-                            *set = overlap;
-                        }
-                    } else if overlap.volume() == new_set.volume() {
-                        // Old set is dominating
-                        set.subtract(&overlap);
-                        to_add.push(overlap);
-                        new_set.clear();
-                        break;
-                    } else {
-                        // Partial overlap so have to keep everything
-                        set.subtract(&overlap);
-                        new_set.subtract(&overlap);
-                        to_add.push(overlap);
-                    }
-                }
-            }
-            if !to_add.is_empty() {
-                equivalence_sets.append(&mut to_add);
-            }
-            if !new_set.is_empty() {
-                equivalence_sets.push(new_set);
-            }
-        }
-        for (index, set) in equivalence_sets.iter().enumerate() {
-            assert!(!set.is_empty());
-            for space in &set.spaces {
-                eq_sets.get_mut(space).unwrap().push(index);
-            }
+        let spaces: Vec<_> = eq_sets
+            .keys()
+            .map(|space_id| self.index_spaces.get(space_id).unwrap())
+            .collect();
+        let signatures = compute_covering_signatures(spaces);
+        for (space_id, sets) in eq_sets {
+            *sets = signatures.get(space_id).cloned().unwrap_or_default();
         }
     }
 

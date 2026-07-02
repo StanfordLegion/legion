@@ -1,4 +1,4 @@
-use foldhash::{HashSet, HashSetExt};
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use std::cmp::{max, min};
 use std::num::NonZeroU64;
 
@@ -472,6 +472,244 @@ impl ISpace {
     }
 }
 
+#[derive(Debug)]
+struct TaggedBox {
+    expr_index: usize,
+    lo: Vec<i128>,
+    hi: Vec<i128>,
+}
+
+impl TaggedBox {
+    fn from_rect(expr_index: usize, rect: &Rect) -> Option<Self> {
+        let mut lo = Vec::with_capacity(rect.dim());
+        let mut hi = Vec::with_capacity(rect.dim());
+        for idx in 0..rect.dim() {
+            let lo_coord = rect.lo.values[idx];
+            let hi_coord = rect.hi.values[idx];
+            if hi_coord < lo_coord {
+                return None;
+            }
+            lo.push(lo_coord as i128);
+            hi.push((hi_coord as i128) + 1);
+        }
+        Some(TaggedBox { expr_index, lo, hi })
+    }
+
+    fn from_point(expr_index: usize, point: &Point) -> Self {
+        TaggedBox {
+            expr_index,
+            lo: point.values.iter().map(|&coord| coord as i128).collect(),
+            hi: point
+                .values
+                .iter()
+                .map(|&coord| (coord as i128) + 1)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Signature(Vec<u64>);
+
+#[derive(Debug, Copy, Clone)]
+struct SweepEvent {
+    coord: i128,
+    rect_index: usize,
+    start: bool,
+}
+
+pub fn compute_covering_signatures<'a, I>(spaces: I) -> HashMap<ISpaceID, Vec<usize>>
+where
+    I: IntoIterator<Item = &'a ISpace>,
+{
+    let mut spaces: Vec<&ISpace> = spaces.into_iter().collect();
+    spaces.sort_by_key(|space| space.ispace_id);
+    spaces.dedup_by_key(|space| space.ispace_id);
+
+    let mut result = HashMap::with_capacity(spaces.len());
+    for space in &spaces {
+        result.insert(space.ispace_id, Vec::new());
+    }
+
+    let mut ndim = None;
+    let mut boxes = Vec::new();
+    for (expr_index, space) in spaces.iter().enumerate() {
+        if space.is_empty() {
+            continue;
+        }
+        for entry in &space.points {
+            let tagged_box = match entry {
+                Bounds::Rect(rect) => {
+                    let dim = rect.dim();
+                    if let Some(ndim) = ndim {
+                        assert!(ndim == dim);
+                    } else {
+                        ndim = Some(dim);
+                    }
+                    TaggedBox::from_rect(expr_index, rect)
+                }
+                Bounds::Point(point) => {
+                    let dim = point.dim();
+                    if let Some(ndim) = ndim {
+                        assert!(ndim == dim);
+                    } else {
+                        ndim = Some(dim);
+                    }
+                    Some(TaggedBox::from_point(expr_index, point))
+                }
+                _ => panic!("Bad bounds entry"),
+            };
+            if let Some(tagged_box) = tagged_box {
+                boxes.push(tagged_box);
+            }
+        }
+    }
+
+    let Some(ndim) = ndim else {
+        return result;
+    };
+
+    let mut signature_ids = HashMap::new();
+    let space_ids: Vec<_> = spaces.iter().map(|space| space.ispace_id).collect();
+    let active: Vec<usize> = (0..boxes.len()).collect();
+    sweep_signatures(
+        &boxes,
+        &space_ids,
+        &active,
+        ndim,
+        0,
+        &mut signature_ids,
+        &mut result,
+    );
+    result
+}
+
+fn sweep_signatures(
+    boxes: &[TaggedBox],
+    space_ids: &[ISpaceID],
+    rect_indices: &[usize],
+    ndim: usize,
+    dim: usize,
+    signature_ids: &mut HashMap<Signature, usize>,
+    result: &mut HashMap<ISpaceID, Vec<usize>>,
+) {
+    if rect_indices.is_empty() {
+        return;
+    }
+    if dim == ndim {
+        emit_signature(boxes, space_ids, rect_indices, signature_ids, result);
+        return;
+    }
+
+    let mut events = Vec::with_capacity(rect_indices.len() * 2);
+    for &rect_index in rect_indices {
+        let rect = &boxes[rect_index];
+        events.push(SweepEvent {
+            coord: rect.lo[dim],
+            rect_index,
+            start: true,
+        });
+        events.push(SweepEvent {
+            coord: rect.hi[dim],
+            rect_index,
+            start: false,
+        });
+    }
+    events.sort_by_key(|event| event.coord);
+
+    let mut active = Vec::new();
+    let mut positions: HashMap<usize, usize> = HashMap::with_capacity(rect_indices.len());
+    let mut index = 0;
+    while index < events.len() {
+        let coord = events[index].coord;
+        let mut next_index = index + 1;
+        while next_index < events.len() && events[next_index].coord == coord {
+            next_index += 1;
+        }
+
+        for event in &events[index..next_index] {
+            if !event.start {
+                remove_active_rect(&mut active, &mut positions, event.rect_index);
+            }
+        }
+        for event in &events[index..next_index] {
+            if event.start {
+                add_active_rect(&mut active, &mut positions, event.rect_index);
+            }
+        }
+
+        if let Some(next) = events.get(next_index) {
+            if coord < next.coord && !active.is_empty() {
+                sweep_signatures(
+                    boxes,
+                    space_ids,
+                    &active,
+                    ndim,
+                    dim + 1,
+                    signature_ids,
+                    result,
+                );
+            }
+        }
+        index = next_index;
+    }
+}
+
+fn add_active_rect(
+    active: &mut Vec<usize>,
+    positions: &mut HashMap<usize, usize>,
+    rect_index: usize,
+) {
+    assert!(positions.insert(rect_index, active.len()).is_none());
+    active.push(rect_index);
+}
+
+fn remove_active_rect(
+    active: &mut Vec<usize>,
+    positions: &mut HashMap<usize, usize>,
+    rect_index: usize,
+) {
+    let position = positions.remove(&rect_index).unwrap();
+    active.swap_remove(position);
+    if position < active.len() {
+        positions.insert(active[position], position);
+    }
+}
+
+fn emit_signature(
+    boxes: &[TaggedBox],
+    space_ids: &[ISpaceID],
+    rect_indices: &[usize],
+    signature_ids: &mut HashMap<Signature, usize>,
+    result: &mut HashMap<ISpaceID, Vec<usize>>,
+) {
+    let mut bits = vec![0; space_ids.len().div_ceil(64)];
+    for &rect_index in rect_indices {
+        let expr_index = boxes[rect_index].expr_index;
+        bits[expr_index / 64] |= 1 << (expr_index % 64);
+    }
+    let signature = Signature(bits);
+    if signature_ids.contains_key(&signature) {
+        return;
+    }
+
+    let signature_id = signature_ids.len();
+    signature_ids.insert(signature.clone(), signature_id);
+    for (word_index, mut word) in signature.0.iter().copied().enumerate() {
+        while word != 0 {
+            let bit = word.trailing_zeros() as usize;
+            let expr_index = word_index * 64 + bit;
+            if expr_index < space_ids.len() {
+                result
+                    .get_mut(&space_ids[expr_index])
+                    .unwrap()
+                    .push(signature_id);
+            }
+            word &= word - 1;
+        }
+    }
+}
+
 // R-tree spatial index for accelerating rectangle overlap queries.
 // Uses Sort-Tile-Recursive (STR) bulk loading.
 const RTREE_BRANCH_FACTOR: usize = 16;
@@ -522,11 +760,10 @@ impl<'a> RTree<'a> {
                 let cb = rects[b].lo.values[sort_dim] + rects[b].hi.values[sort_dim];
                 ca.cmp(&cb)
             });
-            // Partition into groups and recurse on next dimension
-            let num_slices = (indices.len() + RTREE_BRANCH_FACTOR - 1) / RTREE_BRANCH_FACTOR;
-            let slice_size = (indices.len() + num_slices - 1) / num_slices;
-            let mut child_nodes = Vec::with_capacity(num_slices);
-            for chunk in indices.chunks(slice_size) {
+            // Partition into at most RTREE_BRANCH_FACTOR groups and recurse on next dimension.
+            let chunk_size = (indices.len() + RTREE_BRANCH_FACTOR - 1) / RTREE_BRANCH_FACTOR;
+            let mut child_nodes = Vec::with_capacity((indices.len() + chunk_size - 1) / chunk_size);
+            for chunk in indices.chunks(chunk_size) {
                 child_nodes.push(Self::build_node(rects, chunk.to_vec(), dim + 1));
             }
             let bbox = Self::compute_bbox_from_nodes(&child_nodes);
@@ -1536,6 +1773,229 @@ mod tests {
         }
     }
 
+    // ==================== covering signature tests ====================
+
+    mod covering_signature_tests {
+        use super::*;
+        use std::collections::{BTreeMap, BTreeSet};
+
+        fn new_ispace(id: u64) -> ISpace {
+            ISpace::new(ISpaceID(NonZeroU64::new(id).unwrap()))
+        }
+
+        fn add_rect_1d(ispace: &mut ISpace, lo: i64, hi: i64) {
+            ispace.set_rect(1, &[lo, hi], 1, NodeID(0));
+        }
+
+        fn add_rect_2d(ispace: &mut ISpace, lo_x: i64, lo_y: i64, hi_x: i64, hi_y: i64) {
+            ispace.set_rect(2, &[lo_x, lo_y, hi_x, hi_y], 2, NodeID(0));
+        }
+
+        fn add_rect_3d(
+            ispace: &mut ISpace,
+            lo_x: i64,
+            lo_y: i64,
+            lo_z: i64,
+            hi_x: i64,
+            hi_y: i64,
+            hi_z: i64,
+        ) {
+            ispace.set_rect(3, &[lo_x, lo_y, lo_z, hi_x, hi_y, hi_z], 3, NodeID(0));
+        }
+
+        fn add_point_2d(ispace: &mut ISpace, x: i64, y: i64) {
+            ispace.set_point(2, &[x, y], NodeID(0));
+        }
+
+        fn add_point_3d(ispace: &mut ISpace, x: i64, y: i64, z: i64) {
+            ispace.set_point(3, &[x, y, z], NodeID(0));
+        }
+
+        fn signature_sets(signatures: &HashMap<ISpaceID, Vec<usize>>) -> BTreeSet<Vec<u64>> {
+            let mut by_signature: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
+            for (space_id, signature_ids) in signatures {
+                for signature_id in signature_ids {
+                    by_signature
+                        .entry(*signature_id)
+                        .or_default()
+                        .push(space_id.0.get());
+                }
+            }
+            by_signature
+                .into_values()
+                .map(|mut space_ids| {
+                    space_ids.sort();
+                    space_ids
+                })
+                .collect()
+        }
+
+        fn expected_signature_sets(signatures: &[&[u64]]) -> BTreeSet<Vec<u64>> {
+            signatures
+                .iter()
+                .map(|signature| signature.to_vec())
+                .collect()
+        }
+
+        fn brute_force_signature_sets(spaces: &[&ISpace]) -> BTreeSet<Vec<u64>> {
+            let mut lo = Vec::new();
+            let mut hi = Vec::new();
+            for space in spaces {
+                if space.is_empty() {
+                    continue;
+                }
+                let Bounds::Rect(rect) = &space.bounds else {
+                    panic!("Bad index space bounds");
+                };
+                if lo.is_empty() {
+                    lo = rect.lo.values.clone();
+                    hi = rect.hi.values.clone();
+                } else {
+                    assert_eq!(lo.len(), rect.dim());
+                    for dim in 0..rect.dim() {
+                        lo[dim] = min(lo[dim], rect.lo.values[dim]);
+                        hi[dim] = max(hi[dim], rect.hi.values[dim]);
+                    }
+                }
+            }
+
+            let mut result = BTreeSet::new();
+            if lo.is_empty() {
+                return result;
+            }
+            let mut point = lo.clone();
+            brute_force_signature_sets_rec(spaces, &lo, &hi, &mut point, 0, &mut result);
+            result
+        }
+
+        fn brute_force_signature_sets_rec(
+            spaces: &[&ISpace],
+            lo: &[i64],
+            hi: &[i64],
+            point: &mut [i64],
+            dim: usize,
+            result: &mut BTreeSet<Vec<u64>>,
+        ) {
+            if dim == lo.len() {
+                let point = Point::new(point.to_vec());
+                let mut signature = Vec::new();
+                for space in spaces {
+                    if !space.is_empty() && space.contains_point(&point) {
+                        signature.push(space.ispace_id.0.get());
+                    }
+                }
+                if !signature.is_empty() {
+                    result.insert(signature);
+                }
+                return;
+            }
+            for coord in lo[dim]..=hi[dim] {
+                point[dim] = coord;
+                brute_force_signature_sets_rec(spaces, lo, hi, point, dim + 1, result);
+            }
+        }
+
+        #[test]
+        fn test_covering_signatures_1d_overlap() {
+            let mut a = new_ispace(1);
+            add_rect_1d(&mut a, 0, 9);
+            let mut b = new_ispace(2);
+            add_rect_1d(&mut b, 3, 6);
+            let mut c = new_ispace(3);
+            add_rect_1d(&mut c, 6, 11);
+
+            let signatures = compute_covering_signatures([&a, &b, &c]);
+
+            assert_eq!(
+                signature_sets(&signatures),
+                expected_signature_sets(&[&[1], &[1, 2], &[1, 2, 3], &[1, 3], &[3]])
+            );
+        }
+
+        #[test]
+        fn test_covering_signatures_2d_overlap() {
+            let mut a = new_ispace(1);
+            add_rect_2d(&mut a, 0, 0, 5, 3);
+            let mut b = new_ispace(2);
+            add_rect_2d(&mut b, 2, 1, 7, 2);
+            let mut c = new_ispace(3);
+            add_rect_2d(&mut c, 4, 2, 6, 5);
+
+            let signatures = compute_covering_signatures([&a, &b, &c]);
+
+            assert_eq!(
+                signature_sets(&signatures),
+                expected_signature_sets(
+                    &[&[1], &[1, 2], &[1, 2, 3], &[1, 3], &[2], &[2, 3], &[3],]
+                )
+            );
+        }
+
+        #[test]
+        fn test_covering_signatures_point_inside_large_rect() {
+            let mut large = new_ispace(1);
+            add_rect_2d(&mut large, 0, 0, 9, 9);
+            let mut point = new_ispace(2);
+            add_point_2d(&mut point, 5, 5);
+
+            let signatures = compute_covering_signatures([&large, &point]);
+
+            assert_eq!(
+                signature_sets(&signatures),
+                expected_signature_sets(&[&[1], &[1, 2]])
+            );
+        }
+
+        #[test]
+        fn test_covering_signatures_deduplicates_disconnected_regions() {
+            let mut a = new_ispace(1);
+            add_rect_1d(&mut a, 0, 0);
+            add_rect_1d(&mut a, 10, 10);
+
+            let signatures = compute_covering_signatures([&a]);
+
+            assert_eq!(
+                signature_sets(&signatures),
+                expected_signature_sets(&[&[1]])
+            );
+            assert_eq!(signatures.get(&a.ispace_id).unwrap().len(), 1);
+        }
+
+        #[test]
+        fn test_covering_signatures_overlapping_pieces_in_same_space() {
+            let mut a = new_ispace(1);
+            add_rect_1d(&mut a, 0, 5);
+            add_rect_1d(&mut a, 3, 8);
+            let mut b = new_ispace(2);
+            add_rect_1d(&mut b, 4, 4);
+
+            let signatures = compute_covering_signatures([&a, &b]);
+
+            assert_eq!(
+                signature_sets(&signatures),
+                expected_signature_sets(&[&[1], &[1, 2]])
+            );
+        }
+
+        #[test]
+        fn test_covering_signatures_matches_bruteforce_3d() {
+            let mut a = new_ispace(1);
+            add_rect_3d(&mut a, 0, 0, 0, 1, 1, 1);
+            let mut b = new_ispace(2);
+            add_rect_3d(&mut b, 1, 0, 0, 2, 0, 2);
+            let mut c = new_ispace(3);
+            add_point_3d(&mut c, 1, 0, 1);
+
+            let spaces = [&a, &b, &c];
+            let signatures = compute_covering_signatures(spaces);
+
+            assert_eq!(
+                signature_sets(&signatures),
+                brute_force_signature_sets(&spaces)
+            );
+        }
+    }
+
     // ==================== RTree tests ====================
 
     mod rtree_tests {
@@ -1553,6 +2013,20 @@ mod tests {
             tree.query_overlaps(query, &mut results);
             results.sort();
             results
+        }
+
+        fn assert_branch_factor(node: &RTreeNode) {
+            match &node.children {
+                RTreeChildren::Leaves(indices) => {
+                    assert!(indices.len() <= RTREE_BRANCH_FACTOR);
+                }
+                RTreeChildren::Internal(children) => {
+                    assert!(children.len() <= RTREE_BRANCH_FACTOR);
+                    for child in children {
+                        assert_branch_factor(child);
+                    }
+                }
+            }
         }
 
         #[test]
@@ -1608,6 +2082,15 @@ mod tests {
             for r in &rects {
                 assert!(root.bbox.dominates(r));
             }
+        }
+
+        #[test]
+        fn test_rtree_nodes_respect_branch_factor() {
+            let rects: Vec<Rect> = (0..1000)
+                .map(|i| rect2d(i * 3, i * 5, i * 3 + 1, i * 5 + 1))
+                .collect();
+            let tree = RTree::build(&rects);
+            assert_branch_factor(tree.root.as_ref().unwrap());
         }
 
         #[test]
