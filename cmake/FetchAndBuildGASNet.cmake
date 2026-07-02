@@ -18,7 +18,7 @@
 # following configuration variables:
 #
 # GASNet_CONDUIT:
-# GASNet_System:
+# GASNet_SYSTEM:
 # GASNet_GITREPO:
 # GASNet_GITREF:
 # GASNet_CONFIGURE_ARGS:
@@ -109,6 +109,7 @@ if(GASNET_BUILD_NEEDED)
   if(GASNET_BUILD_STATUS)
     message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
   endif()
+  file(WRITE "${GASNet_CONFIG_FILE}" "${GASNet_CONFIG_SETTINGS}")
   set(GASNet_ROOT ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
 
   if (GASNet_INSTALL)
