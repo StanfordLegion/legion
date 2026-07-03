@@ -52,6 +52,7 @@ namespace Legion {
       origin_mapped = false;
       // Slice tasks always already have their options selected
       options_selected = true;
+      remote_commit_precondition = RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -915,7 +916,7 @@ namespace Legion {
         // Send back the message saying that this slice is complete
         SliceRemoteComplete rez;
         pack_remote_complete(rez, effects);
-        rez.dispatch(orig_proc.address_space());
+        remote_commit_precondition = rez.dispatch(orig_proc.address_space());
       }
       else
       {
@@ -941,7 +942,7 @@ namespace Legion {
       {
         SliceRemoteCommit rez;
         pack_remote_commit(rez, commit_precondition);
-        rez.dispatch(orig_proc.address_space());
+        rez.dispatch(orig_proc.address_space(), remote_commit_precondition);
       }
       else
       {

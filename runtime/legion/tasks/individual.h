@@ -147,6 +147,9 @@ namespace Legion {
       std::vector<OutputOptions> output_region_options;
       // Event for when the output regions are registered with the context
       RtEvent output_regions_registered;
+      // On a remote node this is used to order the complete and commit
+      // messages back to the owner, on the owner it records when the remote
+      // operation has actually committed
       RtEvent remote_commit_precondition;
     protected:
       // Events for concurrent task launches, only used for when this task
