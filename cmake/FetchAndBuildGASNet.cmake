@@ -110,11 +110,13 @@ if(GASNET_BUILD_NEEDED)
     message(FATAL_ERROR "GASNet build result = ${GASNET_BUILD_STATUS} - see ${GASNet_BUILD_OUTPUT} for more details")
   endif()
   file(WRITE "${GASNet_CONFIG_FILE}" "${GASNet_CONFIG_SETTINGS}")
-  set(GASNet_ROOT ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
+endif()
 
-  if (GASNet_INSTALL)
-    # This will package the full installation of gasnet into the install prefix at install time.
-    install(CODE "\
+set(GASNet_ROOT ${GASNet_INSTALL_DIR} CACHE STRING "Root directory for GASNet" FORCE)
+
+if (GASNet_INSTALL)
+  # This will package the full installation of gasnet into the install prefix at install time.
+  install(CODE "\
       execute_process(COMMAND make -C \"${GASNet_BUILD_DIR}\" prefix=\"\${CMAKE_INSTALL_PREFIX}\" install
                       RESULT_VARIABLE GASNET_INSTALL_STATUS
                       OUTPUT_FILE \"${GASNet_INSTALL_OUTPUT}\"
@@ -123,5 +125,4 @@ if(GASNET_BUILD_NEEDED)
         message(FATAL_ERROR \"GASNet install result = \${GASNET_INSTALL_STATUS} - see ${GASNet_INSTALL_OUTPUT} for more details\")
       endif()
     ")
-  endif()
 endif()
