@@ -50,6 +50,7 @@ namespace Legion {
       output_regions_registered = RtEvent::NO_RT_EVENT;
       concurrent_precondition = RtUserEvent::NO_RT_USER_EVENT;
       concurrent_postcondition = RtEvent::NO_RT_EVENT;
+      remote_commit_precondition = RtEvent::NO_RT_EVENT;
       orig_task = this;
       remote_unique_id = get_unique_id();
       sent_remotely = false;
@@ -659,7 +660,8 @@ namespace Legion {
       {
         IndividualRemoteComplete rez;
         pack_remote_complete(rez, effects);
-        rez.dispatch(orig_proc.address_space());
+        legion_assert(!remote_commit_precondition.exists());
+        remote_commit_precondition = rez.dispatch(orig_proc.address_space());
         complete_operation(effects);
       }
       else if (must_epoch != nullptr)
@@ -718,7 +720,8 @@ namespace Legion {
       {
         IndividualRemoteCommit rez;
         pack_remote_commit(rez, commit_precondition);
-        rez.dispatch(orig_proc.address_space());
+        rez.dispatch(orig_proc.address_space(), remote_commit_precondition);
+        remote_commit_precondition = RtEvent::NO_RT_EVENT;
       }
       if (must_epoch != nullptr)
       {
@@ -1075,7 +1078,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      RtEvent remote_commit_precondition;
       derez.deserialize(remote_commit_precondition);
       // First unpack the privilege state
       bool has_privilege_state;

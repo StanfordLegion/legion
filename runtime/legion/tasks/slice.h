@@ -190,6 +190,7 @@ namespace Legion {
       bool origin_mapped;
       DomainPoint reduction_instance_point;
     protected:
+      RtEvent remote_commit_precondition;
       std::set<RtEvent> commit_preconditions;
     };
 

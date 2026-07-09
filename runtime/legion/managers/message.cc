@@ -103,7 +103,7 @@ namespace Legion {
     { }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::send_message(
+    RtEvent VirtualChannel::send_message(
         MessageKind kind, const Serializer& rez, RtEvent send_precondition,
         Processor target, bool response)
     //--------------------------------------------------------------------------
@@ -148,6 +148,7 @@ namespace Legion {
       }
       else
         last_message_event = message_done;
+      return message_done;
     }
 
     //--------------------------------------------------------------------------
@@ -224,12 +225,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_message(
+    RtEvent MessageManager::send_message(
         MessageKind kind, VirtualChannelKind channel, const Serializer& rez,
         bool response, RtEvent flush_precondition)
     //--------------------------------------------------------------------------
     {
-      channels[channel].send_message(
+      return channels[channel].send_message(
           kind, rez, flush_precondition, target, response);
     }
 

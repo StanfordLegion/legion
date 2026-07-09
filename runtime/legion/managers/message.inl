@@ -141,25 +141,25 @@ namespace Legion {
         case LOGICAL_REGION_DESTRUCTION_MESSAGE:
           return REFERENCE_VIRTUAL_CHANNEL;
         case INDIVIDUAL_REMOTE_FUTURE_SIZE:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case INDIVIDUAL_REMOTE_OUTPUT_REGISTRATION:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case INDIVIDUAL_REMOTE_MAPPED:
           break;
         case INDIVIDUAL_REMOTE_COMPLETE:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case INDIVIDUAL_REMOTE_COMMIT:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case INDIVIDUAL_CONCURRENT_REQUEST:
           break;
         case INDIVIDUAL_CONCURRENT_RESPONSE:
           break;
         case SLICE_REMOTE_MAPPED:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case SLICE_REMOTE_COMPLETE:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case SLICE_REMOTE_COMMIT:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case SLICE_RENDEZVOUS_CONCURRENT_MAPPED:
           break;
         case SLICE_COLLECTIVE_ALLREDUCE_REQUEST:
@@ -179,7 +179,7 @@ namespace Legion {
         case SLICE_REMOTE_OUTPUT_EXTENTS:
           break;
         case SLICE_REMOTE_OUTPUT_REGISTRATION:
-          return TASK_VIRTUAL_CHANNEL;
+          break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           break;
         // Low priority so reference counting doesn't starve

@@ -29,7 +29,7 @@ namespace Legion {
       LAST_UNORDERED_VIRTUAL_CHANNEL = THROUGHPUT_VIRTUAL_CHANNEL,
       // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1,
-      TASK_VIRTUAL_CHANNEL = 2,
+      // TASK_VIRTUAL_CHANNEL = 2,
       INDEX_SPACE_VIRTUAL_CHANNEL = 3,
       FIELD_SPACE_VIRTUAL_CHANNEL = 4,
       REFERENCE_VIRTUAL_CHANNEL = 6,
@@ -432,7 +432,7 @@ namespace Legion {
     public:
       VirtualChannel& operator=(const VirtualChannel& rhs) = delete;
     public:
-      void send_message(
+      RtEvent send_message(
           MessageKind kind, const Serializer& rez, RtEvent send_precondition,
           Processor target, bool response);
       void record_received(void);
@@ -486,7 +486,7 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager& rhs) = delete;
     public:
-      void send_message(
+      RtEvent send_message(
           MessageKind kind, VirtualChannelKind vc, const Serializer& rez,
           bool response = false,
           RtEvent flush_precondition = RtEvent::NO_RT_EVENT);
@@ -522,12 +522,13 @@ namespace Legion {
       ActiveMessage& operator=(const ActiveMessage& rhs) = delete;
       ActiveMessage& operator=(ActiveMessage&& rhs) = delete;
     public:
-      inline void dispatch(
+      inline RtEvent dispatch(
           AddressSpaceID target, RtEvent pre = RtEvent::NO_RT_EVENT) const
       {
         MessageManager* manager = MessageManager::find_manager(target);
         static_assert(T::CHANNEL < MAX_NUM_VIRTUAL_CHANNELS);
-        manager->send_message(header.kind, T::CHANNEL, *this, T::RESPONSE, pre);
+        return manager->send_message(
+            header.kind, T::CHANNEL, *this, T::RESPONSE, pre);
       }
       inline const void* get_payload(void) const
       {
