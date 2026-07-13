@@ -28,8 +28,6 @@ namespace Legion {
     {
       switch (kind)
       {
-        case SEND_STARTUP_BARRIER:
-          break;
         case TASK_MESSAGE:
           return DEFAULT_VIRTUAL_CHANNEL;
         case STEAL_MESSAGE:

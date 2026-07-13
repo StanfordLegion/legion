@@ -49,7 +49,6 @@ namespace Legion {
     // All the different kinds of active mssages 
     // enum, type, name, response, escape context, escape op
 #define LEGION_ACTIVE_MESSAGES(__op__) \
-  __op__(SEND_STARTUP_BARRIER, StartupBarrierMessage, "Startup Barrier Message", false, true, true) \
   __op__(TASK_MESSAGE, TaskMessage, "Distribute Task Message", false, true, true) \
   __op__(STEAL_MESSAGE, StealTaskMessage, "Steal Task Message", false, true, true) \
   __op__(ADVERTISEMENT_MESSAGE, AdvertiseTaskMessage, "Advertise Task Message", false, true, true) \
