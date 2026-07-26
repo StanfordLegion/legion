@@ -1489,9 +1489,10 @@ namespace Legion {
         info.inst_infos.reserve(closure->entries.size());
         for (const LargeNameClosure::Entry& entry : closure->entries)
         {
-          info.inst_infos.emplace_back(PartInstInfo{
-              entry.instance.get_location(), closure->fid, entry.name,
-              entry.subspace});
+          const Memory location = entry.instance.get_location();
+          process_mem_desc(location);
+          info.inst_infos.emplace_back(
+              PartInstInfo{location, closure->fid, entry.name, entry.subspace});
         }
         if (closure->remove_reference())
           delete closure;
