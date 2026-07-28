@@ -4080,10 +4080,14 @@ namespace Legion {
     IndexPartNodeT<DIM, T>::~IndexPartNodeT(void)
     //--------------------------------------------------------------------------
     {
-      if (kd_root != nullptr)
-        delete kd_root;
-      if (kd_remote != nullptr)
-        delete kd_remote;
+      KDNode<DIM, T, LegionColor>* const root =
+          kd_root.load(std::memory_order_relaxed);
+      if (root != nullptr)
+        delete root;
+      KDNode<DIM, T, AddressSpaceID>* const remote =
+          kd_remote.load(std::memory_order_relaxed);
+      if (remote != nullptr)
+        delete remote;
       if (dense_shard_rects != nullptr)
         delete dense_shard_rects;
       if (sparse_shard_rects != nullptr)
@@ -4097,7 +4101,9 @@ namespace Legion {
         bool local)
     //--------------------------------------------------------------------------
     {
-      if (kd_root == nullptr)
+      KDNode<DIM, T, LegionColor>* local_root =
+          kd_root.load(std::memory_order_acquire);
+      if (local_root == nullptr)
       {
         if (total_children <= LEGION_MAX_BVH_FANOUT)
           return false;
@@ -4119,8 +4125,8 @@ namespace Legion {
           KDNode<DIM, T, LegionColor>* root =
               new KDNode<DIM, T, LegionColor>(parent_space.bounds, bounds);
           AutoLock n_lock(node_lock);
-          if (kd_root == nullptr)
-            kd_root = root;
+          if (kd_root.load(std::memory_order_relaxed) == nullptr)
+            kd_root.store(root, std::memory_order_release);
           else  // Someone else beat us to it
             delete root;
         }
@@ -4131,14 +4137,23 @@ namespace Legion {
           // Another for upper bound rectanges of spaces from remote nodes
           // First check to see if we're the first ones here
           RtEvent wait_on;
+          bool build_kd_tree = false;
           {
             AutoLock n_lock(node_lock);
-            if (kd_remote_ready.exists() || (kd_remote != nullptr))
-              wait_on = kd_remote_ready;
-            else
-              kd_remote_ready = Runtime::create_rt_user_event();
+            // Recheck the root under the lock. Another caller may have
+            // completed the build after our initial check above.
+            if (kd_root.load(std::memory_order_relaxed) == nullptr)
+            {
+              if (kd_remote_ready.exists())
+                wait_on = kd_remote_ready;
+              else
+              {
+                kd_remote_ready = Runtime::create_rt_user_event();
+                build_kd_tree = true;
+              }
+            }
           }
-          if (!wait_on.exists() && (kd_remote == nullptr))
+          if (build_kd_tree)
           {
             const RtEvent rects_ready = request_shard_rects();
             if (rects_ready.exists() && !rects_ready.has_triggered())
@@ -4169,8 +4184,12 @@ namespace Legion {
                   sparse_shard_spaces.emplace_back(std::make_pair(
                       it->first, sparse_shard_spaces.back().second));
               }
-              kd_remote = new KDNode<DIM, T, AddressSpaceID>(
-                  parent_space.bounds, sparse_shard_spaces);
+              // Release store so that readers that acquire-load kd_remote
+              // observe the fully-constructed tree it points to
+              kd_remote.store(
+                  new KDNode<DIM, T, AddressSpaceID>(
+                      parent_space.bounds, sparse_shard_spaces),
+                  std::memory_order_release);
             }
             // Add any local sparse spaces into the dense remote rects
             // All the local dense spaces are already included
@@ -4186,30 +4205,41 @@ namespace Legion {
             KDNode<DIM, T, LegionColor>* root = new KDNode<DIM, T, LegionColor>(
                 parent_space.bounds, *dense_shard_rects);
             AutoLock n_lock(node_lock);
-            kd_root = root;
+            legion_assert(kd_root.load(std::memory_order_relaxed) == nullptr);
+            kd_root.store(root, std::memory_order_release);
             Runtime::trigger_event(kd_remote_ready);
             kd_remote_ready = RtUserEvent::NO_RT_USER_EVENT;
           }
           else if (wait_on.exists() && !wait_on.has_triggered())
             wait_on.wait();
         }
+        // The acquire pairs with the builder's release publication of the
+        // root, making the root and all of the nodes reachable from it safe
+        // to read. kd_remote is published independently below with its own
+        // atomic release/acquire.
+        local_root = kd_root.load(std::memory_order_acquire);
+        legion_assert(local_root != nullptr);
       }
+      // Acquire-load kd_remote to pair with the builder's release store so
+      // that the remote tree it points to is safe to read
+      KDNode<DIM, T, AddressSpaceID>* const local_remote =
+          kd_remote.load(std::memory_order_acquire);
       DomainT<DIM, T> space = expr->get_tight_domain();
       // If we have a remote kd tree then we need to query that to see if
       // we have any remote colors to include
       std::set<LegionColor> color_set;
-      if ((kd_remote != nullptr) && !local)
+      if ((local_remote != nullptr) && !local)
       {
         std::set<AddressSpaceID> remote_spaces;
         for (RectInDomainIterator<DIM, T> itr(space); itr(); itr++)
-          kd_remote->find_interfering(*itr, remote_spaces);
+          local_remote->find_interfering(*itr, remote_spaces);
         if (!remote_spaces.empty())
         {
           RemoteKDTracker tracker;
           RtEvent remote_ready =
               tracker.find_remote_interfering(remote_spaces, handle, expr);
           for (RectInDomainIterator<DIM, T> itr(space); itr(); itr++)
-            kd_root->find_interfering(*itr, color_set);
+            local_root->find_interfering(*itr, color_set);
           if (remote_ready.exists() && !remote_ready.has_triggered())
             remote_ready.wait();
           tracker.get_remote_interfering(color_set);
@@ -4217,13 +4247,13 @@ namespace Legion {
         else
         {
           for (RectInDomainIterator<DIM, T> itr(space); itr(); itr++)
-            kd_root->find_interfering(*itr, color_set);
+            local_root->find_interfering(*itr, color_set);
         }
       }
       else
       {
         for (RectInDomainIterator<DIM, T> itr(space); itr(); itr++)
-          kd_root->find_interfering(*itr, color_set);
+          local_root->find_interfering(*itr, color_set);
       }
       if (!color_set.empty())
         colors.insert(colors.end(), color_set.begin(), color_set.end());
