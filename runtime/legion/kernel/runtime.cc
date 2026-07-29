@@ -12115,12 +12115,23 @@ namespace Legion {
         log_registration.print(
             "Legion endpoint task has Realm ID %d", LG_ENDPOINT_TASK_ID);
 #ifdef LEGION_SEPARATE_META_TASKS
-        LG_TASK_DESCRIPTIONS(descs);
+        static const char* descs[] = {
+#define TASK_NAME(id, type, name) name,
+            LEGION_META_TASKS(TASK_NAME)
+#undef TASK_NAME
+        };
         for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
         {
           if (idx == LG_MESSAGE_ID)
           {
-            LG_MESSAGE_DESCRIPTIONS(msg_descs);
+            static const char* msg_descs[] = {
+#define CTRL_REPL_MESSAGE_NAMES(kind, name) name,
+                LEGION_SHARD_COLLECTIVE_ACTIVE_MESSAGES(CTRL_REPL_MESSAGE_NAMES)
+#undef CTRL_REPL_MESSAGE_NAMES
+#define MESSAGE_NAMES(kind, type, name, resp, escape_ctx, escape_op) name,
+                    LEGION_ACTIVE_MESSAGES(MESSAGE_NAMES)
+#undef MESSAGE_NAMES
+            };
             for (unsigned msg = 0; msg < LAST_SEND_KIND; msg++)
               log_registration.print(
                   "Legion message %s meta-task has Realm ID %d", msg_descs[msg],
