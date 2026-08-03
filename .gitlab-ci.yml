@@ -20,6 +20,10 @@ variables:
   USE_CCACHE: "1"
   CPM_SOURCE_CACHE: $CI_PROJECT_DIR/.cache/cpm_src
   CARGO_HOME: $CI_PROJECT_DIR/.cargo
+  CARGO_INCREMENTAL: "0" # disable incremental Rust builds
+  CARGO_TARGET_MAX_MB: "3072" # enforce a ceiling on Rust target directory size
+  RUNNER_AFTER_SCRIPT_TIMEOUT: "10m"
+  CORE_DUMP_LIMIT: "0"
   REALM_DEFAULT_ARGS: "-ll:report_sparsity_leaks" # Check no sparsity maps are leaked
   GASNET_SHA256: "d10941409de2b36413d74fe6a1c23de6e379a5313b727e4c217ad40b24152e02"
   GASNET_COMMIT: "372097ba7537e571c4e60ba40506ed68b707316f"
@@ -45,6 +49,7 @@ cache: &global_cache
   - key: "cpm_src_cache"
     paths:
       - $CPM_SOURCE_CACHE
+    policy: $CACHE_POLICY
   - key: "external-deps"
     paths:
       - $DEP_CACHE
@@ -295,6 +300,9 @@ cache: &global_cache
 # These commands will run before each job.
 before_script:
   - set -e
+  # See CORE_DUMP_LIMIT above. Off by default; the compile_fail tests crash
+  # the Regent compiler by design, so most cores here are expected failures.
+  - ulimit -c "${CORE_DUMP_LIMIT:-0}" || true
   - uname -a
   - mkdir -p $DEP_CACHE
   - |
@@ -509,6 +517,46 @@ before_script:
       fi
     fi
 
+
+###
+### Cleanup
+###
+
+# Build directories are persistent and wiped on next job, so avoid the
+# transient disk usage by cleaning up eagerly.
+after_script:
+  - |
+    set +e
+    cd "$CI_PROJECT_DIR" 2>/dev/null || exit 0
+    before=$(du -sm . 2>/dev/null | cut -f1)
+
+    # 1. Core dumps: pack into artifact when requested, then delete.
+    if [ "${CORE_DUMP_LIMIT:-0}" = "0" ]; then
+      find . -type f -name 'core.*.*.*' -print -delete 2>/dev/null | head -20
+    else
+      mkdir -p language/test_output/cores
+      find . -type f -name 'core.*.*.*' -print 2>/dev/null | while read -r c; do
+        gzip -1 -c "$c" > "language/test_output/cores/$(basename "$c").gz" && rm -f "$c"
+      done
+    fi
+
+    # 2. Main build directory.
+    rm -rf tmp-build
+
+    # 3. Cargo target directory: reset when over threshold to avoid accumulation.
+    rm -rf tools/legion_prof_rs/target/*/incremental
+    target_mb=$(du -sm tools/legion_prof_rs/target 2>/dev/null | cut -f1)
+    if [ "${target_mb:-0}" -gt "${CARGO_TARGET_MAX_MB:-3072}" ]; then
+      echo "cargo target/ is ${target_mb} MB (cap ${CARGO_TARGET_MAX_MB:-3072} MB), resetting"
+      rm -rf tools/legion_prof_rs/target
+    fi
+
+    # 4. Cargo sources: redundant, regenerated automatically.
+    rm -rf "${CARGO_HOME:-.cargo}/registry/src" "${CARGO_HOME:-.cargo}/git/checkouts"
+
+    after=$(du -sm . 2>/dev/null | cut -f1)
+    echo "build dir: ${before:-?} MB -> ${after:-?} MB"
+    exit 0
 
 ###
 ### Tags
