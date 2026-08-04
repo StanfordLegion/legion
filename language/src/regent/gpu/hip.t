@@ -118,6 +118,18 @@ do
 
     paths["ocml"] = rocm_bincode_path .. "/ocml.bc"
 
+    -- oclc_abi_version_*.bc is required by ROCm 7.x for OCML symbol resolution.
+    -- Older ROCm versions do not have this file; skip if not found.
+    for _, v in ipairs({"600", "500", "400"}) do
+      local abi_path = rocm_bincode_path .. "/oclc_abi_version_" .. v .. ".bc"
+      local f = io.open(abi_path, "r")
+      if f then
+        f:close()
+        paths["abi_version"] = abi_path
+        break
+      end
+    end
+
     return paths
   end
 
@@ -196,7 +208,7 @@ function hiphelper.jit_compile_kernels_and_register(kernels)
   local device_so = os.tmpname()
   local bundle_o = os.tmpname()
 
-  terralib.saveobj(device_o, "object", module, {}, amd_target)
+  terralib.saveobj(device_o, "bitcode", module, {}, amd_target)
 
   local device_paths = ""
   for k, v in pairs(ensure_device_paths()) do
