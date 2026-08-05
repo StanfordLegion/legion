@@ -1406,12 +1406,13 @@ namespace Legion {
 #endif
             fatal.raise();
           }
-          std::map<void*, RtEvent>::const_iterator local_finder =
-              local_callbacks_done.find(fnptr);
+          const LocalRegistrationKey key(fnptr, callback.dedup_tag);
+          std::map<LocalRegistrationKey, RtEvent>::const_iterator local_finder =
+              local_callbacks_done.find(key);
           if (local_finder == local_callbacks_done.end())
           {
             local_perform = Runtime::create_rt_user_event();
-            local_callbacks_done[fnptr] = local_perform;
+            local_callbacks_done[key] = local_perform;
           }
           else
             return local_finder->second;
@@ -4714,8 +4715,9 @@ namespace Legion {
           if (finder->second.empty())
             pending_remote_callbacks.erase(finder);
           // Now see if anyone else has done the local registration
-          std::map<void*, RtEvent>::const_iterator finder =
-              local_callbacks_done.find(callback);
+          const LocalRegistrationKey local_key(callback, dedup_tag);
+          std::map<LocalRegistrationKey, RtEvent>::const_iterator finder =
+              local_callbacks_done.find(local_key);
           if (finder != local_callbacks_done.end())
           {
             legion_assert(finder->second.exists());
@@ -4723,7 +4725,7 @@ namespace Legion {
           }
           else
           {
-            local_callbacks_done[callback] = done_event;
+            local_callbacks_done[local_key] = done_event;
             global_local_done[key] = done_event;
           }
         }
