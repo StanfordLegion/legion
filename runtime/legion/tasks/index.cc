@@ -1971,6 +1971,9 @@ namespace Legion {
                 RtUserEvent pending = Runtime::create_rt_user_event();
                 pending_pointwise_dependences.emplace(
                     std::make_pair(orig_point, pending));
+                // Note we still need to depend on this point mapping even
+                // though we were the ones that made the pending event for it
+                point_preconditions.push_back(pending);
               }
               else
                 point_preconditions.push_back(pending_finder->second);
@@ -2011,6 +2014,7 @@ namespace Legion {
     {
       bool need_trigger = false;
       bool trigger_children_commit = false;
+      RtEvent map_condition;
       {
         AutoLock o_lock(op_lock);
         legion_assert(
@@ -2031,8 +2035,17 @@ namespace Legion {
           // Don't complete this yet if we have redop serdez fns because
           // we still need to map the output future instance before we
           // can consider ourselves mapped and we can't do that until we
-          // get the final future value
-          if (serdez_redop_fns == nullptr)
+          // get the final future value. In that case whichever of the two
+          // happens second performs the mapping completion.
+          // Note the ordering of these clauses matters: the reduction
+          // instance test is only a valid check for whether we've already
+          // made the output future instance when we have serdez redop fns,
+          // since that is the only case where finish_index_task_reduction
+          // is what makes it. Without serdez redop fns it is made much
+          // earlier in create_future_instances, so the first clause must
+          // short-circuit before we ever consult the second one.
+          if ((serdez_redop_fns == nullptr) ||
+              (reduction_instance.load() != nullptr))
             need_trigger = true;
           if ((committed_points == total_points) && !children_commit_invoked)
           {
@@ -2040,20 +2053,19 @@ namespace Legion {
             children_commit_invoked = true;
           }
         }
+        // Compute the mapped precondition while we still hold the lock. We
+        // cannot defer this until after we've released it: with serdez
+        // reduction operators the mapping completion is driven off the
+        // point completion responses, and a point's completion response can
+        // overtake its mapped response since they travel on an unordered
+        // virtual channel, so other point mapped responses can still be
+        // arriving and mutating this data structure.
+        if (need_trigger && !map_applied_conditions.empty())
+          map_condition = Runtime::merge_events(map_applied_conditions);
       }
+      // Note we can't call this while holding the lock since it takes it
       if (need_trigger)
-      {
-        // Get the mapped precondition note we can now access this
-        // without holding the lock because we know we've seen
-        // all the responses so no one else will be mutating it.
-        if (!map_applied_conditions.empty())
-        {
-          RtEvent map_condition = Runtime::merge_events(map_applied_conditions);
-          complete_mapping(map_condition);
-        }
-        else
-          complete_mapping();
-      }
+        complete_mapping(map_condition);
       if (trigger_children_commit)
         trigger_children_committed();
     }
@@ -2185,18 +2197,29 @@ namespace Legion {
           std::swap(
               reduction_instances.front(),
               reduction_instances[runtime_visible_index]);
-        reduction_instance = reduction_instances.front();
-        // Get the mapped precondition note we can now access this
-        // without holding the lock because we know we've seen
-        // all the responses so no one else will be mutating it.
-        if (!map_applied_conditions.empty())
+        // We've now made the output future instance, so we can be mapped as
+        // soon as we've also seen all the point mapped responses. Note that
+        // we cannot assume they have all arrived just because all the points
+        // have completed: a point's completion response can overtake its own
+        // mapped response since they both travel on an unordered virtual
+        // channel. If any are still outstanding then the arrival of the last
+        // one will perform the mapping completion instead of us.
+        bool need_trigger = false;
+        RtEvent map_condition;
         {
-          const RtEvent map_condition =
-              Runtime::merge_events(map_applied_conditions);
-          complete_mapping(map_condition);
+          AutoLock o_lock(op_lock);
+          legion_assert(reduction_instance.load() == nullptr);
+          reduction_instance = reduction_instances.front();
+          if (mapped_points == total_points)
+          {
+            need_trigger = true;
+            if (!map_applied_conditions.empty())
+              map_condition = Runtime::merge_events(map_applied_conditions);
+          }
         }
-        else
-          complete_mapping();
+        // Note we can't call this while holding the lock since it takes it
+        if (need_trigger)
+          complete_mapping(map_condition);
       }
       legion_assert(!reduction_instances.empty());
       legion_assert(reduction_instance == reduction_instances.front());
@@ -4234,6 +4257,9 @@ namespace Legion {
                   RtUserEvent pending = Runtime::create_rt_user_event();
                   pending_pointwise_dependences.emplace(
                       std::make_pair(orig_point, pending));
+                  // Note we still need to depend on this point mapping even
+                  // though we were the ones that made the pending event for it
+                  point_preconditions.push_back(pending);
                 }
                 else
                   point_preconditions.push_back(pending_finder->second);
