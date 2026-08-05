@@ -49,7 +49,6 @@ namespace Legion {
       num_uncommitted_points = 0;
       index_owner = nullptr;
       remote_unique_id = get_unique_id();
-      origin_mapped = false;
       // Slice tasks always already have their options selected
       options_selected = true;
       remote_commit_precondition = RtEvent::NO_RT_EVENT;
@@ -425,7 +424,6 @@ namespace Legion {
       pack_multi_task(rez, target);
       rez.serialize(index_owner);
       rez.serialize(remote_unique_id);
-      rez.serialize(origin_mapped);
       parent_ctx->pack_inner_context(rez);
       rez.serialize(internal_space);
       if (!elide_future_return)
@@ -500,7 +498,6 @@ namespace Legion {
       set_current_proc(current);
       derez.deserialize(index_owner);
       derez.deserialize(remote_unique_id);
-      derez.deserialize(origin_mapped);
       parent_ctx = InnerContext::unpack_inner_context(derez);
       derez.deserialize(internal_space);
       LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
@@ -979,9 +976,11 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         // Can safely overwrite if there is already an event from a call
-        // to find_intra_space_dependence
-        point_mapped_events.emplace(
-            std::make_pair(point->index_point, child_mapped));
+        // to find_intra_space_dependence. Note this must be an assignment
+        // and not an emplace since emplace will not replace an existing
+        // entry, which would leave the placeholder event recorded by
+        // find_intra_space_dependence in place of the real mapped event.
+        point_mapped_events[point->index_point] = child_mapped;
         legion_assert(num_unmapped_points > 0);
         done_mapping = (--num_unmapped_points == 0);
       }

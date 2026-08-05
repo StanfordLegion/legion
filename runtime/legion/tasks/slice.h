@@ -187,7 +187,6 @@ namespace Legion {
     protected:
       IndexTask* index_owner;
       UniqueID remote_unique_id;
-      bool origin_mapped;
       DomainPoint reduction_instance_point;
     protected:
       RtEvent remote_commit_precondition;
