@@ -16,6 +16,8 @@
 #ifndef __LEGION_INDEX_SPACE_H__
 #define __LEGION_INDEX_SPACE_H__
 
+#include <atomic>
+
 #include "legion/api/physical_region_impl.h"
 #include "legion/kernel/garbage_collection.h"
 #include "legion/kernel/runtime.h"
@@ -1587,8 +1589,8 @@ namespace Legion {
       virtual void pack_shard_rects(Serializer& rez, bool clear);
       virtual void unpack_shard_rects(Deserializer& derez);
     protected:
-      KDNode<DIM, T, LegionColor>* kd_root;
-      KDNode<DIM, T, AddressSpaceID>* kd_remote;
+      std::atomic<KDNode<DIM, T, LegionColor>*> kd_root;
+      std::atomic<KDNode<DIM, T, AddressSpaceID>*> kd_remote;
       RtUserEvent kd_remote_ready;
     protected:
       // Each color appears exactly once in this data structure
