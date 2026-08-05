@@ -26,24 +26,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(LocalLock& lock)
-      : type_tag(0), expr_id(0), expr_lock(lock), canonical(nullptr),
-        sparsity_map_kd_tree(nullptr), volume(0), has_volume(false),
-        empty(false), has_empty(false)
+      : type_tag(0), expr_id(0), expr_lock(lock), sparsity_map_kd_tree(nullptr),
+        volume(0), has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     { }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, LocalLock& lock)
       : type_tag(tag), expr_id(runtime->get_unique_index_space_expr_id()),
-        expr_lock(lock), canonical(nullptr), sparsity_map_kd_tree(nullptr),
-        volume(0), has_volume(false), empty(false), has_empty(false)
+        expr_lock(lock), sparsity_map_kd_tree(nullptr), volume(0),
+        has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     { }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(
         TypeTag tag, IndexSpaceExprID id, LocalLock& lock)
-      : type_tag(tag), expr_id(id), expr_lock(lock), canonical(nullptr),
+      : type_tag(tag), expr_id(id), expr_lock(lock),
         sparsity_map_kd_tree(nullptr), volume(0), has_volume(false),
         empty(false), has_empty(false)
     //--------------------------------------------------------------------------
@@ -54,6 +53,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_assert(derived_operations.empty());
+      legion_assert(retired_canonical.load() == nullptr);
       if (sparsity_map_kd_tree != nullptr)
         delete sparsity_map_kd_tree;
     }
@@ -146,7 +146,55 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       legion_assert(is_valid());
+      // Small helper struct to help with making sure that it is safe
+      // to access the canonical atomic
+      struct AutoCanonical {
+      public:
+        AutoCanonical(IndexSpaceExpression* own) : owner(own)
+        {
+          // Must be done in this order for safety
+          owner->canonical_semaphore++;
+          expr = owner->canonical.load();
+        }
+        ~AutoCanonical(void)
+        {
+          const unsigned remaining = --owner->canonical_semaphore;
+          legion_assert(remaining != UINT_MAX);  // check for underflow
+          if (remaining > 0)
+            return;
+          // We were the last one out so reclaim any retired canonical
+          // expression. Note that we cannot key off our own 'expr' here
+          // since we might not have been the one that replaced it. We also
+          // have to test the semaphore again after reading it: a thread
+          // that entered after our decrement can have loaded a canonical
+          // expression that a third thread has since retired, and that one
+          // is not safe to reclaim out from underneath them. Any thread we
+          // see here is going to make this same test on its way out, so
+          // whoever ends up being last will do the reclamation.
+          IndexSpaceExpression* stale = owner->retired_canonical.load();
+          if ((stale != nullptr) && (owner->canonical_semaphore.load() == 0) &&
+              owner->retired_canonical.compare_exchange_strong(
+                  stale, nullptr) &&
+              stale->remove_canonical_reference(owner->get_distributed_id()))
+            delete stale;
+        }
+      public:
+        IndexSpaceExpression* const owner;
+        IndexSpaceExpression* expr = nullptr;
+      };
+      // Check for the common case where we are already our own canonical
+      // expression first. We never dereference the result on that path and
+      // our caller is holding a live reference on us, so there is nothing
+      // here that the semaphore needs to protect and we can skip it. Note
+      // that we still have to go the slow way if we have a retired
+      // canonical expression outstanding, since this is a sticky state and
+      // nobody would ever come back to reclaim it otherwise
       IndexSpaceExpression* expr = canonical.load();
+      if ((expr == this) && (retired_canonical.load() == nullptr))
+        return expr;
+      AutoCanonical canon(this);
+      // Discard the peek above and take the value the semaphore protects
+      expr = canon.expr;
       if (expr != nullptr)
       {
         // If we're our own canonical expression then assume we're
@@ -163,34 +211,41 @@ namespace Legion {
       if (expr == this)
       {
         // If we're our own canonical expression then the runtime didn't
-        // give us a reference to ourself, but we do need to check to see
-        // if we're the first one to write to see if we need to remove any
-        // references from a prior expression
+        // give us a reference to ourself
+        // Hang on to our reference on the previous canonical expression
+        // until the last thread out of here can prove that nobody is still
+        // holding a pointer that they loaded out of 'canonical'
         IndexSpaceExpression* prev = canonical.exchange(expr);
         if ((prev != nullptr) && (prev != expr))
-        {
-          const DistributedID did = get_distributed_id();
-          if (prev->remove_canonical_reference(did))
-            delete prev;
-        }
+          legion_no_skip_assert(retired_canonical.exchange(prev) == nullptr);
         return expr;
       }
       // If the canonical expression is not ourself, then the region tree
       // runtime has given us a live reference back on it so we know it
       // can't be collected, but we need to update the canonical result
       // and add a nested reference if we're the first ones to perform
-      // the update
+      // the update. Note that we add the nested resource reference before
+      // we publish the pointer so that any other thread which loads it out
+      // of 'canonical' sees an expression that we are already keeping alive
+      const DistributedID did = get_distributed_id();
+      expr->add_canonical_reference(did);
       IndexSpaceExpression* prev = canonical.exchange(expr);
       if (prev != expr)
       {
-        const DistributedID did = get_distributed_id();
-        // We're the first to store this result so remove the reference
-        // from the previous one if it existed
-        if ((prev != nullptr) && prev->remove_canonical_reference(did))
-          delete prev;
-        // Add a nested resource reference for the new one
-        expr->add_canonical_reference(did);
+        // Hang on to our reference on the previous canonical expression
+        // until the last thread out of here can prove that nobody is still
+        // holding a pointer that they loaded out of 'canonical'
+        if (prev != nullptr)
+          legion_no_skip_assert(retired_canonical.exchange(prev) == nullptr);
       }
+      else
+        // Someone else stored this same result before we did and they are
+        // holding the canonical reference for it, so we can remove the
+        // extra one that we just added. Note that this can never be the
+        // last reference precisely because they are still holding theirs:
+        // reclaiming it would need the semaphore to be at zero and we are
+        // standing in it
+        legion_no_skip_assert(!expr->remove_canonical_reference(did));
       return expr;
     }
 
