@@ -287,7 +287,14 @@ namespace Legion {
       LocalLock& expr_lock;
     protected:
       std::set<IndexSpaceOperation*> derived_operations;
-      std::atomic<IndexSpaceExpression*> canonical;
+      std::atomic<IndexSpaceExpression*> canonical = nullptr;
+      std::atomic<unsigned> canonical_semaphore = 0;
+      // A canonical expression that we have replaced but not yet reclaimed.
+      // We still hold our canonical reference on it. There can only ever be
+      // one of these outstanding: the threads that keep a reclaim from
+      // happening are the same ones holding a live reference on the current
+      // canonical expression, so it cannot be retired in the meantime.
+      std::atomic<IndexSpaceExpression*> retired_canonical = nullptr;
       KDTree* sparsity_map_kd_tree;
       size_t volume;
       std::atomic<bool> has_volume;
