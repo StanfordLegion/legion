@@ -1406,7 +1406,22 @@ namespace Legion {
       // to all the dynamic objects that we load
       Realm::DSOCodeTranslator callback_translator;
 #endif
-      std::map<void*, RtEvent> local_callbacks_done;
+      struct LocalRegistrationKey {
+        inline LocalRegistrationKey(void) : callback(nullptr), tag(0) { }
+        inline LocalRegistrationKey(void* cb, size_t t) : callback(cb), tag(t)
+        { }
+        inline bool operator<(const LocalRegistrationKey& rhs) const
+        {
+          if (tag < rhs.tag)
+            return true;
+          if (tag > rhs.tag)
+            return false;
+          return std::less<void*>()(callback, rhs.callback);
+        }
+        void* callback;
+        size_t tag;
+      };
+      std::map<LocalRegistrationKey, RtEvent> local_callbacks_done;
     public:
       struct RegistrationKey {
         inline RegistrationKey(void) : tag(0) { }

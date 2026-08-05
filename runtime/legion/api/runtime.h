@@ -4838,9 +4838,9 @@ namespace Legion {
      * @param buffer optional argument buffer to pass to the callback
      * @param dedup whether to deduplicate this with other registration
      *              callbacks for the same function
-     * @param dedup_tag a tag to use for deduplication in the case where
-     *              applications may want to deduplicate across multiple
-     *              callbacks with the same function pointer
+     * @param dedup_tag tag to include in the deduplication key; callbacks
+     *              with the same function and tag are deduplicated, while
+     *              callbacks with different tags are treated as distinct
      */
     static void add_registration_callback(
         RegistrationCallback callback, bool dedup = true, size_t dedup_tag = 0);
@@ -4868,9 +4868,9 @@ namespace Legion {
      * @param buffer optional buffer of data to pass to callback
      * @param dedup whether to deduplicate this with other registration
      *              callbacks for the same function
-     * @param dedup_tag a tag to use for deduplication in the case where
-     *              applications may want to deduplicate across multiple
-     *              callbacks with the same function pointer
+     * @param dedup_tag tag to include in the deduplication key; callbacks
+     *              with the same function and tag are deduplicated, while
+     *              callbacks with different tags are treated as distinct
      */
     static void perform_registration_callback(
         RegistrationCallback callback, bool global, bool deduplicate = true,
