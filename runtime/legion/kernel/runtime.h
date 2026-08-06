@@ -251,18 +251,6 @@ namespace Legion {
         bool prof_all_critical_arrivals;
       };
     public:
-      struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
-      public:
-        static constexpr LgTaskID TASK_ID = LG_TOP_FINISH_TASK_ID;
-      public:
-        TopFinishArgs(void) = default;
-        TopFinishArgs(TopLevelContext* c)
-          : LgTaskArgs<TopFinishArgs>(true, true), ctx(c)
-        { }
-        void execute(void) const;
-      public:
-        TopLevelContext* ctx;
-      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static constexpr LgTaskID TASK_ID = LG_MAPPER_TASK_ID;

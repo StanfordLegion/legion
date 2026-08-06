@@ -67,6 +67,13 @@ namespace Legion {
       predicate_false_future = Future();
       output_region_options.clear();
       SingleTask::deactivate(false /*free*/);
+      if (top_level_task)
+      {
+        if (parent_ctx->remove_base_gc_ref(TOP_LEVEL_REF))
+          delete parent_ctx;
+        if (!is_remote())
+          runtime->decrement_outstanding_top_level_tasks();
+      }
       if (freeop)
         runtime->free_operation(this);
     }
@@ -167,7 +174,11 @@ namespace Legion {
       compute_parent_indexes(false /*force*/);
       // If this is the top-level task we can record some extra properties
       if (top_level)
+      {
         this->top_level_task = true;
+        parent_ctx->add_base_gc_ref(TOP_LEVEL_REF);
+        runtime->increment_outstanding_top_level_tasks();
+      }
       if (spy_logging_level > NO_SPY_LOGGING)
       {
         if (top_level)
@@ -981,9 +992,13 @@ namespace Legion {
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
         orig_task->enqueue_ready_task(false /*target*/);
+        // Make sure we don't try to reclaim the top-level context
+        top_level_task = false;
         deactivate();
         return false;
       }
+      else if (top_level_task)
+        parent_ctx->add_base_gc_ref(TOP_LEVEL_REF);
       if (!elide_future_return)
       {
         result = FutureImpl::unpack_future(derez);
