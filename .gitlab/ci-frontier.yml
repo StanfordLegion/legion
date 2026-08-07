@@ -2,23 +2,23 @@ variables:
   OLCF_SERVICE_ACCOUNT: ums036_auser
   GIT_SUBMODULE_STRATEGY: recursive
 
-.rocm571: &rocm571
-  ROCM_VERSION: "5.7.1"
-
-.rocm600: &rocm600
-  ROCM_VERSION: "6.0.0"
-
-.rocm613: &rocm613
-  ROCM_VERSION: "6.1.3"
-
 .rocm624: &rocm624
   ROCM_VERSION: "6.2.4"
 
 .rocm631: &rocm631
   ROCM_VERSION: "6.3.1"
 
-.rocm641: &rocm641
-  ROCM_VERSION: "6.4.1"
+.rocm642: &rocm642
+  ROCM_VERSION: "6.4.2"
+
+.rocm702: &rocm702
+  ROCM_VERSION: "7.0.2"
+
+.rocm711: &rocm711
+  ROCM_VERSION: "7.1.1"
+
+.rocm720: &rocm720
+  ROCM_VERSION: "7.2.0"
 
 .legion: &legion
   TEST_REGENT: "0"
