@@ -39,15 +39,9 @@ variables:
   TEST_CTEST: "1"
 
 .nodes1: &nodes1
-  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 1 -n 1 -c 56 -p batch --exclusive"
-
-.nodes2: &nodes2
-  SCHEDULER_PARAMETERS: "-A UMS036 -t 0:30:00 -N 2 -n 2 -c 56 -p batch --exclusive"
-
-.nodes1: &nodes1_1hr
   SCHEDULER_PARAMETERS: "-A UMS036 -t 1:00:00 -N 1 -n 1 -c 56 -p batch --exclusive"
 
-.nodes2: &nodes2_1hr
+.nodes2: &nodes2
   SCHEDULER_PARAMETERS: "-A UMS036 -t 1:00:00 -N 2 -n 2 -c 56 -p batch --exclusive"
 
 .tokens: &tokens
@@ -68,72 +62,6 @@ variables:
 stages:
   - test
 
-# legion_rocm571:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#   variables:
-#     <<: [*legion, *rocm571, *nodes1]
-
-# legion_rocm600:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#   variables:
-#     <<: [*legion, *rocm600, *nodes2]
-
-# legion_rocm613:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#   variables:
-#     <<: [*legion, *rocm613, *nodes1_1hr]
-
-# legion_rocm624:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#   variables:
-#     <<: [*legion, *rocm624, *nodes2_1hr]
-
-legion_cmake_rocm571:
-  <<: [*tokens, *tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-    - login12
-  variables:
-    <<: [*legion, *cmake, *ctest, *rocm571, *nodes1]
-
-legion_cmake_rocm600:
-  <<: [*tokens, *tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-    - login12
-  variables:
-    <<: [*legion, *cmake, *ctest, *rocm600, *nodes2]
-
-legion_cmake_rocm613:
-  <<: [*tokens, *tests]
-  stage: test
-  tags:
-    - slurm
-    - frontier
-    - login12
-  variables:
-    <<: [*legion, *cmake, *ctest, *rocm613, *nodes1_1hr]
-
 legion_cmake_rocm624:
   <<: [*tokens, *tests]
   stage: test
@@ -142,7 +70,7 @@ legion_cmake_rocm624:
     - frontier
     - login12
   variables:
-    <<: [*legion, *cmake, *ctest, *rocm624, *nodes1_1hr]
+    <<: [*legion, *cmake, *ctest, *rocm624, *nodes1]
 
 legion_cmake_rocm631:
   <<: [*tokens, *tests]
@@ -152,9 +80,9 @@ legion_cmake_rocm631:
     - frontier
     - login12
   variables:
-    <<: [*legion, *cmake, *ctest, *rocm631, *nodes1_1hr]
+    <<: [*legion, *cmake, *ctest, *rocm631, *nodes1]
 
-legion_cmake_rocm641:
+legion_cmake_rocm642:
   <<: [*tokens, *tests]
   stage: test
   tags:
@@ -162,37 +90,37 @@ legion_cmake_rocm641:
     - frontier
     - login12
   variables:
-    <<: [*legion, *cmake, *ctest, *rocm641, *nodes2_1hr]
+    <<: [*legion, *cmake, *ctest, *rocm642, *nodes2]
 
-# regent_rocm600:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#     - login12
-#   variables:
-#     <<: [*regent, *rocm600, *nodes1]
+legion_cmake_rocm702:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+    - login12
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm702, *nodes1]
 
-# regent_cmake_rocm600:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#     - login12
-#   variables:
-#     <<: [*regent, *cmake, *rocm600, *nodes2]
+legion_cmake_rocm711:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+    - login12
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm711, *nodes1]
 
-# regent_rocm624:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#     - login12
-#   variables:
-#     <<: [*regent, *rocm624, *nodes1_1hr]
+legion_cmake_rocm720:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+    - login12
+  variables:
+    <<: [*legion, *cmake, *ctest, *rocm720, *nodes1]
 
 # regent_cmake_rocm624:
 #   <<: [*tokens, *tests]
@@ -202,4 +130,4 @@ legion_cmake_rocm641:
 #     - frontier
 #     - login12
 #   variables:
-#     <<: [*regent, *cmake, *rocm624, *nodes2_1hr]
+#     <<: [*regent, *cmake, *rocm624, *nodes2]
