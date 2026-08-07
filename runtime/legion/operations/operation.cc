@@ -2203,7 +2203,7 @@ namespace Legion {
       FieldMask user_mask =
           region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(
-          ctx, parent_ctx, &version_info, user_mask, this, index,
+          ctx, context, &version_info, user_mask, this, index,
           find_parent_index(index), ready_events, output_region_ready,
           collective_rendezvous);
     }
