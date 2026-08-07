@@ -26,7 +26,7 @@ if [[ ${TEST_REGENT:-1} -eq 1 ]]; then
 fi
 
 # download Thrust
-git clone https://github.com/ROCmSoftwarePlatform/Thrust.git
+git clone https://github.com/ROCm/Thrust.git
 export THRUST_PATH="$PWD/Thrust"
 
 # download GASNet
