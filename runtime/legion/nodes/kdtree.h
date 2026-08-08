@@ -38,6 +38,60 @@ namespace Legion {
           Rect<DIM, T>& best_left_bounds, Rect<DIM, T>& best_right_bounds,
           std::vector<Rect<DIM, T> >& best_left_set,
           std::vector<Rect<DIM, T> >& best_right_set);
+      // This method computes a splitting plane that evenly divides the points
+      // in the set of rectangles. Unlike compute_best_splitting_plane it will
+      // consider every coordinate inside the bounds and not just the ones on
+      // the boundaries of the rectangles, so it can always find a plane as
+      // long as the rectangles cover more than a single point. Note that the
+      // plane it picks depends only on the set of points covered by the
+      // rectangles and neither on how those points happen to be decomposed
+      // into rectangles nor on the order of the rectangles in the vector, so
+      // it will pick the same plane on all the shards.
+      template<int DIM, typename T>
+      static inline bool compute_balanced_splitting_plane(
+          const Rect<DIM, T>& bounds, const std::vector<Rect<DIM, T> >& rects,
+          Rect<DIM, T>& best_left_bounds, Rect<DIM, T>& best_right_bounds,
+          std::vector<Rect<DIM, T> >& best_left_set,
+          std::vector<Rect<DIM, T> >& best_right_set);
+      // Helper for compute_balanced_splitting_plane that counts the points in
+      // the rectangles that are at or below the splitting plane
+      template<int DIM, typename T>
+      static inline uint64_t compute_volume_below(
+          const std::vector<Rect<DIM, T> >& rects, int dim, T split);
+      // This is the rule for dividing a sparse index space across a range of
+      // shards. It prefers a plane on the boundary of the rectangles so that
+      // it does not chop them up, and only bisects the points directly when
+      // no such plane exists. Note that it must remain a pure function of the
+      // bounds and the rectangle description, which is identical on every
+      // shard: every shard needs to compute the same plane without
+      // communicating, and the extraction path needs to be able to reproduce
+      // these same decisions later without duplicating the policy, so do not
+      // make this depend on the order of the rectangles. Unlike the two methods
+      // above this one always succeeds as long as the rectangles cover more
+      // than a single point.
+      template<int DIM, typename T>
+      static inline void compute_shard_splitting_plane(
+          const Rect<DIM, T>& bounds, const std::vector<Rect<DIM, T> >& rects,
+          Rect<DIM, T>& left_bounds, Rect<DIM, T>& right_bounds,
+          std::vector<Rect<DIM, T> >& left_set,
+          std::vector<Rect<DIM, T> >& right_set);
+      // This is the same rule for the case of a dense rectangle where there is
+      // no sparsity to guide us and we just cut the longest dimension in half.
+      // The same warning applies: every shard must compute the same plane, and
+      // the extraction path replays these decisions, so this must stay a pure
+      // function of the bounds.
+      template<int DIM, typename T>
+      static inline void compute_shard_splitting_plane(
+          const Rect<DIM, T>& bounds, Rect<DIM, T>& left_bounds,
+          Rect<DIM, T>& right_bounds);
+    private:
+      // Compute the distance and midpoint between two coordinates without
+      // overflowing signed coordinate types
+      template<typename T>
+      static inline typename std::make_unsigned<T>::type coordinate_distance(
+          T lower, T upper);
+      template<typename T>
+      static inline T coordinate_midpoint(T lower, T upper);
     };
 
     /**
@@ -154,6 +208,12 @@ namespace Legion {
               eq_sets,
           ShardID source_shard, ShardID dst_lower_shard,
           ShardID dst_upper_shard, RegionNode* region) const = 0;
+      // Gather all the equivalence sets covering any part of this rectangle.
+      // Only ever called on the local (non-sharded) part of the tree since
+      // that is where the equivalence sets actually live.
+      virtual void find_rect_equivalence_sets(
+          const Rect<DIM, T>& rect,
+          local::FieldMaskMap<EquivalenceSet>& eq_sets) const = 0;
       virtual void invalidate_tree(
           const Rect<DIM, T>& rect, const FieldMask& mask,
           std::vector<RtEvent>& invalidated_events, bool move_to_previous,
@@ -267,7 +327,7 @@ namespace Legion {
               eq_sets,
           ShardID dst_lower_shard, ShardID dst_upper_shard,
           RegionNode* region) const;
-      void find_rect_equivalence_sets(
+      virtual void find_rect_equivalence_sets(
           const Rect<DIM, T>& rect,
           local::FieldMaskMap<EquivalenceSet>& eq_sets) const;
     protected:
@@ -332,6 +392,12 @@ namespace Legion {
       virtual ~EqKDSparse(void);
     public:
       EqKDSparse& operator=(const EqKDSparse& rhs) = delete;
+    protected:
+      // Internal nodes do not need to retain the rectangles used to build
+      // them since shard extraction is only initiated at a root node
+      EqKDSparse(
+          const Rect<DIM, T>& bound, const std::vector<Rect<DIM, T> >& rects,
+          bool retain_replay_rectangles);
     public:
       virtual void initialize_set(
           EquivalenceSet* set, const Rect<DIM, T>& rect, const FieldMask& mask,
@@ -369,6 +435,9 @@ namespace Legion {
               eq_sets,
           ShardID source_shard, ShardID dst_lower_shard,
           ShardID dst_upper_shard, RegionNode* region) const;
+      virtual void find_rect_equivalence_sets(
+          const Rect<DIM, T>& rect,
+          local::FieldMaskMap<EquivalenceSet>& eq_sets) const;
       virtual void invalidate_tree(
           const Rect<DIM, T>& rect, const FieldMask& mask,
           std::vector<RtEvent>& invalidated_events, bool move_to_previous,
@@ -389,7 +458,41 @@ namespace Legion {
           std::map<EquivalenceSet*, unsigned>& current_sets,
           local::map<ShardID, FieldMask>& remote_shards, ShardID local_shard);
     protected:
+      // Replays the way EqKDSparseSharded would have divided these rectangles
+      // across the destination shards, gathering the equivalence sets that
+      // land in each one. Mirrors EqKDSparseSharded::refine_node.
+      void find_sparse_shard_equivalence_sets(
+          const Rect<DIM, T>& bounds, const std::vector<Rect<DIM, T> >& rects,
+          local::map<
+              ShardID,
+              local::map<RegionNode*, local::FieldMaskMap<EquivalenceSet> > >&
+              eq_sets,
+          ShardID dst_lower_shard, ShardID dst_upper_shard,
+          RegionNode* region) const;
+      // Once a side of the split is down to a single rectangle,
+      // EqKDSparseSharded::refine_node hands it to a dense EqKDSharded node,
+      // so from there on we have to replay the dense rule instead.
+      void find_dense_shard_equivalence_sets(
+          const Rect<DIM, T>& rect,
+          local::map<
+              ShardID,
+              local::map<RegionNode*, local::FieldMaskMap<EquivalenceSet> > >&
+              eq_sets,
+          ShardID dst_lower_shard, ShardID dst_upper_shard,
+          RegionNode* region) const;
+    protected:
       std::vector<EqKDTreeT<DIM, T>*> children;
+      // The rectangles this node covers, exactly as they were given to us.
+      // These are only retained on roots where shard extraction can begin.
+      // Note that they cannot be recovered from the children: the children are
+      // built by a splitting plane that clips the rectangles it straddles, so
+      // they are a different decomposition of the same points, and the plane
+      // that compute_best_splitting_plane picks depends on which decomposition
+      // it is looking at.
+      std::vector<Rect<DIM, T> > rectangles;
+      // Total number of points in the rectangles above, which is what
+      // EqKDSparseSharded::get_total_volume would report for them
+      uint64_t total_volume;
     };
 
     /**
@@ -444,6 +547,11 @@ namespace Legion {
               eq_sets,
           ShardID source_shard, ShardID dst_lower_shard,
           ShardID dst_upper_shard, RegionNode* region) const;
+      // Equivalence sets never live in a sharded node, they live in the local
+      // sub-tree hanging off of one, so this should never be called
+      virtual void find_rect_equivalence_sets(
+          const Rect<DIM, T>& rect,
+          local::FieldMaskMap<EquivalenceSet>& eq_sets) const;
       virtual void invalidate_tree(
           const Rect<DIM, T>& rect, const FieldMask& mask,
           std::vector<RtEvent>& invalidated_events, bool move_to_previous,
@@ -505,8 +613,6 @@ namespace Legion {
       virtual size_t get_total_volume(void) const;
       virtual void refine_node(void);
       virtual EqKDTreeT<DIM, T>* refine_local(void);
-      static inline bool sort_by_volume(
-          const Rect<DIM, T>& r1, const Rect<DIM, T>& r2);
     protected:
       std::vector<Rect<DIM, T> > rectangles;
       size_t total_volume;
