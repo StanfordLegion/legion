@@ -11412,8 +11412,6 @@ namespace Legion {
       implicit_context = top_context;
       if ((profiler != nullptr) && (implicit_profiler == nullptr))
         profiler->instantiate_profiling_instance();
-      // Add a reference to the top level context
-      top_context->add_base_gc_ref(RUNTIME_REF);
       // Get an individual task to be the top-level task
       IndividualTask* top_task = get_operation<IndividualTask>();
       AutoProvenance provenance(launcher.provenance);
@@ -11423,12 +11421,6 @@ namespace Legion {
       // Set this to be the current processor
       top_task->set_current_proc(target);
       top_task->select_task_options(false /*prioritize*/);
-      increment_outstanding_top_level_tasks();
-      // Launch a task to deactivate the top-level context
-      // when the top-level task is done
-      TopFinishArgs args(top_context);
-      RtEvent pre = top_task->get_commit_event();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, pre);
       add_to_ready_queue(target, top_task);
       // Now we can restore the previous implicit context
       implicit_context = previous_implicit;
@@ -11447,31 +11439,13 @@ namespace Legion {
       TopLevelContext* top_context = new TopLevelContext(
           proxy, 0 /*id*/, get_unique_implicit_top_level_task_id(), 0 /*did*/,
           mapping);
-      // Add a reference to the top level context
-      top_context->add_base_gc_ref(RUNTIME_REF);
       TaskLauncher launcher(
           top_task_id, UntypedBuffer(), Predicate::TRUE_PRED, top_mapper_id);
       // Mark that this task is the top-level task
       top_task->initialize_task(
           top_context, launcher, nullptr /*provenance*/,
           true /*top level task*/);
-      increment_outstanding_top_level_tasks();
-      // Launch a task to deactivate the top-level context
-      // when the top-level task is done
-      TopFinishArgs args(top_context);
-      RtEvent pre = top_task->get_commit_event();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, pre);
       return top_task;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::TopFinishArgs::execute(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (ctx->remove_base_gc_ref(RUNTIME_REF))
-        delete ctx;
-      // Finally tell the runtime that we have one less top level task
-      runtime->decrement_outstanding_top_level_tasks();
     }
 
     //--------------------------------------------------------------------------

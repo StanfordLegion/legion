@@ -41,7 +41,6 @@ namespace Legion {
   __op__(LG_FUTURE_CALLBACK_TASK_ID, FutureImpl::FutureCallbackArgs, "Deferred Future Callback") \
   __op__(LG_CALLBACK_RELEASE_TASK_ID, FutureImpl::CallbackReleaseArgs, "Deferred Future Callback Release") \
   __op__(LG_FUTURE_BROADCAST_TASK_ID, FutureImpl::FutureBroadcastArgs, "Deferred Future Broadcast") \
-  __op__(LG_TOP_FINISH_TASK_ID, Runtime::TopFinishArgs, "Deferred Top Finish") \
   __op__(LG_MAPPER_TASK_ID, Runtime::MapperTaskArgs, "Deferred Mapper Task") \
   __op__(LG_DISJOINTNESS_TASK_ID, IndexPartNode::DisjointnessArgs, "Deferred Disjointness Test") \
   __op__(LG_DEFER_TIMING_MEASUREMENT_TASK_ID, FenceOp::DeferTimingMeasurementArgs, "Deferred Timing Measurement") \
