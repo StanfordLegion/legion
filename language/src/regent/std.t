@@ -4974,7 +4974,11 @@ end
 -- #################
 do
   local intrinsic_names = {}
-  if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
+  if ffi.arch == "arm64" then
+    -- The FMINNM/FMAXNM forms match the NaN behavior of base.fmin/base.fmax.
+    intrinsic_names[vector(float,  4)] = "llvm.aarch64.neon.f%snm.v4f32"
+    intrinsic_names[vector(double, 2)] = "llvm.aarch64.neon.f%snm.v2f64"
+  elseif ffi.os == "Linux" and
     os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0
   then
     intrinsic_names[vector(float,  4)] = "llvm.ppc.altivec.v%sfp"
@@ -4991,6 +4995,9 @@ do
       assert(arg_type:isvector())
       assert((arg_type.type == float and 4 <= arg_type.N and arg_type.N <= 8) or
              (arg_type.type == double and 2 <= arg_type.N and arg_type.N <= 4))
+      assert(intrinsic_names[arg_type] ~= nil,
+             "unsupported vector type " .. tostring(arg_type) ..
+             " for vector math operations on this architecture")
 
       local intrinsic_name = string.format(intrinsic_names[arg_type], fname)
       return terralib.intrinsic(intrinsic_name,

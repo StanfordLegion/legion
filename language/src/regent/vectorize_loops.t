@@ -34,20 +34,23 @@ local VEC_ARCH
 local SIMD_REG_SIZE
 
 local ffi = require("ffi")
-if ffi.os == "OSX" then
+if ffi.arch == "arm64" then
+  -- NEON is mandatory on AArch64, and its vector registers are always 128 bits
+  -- wide. (SVE registers can be wider, but their length is only known at run
+  -- time, so they are not usable with Terra's fixed-width vectors.)
+  SIMD_REG_SIZE = 16
+  VEC_ARCH = "arm"
+elseif ffi.os == "OSX" then
   if os.execute("sysctl -a | grep machdep.cpu.features | grep AVX > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
     VEC_ARCH = "x86"
   elseif os.execute("sysctl -a | grep machdep.cpu.features | grep SSE > /dev/null") == 0 then
     SIMD_REG_SIZE = 16
     VEC_ARCH = "x86"
-  elseif os.execute("sysctl -a | grep hw.optional.neon > /dev/null") == 0 then
-    SIMD_REG_SIZE = 8
-    VEC_ARCH = "arm"
   else
     error("Unable to determine CPU architecture")
   end
-elseif os.execute("bash -c \"[ `uname` == 'FreeBSD' ]\"") == 0 then
+elseif ffi.os == "BSD" then
   if os.execute("sysctl -a | grep -q 'hw.instruction_sse: 1'") == 0 then
     SIMD_REG_SIZE = 16
     VEC_ARCH = "x86"
@@ -95,14 +98,11 @@ elseif VEC_ARCH == "x86" then
   binary_intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
   binary_intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
 elseif VEC_ARCH == "arm" then
-  -- TODO: support the ARM NEON instruction set
-  local vectorize_loops = {}
-  function vectorize_loops.entry(node)
-    print("WARNING: vectorization is not yet supported on ARM CPUs")
-    return node
-  end
-  vectorize_loops.pass_name = "vectorize_loops"
-  return vectorize_loops
+  -- Use the FMINNM/FMAXNM forms, as they match the NaN behavior of the scalar
+  -- min/max operators (see std_base.fmin/fmax), which return the operand that
+  -- is not NaN. The plain FMIN/FMAX instructions propagate NaNs instead.
+  binary_intrinsic_names[vector(float,  4)] = "llvm.aarch64.neon.f%snm.v4f32"
+  binary_intrinsic_names[vector(double, 2)] = "llvm.aarch64.neon.f%snm.v2f64"
 else
   assert(false, "Unsupported architecture")
 end
