@@ -40,10 +40,10 @@ RUN pip3 install --upgrade 'pip>=22,<23' && \
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.85.1 -y
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.24.4/cmake-3.24.4-linux-x86_64.tar.gz && \
-    echo "cac77d28fb8668c179ac02c283b058aeb846fe2133a57d40b503711281ed9f19  cmake-3.24.4-linux-x86_64.tar.gz" | shasum --check && \
-    tar xfzC cmake-3.24.4-linux-x86_64.tar.gz /usr/local --strip-components=1 && \
-    rm cmake-3.24.4-linux-x86_64.tar.gz
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-x86_64.tar.gz && \
+    echo "ba1e0dcc710e2f92be6263f9617510b3660fa9dc409ad2fb8190299563f952a0  cmake-3.26.4-linux-x86_64.tar.gz" | shasum --check && \
+    tar xfzC cmake-3.26.4-linux-x86_64.tar.gz /usr/local --strip-components=1 && \
+    rm cmake-3.26.4-linux-x86_64.tar.gz
 
 # install gitlab-runner
 RUN wget -O /tmp/gitlab-runner-script.deb.sh https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh && \
