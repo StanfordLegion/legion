@@ -3079,6 +3079,7 @@ namespace Legion {
       reduction_collective = nullptr;
       broadcast_collective = nullptr;
       output_size_collective = nullptr;
+      output_regions_finalize_started = false;
       collective_check_id = 0;
       interfering_check_id = 0;
       slice_sharding_output = false;
@@ -4303,17 +4304,174 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndexTask::advance_output_prefix(
+        unsigned index, unsigned dim, size_t color_index,
+        local::vector<DomainPoint>& done_points)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(index < output_region_states.size());
+      OutputRegionState& state = output_region_states[index];
+      legion_assert(dim < state.extents.size());
+      legion_assert(dim < state.offsets.size());
+      std::vector<coord_t>& dim_extents = state.extents[dim];
+      std::vector<coord_t>& dim_offsets = state.offsets[dim];
+      legion_assert(color_index < dim_extents.size());
+      legion_assert(color_index < dim_offsets.size());
+      legion_assert(dim_offsets[color_index] >= 0);
+
+      std::set<ShardID> previous_shards;
+      compute_output_extent_shards(
+          index, dim, color_index, state.global_color_space, state.projection,
+          previous_shards);
+      ReplicateContext* repl_ctx =
+          legion_safe_cast<ReplicateContext*>(parent_ctx);
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      legion_assert(previous_shards.find(local_shard) != previous_shards.end());
+
+      // Ripple carry the newly available offset through all consecutive
+      // extents owned by this shard. An offset can arrive after its extent, so
+      // this path must be shared by both record_output_extent and
+      // record_output_offset.
+      for (size_t idx = color_index; idx < dim_extents.size(); idx++)
+      {
+        if ((dim_extents[idx] < 0) || (dim_offsets[idx] < 0))
+          break;
+        const coord_t next_offset = dim_offsets[idx] + dim_extents[idx];
+        const bool new_offset = (dim_offsets[idx + 1] < 0);
+        if (new_offset)
+          dim_offsets[idx + 1] = next_offset;
+        else
+          legion_assert(dim_offsets[idx + 1] == next_offset);
+
+        // This point now has both its starting and ending offsets for this
+        // dimension, so remove this dimension from its pending count.
+        if (!state.dim_pending_points.empty() &&
+            !state.dim_pending_points[dim].empty())
+        {
+          for (std::set<DomainPoint>::iterator it =
+                   state.dim_pending_points[dim].begin();
+               it != state.dim_pending_points[dim].end();
+               /*nothing*/)
+          {
+            const size_t point_index =
+                (*it)[dim] - state.global_color_space.lo()[dim];
+            if (point_index == idx)
+            {
+              std::map<DomainPoint, unsigned>::iterator finder =
+                  state.pending_points.find(*it);
+              legion_assert(finder != state.pending_points.end());
+              legion_assert(finder->second > 0);
+              if (--finder->second == 0)
+              {
+                done_points.push_back(*it);
+                state.pending_points.erase(finder);
+              }
+              std::set<DomainPoint>::iterator delete_it = it++;
+              state.dim_pending_points[dim].erase(delete_it);
+            }
+            else
+              it++;
+          }
+        }
+
+        if (idx == (dim_extents.size() - 1))
+          break;
+        std::set<ShardID> next_shards;
+        compute_output_extent_shards(
+            index, dim, idx + 1, state.global_color_space, state.projection,
+            next_shards);
+        if (new_offset)
+          send_output_offset_messages(
+              index, dim, idx + 1, dim_offsets[idx + 1], previous_shards,
+              next_shards);
+        // Extents learned through the validation exchange can include points
+        // not owned by this shard. Do not carry the prefix beyond the shard's
+        // participation in this dimension.
+        if (next_shards.find(local_shard) == next_shards.end())
+          break;
+        previous_shards.swap(next_shards);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::set_output_subregions(
+        unsigned index, const local::vector<DomainPoint>& done_points)
+    //--------------------------------------------------------------------------
+    {
+      legion_assert(index < output_region_states.size());
+      const OutputRegionState& state = output_region_states[index];
+      IndexPartNode* part = runtime->get_node(
+          output_regions[index].partition.get_index_partition());
+      for (const DomainPoint& point : done_points)
+      {
+        DomainPoint lo, hi;
+        lo.dim = point.dim;
+        hi.dim = point.dim;
+        for (int dim = 0; dim < point.dim; dim++)
+        {
+          const size_t color_index =
+              point[dim] - state.global_color_space.lo()[dim];
+          legion_assert(state.offsets[dim][color_index] >= 0);
+          legion_assert(state.offsets[dim][color_index + 1] >= 0);
+          lo[dim] = state.offsets[dim][color_index];
+          hi[dim] = state.offsets[dim][color_index + 1] - 1;  // inclusive
+        }
+        IndexSpaceNode* child =
+            part->get_child(part->color_space->linearize_color(point));
+        if (child->set_domain(
+                Domain(lo, hi), ApEvent::NO_AP_EVENT, false /*take ownership*/,
+                true /*broadcast*/))
+          delete child;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplIndexTask::prepare_output_regions_finalization(void)
+    //--------------------------------------------------------------------------
+    {
+      // Must be called while holding the operation lock. Starting the output
+      // extent exchange before all local prefix offsets are ready can allow
+      // the exchange to complete before the parent bounds can be computed.
+      if (output_regions_finalize_started || (total_points == 0))
+        return false;
+      for (unsigned idx = 0; idx < output_regions.size(); idx++)
+      {
+        const OutputRegionState& state = output_region_states[idx];
+        if (state.points.size() != total_points)
+          return false;
+        if (output_region_options[idx].global_indexing() &&
+            !state.pending_points.empty())
+          return false;
+      }
+      output_regions_finalize_started = true;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexTask::record_output_offset(
         unsigned index, unsigned dim, size_t color_index, size_t offset)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      legion_assert(index < output_region_states.size());
-      OutputRegionState& state = output_region_states[index];
-      legion_assert(dim < state.offsets.size());
-      legion_assert(color_index < state.offsets[dim].size());
-      legion_assert(state.offsets[dim][color_index] < 0);
-      state.offsets[dim][color_index] = offset;
+      local::vector<DomainPoint> done_points;
+      bool done;
+      {
+        AutoLock o_lock(op_lock);
+        legion_assert(index < output_region_states.size());
+        legion_assert(output_region_options[index].global_indexing());
+        OutputRegionState& state = output_region_states[index];
+        legion_assert(dim < state.offsets.size());
+        legion_assert(color_index < state.offsets[dim].size());
+        legion_assert(state.offsets[dim][color_index] < 0);
+        state.offsets[dim][color_index] = offset;
+        legion_assert(color_index < state.extents[dim].size());
+        if (state.extents[dim][color_index] >= 0)
+          advance_output_prefix(index, dim, color_index, done_points);
+        done = prepare_output_regions_finalization();
+      }
+      if (!done_points.empty())
+        set_output_subregions(index, done_points);
+      if (done)
+        finalize_output_regions(true /*first invocation*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4330,7 +4488,7 @@ namespace Legion {
       OutputRegionState& state = output_region_states[index];
       // Should always be able to set the domain for the color when we're done
       bool done;
-      std::vector<DomainPoint> done_points;
+      local::vector<DomainPoint> done_points;
       {
         // Check to see if there are any buffered objects in the context
         // that we need to handle if this is global indexing, must do this
@@ -4344,6 +4502,7 @@ namespace Legion {
           repl_ctx->find_pending_output_offsets(context_index, index, offsets);
         }
         AutoLock o_lock(op_lock);
+        legion_assert(!output_regions_finalize_started);
         if (!offsets.empty())
         {
           legion_assert(state.points.empty());
@@ -4388,8 +4547,8 @@ namespace Legion {
             legion_assert(color_index < dim_offsets.size());
             if (0 <= dim_extents[color_index])
             {
-              // Already set, so there's nothing to do here other than
-              // to check that the extent matches what we expect
+              // The extent may already be known from another point on the
+              // same axis, but it still must agree with this point.
               if (dim_extents[color_index] != extent[dim])
               {
                 Error error(LEGION_PROGRAMMING_MODEL_EXCEPTION);
@@ -4401,18 +4560,12 @@ namespace Legion {
                       << "sure the outputs from point tasks are aligned.";
                 error.raise();
               }
-              if (dim_offsets[color_index] < 0)
-              {
-                remaining_dims++;
-                if (state.dim_pending_points.empty())
-                  state.dim_pending_points.resize(color.get_dim());
-                state.dim_pending_points[dim].insert(color);
-              }
-              continue;
             }
             else  // We're a new extent, so we can save it
               dim_extents[color_index] = extent[dim];
-            // If the previous offset is not ready yet there's nothing to do
+            // If the starting offset is not ready, remember that this point
+            // is waiting on this dimension. record_output_offset will resume
+            // the prefix computation when the remote offset arrives.
             if (dim_offsets[color_index] < 0)
             {
               remaining_dims++;
@@ -4421,61 +4574,8 @@ namespace Legion {
               state.dim_pending_points[dim].insert(color);
               continue;
             }
-            // Compute the set of shards for all the points associated with
-            // the current extent
-            std::set<ShardID> previous_shards;
-            compute_output_extent_shards(
-                index, dim, color_index, state.global_color_space,
-                state.projection, previous_shards);
-            // Ripple carry add the extents forward and send out any messages
-            // to other shards that need to be notified
-            for (unsigned idx = color_index; idx < dim_extents.size(); idx++)
-            {
-              if (dim_extents[idx] < 0)
-                break;
-              dim_offsets[idx + 1] = dim_offsets[idx] + dim_extents[idx];
-              // Compute the set of shards associated with the next extent
-              if (idx < (dim_extents.size() - 1))
-              {
-                std::set<ShardID> next_shards;
-                compute_output_extent_shards(
-                    index, dim, idx + 1, state.global_color_space,
-                    state.projection, next_shards);
-                send_output_offset_messages(
-                    index, dim, idx + 1, dim_offsets[idx + 1], previous_shards,
-                    next_shards);
-                previous_shards.swap(next_shards);
-              }
-              // Check for any local points for which we are done now
-              if (!state.dim_pending_points.empty() &&
-                  !state.dim_pending_points[dim].empty())
-              {
-                for (std::set<DomainPoint>::iterator it =
-                         state.dim_pending_points[dim].begin();
-                     it != state.dim_pending_points[dim].end();
-                     /*nothing*/)
-                {
-                  const unsigned index =
-                      (*it)[dim] - state.global_color_space.lo()[dim];
-                  if (index == (idx + 1))
-                  {
-                    std::map<DomainPoint, unsigned>::iterator finder =
-                        state.pending_points.find(*it);
-                    legion_assert(finder != state.pending_points.end());
-                    legion_assert(finder->second > 0);
-                    if (--finder->second == 0)
-                    {
-                      done_points.push_back(*it);
-                      state.pending_points.erase(finder);
-                    }
-                    std::set<DomainPoint>::iterator delete_it = it++;
-                    state.dim_pending_points[dim].erase(delete_it);
-                  }
-                  else
-                    it++;
-                }
-              }
-            }
+            if (dim_offsets[color_index + 1] < 0)
+              advance_output_prefix(index, dim, color_index, done_points);
           }
           if (remaining_dims > 0)
           {
@@ -4486,44 +4586,10 @@ namespace Legion {
           else
             done_points.push_back(color);
         }
-        done = (state.points.size() == total_points);
-        if (done)
-        {
-          // Check to see if all the other output regions are done too
-          for (unsigned idx = 0; idx < output_regions.size(); idx++)
-          {
-            if (output_region_states[idx].points.size() == total_points)
-              continue;
-            done = false;
-            break;
-          }
-        }
+        done = prepare_output_regions_finalization();
       }
       if (!done_points.empty())
-      {
-        IndexPartNode* part = runtime->get_node(
-            output_regions[index].partition.get_index_partition());
-        for (std::vector<DomainPoint>::const_iterator it = done_points.begin();
-             it != done_points.end(); it++)
-        {
-          DomainPoint lo, hi;
-          lo.dim = color.dim;
-          hi.dim = color.dim;
-          for (int dim = 0; dim < color.dim; dim++)
-          {
-            const unsigned color_index =
-                (*it)[dim] - state.global_color_space.lo()[dim];
-            lo[dim] = state.offsets[dim][color_index];
-            hi[dim] = state.offsets[dim][color_index + 1] - 1;  // inclusive
-          }
-          IndexSpaceNode* child =
-              part->get_child(part->color_space->linearize_color(*it));
-          if (child->set_domain(
-                  Domain(lo, hi), ApEvent::NO_AP_EVENT,
-                  false /*take ownership*/, true /*broadcast*/))
-            delete child;
-        }
-      }
+        set_output_subregions(index, done_points);
       if (done)
       {
         // Still need to participate in the exchange for computing the
@@ -4758,9 +4824,6 @@ namespace Legion {
       // Check to see if we have an exchange to perform
       if (first_invocation && (output_size_collective != nullptr))
       {
-        // We need to gather output region sizes from all the other shards
-        // to determine the sizes of globally indexed output regions
-        output_size_collective->perform_collective_async();
         // The collective will call us when it is ready but we still need
         // to make sure that we fold the completion event for the
         // collective back into the completion events
@@ -4769,10 +4832,12 @@ namespace Legion {
         {
           AutoLock o_lock(op_lock);
           // We should still not be complete if we're here
-          legion_assert(
-              (completed_points < total_points) || (total_points == 0));
+          legion_assert(!children_commit || !commit_received);
           commit_preconditions.insert(done_event);
         }
+        // We need to gather output region sizes from all the other shards
+        // to determine the sizes of globally indexed output regions
+        output_size_collective->perform_collective_async();
       }
       else
       {

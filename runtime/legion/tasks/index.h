@@ -450,6 +450,12 @@ namespace Legion {
           unsigned index, unsigned dim, size_t color_index, size_t offset,
           const std::set<ShardID>& previous_shards,
           const std::set<ShardID>& next_shards) const;
+      void advance_output_prefix(
+          unsigned index, unsigned dim, size_t color_index,
+          local::vector<DomainPoint>& done_points);
+      void set_output_subregions(
+          unsigned index, const local::vector<DomainPoint>& done_points);
+      bool prepare_output_regions_finalization(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction* sharding_function;
@@ -479,6 +485,7 @@ namespace Legion {
       ShardingGatherCollective* sharding_collective;
     protected:
       bool slice_sharding_output;
+      bool output_regions_finalize_started;
     };
 
   }  // namespace Internal
