@@ -146,8 +146,10 @@ terra base.assert_error(x : bool, message : rawstring)
   if not x then
     var stderr = c.fdopen(2, "w")
     c.fprintf(stderr, "Errors reported during runtime.\n%s\n", message)
-    -- Just because it's stderr doesn't mean it's unbuffered...
-    c.fflush(stderr)
+    -- For good measure we'll flush everything: stderr itself is not
+    -- guaranteed to be line/unbuffered, and the user may have their
+    -- own streams they forgot to flush as well.
+    c.fflush(nil)
     c.abort()
   end
 end
@@ -156,8 +158,10 @@ terra base.assert(x : bool, message : rawstring)
   if not x then
     var stderr = c.fdopen(2, "w")
     c.fprintf(stderr, "assertion failed: %s\n", message)
-    -- Just because it's stderr doesn't mean it's unbuffered...
-    c.fflush(stderr)
+    -- For good measure we'll flush everything: stderr itself is not
+    -- guaranteed to be line/unbuffered, and the user may have their
+    -- own streams they forgot to flush as well.
+    c.fflush(nil)
     c.abort()
   end
 end
