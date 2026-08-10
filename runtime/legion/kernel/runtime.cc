@@ -4200,7 +4200,7 @@ namespace Legion {
       // If we made it here, then we don't have a message manager yet
       // re-take the lock and re-check to see if we don't have a manager
       // If we still don't then we need to make one
-      RtEvent wait_on;
+      RtUserEvent wait_on;
       bool send_request = false;
       {
         AutoLock m_lock(message_manager_lock);
@@ -4210,7 +4210,7 @@ namespace Legion {
         if (result != nullptr)
           return result;
         // Figure out if there is an event to wait on yet
-        std::map<AddressSpace, RtUserEvent>::const_iterator finder =
+        std::map<AddressSpaceID, RtUserEvent>::const_iterator finder =
             pending_endpoint_requests.find(sid);
         if (finder == pending_endpoint_requests.end())
         {
@@ -4239,6 +4239,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize<bool>(true);  // request
             rez.serialize(utility_group);
+            rez.serialize(wait_on);
           }
           const Realm::ProfilingRequestSet empty_requests;
           it->spawn(
@@ -4254,6 +4255,16 @@ namespace Legion {
       // When we wake up there should be a result
       result = message_managers[sid].load();
       legion_assert(result != nullptr);
+      if (send_request)
+      {
+        // Remove the pending request once we're done
+        AutoLock m_lock(message_manager_lock);
+        std::map<AddressSpaceID, RtUserEvent>::iterator finder =
+            pending_endpoint_requests.find(sid);
+        legion_assert(finder != pending_endpoint_requests.end());
+        legion_assert(finder->second == wait_on);
+        pending_endpoint_requests.erase(finder);
+      }
       return result;
     }
 
@@ -4261,11 +4272,15 @@ namespace Legion {
     void Runtime::handle_endpoint_creation(Deserializer& derez)
     //--------------------------------------------------------------------------
     {
+      // VERY IMPORTANT: we cannot do anything to block in this task because
+      // we're not profiling so no acquiring of locks or waiting on events
       DerezCheck z(derez);
       bool request;
       derez.deserialize(request);
       Processor remote_utility_group;
       derez.deserialize(remote_utility_group);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       if (request)
       {
         Serializer rez;
@@ -4273,6 +4288,7 @@ namespace Legion {
           RezCheck z2(rez);
           rez.serialize<bool>(false /*request*/);
           rez.serialize(utility_group);
+          rez.serialize(done_event);
           rez.serialize(address_space);
         }
         const Realm::ProfilingRequestSet empty_requests;
@@ -4284,14 +4300,9 @@ namespace Legion {
       {
         AddressSpaceID remote_space;
         derez.deserialize(remote_space);
-        AutoLock m_lock(message_manager_lock);
         message_managers[remote_space].store(new MessageManager(
             remote_space, max_message_size, remote_utility_group));
-        std::map<AddressSpaceID, RtUserEvent>::iterator finder =
-            pending_endpoint_requests.find(remote_space);
-        legion_assert(finder != pending_endpoint_requests.end());
-        Runtime::trigger_event(finder->second);
-        pending_endpoint_requests.erase(finder);
+        Runtime::trigger_event(done_event);
       }
     }
 
@@ -5542,16 +5553,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->decrement_outstanding_top_level_tasks();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void StartupBarrierMessage::handle(
-        Deserializer& derez, AddressSpaceID)
-    //--------------------------------------------------------------------------
-    {
-      RtBarrier startup_barrier;
-      derez.deserialize(startup_barrier);
-      runtime->broadcast_startup_barrier(startup_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -13224,6 +13225,8 @@ namespace Legion {
     void Runtime::broadcast_startup_barrier(RtBarrier startup_barrier)
     //--------------------------------------------------------------------------
     {
+      // VERY IMPORTANT: we cannot do anything to block in this task because
+      // we're not profiling so no acquiring of locks or waiting on events
       legion_assert(startup_barrier.exists());
       // Make sure the representation of the barriers haven't changed
       static_assert(
@@ -13232,15 +13235,44 @@ namespace Legion {
           "Realm Barrier representation changed");
       // Tree broadcast it out to any downstream nodes
       AddressSpaceID offset = address_space * legion_collective_radix;
+      std::map<AddressSpaceID, Processor> needed_spaces;
       for (int idx = 1; idx <= legion_collective_radix; idx++)
       {
         AddressSpaceID target = offset + idx;
         if (target < total_address_spaces)
+          needed_spaces.emplace(target, Processor::NO_PROC);
+      }
+      // Find a processor on the target addresss space
+      // TODO: refine search once Realm supports queries on specifc spaces
+      Machine::ProcessorQuery all_startup_procs(machine);
+      for (Machine::ProcessorQuery::iterator it = all_startup_procs.begin();
+           it != all_startup_procs.end(); it++)
+      {
+        std::map<AddressSpaceID, Processor>::iterator finder =
+            needed_spaces.find(it->address_space());
+        if (finder == needed_spaces.end())
+          continue;
+        if (it->kind() == Processor::LOC_PROC)
         {
-          StartupBarrierMessage rez;
-          rez.serialize(startup_barrier);
-          rez.dispatch(target);
+          // We prefer CPUs for the startup kind so once we see one we're done
+          it->spawn(
+              LG_STARTUP_TASK_ID, &startup_barrier, sizeof(startup_barrier));
+          needed_spaces.erase(finder);
+          if (needed_spaces.empty())
+            break;
         }
+        else if (
+            (it->kind() == Processor::UTIL_PROC) && !finder->second.exists())
+          finder->second = *it;
+      }
+      for (const std::pair<const AddressSpaceID, Processor>& target :
+           needed_spaces)
+      {
+        if (!target.second.exists())
+          std::abort();  // Should always have found at least one kind of
+                         // processor
+        target.second.spawn(
+            LG_STARTUP_TASK_ID, &startup_barrier, sizeof(startup_barrier));
       }
       // Write the timestamp first
       startup_timestamp = startup_barrier.timestamp;
@@ -13262,8 +13294,15 @@ namespace Legion {
       implicit_fevent = LgEvent::NO_LG_EVENT;
       // Create the startup barrier and send it out
       // Note we don't profile this for critical paths
-      RtBarrier startup_barrier(
-          Realm::Barrier::create_barrier(runtime->total_address_spaces));
+      RtBarrier startup_barrier;
+      if (arglen > 0)
+      {
+        legion_assert(arglen == sizeof(startup_barrier));
+        std::memcpy(&startup_barrier, args, sizeof(startup_barrier));
+      }
+      else
+        startup_barrier = RtBarrier(
+            Realm::Barrier::create_barrier(runtime->total_address_spaces));
       runtime->broadcast_startup_barrier(startup_barrier);
     }
 
