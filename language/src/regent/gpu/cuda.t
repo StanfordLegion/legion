@@ -225,7 +225,27 @@ local terra check(ok : DriverAPI.CUresult, location : rawstring)
     var error_string : rawstring = nil
     DriverAPI.cuGetErrorName(ok, &error_name)
     DriverAPI.cuGetErrorString(ok, &error_string)
-    base.c.printf("error in %s (%s): %s\n", location, error_name, error_string)
+    var stderr = base.c.fdopen(2, "w")
+    base.c.fprintf(stderr, "error in %s (%s): %s\n", location, error_name, error_string)
+    base.c.fflush(stderr)
+    base.c.abort()
+  end
+end
+
+-- Same as check(), but also reports the JIT compiler's log, which is
+-- where the actual reason for a PTX failure shows up.
+local terra check_jit(ok : DriverAPI.CUresult, location : rawstring, error_log : rawstring)
+  if ok ~= DriverAPI.CUDA_SUCCESS then
+    var error_name : rawstring = nil
+    var error_string : rawstring = nil
+    DriverAPI.cuGetErrorName(ok, &error_name)
+    DriverAPI.cuGetErrorString(ok, &error_string)
+    var stderr = base.c.fdopen(2, "w")
+    base.c.fprintf(stderr, "error in %s (%s): %s\n", location, error_name, error_string)
+    if error_log ~= nil and error_log[0] ~= 0 then
+      base.c.fprintf(stderr, "CUDA JIT compiler output:\n%s\n", error_log)
+    end
+    base.c.fflush(stderr)
     base.c.abort()
   end
 end
@@ -235,12 +255,14 @@ local struct cubin_t {
   size : uint64
 }
 
+local JIT_ERROR_LOG_SIZE = 32768
+
 local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
   var linkState : DriverAPI.CUlinkState
   var cubin : &opaque
   var cubinSize : uint64
-  var error_str : rawstring = nil
-  var error_sz : uint64 = 0
+  var error_log : int8[JIT_ERROR_LOG_SIZE]
+  error_log[0] = 0
 
   var options = arrayof(
     DriverAPI.CUjit_option,
@@ -248,11 +270,13 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
     DriverAPI.CU_JIT_ERROR_LOG_BUFFER,
     DriverAPI.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES
   )
+  -- Note: CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES is passed by value (as a
+  -- void *), not by pointer.
   var option_values = arrayof(
     [&opaque],
     [&opaque](version),
-    &error_str,
-    [&opaque](&error_sz)
+    [&opaque](&error_log[0]),
+    [&opaque]([uint64](JIT_ERROR_LOG_SIZE))
   );
 
   var cx : DriverAPI.CUcontext
@@ -268,9 +292,9 @@ local terra ptx_to_cubin(ptx : rawstring, ptx_sz : uint64, version : uint64)
     cx_created = true
   end
 
-  check(DriverAPI.cuLinkCreate_v2(1, options, option_values, &linkState), "cuLinkCreate_v2")
-  check(DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil), "cuLinkAddData_v2")
-  check(DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize), "cuLinkComplete")
+  check(DriverAPI.cuLinkCreate_v2(3, options, option_values, &linkState), "cuLinkCreate_v2")
+  check_jit(DriverAPI.cuLinkAddData_v2(linkState, DriverAPI.CU_JIT_INPUT_PTX, ptx, ptx_sz, nil, 0, nil, nil), "cuLinkAddData_v2", &error_log[0])
+  check_jit(DriverAPI.cuLinkComplete(linkState, &cubin, &cubinSize), "cuLinkComplete", &error_log[0])
 
   -- Make a copy of the returned cubin before we destroy the linker and cuda context,
   -- which may deallocate the cubin
@@ -334,7 +358,21 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
       check(DriverAPI.cuDevicePrimaryCtxRetain(&ctx, dev), "cuDevicePrimaryCtxRetain")
       check(DriverAPI.cuCtxPushCurrent_v2(ctx), "cuCtxPushCurrent_v2")
       var module : DriverAPI.CUmodule
-      check(DriverAPI.cuModuleLoadData(&module, image), "cuModuleLoadData")
+      var error_log : int8[JIT_ERROR_LOG_SIZE]
+      error_log[0] = 0
+      var load_options = arrayof(
+        DriverAPI.CUjit_option,
+        DriverAPI.CU_JIT_ERROR_LOG_BUFFER,
+        DriverAPI.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES
+      )
+      var load_option_values = arrayof(
+        [&opaque],
+        [&opaque](&error_log[0]),
+        [&opaque]([uint64](JIT_ERROR_LOG_SIZE))
+      )
+      check_jit(
+        DriverAPI.cuModuleLoadDataEx(&module, image, 2, load_options, load_option_values),
+        "cuModuleLoadDataEx", &error_log[0])
       escape
         for _, k in ipairs(kernels) do
           local kernel = k.kernel
@@ -397,7 +435,17 @@ cudahelper.bid_x = bid_x
 cudahelper.bid_y = bid_y
 cudahelper.bid_z = bid_z
 
-local barrier = cudalib.nvvm_barrier0
+local barrier
+if terralib.llvmversion >= 210 then
+  local barrier_cta_sync_aligned_all =
+    terralib.intrinsic("llvm.nvvm.barrier.cta.sync.aligned.all", {int32} -> {})
+  terra barrier()
+    barrier_cta_sync_aligned_all(0)
+  end
+  barrier:setinlined(true)
+else
+  barrier = cudalib.nvvm_barrier0
+end
 
 cudahelper.barrier = barrier
 
