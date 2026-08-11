@@ -7711,6 +7711,7 @@ namespace Legion {
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode* result = creator.result;
       legion_assert(result != nullptr);
+      RtUserEvent to_trigger;
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -7723,7 +7724,13 @@ namespace Legion {
           return it->second;
         }
         index_nodes[sp] = result;
-        index_space_requests.erase(sp);
+        std::map<IndexSpace, RtUserEvent>::iterator request_finder =
+            index_space_requests.find(sp);
+        if (request_finder != index_space_requests.end())
+        {
+          to_trigger = request_finder->second;
+          index_space_requests.erase(request_finder);
+        }
         // Add a reference for when we set this index space node
         // Hold the reference on the parent partition to keep both it
         // and the child index space alive
@@ -7732,6 +7739,11 @@ namespace Legion {
         parent.add_child(result);
         result->register_with_runtime();
       }
+      // A collective child replica can arrive after a forwarded lookup for it.
+      // In that case the owner intentionally does not answer the redundant
+      // request from the collective member, so local creation satisfies it.
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
       return result;
     }
 
@@ -8125,7 +8137,7 @@ namespace Legion {
         if (finder != index_nodes.end())
           return finder->second;
         // Still doesn't exists, see if we sent a request already
-        std::map<IndexSpace, RtEvent>::const_iterator wait_finder =
+        std::map<IndexSpace, RtUserEvent>::const_iterator wait_finder =
             index_space_requests.find(space);
         if (wait_finder == index_space_requests.end())
         {
@@ -8808,7 +8820,7 @@ namespace Legion {
       if (finder != index_nodes.end())
         return RtEvent::NO_RT_EVENT;
       // Still doesn't exists, see if we sent a request already
-      std::map<IndexSpace, RtEvent>::const_iterator wait_finder =
+      std::map<IndexSpace, RtUserEvent>::const_iterator wait_finder =
           index_space_requests.find(space);
       if (wait_finder == index_space_requests.end())
       {
