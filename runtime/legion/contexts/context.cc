@@ -41,7 +41,7 @@ namespace Legion {
         executing_processor(Processor::NO_PROC), inlined_tasks(0),
         total_tunable_count(0), reference_tracker(false),
         overhead_profiler(nullptr), implicit_task_profiler(nullptr),
-        implicit_effects(nullptr), safe_cast_semaphore(0), task_executed(false),
+        implicit_effects(nullptr), safe_cast_semaphore(0),
         mutable_priority(false), inline_task(inline_t),
         implicit_task(implicit_t)
     //--------------------------------------------------------------------------

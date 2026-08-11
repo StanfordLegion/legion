@@ -618,7 +618,6 @@ namespace Legion {
       std::vector<ExceptionHandlerID> exception_handler_stack;
       std::vector<long long> user_profiling_ranges;
     protected:
-      bool task_executed;
       bool mutable_priority;
     public:
       const bool inline_task;

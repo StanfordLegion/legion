@@ -1231,6 +1231,7 @@ namespace Legion {
       bool currently_active_context;
       // Whether we have an outstanding commit task in flight
       bool outstanding_commit_task;
+      bool task_executed = false;
     protected:
       UniqueID current_fence_uid;
       FenceOp* current_mapping_fence;
