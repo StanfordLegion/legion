@@ -1259,7 +1259,7 @@ namespace Legion {
       std::map<RegionTreeID, RegionNode*> tree_nodes;
     private:
       // pending events for requested nodes
-      std::map<IndexSpace, RtEvent> index_space_requests;
+      std::map<IndexSpace, RtUserEvent> index_space_requests;
       std::map<IndexPartition, RtEvent> index_part_requests;
       std::map<FieldSpace, RtEvent> field_space_requests;
       std::map<RegionTreeID, RtEvent> region_tree_requests;

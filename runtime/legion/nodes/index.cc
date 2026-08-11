@@ -1105,9 +1105,18 @@ namespace Legion {
         // right node and if not forward it on to the right node
         if (target->collective_mapping != nullptr)
         {
-          legion_assert(!target->collective_mapping->contains(source));
           legion_assert(
               target->collective_mapping->contains(target->local_space));
+          // A collective member can request a lazily-created partition child
+          // if the forwarded request overtakes the child replication message.
+          // Its local create_node call will satisfy and trigger the pending
+          // lookup, so the owner must not bounce the request back to it.
+          if (target->collective_mapping->contains(source))
+          {
+            legion_assert(target->is_owner());
+            legion_assert(target->parent != nullptr);
+            return;
+          }
           if (target->is_owner())
           {
             const AddressSpaceID nearest =
