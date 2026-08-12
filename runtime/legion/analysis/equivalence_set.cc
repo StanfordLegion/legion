@@ -2214,7 +2214,7 @@ namespace Legion {
                    analysis.target_views[idx].begin();
                it != analysis.target_views[idx].end(); it++)
           {
-            const FieldMask inst_overlap = user_mask & overlap;
+            const FieldMask inst_overlap = overlap & it->second;
             if (!inst_overlap)
               continue;
             new_instances.insert(it->first, inst_overlap);
