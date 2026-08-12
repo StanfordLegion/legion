@@ -7109,7 +7109,7 @@ namespace Legion {
       std::sort(
           to_perform.begin(), to_perform.end(),
           [](Operation* lhs, Operation* rhs) {
-            return lhs->get_context_index(), rhs->get_context_index();
+            return lhs->get_context_index() < rhs->get_context_index();
           });
       for (Operation* const & it : to_perform)
       {
@@ -7156,7 +7156,7 @@ namespace Legion {
       std::sort(
           to_perform.begin(), to_perform.end(),
           [](Operation* lhs, Operation* rhs) {
-            return lhs->get_context_index(), rhs->get_context_index();
+            return lhs->get_context_index() < rhs->get_context_index();
           });
       for (Operation* const & it : to_perform)
       {
