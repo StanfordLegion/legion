@@ -142,7 +142,12 @@ namespace Realm {
     LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level);
 
   public:
-    LoggerMessage(const LoggerMessage &to_copy);
+    LoggerMessage(const LoggerMessage &to_copy) = delete;
+    LoggerMessage &operator=(const LoggerMessage &to_copy) = delete;
+
+    LoggerMessage(LoggerMessage &&to_move);
+    LoggerMessage &operator=(LoggerMessage &&to_move) = delete;
+
     ~LoggerMessage(void);
 
     template <typename T>

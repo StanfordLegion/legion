@@ -26,6 +26,10 @@
 #include "realm/transfer/ib_memory.h"
 #include "realm/inst_layout.h"
 
+#include <limits>
+#include <map>
+#include <numeric>
+
 #ifdef REALM_ON_WINDOWS
 #include <basetsd.h>
 typedef SSIZE_T ssize_t;
@@ -2997,11 +3001,22 @@ namespace Realm {
     , addrsplit_channel(_addrsplit_channel)
   {}
 
+  // non-static (exposed for unit testing); default lives on this declaration
+  size_t compute_ib_min_size(size_t combined_field_size, CustomSerdezID serdez_id,
+                             size_t max_needed = std::numeric_limits<size_t>::max());
+  size_t compute_ib_natural_size(size_t combined_field_size, size_t domain_size,
+                                 CustomSerdezID serdez_id);
+  static size_t compute_ib_granularity(size_t combined_field_size,
+                                       CustomSerdezID serdez_id);
+  static void init_ib_edge(TransferGraph::IBInfo &ibe, Memory memory, size_t size,
+                           size_t min_size, size_t size_granularity);
+
   static TransferGraph::XDTemplate::IO
   add_copy_path(std::vector<TransferGraph::XDTemplate> &xd_nodes,
                 std::vector<TransferGraph::IBInfo> &ib_edges,
                 TransferGraph::XDTemplate::IO start_edge, const MemPathInfo &info,
-                size_t ib_size = Config::ib_size_bytes)
+                size_t ib_size = Config::ib_size_bytes,
+                size_t ib_min_size = IB_ALLOC_ALIGNMENT, size_t ib_size_granularity = 1)
   {
     size_t hops = info.xd_channels.size();
 
@@ -3031,8 +3046,7 @@ namespace Realm {
       xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + i);
 
       TransferGraph::IBInfo &ibe = ib_edges[ib_base + i];
-      ibe.memory = info.path[i + 1];
-      ibe.size = ib_size;
+      init_ib_edge(ibe, info.path[i + 1], ib_size, ib_min_size, ib_size_granularity);
     }
 
     // last edge we created is the output
@@ -3117,6 +3131,18 @@ namespace Realm {
     src_fields.push_back(TransferDesc::FieldInfo{field_id, 0, address_size(), 0});
     TransferGraph::XDTemplate::IO addr_edge =
         TransferGraph::XDTemplate::mk_inst(inst, addr_field_start, 1);
+    const size_t address_natural_size =
+        compute_ib_natural_size(address_size(), ind_domain_size, 0);
+    const size_t data_natural_size =
+        compute_ib_natural_size(bytes_per_element, ind_domain_size, serdez_id);
+    const size_t address_min_size =
+        compute_ib_min_size(address_size(), 0, address_natural_size);
+    const size_t address_granularity = compute_ib_granularity(address_size(), 0);
+    const size_t control_min_size = compute_ib_min_size(sizeof(unsigned), 0);
+    const size_t control_granularity = compute_ib_granularity(sizeof(unsigned), 0);
+    const size_t data_min_size =
+        compute_ib_min_size(bytes_per_element, serdez_id, data_natural_size);
+    const size_t data_granularity = compute_ib_granularity(bytes_per_element, serdez_id);
 
     // special case - a gather from a single source with no out of range
     //  accesses
@@ -3139,12 +3165,10 @@ namespace Realm {
                                        0 /*no serdez*/, 0 /*redop_id*/, addr_path,
                                        true /*skip_final_memcpy*/);
           assert(ok);
-          size_t aligned_ib_size =
-              Config::ib_size_bytes +
-              (address_size() - (Config::ib_size_bytes % address_size())) %
-                  address_size();
+          size_t aligned_ib_size = ib_align_up(Config::ib_size_bytes, address_size());
           addr_edge =
-              add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size);
+              add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size,
+                            address_min_size, address_granularity);
         }
       }
 
@@ -3178,8 +3202,9 @@ namespace Realm {
           xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
 
           TransferGraph::IBInfo &ibe = ib_edges[ib_idx + i];
-          ibe.memory = path_infos[0].path[i + 1];
-          ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
+          init_ib_edge(ibe, path_infos[0].path[i + 1],
+                       std::max(Config::ib_size_bytes, data_min_size), data_min_size,
+                       data_granularity);
         }
       }
     } else {
@@ -3248,7 +3273,9 @@ namespace Realm {
                                    0 /*no serdez*/, 0 /*redop_id*/, addr_path,
                                    true /*skip_final_memcpy*/);
       assert(ok);
-      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      addr_edge =
+          add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, Config::ib_size_bytes,
+                        address_min_size, address_granularity);
 
       std::vector<TransferGraph::XDTemplate::IO> decoded_addr_edges(spaces_size);
       TransferGraph::XDTemplate::IO ctrl_edge;
@@ -3271,14 +3298,14 @@ namespace Realm {
         for(size_t i = 0; i < spaces_size; i++) {
           xdn.outputs[i] = TransferGraph::XDTemplate::mk_edge(ib_base + i);
           decoded_addr_edges[i] = xdn.outputs[i];
-          ib_edges[ib_base + i].memory = addr_ib_mem;
-          ib_edges[ib_base + i].size = 65536; // TODO
+          init_ib_edge(ib_edges[ib_base + i], addr_ib_mem, 65536, address_min_size,
+                       address_granularity);
         }
         xdn.outputs[spaces_size] =
             TransferGraph::XDTemplate::mk_edge(ib_base + spaces_size);
         ctrl_edge = xdn.outputs[spaces_size];
-        ib_edges[ib_base + spaces_size].memory = addr_ib_mem;
-        ib_edges[ib_base + spaces_size].size = 65536; // TODO
+        init_ib_edge(ib_edges[ib_base + spaces_size], addr_ib_mem, 65536,
+                     control_min_size, control_granularity);
       }
 
       // next, see what work we need to get the addresses to where the
@@ -3292,7 +3319,8 @@ namespace Realm {
                                        0 /*no serdez*/, 0 /*redop_id*/, path);
           assert(ok);
           decoded_addr_edges[i] =
-              add_copy_path(xd_nodes, ib_edges, decoded_addr_edges[i], path);
+              add_copy_path(xd_nodes, ib_edges, decoded_addr_edges[i], path,
+                            Config::ib_size_bytes, address_min_size, address_granularity);
         }
       }
 
@@ -3303,7 +3331,9 @@ namespace Realm {
         bool ok = find_shortest_path(nodes_info, addr_ib_mem, dst_ib_mem, 0 /*no serdez*/,
                                      0 /*redop_id*/, path);
         assert(ok);
-        ctrl_edge = add_copy_path(xd_nodes, ib_edges, ctrl_edge, path);
+        ctrl_edge =
+            add_copy_path(xd_nodes, ib_edges, ctrl_edge, path, Config::ib_size_bytes,
+                          control_min_size, control_granularity);
       }
 
       // now any data paths with more than one hop need all but the last hop
@@ -3336,8 +3366,9 @@ namespace Realm {
             }
             xdn.outputs.resize(1);
             xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
-            ib_edges[ib_base + j].memory = mpi.path[j + 1];
-            ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+            init_ib_edge(ib_edges[ib_base + j], mpi.path[j + 1],
+                         std::max<size_t>(65536, data_min_size), data_min_size,
+                         data_granularity);
           }
           data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_base + hops - 1);
         }
@@ -3439,6 +3470,18 @@ namespace Realm {
     src_fields.push_back(TransferDesc::FieldInfo{field_id, 0, address_size(), 0});
     TransferGraph::XDTemplate::IO addr_edge =
         TransferGraph::XDTemplate::mk_inst(inst, addr_field_start, 1);
+    const size_t address_natural_size =
+        compute_ib_natural_size(address_size(), ind_domain_size, 0);
+    const size_t data_natural_size =
+        compute_ib_natural_size(bytes_per_element, ind_domain_size, serdez_id);
+    const size_t address_min_size =
+        compute_ib_min_size(address_size(), 0, address_natural_size);
+    const size_t address_granularity = compute_ib_granularity(address_size(), 0);
+    const size_t control_min_size = compute_ib_min_size(sizeof(unsigned), 0);
+    const size_t control_granularity = compute_ib_granularity(sizeof(unsigned), 0);
+    const size_t data_min_size =
+        compute_ib_min_size(bytes_per_element, serdez_id, data_natural_size);
+    const size_t data_granularity = compute_ib_granularity(bytes_per_element, serdez_id);
 
     // special case - a scatter to a single destination with no out of
     //  range accesses
@@ -3462,11 +3505,9 @@ namespace Realm {
                                      ind_ib_mem, 0 /*no serdez*/, 0 /*redop_id*/,
                                      addr_path, true /*skip_final_memcpy*/);
         assert(ok);
-        size_t aligned_ib_size =
-            Config::ib_size_bytes +
-            (address_size() - (Config::ib_size_bytes % address_size())) % address_size();
-        addr_edge =
-            add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, aligned_ib_size);
+        size_t aligned_ib_size = ib_align_up(Config::ib_size_bytes, address_size());
+        addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path,
+                                  aligned_ib_size, address_min_size, address_granularity);
       }
 
       size_t xd_idx = xd_nodes.size();
@@ -3500,8 +3541,9 @@ namespace Realm {
           xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_idx + i);
 
           TransferGraph::IBInfo &ibe = ib_edges[ib_idx + i];
-          ibe.memory = path_infos[0].path[i + 1];
-          ibe.size = Config::ib_size_bytes; // 1 << 20; /*TODO*/
+          init_ib_edge(ibe, path_infos[0].path[i + 1],
+                       std::max(Config::ib_size_bytes, data_min_size), data_min_size,
+                       data_granularity);
         }
       }
     } else {
@@ -3554,7 +3596,9 @@ namespace Realm {
                                    0 /*no serdez*/, 0 /*redop_id*/, addr_path,
                                    true /*skip_final_memcpy*/);
       assert(ok);
-      addr_edge = add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path);
+      addr_edge =
+          add_copy_path(xd_nodes, ib_edges, addr_edge, addr_path, Config::ib_size_bytes,
+                        address_min_size, address_granularity);
 
       std::vector<TransferGraph::XDTemplate::IO> decoded_addr_edges(spaces_size);
       TransferGraph::XDTemplate::IO ctrl_edge;
@@ -3578,14 +3622,14 @@ namespace Realm {
         for(size_t i = 0; i < spaces_size; i++) {
           xdn.outputs[i] = TransferGraph::XDTemplate::mk_edge(ib_base + i);
           decoded_addr_edges[i] = xdn.outputs[i];
-          ib_edges[ib_base + i].memory = addr_ib_mem;
-          ib_edges[ib_base + i].size = 65536; // TODO
+          init_ib_edge(ib_edges[ib_base + i], addr_ib_mem, 65536, address_min_size,
+                       address_granularity);
         }
         xdn.outputs[spaces_size] =
             TransferGraph::XDTemplate::mk_edge(ib_base + spaces_size);
         ctrl_edge = xdn.outputs[spaces_size];
-        ib_edges[ib_base + spaces_size].memory = addr_ib_mem;
-        ib_edges[ib_base + spaces_size].size = 65536; // TODO
+        init_ib_edge(ib_edges[ib_base + spaces_size], addr_ib_mem, 65536,
+                     control_min_size, control_granularity);
       }
 
       // control information has to get to the split at the start
@@ -3595,7 +3639,9 @@ namespace Realm {
         bool ok = find_shortest_path(get_runtime()->nodes, addr_ib_mem, src_ib_mem,
                                      0 /*no serdez*/, 0 /*redop_id*/, path);
         assert(ok);
-        ctrl_edge = add_copy_path(xd_nodes, ib_edges, ctrl_edge, path);
+        ctrl_edge =
+            add_copy_path(xd_nodes, ib_edges, ctrl_edge, path, Config::ib_size_bytes,
+                          control_min_size, control_granularity);
       }
 
       // next, see what work we need to get the addresses to where the
@@ -3612,7 +3658,8 @@ namespace Realm {
                                        0 /*no serdez*/, 0 /*redop_id*/, path);
           assert(ok);
           decoded_addr_edges[i] =
-              add_copy_path(xd_nodes, ib_edges, decoded_addr_edges[i], path);
+              add_copy_path(xd_nodes, ib_edges, decoded_addr_edges[i], path,
+                            Config::ib_size_bytes, address_min_size, address_granularity);
         }
       }
 
@@ -3649,8 +3696,9 @@ namespace Realm {
             ib_edges.resize(ib_idx + 1);
             data_edges[i] = TransferGraph::XDTemplate::mk_edge(ib_idx);
             xdn.outputs[i] = data_edges[i];
-            ib_edges[ib_idx].memory = path_infos[path_idx[i]].path[1];
-            ib_edges[ib_idx].size = 65536; // TODO: pick size?
+            init_ib_edge(ib_edges[ib_idx], path_infos[path_idx[i]].path[1],
+                         std::max<size_t>(65536, data_min_size), data_min_size,
+                         data_granularity);
           }
         }
       }
@@ -3682,8 +3730,9 @@ namespace Realm {
                             : TransferGraph::XDTemplate::mk_edge(ib_base + j - 1));
               xdn.outputs.resize(1);
               xdn.outputs[0] = TransferGraph::XDTemplate::mk_edge(ib_base + j);
-              ib_edges[ib_base + j].memory = mpi.path[j + 2];
-              ib_edges[ib_base + j].size = 65536; // TODO: pick size?
+              init_ib_edge(ib_edges[ib_base + j], mpi.path[j + 2],
+                           std::max<size_t>(65536, data_min_size), data_min_size,
+                           data_granularity);
             } else {
               // last hop uses the address stream
               xdn.inputs.resize(2);
@@ -3939,30 +3988,155 @@ namespace Realm {
     }
   }
 
-  static size_t compute_ib_size(size_t combined_field_size, size_t domain_size,
-                                CustomSerdezID serdez_id)
+  static size_t ib_align_down(size_t n, size_t mult)
+  {
+    if(mult == 0) {
+      return n;
+    }
+    return n - (n % mult);
+  }
+
+  static bool ib_align_up_overflow(size_t n, size_t mult, size_t &result)
+  {
+    if(mult == 0) {
+      result = n;
+      return false;
+    }
+
+    size_t leftover = n % mult;
+    if(leftover == 0) {
+      result = n;
+      return false;
+    }
+
+    size_t extra = mult - leftover;
+    if(n > (std::numeric_limits<size_t>::max() - extra)) {
+      result = std::numeric_limits<size_t>::max();
+      return true;
+    }
+    result = n + extra;
+    return false;
+  }
+
+  static bool ib_add_overflow(size_t a, size_t b, size_t &result)
+  {
+    if(a > (std::numeric_limits<size_t>::max() - b)) {
+      result = std::numeric_limits<size_t>::max();
+      return true;
+    }
+    result = a + b;
+    return false;
+  }
+
+  static size_t ib_saturating_add(size_t a, size_t b)
+  {
+    size_t result;
+    ib_add_overflow(a, b, result);
+    return result;
+  }
+
+  static size_t ib_saturating_mul(size_t a, size_t b)
+  {
+    if((a != 0) && (b > (std::numeric_limits<size_t>::max() / a))) {
+      return std::numeric_limits<size_t>::max();
+    }
+    return a * b;
+  }
+
+  static size_t ib_saturating_mul_add(size_t a, size_t b, size_t c)
+  {
+    return ib_saturating_add(ib_saturating_mul(a, b), c);
+  }
+
+  static bool ib_checked_lcm(size_t a, size_t b, size_t &result)
+  {
+    if((a == 0) || (b == 0)) {
+      result = 0;
+      return true;
+    }
+
+    size_t div = a / std::gcd(a, b);
+    if(div > (std::numeric_limits<size_t>::max() / b)) {
+      return false;
+    }
+    result = div * b;
+    return true;
+  }
+
+  // floor(a * b / c) without overflowing a 64-bit intermediate for realistic IB
+  // sizes; uses 128-bit arithmetic where the compiler provides it (gcc/clang)
+  // and falls back to long double otherwise (e.g. MSVC).
+  static size_t ib_mul_div_floor(size_t a, size_t b, size_t c)
+  {
+    if(c == 0) {
+      return 0;
+    }
+#if defined(__SIZEOF_INT128__)
+    return static_cast<size_t>((static_cast<unsigned __int128>(a) * b) / c);
+#else
+    long double v = (static_cast<long double>(a) * static_cast<long double>(b)) /
+                    static_cast<long double>(c);
+    return static_cast<size_t>(v);
+#endif
+  }
+
+  static size_t get_cached_memory_size(std::map<Memory, size_t> &caps, Memory memory)
+  {
+    std::map<Memory, size_t>::const_iterator it = caps.find(memory);
+    if(it != caps.end()) {
+      return it->second;
+    }
+    size_t memory_size = MemoryImpl::get_memory_size(get_runtime(), memory);
+    caps[memory] = memory_size;
+    return memory_size;
+  }
+
+  static size_t get_ib_size_limit(Memory ib_mem, size_t config_limit,
+                                  std::map<Memory, size_t> &caps)
+  {
+    size_t memory_limit = get_cached_memory_size(caps, ib_mem);
+    return std::min(memory_limit, config_limit);
+  }
+
+  static size_t get_serdez_max_serialized_size(CustomSerdezID serdez_id)
+  {
+    const CustomSerdezUntyped *serdez_op =
+        get_runtime()->custom_serdez_table.get(serdez_id, 0);
+    assert(serdez_op != 0);
+    return serdez_op->max_serialized_size;
+  }
+
+  static size_t compute_ib_granularity(size_t combined_field_size,
+                                       CustomSerdezID serdez_id)
+  {
+    return (serdez_id != 0) ? 1 : std::max<size_t>(combined_field_size, 1);
+  }
+
+  size_t compute_ib_natural_size(size_t combined_field_size, size_t domain_size,
+                                 CustomSerdezID serdez_id)
   {
     size_t element_size;
     size_t serdez_pad = 0;
-    size_t min_granularity = 1;
     if(serdez_id != 0) {
-      const CustomSerdezUntyped *serdez_op =
-          get_runtime()->custom_serdez_table.get(serdez_id, 0);
-      assert(serdez_op != 0);
-      element_size = serdez_op->max_serialized_size;
-      serdez_pad = serdez_op->max_serialized_size;
+      element_size = get_serdez_max_serialized_size(serdez_id);
+      serdez_pad = element_size;
     } else {
       element_size = combined_field_size;
+    }
+
+    return ib_saturating_mul_add(domain_size, element_size, serdez_pad);
+  }
+
+  static size_t compute_ib_size(size_t combined_field_size, size_t domain_size,
+                                CustomSerdezID serdez_id, size_t max_ib_size)
+  {
+    size_t min_granularity = 1;
+    if(serdez_id == 0) {
       min_granularity = combined_field_size;
     }
 
-    size_t max_ib_size = 0;
-    RealmStatus status =
-        get_runtime()->get_module_config("core")->get_property("ib_regmem", max_ib_size);
-    assert(status == REALM_SUCCESS);
-
-    size_t ib_size = domain_size * element_size + serdez_pad;
-    const size_t IB_MAX_SIZE = max_ib_size; // 16 << 20; // 16MB
+    size_t ib_size = compute_ib_natural_size(combined_field_size, domain_size, serdez_id);
+    const size_t IB_MAX_SIZE = max_ib_size;
     if(ib_size > IB_MAX_SIZE) {
       // take up to IB_MAX_SIZE, respecting the min granularity
       if(min_granularity > 1) {
@@ -3980,6 +4154,238 @@ namespace Realm {
     }
 
     return ib_size;
+  }
+
+  // Smallest IB (logical ring) size that still lets a transfer make forward
+  // progress.  The engine moves at most ib_size>>1 bytes per step (channel.cc)
+  // and stalls if the ring can't hold a whole element, so the pipeline floor is
+  // 2 elements (plus one serdez pad, matching compute_ib_size's layout).  A
+  // transfer whose entire data is smaller than that floor is served by a buffer
+  // holding all of it, so 'max_needed' caps the floor at the total data size.
+  // The result is the logical ring floor and is intentionally NOT 256-aligned:
+  // ibe.size need not be aligned (only its allocation is), and aligning the
+  // floor up here would spuriously reject sub-256-byte transfers.
+  size_t compute_ib_min_size(size_t combined_field_size, CustomSerdezID serdez_id,
+                             size_t max_needed)
+  {
+    size_t element_size;
+    size_t serdez_pad = 0;
+    if(serdez_id != 0) {
+      element_size = get_serdez_max_serialized_size(serdez_id);
+      serdez_pad = element_size;
+    } else {
+      element_size = combined_field_size;
+    }
+    return std::min(ib_saturating_add(serdez_pad, ib_saturating_mul(2, element_size)),
+                    max_needed);
+  }
+
+  static void init_ib_edge(TransferGraph::IBInfo &ibe, Memory memory, size_t size,
+                           size_t min_size, size_t size_granularity)
+  {
+    ibe.memory = memory;
+    ibe.size = size;
+    ibe.min_size = min_size;
+    ibe.size_granularity = std::max<size_t>(size_granularity, 1);
+  }
+
+  static void init_transfer_ib_edge(TransferGraph::IBInfo &ibe, Memory memory,
+                                    size_t combined_field_size, size_t domain_size,
+                                    CustomSerdezID serdez_id, size_t ib_limit)
+  {
+    size_t size = compute_ib_size(combined_field_size, domain_size, serdez_id, ib_limit);
+    // the progress floor never needs to exceed the transfer's natural (uncapped)
+    //  size: a domain smaller than the 2-element floor is fully served by a
+    //  buffer holding all of its data
+    size_t natural_size =
+        compute_ib_natural_size(combined_field_size, domain_size, serdez_id);
+    init_ib_edge(ibe, memory, size,
+                 compute_ib_min_size(combined_field_size, serdez_id, natural_size),
+                 compute_ib_granularity(combined_field_size, serdez_id));
+  }
+
+  static size_t effective_ib_min_size(const TransferGraph::IBInfo &edge)
+  {
+    return (edge.min_size != 0) ? edge.min_size : IB_ALLOC_ALIGNMENT;
+  }
+
+  void redistribute_ib_sizes_impl(std::vector<TransferGraph::IBInfo> &ib_edges,
+                                  const std::map<Memory, size_t> &caps)
+  {
+    // group edge indices by target memory
+    std::map<Memory, std::vector<size_t>> groups;
+    for(size_t i = 0; i < ib_edges.size(); i++) {
+      groups[ib_edges[i].memory].push_back(i);
+    }
+
+    for(const std::pair<const Memory, std::vector<size_t>> &kv : groups) {
+      Memory mem = kv.first;
+      const std::vector<size_t> &idxs = kv.second;
+      size_t cap = caps.at(mem);
+      size_t budget_bytes = ib_align_down(cap, IB_ALLOC_ALIGNMENT);
+
+      // aggregate as the allocator will actually consume it (256-byte rounded)
+      size_t rounded_sum = 0;
+      bool rounded_sum_overflow = false;
+      for(size_t e : idxs) {
+        size_t min_size = effective_ib_min_size(ib_edges[e]);
+        if(ib_edges[e].size < min_size) {
+          log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << e
+                              << " mem=" << ib_edges[e].memory
+                              << " requested=" << ib_edges[e].size
+                              << " min-needed=" << min_size;
+          abort();
+        }
+        size_t rounded_size = 0;
+        rounded_sum_overflow |=
+            ib_align_up_overflow(ib_edges[e].size, IB_ALLOC_ALIGNMENT, rounded_size);
+        rounded_sum_overflow |= ib_add_overflow(rounded_sum, rounded_size, rounded_sum);
+      }
+      if(!rounded_sum_overflow && (rounded_sum <= cap)) {
+        continue; // fits already, leave untouched
+      }
+
+      // Per-edge floor and requested size, both rounded to a unit that is valid
+      // for the allocator and the transfer's element granularity.
+      std::vector<size_t> unit_bytes(idxs.size());
+      std::vector<size_t> floor_bytes(idxs.size());
+      std::vector<size_t> req_bytes(idxs.size());
+      std::vector<size_t> want_bytes(idxs.size());
+      size_t floor_bytes_total = 0;
+      size_t want_bytes_total = 0;
+      bool floor_bytes_overflow = false;
+      for(size_t k = 0; k < idxs.size(); k++) {
+        size_t e = idxs[k];
+        // final sizes must be a multiple of both the allocator alignment and the
+        //  transfer's element granularity
+        if(!ib_checked_lcm(IB_ALLOC_ALIGNMENT,
+                           std::max<size_t>(ib_edges[e].size_granularity, 1),
+                           unit_bytes[k])) {
+          log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << e
+                              << " mem=" << ib_edges[e].memory
+                              << " granularity=" << ib_edges[e].size_granularity
+                              << " alignment=" << IB_ALLOC_ALIGNMENT
+                              << " has unrepresentable lcm";
+          abort();
+        }
+        size_t floor_sz = 0;
+        if(ib_align_up_overflow(effective_ib_min_size(ib_edges[e]), unit_bytes[k],
+                                floor_sz)) {
+          log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << e
+                              << " mem=" << ib_edges[e].memory
+                              << " min-needed=" << effective_ib_min_size(ib_edges[e])
+                              << " unit=" << unit_bytes[k]
+                              << " has unrepresentable aligned floor";
+          abort();
+        }
+        size_t req_sz = ib_align_down(ib_edges[e].size, unit_bytes[k]);
+        if(req_sz < floor_sz) {
+          log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << e
+                              << " mem=" << ib_edges[e].memory
+                              << " requested=" << ib_edges[e].size
+                              << " min-needed=" << floor_sz << " unit=" << unit_bytes[k];
+          abort();
+        }
+        floor_bytes[k] = floor_sz;
+        req_bytes[k] = req_sz;
+        want_bytes[k] = req_bytes[k] - floor_bytes[k];
+        floor_bytes_overflow |=
+            ib_add_overflow(floor_bytes_total, floor_bytes[k], floor_bytes_total);
+        want_bytes_total = ib_saturating_add(want_bytes_total, want_bytes[k]);
+      }
+
+      if(floor_bytes_overflow || (floor_bytes_total > budget_bytes)) {
+        // genuinely impossible: can't fit even one element per edge at once
+        log_new_dma.fatal() << "FATAL: impossible IB allocation batch: mem=" << mem
+                            << " min-needed=" << floor_bytes_total << " avail=" << cap
+                            << " edges=" << idxs.size();
+        abort();
+      }
+      size_t extra_bytes = budget_bytes - floor_bytes_total;
+
+      // give each edge its floor plus a proportional share of the spare
+      // capacity, weighted by how much it wanted above its floor.  A running
+      // remainder bounds each grant so the total handed out never exceeds the
+      // spare budget - this keeps the aggregate <= cap and avoids any size_t
+      // underflow regardless of how the (floored) proportional share is rounded.
+      size_t remaining_extra = extra_bytes;
+      for(size_t k = 0; k < idxs.size(); k++) {
+        size_t give = 0;
+        if(want_bytes_total != 0) {
+          size_t share = ib_mul_div_floor(want_bytes[k], extra_bytes, want_bytes_total);
+          give = ib_align_down(std::min(share, remaining_extra), unit_bytes[k]);
+        }
+        ib_edges[idxs[k]].size = floor_bytes[k] + give;
+        remaining_extra -= give;
+      }
+
+      // Rounding can leave whole units unused; hand them to edges still below
+      // their requested size when a whole valid unit fits.
+      for(size_t k = 0; (remaining_extra > 0) && (k < idxs.size()); k++) {
+        size_t cur = ib_edges[idxs[k]].size;
+        if(cur < req_bytes[k]) {
+          size_t add =
+              ib_align_down(std::min(remaining_extra, req_bytes[k] - cur), unit_bytes[k]);
+          if(add > 0) {
+            ib_edges[idxs[k]].size += add;
+            remaining_extra -= add;
+          }
+        }
+      }
+    }
+  }
+
+  static void verify_ib_alloc_sizes(const std::vector<TransferGraph::IBInfo> &ib_edges,
+                                    const std::map<Memory, size_t> &caps)
+  {
+    std::map<Memory, size_t> bytes_by_memory;
+    for(size_t i = 0; i < ib_edges.size(); i++) {
+      size_t memory_size = caps.at(ib_edges[i].memory);
+      size_t min_size = effective_ib_min_size(ib_edges[i]);
+      if(ib_edges[i].size < min_size) {
+        log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << i
+                            << " mem=" << ib_edges[i].memory
+                            << " requested=" << ib_edges[i].size
+                            << " min-needed=" << min_size;
+        abort();
+      }
+
+      // the allocator rounds each request up to IB_ALLOC_ALIGNMENT, so compare
+      // against the rounded size to stay consistent with what it consumes
+      size_t rounded_size = 0;
+      if(ib_align_up_overflow(ib_edges[i].size, IB_ALLOC_ALIGNMENT, rounded_size)) {
+        log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << i
+                            << " mem=" << ib_edges[i].memory
+                            << " requested=" << ib_edges[i].size
+                            << " has unrepresentable aligned size";
+        abort();
+      }
+      if(rounded_size > memory_size) {
+        log_new_dma.fatal() << "FATAL: impossible IB allocation planned: index=" << i
+                            << " mem=" << ib_edges[i].memory << " needed=" << rounded_size
+                            << " avail=" << memory_size;
+        abort();
+      }
+
+      size_t &bytes_for_memory = bytes_by_memory[ib_edges[i].memory];
+      if(ib_add_overflow(bytes_for_memory, rounded_size, bytes_for_memory)) {
+        log_new_dma.fatal() << "FATAL: impossible IB allocation batch planned: mem="
+                            << ib_edges[i].memory << " needed exceeds size_t"
+                            << " avail=" << memory_size;
+        abort();
+      }
+    }
+
+    for(const std::pair<const Memory, size_t> &kv : bytes_by_memory) {
+      Memory memory = kv.first;
+      size_t memory_size = caps.at(memory);
+      if(kv.second > memory_size) {
+        log_new_dma.fatal() << "FATAL: impossible IB allocation batch planned: mem="
+                            << memory << " needed=" << kv.second
+                            << " avail=" << memory_size;
+        abort();
+      }
+    }
   }
 
   struct IBAllocOrderSorter {
@@ -4064,6 +4470,11 @@ namespace Realm {
     }
 
     size_t domain_size = analysis_domain_size;
+    size_t ib_regmem_limit = 0;
+    RealmStatus ib_regmem_status = get_runtime()->get_module_config("core")->get_property(
+        "ib_regmem", ib_regmem_limit);
+    assert(ib_regmem_status == REALM_SUCCESS);
+    std::map<Memory, size_t> ib_caps;
 
     // TODO: look at layouts and decide if fields should be grouped into
     //  a smaller number of copies
@@ -4143,11 +4554,9 @@ namespace Realm {
         size_t pathlen = path_info.xd_channels.size();
         size_t xd_idx = graph.xd_nodes.size();
         size_t ib_idx = graph.ib_edges.size();
-        size_t ib_alloc_size = 0;
         graph.xd_nodes.resize(xd_idx + pathlen);
         if(pathlen > 1) {
           graph.ib_edges.resize(ib_idx + pathlen - 1);
-          ib_alloc_size = compute_ib_size(combined_field_size, domain_size, serdez_id);
         }
         for(size_t j = 0; j < pathlen; j++) {
           TransferGraph::XDTemplate &xdn = graph.xd_nodes[xd_idx++];
@@ -4175,8 +4584,10 @@ namespace Realm {
           // xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
           if(j < (pathlen - 1)) {
             TransferGraph::IBInfo &ibe = graph.ib_edges[ib_idx++];
-            ibe.memory = path_info.path[j + 1];
-            ibe.size = ib_alloc_size;
+            Memory ib_memory = path_info.path[j + 1];
+            size_t ib_limit = get_ib_size_limit(ib_memory, ib_regmem_limit, ib_caps);
+            init_transfer_ib_edge(ibe, ib_memory, combined_field_size, domain_size,
+                                  serdez_id, ib_limit);
           }
         }
 
@@ -4218,11 +4629,9 @@ namespace Realm {
         size_t pathlen = path_info.xd_channels.size();
         size_t xd_idx = graph.xd_nodes.size();
         size_t ib_idx = graph.ib_edges.size();
-        size_t ib_alloc_size = 0;
         graph.xd_nodes.resize(xd_idx + pathlen);
         if(pathlen > 1) {
           graph.ib_edges.resize(ib_idx + pathlen - 1);
-          ib_alloc_size = compute_ib_size(combined_field_size, domain_size, serdez_id);
         }
         for(size_t j = 0; j < pathlen; j++) {
           TransferGraph::XDTemplate &xdn = graph.xd_nodes[xd_idx++];
@@ -4247,8 +4656,10 @@ namespace Realm {
                    : TransferGraph::XDTemplate::mk_edge(ib_idx));
           if(j < (pathlen - 1)) {
             TransferGraph::IBInfo &ibe = graph.ib_edges[ib_idx++];
-            ibe.memory = path_info.path[j + 1];
-            ibe.size = ib_alloc_size;
+            Memory ib_memory = path_info.path[j + 1];
+            size_t ib_limit = get_ib_size_limit(ib_memory, ib_regmem_limit, ib_caps);
+            init_transfer_ib_edge(ibe, ib_memory, combined_field_size, domain_size,
+                                  serdez_id, ib_limit);
           }
         }
 
@@ -4361,12 +4772,9 @@ namespace Realm {
             size_t pathlen = path_info.xd_channels.size();
             size_t xd_idx = graph.xd_nodes.size();
             size_t ib_idx = graph.ib_edges.size();
-            size_t ib_alloc_size = 0;
             graph.xd_nodes.resize(xd_idx + pathlen);
             if(pathlen > 1) {
               graph.ib_edges.resize(ib_idx + pathlen - 1);
-              ib_alloc_size =
-                  compute_ib_size(combined_field_size, domain_size, serdez_id);
             }
             for(size_t j = 0; j < pathlen; j++) {
               TransferGraph::XDTemplate &xdn = graph.xd_nodes[xd_idx++];
@@ -4401,8 +4809,10 @@ namespace Realm {
               // xdn.outputs[0].indirect_inst = RegionInstance::NO_INST;
               if(j < (pathlen - 1)) {
                 TransferGraph::IBInfo &ibe = graph.ib_edges[ib_idx++];
-                ibe.memory = path_info.path[j + 1];
-                ibe.size = ib_alloc_size;
+                Memory ib_memory = path_info.path[j + 1];
+                size_t ib_limit = get_ib_size_limit(ib_memory, ib_regmem_limit, ib_caps);
+                init_transfer_ib_edge(ibe, ib_memory, combined_field_size, domain_size,
+                                      serdez_id, ib_limit);
               }
             }
 
@@ -4493,8 +4903,15 @@ namespace Realm {
 
             int ib_idx = graph.ib_edges.size();
             graph.ib_edges.resize(ib_idx + 1);
-            graph.ib_edges[ib_idx].memory = ib_mem;
-            graph.ib_edges[ib_idx].size = 1 << 20; // HACK
+            size_t data_natural_size = compute_ib_natural_size(
+                addrsplit_bytes_per_element, domain_size, serdez_id);
+            size_t data_min_size = compute_ib_min_size(addrsplit_bytes_per_element,
+                                                       serdez_id, data_natural_size);
+            size_t data_granularity =
+                compute_ib_granularity(addrsplit_bytes_per_element, serdez_id);
+            init_ib_edge(graph.ib_edges[ib_idx], ib_mem,
+                         std::max<size_t>(size_t(1) << 20, data_min_size), data_min_size,
+                         data_granularity);
 
             IndirectionInfo *gather_info = indirects[srcs[i].indirect_index];
             gather_info->generate_gather_paths(
@@ -4550,6 +4967,15 @@ namespace Realm {
     //  then having the allocation code do all ibs for the same memory for a single
     //  transfer op atomically) does the trick
     if(!graph.ib_edges.empty()) {
+      // shrink any set of same-memory IB edges whose aggregate exceeds the
+      //  memory's capacity so the plan is feasible (must run before the sort
+      //  below, which tiebreaks on the final edge sizes)
+      for(const TransferGraph::IBInfo &e : graph.ib_edges) {
+        get_cached_memory_size(ib_caps, e.memory);
+      }
+      redistribute_ib_sizes_impl(graph.ib_edges, ib_caps);
+      verify_ib_alloc_sizes(graph.ib_edges, ib_caps);
+
       graph.ib_alloc_order.resize(graph.ib_edges.size());
       for(size_t i = 0; i < graph.ib_edges.size(); i++) {
         graph.ib_alloc_order[i] = i;

@@ -24,7 +24,31 @@
 
 #include "realm/mem_impl.h"
 
+#include <limits>
+
 namespace Realm {
+
+  // IBMemory::do_alloc rounds every allocation up to this alignment; planner-side
+  // size math must account for it so any plan the planner accepts is allocatable.
+  static constexpr size_t IB_ALLOC_ALIGNMENT = 256;
+
+  // round n up to the next multiple of mult (matches the semantics of the
+  // file-local roundup() in inst_impl.cc)
+  inline size_t ib_align_up(size_t n, size_t mult = IB_ALLOC_ALIGNMENT)
+  {
+    if(mult == 0) {
+      return n;
+    }
+    size_t leftover = n % mult;
+    if(leftover == 0) {
+      return n;
+    }
+    size_t extra = mult - leftover;
+    if(n > (std::numeric_limits<size_t>::max() - extra)) {
+      return std::numeric_limits<size_t>::max();
+    }
+    return n + extra;
+  }
 
   // a simple memory used for intermediate buffers in dma system
   class REALM_INTERNAL_API_EXTERNAL_LINKAGE IBMemory : public MemoryImpl {

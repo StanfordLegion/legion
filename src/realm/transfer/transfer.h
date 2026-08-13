@@ -440,6 +440,12 @@ namespace Realm {
     struct IBInfo {
       Memory memory;
       size_t size;
+      // smallest size that still lets the transfer make forward progress;
+      // 0 means "no explicit floor, use the global IB_ALLOC_ALIGNMENT default"
+      size_t min_size = 0;
+      // final sizes chosen by redistribution must remain multiples of this
+      // transfer granularity, in addition to the allocator's alignment
+      size_t size_granularity = 1;
     };
     std::vector<XDTemplate> xd_nodes;
     std::vector<IBInfo> ib_edges;
