@@ -23,6 +23,7 @@
 #include "legion/nodes/index.h"
 #include "legion/operations/mustepoch.h"
 #include "legion/tasks/individual.h"
+#include "legion/tasks/point.h"
 #include "legion/tasks/slice.h"
 #include "legion/tracing/recognizer.h"
 #include "legion/utilities/provenance.h"
@@ -2003,8 +2004,22 @@ namespace Legion {
     void IndexTask::record_origin_mapped_slice(SliceTask* local_slice)
     //--------------------------------------------------------------------------
     {
+      std::vector<RtEvent> profiling_preconditions;
+      for (PointTask* const point : local_slice->points)
+      {
+        const RtEvent profiling_reported = point->get_profiling_reported();
+        if (!profiling_reported.exists())
+          continue;
+        // The retained origin point owns any profiling responses for copies
+        // issued while mapping it, so keep it alive until they are reported.
+        // This also handles copy-only profiling when no copies were issued.
+        point->finalize_single_task_profiling();
+        profiling_preconditions.emplace_back(profiling_reported);
+      }
       AutoLock o_lock(op_lock);
       origin_mapped_slices.emplace_back(local_slice);
+      commit_preconditions.insert(
+          profiling_preconditions.begin(), profiling_preconditions.end());
     }
 
     //--------------------------------------------------------------------------
