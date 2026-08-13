@@ -41,10 +41,10 @@
 #include <cuda/std/complex>
 #define COMPLEX_NAMESPACE cuda::std
 #endif
-#elif defined(LEGION_USE_HIP) && defined(__HIP_PLATFORM_AMD__)
-#include <thrust/complex.h>
-#define COMPLEX_NAMESPACE thrust
 #else
+// std::complex works in HIP device code (both amdclang and hipcc treat the
+// libstdc++/libc++ implementation as host/device), so no separate device-side
+// complex library (e.g. thrust) is needed for the HIP/AMD platform.
 #include <complex>
 #define COMPLEX_NAMESPACE std
 #endif

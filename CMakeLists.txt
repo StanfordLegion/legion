@@ -503,10 +503,12 @@ set(REALM_UCX_DYNAMIC_LOAD ${Legion_UCX_DYNAMIC_LOAD})
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
 option(Legion_USE_HIP "Enable support for the HIP runtime on AMD/NVIDIA GPU" OFF)
 
-set(Legion_HIP_TARGETS "ROCM" "CUDA")
-mark_as_advanced(Legion_HIP_TARGETS)
-set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
-set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
+if(DEFINED Legion_HIP_TARGET)
+  message(FATAL_ERROR "Legion_HIP_TARGET is deprecated, set CMAKE_HIP_PLATFORM instead")
+endif()
+if(DEFINED Legion_HIP_ARCH)
+  message(FATAL_ERROR "Legion_HIP_ARCH is deprecated, set CMAKE_HIP_ARCHITECTURES instead")
+endif()
 
 if(Legion_USE_CUDA OR Legion_USE_HIP)
 
@@ -514,7 +516,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
   # define variable for legion_defines.h
   set(LEGION_GPU_REDUCTIONS ${Legion_GPU_REDUCTIONS})
 
-  if(Legion_USE_CUDA OR (Legion_HIP_TARGET STREQUAL "CUDA"))
+  if(Legion_USE_CUDA OR (CMAKE_HIP_PLATFORM STREQUAL "nvidia"))
 
     include(cmake/cuda_helpers.cmake)
 
@@ -594,34 +596,52 @@ set(REALM_CUDA_DYNAMIC_LOAD ${Legion_CUDA_DYNAMIC_LOAD})
 # HIP configuration
 #------------------------------------------------------------------------------#
 if(Legion_USE_HIP)
-
-  set(HIPCC_FLAGS ${HIPCC_FLAGS})
-
-  if(Legion_HIP_TARGET STREQUAL "CUDA")
-    list(APPEND HIPCC_FLAGS -D__HIP_PLATFORM_NVCC__)
-  elseif(Legion_HIP_TARGET STREQUAL "ROCM")
-    # find the hip library
-    find_package(HIP REQUIRED)
-
-    set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
-
-    set(HIPCC_FLAGS "-fno-strict-aliasing")
-    if("${Legion_HIP_ARCH}" STREQUAL "")
-      set(HIP_GENCODE "")
+  # Locate the ROCm installation that provides HIP
+  if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Path to where ROCm has been installed")
     else()
-      set(HIP_GENCODE "--offload-arch=${Legion_HIP_ARCH}")
+      set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to where ROCm has been installed")
     endif()
+  endif()
+  list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+  if(NOT HIP_ROOT_DIR)
+    set(HIP_ROOT_DIR "${ROCM_PATH}")
+  endif()
+  set(CMAKE_HIP_COMPILER_ROCM_ROOT "${HIP_ROOT_DIR}")
 
-    if(BUILD_SHARED_LIBS)
-      list(APPEND HIPCC_FLAGS -fPIC)
+  # hip-config.cmake keys off of HIP_PLATFORM rather than CMAKE_HIP_PLATFORM
+  if(DEFINED CMAKE_HIP_PLATFORM)
+    set(HIP_PLATFORM "${CMAKE_HIP_PLATFORM}")
+  endif()
+
+  find_package(hip REQUIRED CONFIG)
+  if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+    # the nvidia HIP platform requires 3.28+ for enable_language(HIP) to work
+    cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+    set_target_properties(hip::host PROPERTIES
+      INTERFACE_COMPILE_DEFINITIONS "__HIP_PLATFORM_NVIDIA__"
+      INTERFACE_LINK_LIBRARIES CUDA::cudart
+    )
+    if(NOT DEFINED CMAKE_HIP_RUNTIME_LIBRARY)
+      set(CMAKE_HIP_RUNTIME_LIBRARY "Shared")
     endif()
-
-    list(APPEND HIPCC_FLAGS -std=c++${CMAKE_CXX_STANDARD})
-
-    install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+  endif()
+  # Deal with an issue on some hip configs where the include directory is not
+  # set in the interface
+  get_target_property(HIPHOST_INC_DIR hip::host INTERFACE_INCLUDE_DIRECTORIES)
+  if(HIPHOST_INC_DIR STREQUAL "HIPHOST_INC_DIR-NOTFOUND")
+    set_target_properties(hip::host PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES ${HIP_INCLUDE_DIR}
     )
   endif()
+  unset(HIPHOST_INC_DIR)
+
+  enable_language(HIP)
+
+  # HIP sources are C++ sources and use the same standard as the rest of Legion
+  set(CMAKE_HIP_STANDARD ${CMAKE_CXX_STANDARD})
+  set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
   option(Legion_HIJACK_HIP "Enable HIJACK HIP" OFF)
 
@@ -988,10 +1008,6 @@ add_library(Legion::Legion ALIAS Legion)
 add_library(Legion::Realm ALIAS ${REALM_TGT})
 
 if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
-  if(Legion_HIP_TARGET STREQUAL "ROCM")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} ${HIPCC_FLAGS} ${HIP_GENCODE}")
-  endif()
-
   if(Legion_BUILD_ALL OR Legion_BUILD_APPS)
     add_subdirectory(apps)
   endif()
@@ -1031,13 +1047,6 @@ if(Legion_REDOP_HALF)
   set(LEGION_REDOP_HALF ON)
 endif()
 mark_as_advanced(Legion_REDOP_HALF)
-
-if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
-  set(HIP_THRUST_ROOT_DIR "" CACHE STRING "Location of HIP THRUST library")
-  if(NOT HIP_THRUST_ROOT_DIR)
-    message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
-  endif()
-endif()
 
 #------------------------------------------------------------------------------#
 # Build and install legion_prof_rs
