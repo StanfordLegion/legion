@@ -120,7 +120,6 @@ namespace Realm {
       bool cfg_use_worker_threads = false, cfg_use_shared_worker = true,
            cfg_pin_sysmem = true;
       bool cfg_fences_use_callbacks = false;
-      bool cfg_suppress_hijack_warning = false;
       unsigned cfg_skip_gpu_count = 0;
       bool cfg_skip_busy_gpus = false;
       size_t cfg_min_avail_mem = 0;
@@ -136,6 +135,30 @@ namespace Realm {
       int res_num_gpus = 0;
       size_t res_min_fbmem_size = 0;
       std::vector<size_t> res_fbmem_sizes;
+    };
+
+    // Descriptor for explicitly registering HIP reduction kernels with the HipModule.
+    // This is the HIP equivalent of CudaRedOpDesc. Unlike CUDA (which caches
+    // per-GPU CUfunction handles), HIP launches kernels via hipLaunchKernel using
+    // host-side function pointers directly, so void* suffices for all variants.
+    struct HipRedOpDesc {
+      ReductionOpID redop_id = 0;
+      Processor proc = Processor::NO_PROC;
+      // basic stride-based reduction kernels
+      void *apply_excl = nullptr;
+      void *apply_nonexcl = nullptr;
+      void *fold_excl = nullptr;
+      void *fold_nonexcl = nullptr;
+      // advanced kernels: up-to-3D multidimensional affine layout
+      void *apply_excl_advanced = nullptr;
+      void *apply_nonexcl_advanced = nullptr;
+      void *fold_excl_advanced = nullptr;
+      void *fold_nonexcl_advanced = nullptr;
+      // transpose kernels: up-to-3D multidimensional transpose layout
+      void *apply_excl_transpose = nullptr;
+      void *apply_nonexcl_transpose = nullptr;
+      void *fold_excl_transpose = nullptr;
+      void *fold_nonexcl_transpose = nullptr;
     };
 
     // our interface to the rest of the runtime
@@ -181,6 +204,10 @@ namespace Realm {
       //  if you already have a pointer to the HipModule
       unifiedHipStream_t *get_task_hip_stream();
       void set_task_ctxsync_required(bool is_required);
+
+      // explicitly register HIP reduction kernels (for use without runtime hijack or
+      // when kernels are loaded from pre-compiled modules via the HIP driver API)
+      bool register_reduction(Event &event, const HipRedOpDesc *descs, size_t num);
 
     public:
       HipModuleConfig *config;

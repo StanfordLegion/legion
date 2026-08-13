@@ -96,6 +96,10 @@ namespace Realm {
     //  to look up the actual kernels
     void *hip_apply_excl_fn, *hip_apply_nonexcl_fn;
     void *hip_fold_excl_fn, *hip_fold_nonexcl_fn;
+    void *hip_apply_excl_fn_advanced, *hip_apply_nonexcl_fn_advanced;
+    void *hip_fold_excl_fn_advanced, *hip_fold_nonexcl_fn_advanced;
+    void *hip_apply_excl_fn_transpose, *hip_apply_nonexcl_fn_transpose;
+    void *hip_fold_excl_fn_transpose, *hip_fold_nonexcl_fn_transpose;
 #endif
 
     ReductionOpUntyped()
@@ -130,6 +134,14 @@ namespace Realm {
       , hip_apply_nonexcl_fn(0)
       , hip_fold_excl_fn(0)
       , hip_fold_nonexcl_fn(0)
+      , hip_apply_excl_fn_advanced(0)
+      , hip_apply_nonexcl_fn_advanced(0)
+      , hip_fold_excl_fn_advanced(0)
+      , hip_fold_nonexcl_fn_advanced(0)
+      , hip_apply_excl_fn_transpose(0)
+      , hip_apply_nonexcl_fn_transpose(0)
+      , hip_fold_excl_fn_transpose(0)
+      , hip_fold_nonexcl_fn_transpose(0)
 #endif
     {}
 

@@ -101,6 +101,7 @@ list(
   event_test.cc
   path_cache_test.cc
   transfer_utils_test.cc
+  ib_redistribute_test.cc
   address_list_test.cc
   cmdline_parser_test.cc
   sequence_assembler_test.cc
@@ -124,6 +125,7 @@ list(
   hpp_event_test.cc
   key_value_store_test.cc
   deferred_alloc_test.cc
+  logging_test.cc
 )
 list(TRANSFORM REALM_UNIT_TESTS PREPEND "${REALM_TEST_DIR}/unit_tests/")
 add_executable(realm_unit_tests ${REALM_UNIT_TESTS})
@@ -387,10 +389,28 @@ add_integration_test(
 )
 target_link_libraries(memspeed ${TEST_GPU_LIBS})
 set(simple_reduce_ARGS -all)
-if(NOT BUILD_SHARED_LIBS OR NOT REALM_ENABLE_HIP)
+if(REALM_USE_HIP AND TEST_USE_GPU)
+  # HIP variant: hipLaunchKernel accepts host-side void* pointers directly,
+  # so the kernel registration works correctly even with shared libs.
+  add_integration_test(
+    simple_reduce "${REALM_TEST_DIR}/simple_reduce.cc"
+    "${REALM_TEST_DIR}/simple_reduce_gpu.hip"
+  )
+  set_source_files_properties("${REALM_TEST_DIR}/simple_reduce_gpu.hip" PROPERTIES LANGUAGE HIP)
+  # Test that reductions fall back to the basic stride loop when only the 4
+  # basic kernels are registered (advanced/transpose slots remain null).
+  set(hip_reduce_basic_ARGS -ll:gpu 1)
+  set(hip_reduce_basic_RESOURCE_LOCK gpu)
+  add_integration_test(
+    hip_reduce_basic "${REALM_TEST_DIR}/hip_reduce_basic.cc"
+    "${REALM_TEST_DIR}/hip_reduce_basic.hip"
+  )
+  set_source_files_properties("${REALM_TEST_DIR}/hip_reduce_basic.hip" PROPERTIES LANGUAGE HIP)
+  set_target_properties(hip_reduce_basic PROPERTIES ENABLE_EXPORTS TRUE)
+elseif(NOT BUILD_SHARED_LIBS OR NOT REALM_ENABLE_HIP)
   # simple_reduce registers a kernel with the runtime, but uses a different instance of the runtime
   # than in librealm.so, which causes an "invalid device function" error.  This has been solved in
-  # the CUDA module, not the HIP module yet.
+  # the CUDA module but not for HIP + shared libs.
   add_integration_test(
     simple_reduce "${REALM_TEST_DIR}/simple_reduce.cc"
     "$<$<BOOL:TEST_USE_GPU>:${REALM_TEST_DIR}/simple_reduce_gpu.cu>"

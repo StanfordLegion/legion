@@ -29,10 +29,6 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/ib_memory.h"
 
-#ifdef REALM_USE_HIP_HIJACK
-#include "realm/hip/hip_hijack.h"
-#endif
-
 #include "realm/mutex.h"
 #include "realm/utils.h"
 
@@ -43,9 +39,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <math.h>
+#include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <utility>
 
 #define IS_DEFAULT_STREAM(stream) ((stream) == 0)
 
+extern const unsigned char realm_hip_fatbin[];
 namespace Realm {
 
   extern Logger log_taskreg;
@@ -275,7 +277,7 @@ namespace Realm {
       r->add_dma_channel(new GPUChannel(this, XFER_GPU_IN_FB, &r->bgwork));
       r->add_dma_channel(new GPUfillChannel(this, &r->bgwork));
       r->add_dma_channel(new GPUreduceChannel(this, &r->bgwork));
-
+      r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_IN_FB, &r->bgwork));
       // treat managed mem like pinned sysmem on the assumption that most data
       //  is usually in system memory
       if(!pinned_sysmems.empty() || !managed_mems.empty()) {
@@ -288,6 +290,7 @@ namespace Realm {
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty() || !hipipc_mappings.empty()) {
         r->add_dma_channel(new GPUChannel(this, XFER_GPU_PEER_FB, &r->bgwork));
+        r->add_dma_channel(new GPUIndirectChannel(this, XFER_GPU_SC_PEER_FB, &r->bgwork));
       }
     }
 
@@ -406,8 +409,7 @@ namespace Realm {
       // shouldn't be any events running around still
       assert((current_size + external_count) == total_size);
       if(external_count)
-        log_stream.warning() << "Application leaking " << external_count
-                             << " cuda events";
+        log_stream.warning() << "Application leaking " << external_count << " hip events";
 
       for(int i = 0; i < current_size; i++)
         CHECK_HIP(hipEventDestroy(available_events[i]));
@@ -669,24 +671,6 @@ namespace Realm {
       static thread_local int context_sync_required = 0;
     }; // namespace ThreadLocal
 
-#ifdef REALM_USE_HIP_HIJACK
-    // this flag will be set on the first call into any of the hijack code in
-    //  cudart_hijack.cc
-    //  an application is linked with -lcudart, we will NOT be hijacking the
-    //  application's calls, and the cuda module needs to know that)
-    /*extern*/ bool cudart_hijack_active = false;
-
-    // for most HIP API entry points, calling them from a non-GPU task is
-    //  a fatal error - for others (e.g. cudaDeviceSynchronize), it's either
-    //  silently permitted (0), warned (1), or a fatal error (2) based on this
-    //  setting
-    /*extern*/ int cudart_hijack_nongpu_sync = 2;
-
-    // used in GPUTaskScheduler<T>::execute_task below
-    static bool already_issued_hijack_warning = false;
-    static bool already_issued_hijack_enabled_warning = false;
-#endif
-
     template <typename T>
     bool GPUTaskScheduler<T>::execute_task(Task *task)
     {
@@ -738,33 +722,7 @@ namespace Realm {
       //  full context synchronization is required for a task to be
       //  "complete"
       if(gpu_proc->gpu->module->config->cfg_task_context_sync < 0) {
-#ifdef REALM_USE_HIP_HIJACK
-        // normally hijack code will catch all the work and put it on the
-        //  right stream, but if we haven't seen it used, there may be a
-        //  static copy of the cuda runtime that's in use and foiling the
-        //  hijack
-        if(cudart_hijack_active) {
-          gpu_proc->gpu->module->config->cfg_task_context_sync = 0;
-          if(!already_issued_hijack_enabled_warning) {
-            already_issued_hijack_enabled_warning = true;
-            log_gpu.warning()
-                << "HIP hijack is active"
-                << " - device synchronizations not required after every GPU task!";
-          }
-        } else {
-          if(!(gpu_proc->gpu->module->config->cfg_suppress_hijack_warning ||
-               already_issued_hijack_warning)) {
-            already_issued_hijack_warning = true;
-            log_gpu.warning()
-                << "HIP hijack code not active"
-                << " - device synchronizations required after every GPU task!";
-          }
-          // gpu_proc->gpu->module->cfg_task_context_sync = 1;
-        }
-#else
-        // without hijack or legacy sync requested, ctxsync is needed
         gpu_proc->gpu->module->config->cfg_task_context_sync = 1;
-#endif
       }
 
       if((ThreadLocal::context_sync_required > 0) ||
@@ -1727,27 +1685,6 @@ namespace Realm {
       return ThreadLocal::current_gpu_proc;
     }
 
-#ifdef REALM_USE_HIP_HIJACK
-    void GPUProcessor::push_call_configuration(dim3 grid_dim, dim3 block_dim,
-                                               size_t shared_size, void *stream)
-    {
-      call_configs.push_back(
-          CallConfig(grid_dim, block_dim, shared_size, (hipStream_t)stream));
-    }
-
-    void GPUProcessor::pop_call_configuration(dim3 *grid_dim, dim3 *block_dim,
-                                              size_t *shared_size, void *stream)
-    {
-      assert(!call_configs.empty());
-      const CallConfig &config = call_configs.back();
-      *grid_dim = config.grid;
-      *block_dim = config.block;
-      *shared_size = config.shared;
-      *((hipStream_t *)stream) = config.stream;
-      call_configs.pop_back();
-    }
-#endif
-
     void GPUProcessor::stream_wait_on_event(hipStream_t stream, hipEvent_t event)
     {
       if(IS_DEFAULT_STREAM(stream))
@@ -1840,126 +1777,99 @@ namespace Realm {
       }
     }
 
-#ifdef REALM_USE_HIP_HIJACK
-    void GPUProcessor::event_create(hipEvent_t *event, int flags)
+    static void launch_kernel(const Realm::Hip::GPU::GPUFuncInfo &func_info, void *params,
+                              size_t num_elems, size_t arg_size, GPUStream *stream)
     {
-      // int cu_flags = CU_EVENT_DEFAULT;
-      // if((flags & cudaEventBlockingSync) != 0)
-      // 	cu_flags |= CU_EVENT_BLOCKING_SYNC;
-      // if((flags & cudaEventDisableTiming) != 0)
-      // 	cu_flags |= CU_EVENT_DISABLE_TIMING;
-
-      // get an event from our event pool (ignoring the flags for now)
-      hipEvent_t e = gpu->event_pool.get_event(true /*external*/);
-      *event = e;
+      unsigned int num_blocks = 0, num_threads = 0;
+      num_threads = std::min(static_cast<unsigned int>(func_info.occ_num_threads),
+                             static_cast<unsigned int>(num_elems));
+      num_blocks = std::min(
+          static_cast<unsigned int>((num_elems + num_threads - 1) / num_threads),
+          static_cast<unsigned int>(
+              func_info.occ_num_blocks)); // Cap the grid based on the given volume
+      void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, params,
+                        HIP_LAUNCH_PARAM_BUFFER_SIZE, &arg_size, HIP_LAUNCH_PARAM_END};
+      CHECK_HIP(hipModuleLaunchKernel(func_info.func, num_blocks, 1, 1, num_threads, 1, 1,
+                                      /* shared_mem_bytes */ 0, stream->get_stream(),
+                                      nullptr, config));
     }
 
-    void GPUProcessor::event_destroy(hipEvent_t event)
+    void GPU::launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                      size_t elem_size, GPUStream *stream)
     {
-      // assume the event is one of ours and put it back in the pool
-      hipEvent_t e = event;
-      if(e)
-        gpu->event_pool.return_event(e, true /*external*/);
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+      size_t num_elems = copy_info.extents[1] * copy_info.extents[2];
+      assert((1ULL << log_elem_size) <= elem_size);
+
+      const GPUFuncInfo &func_info = transpose_kernels[log_elem_size];
+      unsigned int num_blocks = 0, num_threads = 0;
+      size_t chunks = copy_info.extents[0] / elem_size;
+      copy_info.tile_size = static_cast<size_t>(
+          static_cast<size_t>(sqrt(func_info.occ_num_threads) / chunks) * chunks);
+      size_t shared_mem_bytes =
+          (copy_info.tile_size * (copy_info.tile_size + 1)) * copy_info.extents[0];
+
+      num_threads = copy_info.tile_size * copy_info.tile_size;
+
+      num_blocks =
+          std::min(static_cast<unsigned int>((num_elems + num_threads - 1) / num_threads),
+                   static_cast<unsigned int>(func_info.occ_num_blocks));
+      size_t offset = sizeof(copy_info);
+      void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &copy_info,
+                        HIP_LAUNCH_PARAM_BUFFER_SIZE, &offset, HIP_LAUNCH_PARAM_END};
+      CHECK_HIP(hipModuleLaunchKernel(func_info.func, num_blocks, 1, 1, num_threads, 1, 1,
+                                      shared_mem_bytes, stream->get_stream(), nullptr,
+                                      config));
     }
 
-    void GPUProcessor::event_record(hipEvent_t event, hipStream_t stream)
+    void GPU::launch_batch_affine_kernel(void *copy_info, size_t dim, size_t elem_size,
+                                         size_t volume, GPUStream *stream,
+                                         size_t arg_size)
     {
-      // ignore the provided stream and record the event on this task's assigned stream
-      hipEvent_t e = event;
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      CHECK_HIP(hipEventRecord(e, stream));
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_elem_size) == elem_size);
+      assert(dim <= REALM_MAX_DIM);
+      assert(dim >= 1);
+      log_gpudma.info() << "launching batch affine kernel ";
+      GPUFuncInfo &func_info = batch_affine_kernels[dim - 1][log_elem_size];
+      launch_kernel(func_info, copy_info, volume, arg_size, stream);
     }
 
-    void GPUProcessor::event_synchronize(hipEvent_t event)
+    void GPU::launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
+                                          size_t field_size, size_t volume,
+                                          size_t arg_size, GPUStream *stream)
     {
-      // TODO: consider suspending task rather than busy-waiting here...
-      hipEvent_t e = event;
-      CHECK_HIP(hipEventSynchronize(e));
+      size_t log_addr_size = std::min(static_cast<size_t>(ctz(addr_size)),
+                                      HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+      size_t log_field_size = std::min(static_cast<size_t>(ctz(field_size)),
+                                       HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_field_size) <= field_size);
+      assert(dim <= REALM_MAX_DIM);
+      assert(dim >= 1);
+      log_gpudma.info() << "launching indirect copy kernel ";
+      GPUFuncInfo &func_info =
+          indirect_copy_kernels[dim - 1][log_addr_size][log_field_size];
+      launch_kernel(func_info, copy_info, volume, arg_size, stream);
     }
 
-    void GPUProcessor::event_elapsed_time(float *ms, hipEvent_t start, hipEvent_t end)
+    void GPU::launch_batch_affine_fill_kernel(void *fill_info, size_t dim,
+                                              size_t elem_size, size_t volume,
+                                              size_t arg_size, GPUStream *stream)
     {
-      // TODO: consider suspending task rather than busy-waiting here...
-      hipEvent_t e1 = start;
-      hipEvent_t e2 = end;
-      CHECK_HIP(hipEventElapsedTime(ms, e1, e2));
+      size_t log_elem_size = std::min(static_cast<size_t>(ctz(elem_size)),
+                                      HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES - 1);
+
+      assert((1ULL << log_elem_size) == elem_size);
+      assert(dim <= REALM_MAX_DIM);
+      assert(dim >= 1);
+      log_gpudma.info() << "launching batch affine fill kernel ";
+      GPUFuncInfo &func_info = batch_affine_fill_kernels[dim - 1][log_elem_size];
+      launch_kernel(func_info, fill_info, volume, arg_size, stream);
     }
-
-    GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
-      : grid(_grid)
-      , block(_block)
-      , shared(_shared)
-    {}
-
-    GPUProcessor::CallConfig::CallConfig(dim3 _grid, dim3 _block, size_t _shared,
-                                         hipStream_t _stream)
-      : LaunchConfig(_grid, _block, _shared)
-      , stream(_stream)
-    {}
-
-    void GPUProcessor::configure_call(dim3 grid_dim, dim3 block_dim, size_t shared_mem,
-                                      hipStream_t stream)
-    {
-      launch_configs.push_back(CallConfig(grid_dim, block_dim, shared_mem, stream));
-    }
-
-    void GPUProcessor::setup_argument(const void *arg, size_t size, size_t offset)
-    {
-      size_t required = offset + size;
-
-      if(required > kernel_args.size())
-        kernel_args.resize(required);
-
-      memcpy(&kernel_args[offset], arg, size);
-    }
-
-    void GPUProcessor::launch(const void *func)
-    {
-      // make sure we have a launch config
-      assert(!launch_configs.empty());
-      CallConfig &config = launch_configs.back();
-
-      // Find our function
-      hipFunction_t f = gpu->lookup_function(func);
-
-      size_t arg_size = kernel_args.size();
-      void *extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernel_args[0],
-                       HIP_LAUNCH_PARAM_BUFFER_SIZE, &arg_size, HIP_LAUNCH_PARAM_END};
-
-      if(IS_DEFAULT_STREAM(config.stream))
-        config.stream = ThreadLocal::current_gpu_stream->get_stream();
-      log_stream.debug() << "kernel " << func << " added to stream " << config.stream;
-
-      // Launch the kernel on our stream dammit!
-      CHECK_HIP(hipModuleLaunchKernel(f, config.grid.x, config.grid.y, config.grid.z,
-                                      config.block.x, config.block.y, config.block.z,
-                                      config.shared, config.stream, NULL, extra));
-
-      // pop the config we just used
-      launch_configs.pop_back();
-
-      // clear out the kernel args
-      kernel_args.clear();
-    }
-
-    void GPUProcessor::launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim,
-                                     void **args, size_t shared_memory,
-                                     hipStream_t stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      log_stream.debug() << "kernel " << func << " added to stream " << stream;
-      /*
-      // Launch the kernel on our stream dammit!
-      CHECK_HIP( hipLaunchKernelGGL(func,
-                               grid_dim, block_dim,
-                               shared_memory,
-                               stream,
-                               args) );
-    */
-    }
-#endif
 
     void GPUProcessor::gpu_memcpy(void *dst, const void *src, size_t size,
                                   hipMemcpyKind kind)
@@ -1979,49 +1889,6 @@ namespace Realm {
       CHECK_HIP(hipMemcpyAsync(dst, src, size, kind, stream));
       // no synchronization here
     }
-
-#ifdef REALM_USE_HIP_HIJACK
-    void GPUProcessor::gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
-                                            size_t offset, hipMemcpyKind kind)
-    {
-      hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
-      char *var_base = gpu->lookup_variable(dst);
-      CHECK_HIP(hipMemcpyAsync((void *)(var_base + offset), src, size, kind, current));
-      stream_synchronize(current);
-    }
-
-    void GPUProcessor::gpu_memcpy_to_symbol_async(const void *dst, const void *src,
-                                                  size_t size, size_t offset,
-                                                  hipMemcpyKind kind, hipStream_t stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      char *var_base = gpu->lookup_variable(dst);
-      CHECK_HIP(hipMemcpyAsync((void *)(var_base + offset), src, size, kind, stream));
-      // no synchronization here
-    }
-
-    void GPUProcessor::gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
-                                              size_t offset, hipMemcpyKind kind)
-    {
-      hipStream_t current = ThreadLocal::current_gpu_stream->get_stream();
-      char *var_base = gpu->lookup_variable(src);
-      CHECK_HIP(hipMemcpyAsync(dst, (void *)(var_base + offset), size, kind, current));
-      stream_synchronize(current);
-    }
-
-    void GPUProcessor::gpu_memcpy_from_symbol_async(void *dst, const void *src,
-                                                    size_t size, size_t offset,
-                                                    hipMemcpyKind kind,
-                                                    hipStream_t stream)
-    {
-      if(IS_DEFAULT_STREAM(stream))
-        stream = ThreadLocal::current_gpu_stream->get_stream();
-      char *var_base = gpu->lookup_variable(src);
-      CHECK_HIP(hipMemcpyAsync(dst, (void *)(var_base + offset), size, kind, stream));
-      // no synchronization here
-    }
-#endif
 
     void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
     {
@@ -2057,13 +1924,108 @@ namespace Realm {
       host_to_device_stream = new GPUStream(this, worker);
       device_to_host_stream = new GPUStream(this, worker);
 
+      hipDevice_t dev;
+      int numSMs;
+
+      CHECK_HIP(hipGetDevice(&dev));
+      CHECK_HIP(
+          hipDeviceGetAttribute(&numSMs, hipDeviceAttributeMultiprocessorCount, dev));
+      CHECK_HIP(hipModuleLoadData(&device_module, (void *)realm_hip_fatbin));
+
+      // hipModuleOccupancyMaxPotentialBlockSize ignores __launch_bounds__ on HIP (unlike
+      // CUDA's cuOccupancyMaxPotentialBlockSize). Query the kernel's declared maximum and
+      // pass it as blockSizeLimit so the occupancy calculator doesn't exceed it.
+      auto occupancy_max_block_size = [](int *grid_size, int *block_size,
+                                         hipFunction_t func, size_t dyn_shared_mem) {
+        int max_tpb = 0;
+        hipError_t e =
+            hipFuncGetAttribute(&max_tpb, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, func);
+        if(e != hipSuccess)
+          return e;
+        return hipModuleOccupancyMaxPotentialBlockSize(grid_size, block_size, func,
+                                                       dyn_shared_mem, max_tpb);
+      };
+
+      for(unsigned int log_bit_sz = 0; log_bit_sz < HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES;
+          log_bit_sz++) {
+        const unsigned int bit_sz = 8U << log_bit_sz;
+        GPUFuncInfo func_info;
+        char name[30];
+        std::snprintf(name, sizeof(name), "memcpy_transpose%u", bit_sz);
+        CHECK_HIP(hipModuleGetFunction(&func_info.func, device_module, name));
+
+        // hipModuleOccupancyMaxPotentialBlockSize takes a fixed dynSharedMemPerBlk rather
+        // than a callback (unlike cuOccupancyMaxPotentialBlockSize). Use a two-step
+        // approach: query without shared-mem constraint to get an initial block size,
+        // find the largest tile_size whose shared-mem fits, then re-query with that
+        // constraint to get the optimal block count.
+        {
+          int max_shared_mem = 0;
+          CHECK_HIP(hipDeviceGetAttribute(
+              &max_shared_mem, hipDeviceAttributeMaxSharedMemoryPerBlock, dev));
+          CHECK_HIP(occupancy_max_block_size(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0));
+          int tile_size =
+              static_cast<int>(sqrt(static_cast<double>(func_info.occ_num_threads)));
+          size_t sharedmem_needed = 0;
+          while(tile_size > 0) {
+            sharedmem_needed =
+                static_cast<size_t>(tile_size * (tile_size + 1)) * HIP_MAX_FIELD_BYTES;
+            if(sharedmem_needed <= static_cast<size_t>(max_shared_mem))
+              break;
+            tile_size--;
+          }
+          CHECK_HIP(occupancy_max_block_size(&func_info.occ_num_blocks,
+                                             &func_info.occ_num_threads, func_info.func,
+                                             sharedmem_needed));
+          // Clamp to tile_size^2: the occupancy call may suggest a larger block size
+          // than the tile can accommodate.
+          func_info.occ_num_threads = tile_size * tile_size;
+        }
+        transpose_kernels[log_bit_sz] = func_info;
+
+        for(unsigned int d = 1; d <= HIP_MAX_DIM; d++) {
+          std::snprintf(name, sizeof(name), "memcpy_affine_batch%uD_%u", d, bit_sz);
+          CHECK_HIP(hipModuleGetFunction(&func_info.func, device_module, name));
+          // No shared memory used; allow the driver to choose the optimal block size.
+          CHECK_HIP(occupancy_max_block_size(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0));
+          batch_affine_kernels[d - 1][log_bit_sz] = func_info;
+
+          std::snprintf(name, sizeof(name), "fill_affine_large%uD_%u", d, bit_sz);
+          CHECK_HIP(hipModuleGetFunction(&func_info.func, device_module, name));
+          CHECK_HIP(occupancy_max_block_size(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0));
+          fill_affine_large_kernels[d - 1][log_bit_sz] = func_info;
+
+          std::snprintf(name, sizeof(name), "fill_affine_batch%uD_%u", d, bit_sz);
+          CHECK_HIP(hipModuleGetFunction(&func_info.func, device_module, name));
+          CHECK_HIP(occupancy_max_block_size(
+              &func_info.occ_num_blocks, &func_info.occ_num_threads, func_info.func, 0));
+          batch_affine_fill_kernels[d - 1][log_bit_sz] = func_info;
+
+          for(unsigned int log_addr_bit_sz = 2; log_addr_bit_sz < 4; log_addr_bit_sz++) {
+            const unsigned int addr_bit_sz = 8U << log_addr_bit_sz;
+            std::snprintf(name, sizeof(name), "memcpy_indirect%uD_%u%u", d, bit_sz,
+                          addr_bit_sz);
+
+            CHECK_HIP(hipModuleGetFunction(&func_info.func, device_module, name));
+
+            CHECK_HIP(occupancy_max_block_size(&func_info.occ_num_blocks,
+                                               &func_info.occ_num_threads, func_info.func,
+                                               0));
+            indirect_copy_kernels[d - 1][log_addr_bit_sz][log_bit_sz] = func_info;
+          }
+        }
+      }
+
       device_to_device_streams.resize(module->config->cfg_d2d_streams, 0);
       for(unsigned i = 0; i < module->config->cfg_d2d_streams; i++)
         device_to_device_streams[i] =
             new GPUStream(this, worker, module->config->cfg_d2d_stream_priority);
 
       // only create p2p streams for devices we can talk to
-      peer_to_peer_streams.resize(module->gpu_info.size(), 0);
+      peer_to_peer_streams.resize(module->gpu_info.size(), nullptr);
       for(std::vector<GPUInfo *>::const_iterator it = module->gpu_info.begin();
           it != module->gpu_info.end(); ++it)
         if(info->peers.count((*it)->device) != 0)
@@ -2074,11 +2036,6 @@ namespace Realm {
         task_streams[i] = new GPUStream(this, worker);
 
       pop_context();
-
-#ifdef REALM_USE_HIP_HIJACK
-      // now hook into the cuda runtime fatbin/etc. registration path
-      GlobalRegistrations::add_gpu_context(this);
-#endif
     }
 
     GPU::~GPU(void)
@@ -2130,6 +2087,12 @@ namespace Realm {
       // hipCtx_t popped;
       // CHECK_HIP( hipCtxPopCurrent(&popped) );
       // assert(popped == context);
+    }
+
+    bool GPU::can_access_peer(const GPU *peer) const
+    {
+      return (peer != NULL) &&
+             (info->peers.find(peer->info->device) != info->peers.end());
     }
 
     void GPU::create_processor(RuntimeImpl *runtime, size_t stack_size)
@@ -2327,111 +2290,6 @@ namespace Realm {
       runtime->add_memory(fb_dmem);
     }
 
-#ifdef REALM_USE_HIP_HIJACK
-    void GPU::register_fat_binary(const FatBin *fatbin)
-    {
-      AutoGPUContext agc(this);
-
-      log_gpu.info() << "registering fat binary " << fatbin << " with GPU " << this;
-
-      // have we see this one already?
-      if(device_modules.count(fatbin) > 0) {
-        log_gpu.warning() << "duplicate registration of fat binary data " << fatbin;
-        return;
-      }
-
-      if(fatbin->data != 0) {
-        // binary data to be loaded with cuModuleLoad(Ex)
-        hipModule_t module = load_hip_module(fatbin->data);
-        device_modules[fatbin] = module;
-        return;
-      }
-
-      assert(0);
-    }
-
-    void GPU::register_variable(const RegisteredVariable *var)
-    {
-      AutoGPUContext agc(this);
-
-      log_gpu.debug() << "registering variable " << var->device_name << " ("
-                      << var->host_var << ") with GPU " << this;
-
-      // have we seen it already?
-      if(device_variables.count(var->host_var) > 0) {
-        log_gpu.warning() << "duplicate registration of variable " << var->device_name;
-        return;
-      }
-
-      // get the module it lives in
-      std::map<const FatBin *, hipModule_t>::const_iterator it =
-          device_modules.find(var->fat_bin);
-      assert(it != device_modules.end());
-      hipModule_t module = it->second;
-
-      hipDeviceptr_t ptr;
-      size_t size;
-      CHECK_HIP(hipModuleGetGlobal(&ptr, &size, module, var->device_name));
-      device_variables[var->host_var] = reinterpret_cast<char *>(ptr);
-
-      // if this is a managed variable, the "host_var" is actually a pointer
-      //  we need to fill in, so do that now
-      if(var->managed) {
-        hipDeviceptr_t *indirect = const_cast<hipDeviceptr_t *>(
-            static_cast<const hipDeviceptr_t *>(var->host_var));
-        if(*indirect) {
-          // it's already set - make sure we're consistent (we're probably not)
-          if(*indirect != ptr) {
-            log_gpu.fatal() << "__managed__ variables are not supported when using "
-                               "multiple devices with HIP hijack enabled";
-            abort();
-          }
-        } else {
-          *indirect = ptr;
-        }
-      }
-    }
-
-    void GPU::register_function(const RegisteredFunction *func)
-    {
-      AutoGPUContext agc(this);
-
-      log_gpu.debug() << "registering function " << func->device_fun << " ("
-                      << func->host_fun << ") with GPU " << this;
-
-      // have we seen it already?
-      if(device_functions.count(func->host_fun) > 0) {
-        log_gpu.warning() << "duplicate registration of function " << func->device_fun;
-        return;
-      }
-
-      // get the module it lives in
-      std::map<const FatBin *, hipModule_t>::const_iterator it =
-          device_modules.find(func->fat_bin);
-      assert(it != device_modules.end());
-      hipModule_t module = it->second;
-
-      hipFunction_t f;
-      CHECK_HIP(hipModuleGetFunction(&f, module, func->device_fun));
-      device_functions[func->host_fun] = f;
-    }
-
-    hipFunction_t GPU::lookup_function(const void *func)
-    {
-      std::map<const void *, hipFunction_t>::iterator finder =
-          device_functions.find(func);
-      assert(finder != device_functions.end());
-      return finder->second;
-    }
-
-    char *GPU::lookup_variable(const void *var)
-    {
-      std::map<const void *, char *>::iterator finder = device_variables.find(var);
-      assert(finder != device_variables.end());
-      return finder->second;
-    }
-#endif
-
     hipModule_t GPU::load_hip_module(const void *data)
     {
       assert(0);
@@ -2526,7 +2384,6 @@ namespace Realm {
           .add_option_int("-ll:gpuworker", cfg_use_shared_worker)
           .add_option_int("-ll:pin", cfg_pin_sysmem)
           .add_option_bool("-hip:callbacks", cfg_fences_use_callbacks)
-          .add_option_bool("-hip:nohijack", cfg_suppress_hijack_warning)
           .add_option_int("-hip:skipgpus", cfg_skip_gpu_count)
           .add_option_bool("-hip:skipbusy", cfg_skip_busy_gpus)
           .add_option_int_units("-hip:minavailmem", cfg_min_avail_mem, 'm')
@@ -2535,9 +2392,6 @@ namespace Realm {
           .add_option_int("-hip:mtdma", cfg_multithread_dma)
           .add_option_int_units("-hip:hostreg", cfg_hostreg_limit, 'm')
           .add_option_int("-hip:ipc", cfg_use_hip_ipc);
-#ifdef REALM_USE_HIP_HIJACK
-      cp.add_option_int("-hip:nongpusync", cudart_hijack_nongpu_sync);
-#endif
 
       bool ok = cp.parse_command_line(cmdline);
       if(!ok) {
@@ -2646,82 +2500,6 @@ namespace Realm {
           info->major = dev_prop.major;
           info->minor = dev_prop.minor;
           info->totalGlobalMem = dev_prop.totalGlobalMem;
-#ifdef REALM_USE_HIP_HIJACK
-          // We only need the rest of these properties for the hijack
-#define GET_DEVICE_PROP(member, name)                                                    \
-  do {                                                                                   \
-    int tmp;                                                                             \
-    CHECK_HIP(hipDeviceGetAttribute(&tmp, hipDeviceAttribute##name, info->device));      \
-    info->member = tmp;                                                                  \
-  } while(0)
-          // SCREW TEXTURES AND SURFACES FOR NOW!
-          GET_DEVICE_PROP(sharedMemPerBlock, MaxSharedMemoryPerBlock);
-          GET_DEVICE_PROP(regsPerBlock, MaxRegistersPerBlock);
-          GET_DEVICE_PROP(warpSize, WarpSize);
-          // GET_DEVICE_PROP(memPitch, MAX_PITCH);
-          GET_DEVICE_PROP(maxThreadsPerBlock, MaxThreadsPerBlock);
-          GET_DEVICE_PROP(maxThreadsDim[0], MaxBlockDimX);
-          GET_DEVICE_PROP(maxThreadsDim[1], MaxBlockDimY);
-          GET_DEVICE_PROP(maxThreadsDim[2], MaxBlockDimZ);
-          GET_DEVICE_PROP(maxGridSize[0], MaxGridDimX);
-          GET_DEVICE_PROP(maxGridSize[1], MaxGridDimY);
-          GET_DEVICE_PROP(maxGridSize[2], MaxGridDimZ);
-          GET_DEVICE_PROP(clockRate, ClockRate);
-          GET_DEVICE_PROP(totalConstMem, TotalConstantMemory);
-          // GET_DEVICE_PROP(deviceOverlap, GPU_OVERLAP);
-          GET_DEVICE_PROP(multiProcessorCount, MultiprocessorCount);
-          // GET_DEVICE_PROP(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT);
-          // GET_DEVICE_PROP(integrated, INTEGRATED);
-          // GET_DEVICE_PROP(canMapHostMemory, CAN_MAP_HOST_MEMORY);
-          GET_DEVICE_PROP(computeMode, ComputeMode);
-          GET_DEVICE_PROP(concurrentKernels, ConcurrentKernels);
-          // GET_DEVICE_PROP(ECCEnabled, ECC_ENABLED);
-          GET_DEVICE_PROP(pciBusID, PciBusId);
-          GET_DEVICE_PROP(pciDeviceID, PciDeviceId);
-          // GET_DEVICE_PROP(pciDomainID, PCI_DOMAIN_ID);
-          // GET_DEVICE_PROP(tccDriver, TCC_DRIVER);
-          // GET_DEVICE_PROP(asyncEngineCount, ASYNC_ENGINE_COUNT);
-          // GET_DEVICE_PROP(unifiedAddressing, UNIFIED_ADDRESSING);
-          GET_DEVICE_PROP(memoryClockRate, MemoryClockRate);
-          GET_DEVICE_PROP(memoryBusWidth, MemoryBusWidth);
-          GET_DEVICE_PROP(l2CacheSize, L2CacheSize);
-          GET_DEVICE_PROP(maxThreadsPerMultiProcessor, MaxThreadsPerMultiProcessor);
-          // GET_DEVICE_PROP(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED);
-          // GET_DEVICE_PROP(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED);
-          // GET_DEVICE_PROP(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED);
-          GET_DEVICE_PROP(maxSharedMemoryPerMultiProcessor,
-                          MaxSharedMemoryPerMultiprocessor);
-          // GET_DEVICE_PROP(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR);
-          // GET_DEVICE_PROP(managedMemory, MANAGED_MEMORY);
-          GET_DEVICE_PROP(isMultiGpuBoard, IsMultiGpuBoard);
-          // GET_DEVICE_PROP(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID);
-// #if CUDA_VERSION >= 8000
-//             GET_DEVICE_PROP(singleToDoublePrecisionPerfRatio,
-//             SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO);
-//             GET_DEVICE_PROP(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS);
-//             GET_DEVICE_PROP(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS);
-// #endif
-// #if CUDA_VERSION >= 9000
-//             GET_DEVICE_PROP(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED);
-//             GET_DEVICE_PROP(canUseHostPointerForRegisteredMem,
-//             CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM);
-//             GET_DEVICE_PROP(cooperativeLaunch, COOPERATIVE_LAUNCH);
-//             GET_DEVICE_PROP(cooperativeMultiDeviceLaunch,
-//             COOPERATIVE_MULTI_DEVICE_LAUNCH); GET_DEVICE_PROP(sharedMemPerBlockOptin,
-//             MAX_SHARED_MEMORY_PER_BLOCK_OPTIN);
-// #endif
-// #if CUDA_VERSION >= 9200
-//             GET_DEVICE_PROP(pageableMemoryAccessUsesHostPageTables,
-//             PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES);
-//             GET_DEVICE_PROP(directManagedMemAccessFromHost,
-//             DIRECT_MANAGED_MEM_ACCESS_FROM_HOST);
-// #endif
-// #if CUDA_VERSION >= 11000
-//             GET_DEVICE_PROP(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR);
-//             GET_DEVICE_PROP(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE);
-// #endif
-#undef GET_DEVICE_PROP
-#endif // REALM_USE_HIP_HIJACK
           log_gpu.info() << "GPU #" << i << ": " << info->name << " (" << info->major
                          << '.' << info->minor << ") " << (info->totalGlobalMem >> 20)
                          << " MB";
@@ -3293,9 +3071,6 @@ namespace Realm {
       runtime->repl_heap.remove_listener(rh_listener);
 
       for(std::vector<GPU *>::iterator it = gpus.begin(); it != gpus.end(); it++) {
-#ifdef REALM_USE_HIP_HIJACK
-        GlobalRegistrations::remove_gpu_context(*it);
-#endif
         delete *it;
       }
       gpus.clear();
@@ -3318,152 +3093,75 @@ namespace Realm {
       ThreadLocal::context_sync_required = (is_required ? 1 : 0);
     }
 
-#ifdef REALM_USE_HIP_HIJACK
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // struct RegisteredFunction
-
-    RegisteredFunction::RegisteredFunction(const FatBin *_fat_bin, const void *_host_fun,
-                                           const char *_device_fun)
-      : fat_bin(_fat_bin)
-      , host_fun(_host_fun)
-      , device_fun(_device_fun)
-    {}
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // struct RegisteredVariable
-
-    RegisteredVariable::RegisteredVariable(const FatBin *_fat_bin, const void *_host_var,
-                                           const char *_device_name, bool _external,
-                                           int _size, bool _constant, bool _global,
-                                           bool _managed)
-      : fat_bin(_fat_bin)
-      , host_var(_host_var)
-      , device_name(_device_name)
-      , external(_external)
-      , size(_size)
-      , constant(_constant)
-      , global(_global)
-      , managed(_managed)
-    {}
-
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class GlobalRegistrations
-
-    GlobalRegistrations::GlobalRegistrations(void) {}
-
-    GlobalRegistrations::~GlobalRegistrations(void)
+    bool HipModule::register_reduction(Event &event, const HipRedOpDesc *descs,
+                                       size_t num)
     {
-      delete_container_contents(variables);
-      delete_container_contents(functions);
-      // we don't own fat binary pointers, but we can forget them
-      fat_binaries.clear();
+      std::vector<Event> events(num, Event::NO_EVENT);
+
+      // Validate all entries before making any changes
+      for(size_t didx = 0; didx < num; didx++) {
+        ReductionOpUntyped *redop =
+            get_runtime()->reduce_op_table.get(descs[didx].redop_id, nullptr);
+        if(redop == nullptr) {
+          log_gpu.debug("Failed to find pre-registered reduction operator %d",
+                        descs[didx].redop_id);
+          return false;
+        }
+        // Validate that proc is a GPU managed by this module
+        bool found_gpu = false;
+        for(GPU *g : gpus) {
+          if(g->proc->me == descs[didx].proc) {
+            found_gpu = true;
+            break;
+          }
+        }
+        if(!found_gpu) {
+          log_gpu.debug("register_reduction: proc not found in HIP module");
+          return false;
+        }
+      }
+
+      for(size_t didx = 0; didx < num; didx++) {
+        ReductionOpUntyped *redop =
+            get_runtime()->reduce_op_table.get(descs[didx].redop_id, nullptr);
+        assert(redop != nullptr); // already validated above
+
+        // store basic kernel host function pointers
+        if(descs[didx].apply_excl)
+          redop->hip_apply_excl_fn = descs[didx].apply_excl;
+        if(descs[didx].apply_nonexcl)
+          redop->hip_apply_nonexcl_fn = descs[didx].apply_nonexcl;
+        if(descs[didx].fold_excl)
+          redop->hip_fold_excl_fn = descs[didx].fold_excl;
+        if(descs[didx].fold_nonexcl)
+          redop->hip_fold_nonexcl_fn = descs[didx].fold_nonexcl;
+
+        // store advanced affine kernel host function pointers
+        if(descs[didx].apply_excl_advanced)
+          redop->hip_apply_excl_fn_advanced = descs[didx].apply_excl_advanced;
+        if(descs[didx].apply_nonexcl_advanced)
+          redop->hip_apply_nonexcl_fn_advanced = descs[didx].apply_nonexcl_advanced;
+        if(descs[didx].fold_excl_advanced)
+          redop->hip_fold_excl_fn_advanced = descs[didx].fold_excl_advanced;
+        if(descs[didx].fold_nonexcl_advanced)
+          redop->hip_fold_nonexcl_fn_advanced = descs[didx].fold_nonexcl_advanced;
+
+        // store transpose kernel host function pointers
+        if(descs[didx].apply_excl_transpose)
+          redop->hip_apply_excl_fn_transpose = descs[didx].apply_excl_transpose;
+        if(descs[didx].apply_nonexcl_transpose)
+          redop->hip_apply_nonexcl_fn_transpose = descs[didx].apply_nonexcl_transpose;
+        if(descs[didx].fold_excl_transpose)
+          redop->hip_fold_excl_fn_transpose = descs[didx].fold_excl_transpose;
+        if(descs[didx].fold_nonexcl_transpose)
+          redop->hip_fold_nonexcl_fn_transpose = descs[didx].fold_nonexcl_transpose;
+
+        events[didx] = get_runtime()->notify_register_reduction(descs[didx].redop_id);
+      }
+
+      event = Event::merge_events(events);
+      return true;
     }
-
-    /*static*/ GlobalRegistrations &GlobalRegistrations::get_global_registrations(void)
-    {
-      static GlobalRegistrations reg;
-      return reg;
-    }
-
-    // called by a GPU when it has created its context - will result in calls back
-    //  into the GPU for any modules/variables/whatever already registered
-    /*static*/ void GlobalRegistrations::add_gpu_context(GPU *gpu)
-    {
-      GlobalRegistrations &g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add this gpu to the list
-      assert(g.active_gpus.count(gpu) == 0);
-      g.active_gpus.insert(gpu);
-
-      // and now tell it about all the previous-registered stuff
-      for(std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-          it != g.fat_binaries.end(); it++)
-        gpu->register_fat_binary(*it);
-
-      for(std::vector<RegisteredVariable *>::iterator it = g.variables.begin();
-          it != g.variables.end(); it++)
-        gpu->register_variable(*it);
-
-      for(std::vector<RegisteredFunction *>::iterator it = g.functions.begin();
-          it != g.functions.end(); it++)
-        gpu->register_function(*it);
-    }
-
-    /*static*/ void GlobalRegistrations::remove_gpu_context(GPU *gpu)
-    {
-      GlobalRegistrations &g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      assert(g.active_gpus.count(gpu) > 0);
-      g.active_gpus.erase(gpu);
-    }
-
-    // called by __cuda(un)RegisterFatBinary
-    /*static*/ void GlobalRegistrations::register_fat_binary(FatBin *fatbin)
-    {
-      GlobalRegistrations &g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add the fat binary to the list and tell any gpus we know of about it
-      g.fat_binaries.push_back(fatbin);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin(); it != g.active_gpus.end();
-          it++)
-        (*it)->register_fat_binary(fatbin);
-    }
-
-    /*static*/ void GlobalRegistrations::unregister_fat_binary(FatBin *fatbin)
-    {
-      GlobalRegistrations &g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // remove the fatbin from the list - don't bother telling gpus
-      std::vector<FatBin *>::iterator it = g.fat_binaries.begin();
-      while(it != g.fat_binaries.end())
-        if(*it == fatbin)
-          it = g.fat_binaries.erase(it);
-        else
-          it++;
-    }
-
-    // called by __cudaRegisterVar
-    /*static*/ void GlobalRegistrations::register_variable(RegisteredVariable *var)
-    {
-      GlobalRegistrations &g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add the variable to the list and tell any gpus we know
-      g.variables.push_back(var);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin(); it != g.active_gpus.end();
-          it++)
-        (*it)->register_variable(var);
-    }
-
-    // called by __cudaRegisterFunction
-    /*static*/ void GlobalRegistrations::register_function(RegisteredFunction *func)
-    {
-      GlobalRegistrations &g = get_global_registrations();
-
-      AutoLock<> al(g.mutex);
-
-      // add the function to the list and tell any gpus we know
-      g.functions.push_back(func);
-
-      for(std::set<GPU *>::iterator it = g.active_gpus.begin(); it != g.active_gpus.end();
-          it++)
-        (*it)->register_function(func);
-    }
-#endif
 
     // active messages for establishing cuda ipc mappings
 
@@ -3623,13 +3321,10 @@ namespace Realm {
 
     ActiveMessageHandlerReg<HipIpcRelease> hip_ipc_release_handler;
 
-#ifndef REALM_USE_HIP_HIJACK
     extern "C" {
     REALM_PUBLIC_API
     hipStream_t hipGetTaskStream() { return 0; }
     }; // extern "C"
-
-#endif
 
   }; // namespace Hip
 };   // namespace Realm

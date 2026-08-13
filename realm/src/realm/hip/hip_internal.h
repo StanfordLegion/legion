@@ -31,6 +31,8 @@
 #include "realm/bgwork.h"
 #include "realm/transfer/channel.h"
 #include "realm/transfer/ib_memory.h"
+#include "realm/hip/hip_memcpy.h"
+#include "realm/hip/hip_reduc.h"
 
 #define CHECK_CUDART(cmd)                                                                \
   do {                                                                                   \
@@ -62,21 +64,15 @@ namespace Realm {
 
   namespace Hip {
 
-    struct GPUInfo
-#ifdef REALM_USE_HIP_HIJACK
-      : public hipDeviceProp_t
-#endif
-    {
+    struct GPUInfo {
       int index; // index used by HIP runtime
       hipDevice_t device;
 
       static const size_t MAX_NAME_LEN = 64;
-#ifndef REALM_USE_HIP_HIJACK
       char name[MAX_NAME_LEN];
 
       int major, minor;
       size_t totalGlobalMem;
-#endif
       std::set<hipDevice_t> peers; // other GPUs we can do p2p copies with
     };
 
@@ -312,10 +308,6 @@ namespace Realm {
       CoreReservation *core_rsrv;
     };
 
-    struct FatBin;
-    struct RegisteredVariable;
-    struct RegisteredFunction;
-
     // a GPU object represents our use of a given HIP-capable GPU - this will
     //  have an associated HIP context, a (possibly shared) worker thread, a
     //  processor, and an FB memory (the ZC memory is shared across all GPUs)
@@ -327,28 +319,32 @@ namespace Realm {
       void push_context(void);
       void pop_context(void);
 
-#ifdef REALM_USE_HIP_HIJACK
-      void register_fat_binary(const FatBin *data);
-      void register_variable(const RegisteredVariable *var);
-      void register_function(const RegisteredFunction *func);
-
-      hipFunction_t lookup_function(const void *func);
-      char *lookup_variable(const void *var);
-#endif
-
       void create_processor(RuntimeImpl *runtime, size_t stack_size);
       void create_fb_memory(RuntimeImpl *runtime, size_t size, size_t ib_size);
       void create_dynamic_fb_memory(RuntimeImpl *runtime, size_t max_size);
 
       void create_dma_channels(Realm::RuntimeImpl *r);
 
-      bool can_access_peer(GPU *peer);
+      bool can_access_peer(const GPU *peer) const;
 
       GPUStream *find_stream(hipStream_t stream) const;
       REALM_INTERNAL_API_EXTERNAL_LINKAGE GPUStream *
       get_null_task_stream(void) const; // needed by librealm_kokkos.so
       GPUStream *get_next_task_stream(bool create = false);
       GPUStream *get_next_d2d_stream();
+      void launch_batch_affine_kernel(void *copy_info, size_t dim, size_t elemSize,
+                                      size_t volume, GPUStream *stream, size_t arg_size);
+      void launch_batch_affine_fill_kernel(void *fill_info, size_t dim, size_t elem_size,
+                                           size_t volume, size_t arg_size,
+                                           GPUStream *stream);
+      void launch_transpose_kernel(MemcpyTransposeInfo<size_t> &copy_info,
+                                   size_t elemSize, GPUStream *stream);
+
+      void launch_indirect_copy_kernel(void *copy_info, size_t dim, size_t addr_size,
+                                       size_t field_size, size_t volume, size_t arg_size,
+                                       GPUStream *stream);
+      bool is_accessible_host_mem(const MemoryImpl *mem) const;
+      bool is_accessible_gpu_mem(const MemoryImpl *mem) const;
 
     protected:
       hipModule_t load_hip_module(const void *data);
@@ -364,6 +360,30 @@ namespace Realm {
 
       // hipCtx_t context;
       int device_id = -1;
+      hipModule_t device_module = nullptr;
+
+      struct GPUFuncInfo {
+        hipFunction_t func;
+        int occ_num_threads;
+        int occ_num_blocks;
+      };
+
+      // The maximum value of log2(type_bytes) that hip kernels handle.
+      // log2(1 byte)   --> 0
+      // log2(2 bytes)  --> 1
+      // log2(4 bytes)  --> 2
+      // log2(8 bytes)  --> 3
+      // log2(16 bytes) --> 4
+      static const size_t HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES = 5;
+
+      GPUFuncInfo batch_affine_kernels[REALM_MAX_DIM][HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo batch_affine_fill_kernels[REALM_MAX_DIM]
+                                           [HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo fill_affine_large_kernels[REALM_MAX_DIM]
+                                           [HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo indirect_copy_kernels[REALM_MAX_DIM][HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES]
+                                       [HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
+      GPUFuncInfo transpose_kernels[HIP_MEMCPY_KERNEL_MAX2_LOG2_BYTES];
 
       char *fbmem_base = nullptr;
 
@@ -404,12 +424,6 @@ namespace Realm {
       std::map<NodeID, GPUStream *> hipipc_streams;
 
       const HipIpcMapping *find_ipc_mapping(Memory mem) const;
-
-#ifdef REALM_USE_HIP_HIJACK
-      std::map<const FatBin *, hipModule_t> device_modules;
-      std::map<const void *, hipFunction_t> device_functions;
-      std::map<const void *, char *> device_variables;
-#endif
     };
 
     // helper to push/pop a GPU's context by scope
@@ -443,69 +457,19 @@ namespace Realm {
     public:
       static GPUProcessor *get_current_gpu_proc(void);
 
-#ifdef REALM_USE_HIP_HIJACK
-      // calls that come from the HIP runtime API
-      void push_call_configuration(dim3 grid_dim, dim3 block_dim, size_t shared_size,
-                                   void *stream);
-      void pop_call_configuration(dim3 *grid_dim, dim3 *block_dim, size_t *shared_size,
-                                  void *stream);
-#endif
-
       void stream_wait_on_event(hipStream_t stream, hipEvent_t event);
       void stream_synchronize(hipStream_t stream);
       void device_synchronize(void);
 
-#ifdef REALM_USE_HIP_HIJACK
-      void event_create(hipEvent_t *event, int flags);
-      void event_destroy(hipEvent_t event);
-      void event_record(hipEvent_t event, hipStream_t stream);
-      void event_synchronize(hipEvent_t event);
-      void event_elapsed_time(float *ms, hipEvent_t start, hipEvent_t end);
-
-      void configure_call(dim3 grid_dim, dim3 block_dim, size_t shared_memory,
-                          hipStream_t stream);
-      void setup_argument(const void *arg, size_t size, size_t offset);
-      void launch(const void *func);
-      void launch_kernel(const void *func, dim3 grid_dim, dim3 block_dim, void **args,
-                         size_t shared_memory, hipStream_t stream);
-#endif
-
       void gpu_memcpy(void *dst, const void *src, size_t size, hipMemcpyKind kind);
       void gpu_memcpy_async(void *dst, const void *src, size_t size, hipMemcpyKind kind,
                             hipStream_t stream);
-#ifdef REALM_USE_HIP_HIJACK
-      void gpu_memcpy_to_symbol(const void *dst, const void *src, size_t size,
-                                size_t offset, hipMemcpyKind kind);
-      void gpu_memcpy_to_symbol_async(const void *dst, const void *src, size_t size,
-                                      size_t offset, hipMemcpyKind kind,
-                                      hipStream_t stream);
-      void gpu_memcpy_from_symbol(void *dst, const void *src, size_t size, size_t offset,
-                                  hipMemcpyKind kind);
-      void gpu_memcpy_from_symbol_async(void *dst, const void *src, size_t size,
-                                        size_t offset, hipMemcpyKind kind,
-                                        hipStream_t stream);
-#endif
-
       void gpu_memset(void *dst, int value, size_t count);
       void gpu_memset_async(void *dst, int value, size_t count, hipStream_t stream);
 
     public:
       GPU *gpu;
 
-      // data needed for kernel launches
-      struct LaunchConfig {
-        dim3 grid;
-        dim3 block;
-        size_t shared;
-        LaunchConfig(dim3 _grid, dim3 _block, size_t _shared);
-      };
-      struct CallConfig : public LaunchConfig {
-        hipStream_t stream;
-        CallConfig(dim3 _grid, dim3 _block, size_t _shared, hipStream_t _stream);
-      };
-      std::vector<CallConfig> launch_configs;
-      std::vector<char> kernel_args;
-      std::vector<CallConfig> call_configs;
       bool block_on_synchronize;
       ContextSynchronizer ctxsync;
 
@@ -669,6 +633,29 @@ namespace Realm {
       GPUCompletionEvent event;
     };
 
+    class GPUIndirectTransferCompletion : public GPUCompletionNotification {
+    public:
+      GPUIndirectTransferCompletion(
+          XferDes *_xd, int _read_port_idx, size_t _read_offset, size_t _read_size,
+          int _write_port_idx, size_t _write_offset, size_t _write_size,
+          int _read_ind_port_idx = -1, size_t _read_ind_offset = 0,
+          size_t _read_ind_size = 0, int _write_ind_port_idx = -1,
+          size_t _write_ind_offset = 0, size_t _write_ind_size = 0);
+
+      virtual void request_completed(void);
+
+    protected:
+      XferDes *xd;
+      int read_port_idx;
+      size_t read_offset, read_size;
+      int read_ind_port_idx;
+      size_t read_ind_offset, read_ind_size;
+      int write_port_idx;
+      size_t write_offset, write_size;
+      int write_ind_port_idx;
+      size_t write_ind_offset, write_ind_size;
+    };
+
     class GPUTransferCompletion : public GPUCompletionNotification {
     public:
       GPUTransferCompletion(XferDes *_xd, int _read_port_idx, size_t _read_offset,
@@ -683,6 +670,26 @@ namespace Realm {
       size_t read_offset, read_size;
       int write_port_idx;
       size_t write_offset, write_size;
+    };
+    class MemSpecificHipArray : public MemSpecificInfo {
+    public:
+      MemSpecificHipArray(hipArray_t _array);
+      virtual ~MemSpecificHipArray();
+
+      hipArray_t array;
+    };
+
+    class AddressInfoHipArray : public TransferIterator::AddressInfoCustom {
+    public:
+      virtual int set_rect(const RegionInstanceImpl *inst,
+                           const InstanceLayoutPieceBase *piece, size_t field_size,
+                           size_t field_offset, int ndims, const int64_t lo[/*ndims*/],
+                           const int64_t hi[/*ndims*/], const int order[/*ndims*/]);
+
+      hipArray_t array;
+      int dim;
+      size_t pos[3];
+      size_t width_in_bytes, height, depth;
     };
 
     class GPUChannel;
@@ -700,6 +707,99 @@ namespace Realm {
     private:
       std::vector<GPU *> src_gpus, dst_gpus;
       std::vector<bool> dst_is_ipc;
+    };
+
+    class GPUIndirectChannel;
+
+    class GPUIndirectXferDes : public XferDes {
+    public:
+      GPUIndirectXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
+                         XferDesID _guid, const std::vector<XferDesPortInfo> &inputs_info,
+                         const std::vector<XferDesPortInfo> &outputs_info, int _priority,
+                         XferDesRedopInfo _redop_info);
+
+      long get_requests(Request **requests, long nr);
+      bool progress_xd(GPUIndirectChannel *channel, TimeLimit work_until);
+
+    protected:
+      std::vector<GPU *> src_gpus, dst_gpus;
+      std::vector<bool> dst_is_ipc;
+    };
+
+    class GPUIndirectChannel
+      : public SingleXDQChannel<GPUIndirectChannel, GPUIndirectXferDes> {
+    public:
+      GPUIndirectChannel(GPU *_src_gpu, XferDesKind _kind, BackgroundWorkManager *bgwork);
+      ~GPUIndirectChannel();
+
+      // multi-threading of copies for a given device is disabled by
+      static const bool is_ordered = true;
+
+      virtual bool needs_wrapping_iterator() const;
+      virtual Memory suggest_ib_memories() const;
+
+      virtual RemoteChannelInfo *construct_remote_info() const;
+
+      virtual uint64_t
+      supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+                    CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+                    size_t total_bytes, const std::vector<size_t> *src_frags,
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret = 0,
+                    unsigned *bw_ret = 0, unsigned *lat_ret = 0);
+
+      virtual bool supports_indirection_memory(Memory mem) const;
+
+      virtual XferDes *create_xfer_des(uintptr_t dma_op, NodeID launch_node,
+                                       XferDesID guid,
+                                       const std::vector<XferDesPortInfo> &inputs_info,
+                                       const std::vector<XferDesPortInfo> &outputs_info,
+                                       int priority, XferDesRedopInfo redop_info,
+                                       const void *fill_data, size_t fill_size,
+                                       size_t fill_total);
+
+      long submit(Request **requests, long nr);
+      GPU *get_gpu() const { return src_gpu; }
+
+    protected:
+      friend class GPUIndirectXferDes;
+      GPU *src_gpu;
+    };
+
+    class GPUIndirectRemoteChannelInfo : public SimpleRemoteChannelInfo {
+    public:
+      GPUIndirectRemoteChannelInfo(NodeID _owner, XferDesKind _kind,
+                                   uintptr_t _remote_ptr,
+                                   const std::vector<Channel::SupportedPath> &_paths,
+                                   const std::vector<Memory> &_indirect_memories);
+
+      virtual RemoteChannel *create_remote_channel();
+
+      template <typename S>
+      bool serialize(S &serializer) const;
+
+      template <typename S>
+      static RemoteChannelInfo *deserialize_new(S &deserializer);
+
+    protected:
+      static Serialization::PolymorphicSerdezSubclass<RemoteChannelInfo,
+                                                      GPUIndirectRemoteChannelInfo>
+          serdez_subclass;
+    };
+
+    class GPUIndirectRemoteChannel : public RemoteChannel {
+      friend class GPUIndirectRemoteChannelInfo;
+
+    public:
+      GPUIndirectRemoteChannel(uintptr_t _remote_ptr,
+                               const std::vector<Memory> &_indirect_memories);
+      virtual Memory suggest_ib_memories() const;
+      virtual bool needs_wrapping_iterator() const;
+      virtual uint64_t
+      supports_path(ChannelCopyInfo channel_copy_info, CustomSerdezID src_serdez_id,
+                    CustomSerdezID dst_serdez_id, ReductionOpID redop_id,
+                    size_t total_bytes, const std::vector<size_t> *src_frags,
+                    const std::vector<size_t> *dst_frags, XferDesKind *kind_ret /*= 0*/,
+                    unsigned *bw_ret /*= 0*/, unsigned *lat_ret /*= 0*/);
     };
 
     class GPUChannel : public SingleXDQChannel<GPUChannel, GPUXferDes> {
@@ -720,6 +820,7 @@ namespace Realm {
                                        size_t fill_total);
 
       long submit(Request **requests, long nr);
+      GPU *get_gpu() const { return src_gpu; }
 
     private:
       GPU *src_gpu;
@@ -767,7 +868,6 @@ namespace Realm {
     };
 
     class GPUreduceChannel;
-
     class GPUreduceXferDes : public XferDes {
     public:
       GPUreduceXferDes(uintptr_t _dma_op, Channel *_channel, NodeID _launch_node,
@@ -778,16 +878,24 @@ namespace Realm {
       long get_requests(Request **requests, long nr);
 
       bool progress_xd(GPUreduceChannel *channel, TimeLimit work_until);
+      bool fast_reduction_kernel_mode(GPUreduceChannel *channel, size_t max_bytes,
+                                      XferPort *in_port, XferPort *out_port,
+                                      size_t in_span_start, size_t out_span_start);
+      void *describe_kernel_variant(bool is_advanced);
+      void setup_redop_kernel(GPUreduceChannel *channel, void *redop_args,
+                              const size_t in_span_start, const size_t out_span_start,
+                              const size_t in_elem_size, const size_t out_elem_size,
+                              const size_t elems, const bool has_transpose);
 
     protected:
       XferDesRedopInfo redop_info;
       const ReductionOpUntyped *redop;
-#if defined(REALM_USE_HIP_HIJACK)
-      void *kernel;
-#else
-      const void *kernel_host_proxy;
-#endif
+      void *kernel_host_proxy;
+      void *kernel_host_proxy_advanced;
+      void *kernel_host_proxy_transpose;
       GPUStream *stream;
+      std::vector<GPU *> src_gpus;
+      std::vector<bool> src_is_ipc;
     };
 
     class GPUreduceChannel : public SingleXDQChannel<GPUreduceChannel, GPUreduceXferDes> {

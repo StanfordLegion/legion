@@ -78,7 +78,7 @@ namespace Realm {
       return this->size + ZERO_SIZE_INSTANCE_OFFSET;
     }
 
-    const size_t alignment = 256;
+    const size_t alignment = IB_ALLOC_ALIGNMENT;
 
     if(alignment > 0) {
       off_t leftover = size % alignment;
@@ -293,7 +293,7 @@ namespace Realm {
       return;
     }
 
-    const size_t alignment = 256;
+    const size_t alignment = IB_ALLOC_ALIGNMENT;
 
     if(alignment > 0) {
       off_t leftover = size % alignment;

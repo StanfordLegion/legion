@@ -367,13 +367,21 @@ namespace Realm {
       stream.construct(buffer.construct());
   }
 
-  inline LoggerMessage::LoggerMessage(const LoggerMessage &to_copy)
-    : logger(to_copy.logger)
-    , active(to_copy.active)
-    , level(to_copy.level)
+  inline LoggerMessage::LoggerMessage(LoggerMessage &&to_move)
+    : logger(to_move.logger)
+    , active(to_move.active)
+    , level(to_move.level)
   {
-    if(active)
+    if(active) {
       stream.construct(buffer.construct());
+      stream->write(to_move.buffer->data(), to_move.buffer->size());
+      stream->copyfmt(*to_move.stream);
+      stream->clear(to_move.stream->rdstate());
+
+      to_move.logger = 0;
+      to_move.active = false;
+      to_move.level = Logger::LEVEL_NONE;
+    }
   }
 
   inline LoggerMessage::~LoggerMessage(void)
