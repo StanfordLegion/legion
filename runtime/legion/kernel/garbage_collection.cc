@@ -1956,6 +1956,7 @@ namespace Legion {
               rez.serialize(count);
               rez.serialize(result);
               rez.serialize(ready);
+              rez.serialize(lamport_clock);
             }
             rez.dispatch(source);
           }
@@ -1978,7 +1979,6 @@ namespace Legion {
             rez.serialize(count);
             rez.serialize(result);
             rez.serialize(ready);
-            rez.serialize(lamport_clock);
           }
           rez.dispatch(current_owner);
         }
