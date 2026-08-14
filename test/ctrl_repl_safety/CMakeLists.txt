@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 project(LegionTest_ctrl_repl_safety)
 
 # Only search if were building stand-alone and not as part of Legion

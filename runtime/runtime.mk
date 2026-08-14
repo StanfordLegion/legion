@@ -490,14 +490,6 @@ ifeq ($(strip $(USE_HIP)),1)
   endif
   ifeq ($(strip $(HIP_TARGET)),ROCM)
     #HIP on AMD
-    ifeq ($(strip $(USE_COMPLEX)),1)
-      ifndef THRUST_PATH
-        $(error THRUST_PATH variable is not defined, aborting build)
-      endif
-      # Please download the thrust from https://github.com/ROCmSoftwarePlatform/Thrust
-      # We need to put thrust inc ahead of ROCM_PATH because the thrust comes with hip is broken
-      INC_FLAGS += -I$(THRUST_PATH)
-    endif
     HIPCC	        ?= $(ROCM_PATH)/bin/hipcc
     # Latter is preferred, former is for backwards compatability
     REALM_CC_FLAGS  += -DREALM_USE_HIP

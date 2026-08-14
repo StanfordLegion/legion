@@ -805,15 +805,15 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     if 'USE_GASNETEX_WRAPPER' in env:
         cmake_cmd.append('-DLegion_USE_GASNETEX_WRAPPER=%s' % ('ON' if env['USE_GASNETEX_WRAPPER'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
-    if 'GPU_ARCH' in env:
-        cmake_cmd.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
+    if 'GPU_ARCH' in env and env['USE_CUDA'] == '1':
+        cmake_cmd.append('-DCMAKE_CUDA_ARCHITECTURES=%s' % env['GPU_ARCH'])
     cmake_cmd.append('-DLegion_USE_HIP=%s' % ('ON' if env['USE_HIP'] == '1' else 'OFF'))
-    if 'HIP_ARCH' in env:
-        cmake_cmd.append('-DLegion_HIP_ARCH=%s' % env['HIP_ARCH'])
-    if 'HIP_TARGET' in env:
-        cmake_cmd.append('-DLegion_HIP_TARGET=%s' % env['HIP_TARGET'])
-    if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
-        cmake_cmd.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
+    if 'GPU_ARCH' in env and env['USE_HIP'] == '1':
+        cmake_cmd.append('-DCMAKE_HIP_ARCHITECTURES=%s' % env['GPU_ARCH'])
+    elif 'HIP_ARCHITECTURES' in env and env['USE_HIP'] == '1':
+        cmake_cmd.append('-DCMAKE_HIP_ARCHITECTURES=%s' % env['HIP_ARCHITECTURES'])
+    if 'HIP_PLATFORM' in env and env['USE_HIP'] == '1':
+        cmake_cmd.append('-DCMAKE_HIP_PLATFORM=%s' % env['HIP_PLATFORM'])
     cmake_cmd.append('-DLegion_USE_NVTX=%s' % ('ON' if env['USE_NVTX'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
     cmake_cmd.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))

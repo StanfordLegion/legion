@@ -459,56 +459,19 @@ if(Legion_USE_CUDA)
 endif()
 
 if(Legion_USE_HIP)
-  if(Legion_HIP_TARGET STREQUAL "CUDA")
-    target_sources(LegionRuntime PRIVATE ${LEGION_HIP_SRC})
-    target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                           -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
-    target_include_directories(LegionRuntime PRIVATE ${HIP_ROOT_DIR}/include)
+  # Compile the GPU reduction operators with the HIP language.  hip::host is a
+  # public dependency because Legion's installed headers (e.g. mathtypes/half.h
+  # and realm's hijack api) include hip headers and need the platform macros.
+  set_source_files_properties(${LEGION_HIP_SRC} PROPERTIES LANGUAGE HIP)
+  target_sources(LegionRuntime PRIVATE ${LEGION_HIP_SRC})
+  target_link_libraries(LegionRuntime PUBLIC hip::host)
+  target_compile_options(LegionRuntime PRIVATE
+    $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-fno-strict-aliasing>
+    $<$<COMPILE_LANG_AND_ID:HIP,NVIDIA>:-Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>
+  )
+  if(CMAKE_HIP_PLATFORM STREQUAL "nvidia" AND Legion_REDOP_COMPLEX)
     # complex reduction ops bring in a public dependency on cuda headers
-    if(Legion_REDOP_COMPLEX)
-      target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
-      target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_NVIDIA__)
-    endif()
-  elseif(Legion_HIP_TARGET STREQUAL "ROCM")
-    set(HIP_LIBRARIES ${HIP_ROOT_DIR}/lib/libamdhip64.so)
-    set_source_files_properties(${LEGION_HIP_SRC} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-    get_target_property(REALM_INCLUDE_DIRS ${REALM_TGT} INTERFACE_INCLUDE_DIRECTORIES)
-    set(REALM_INCLUDE_FLAGS)
-    foreach(_dir IN LISTS REALM_INCLUDE_DIRS)
-      if(${_dir} MATCHES "\\$<(.*):(.*)>")
-        list(APPEND REALM_INCLUDE_FLAGS "$<${CMAKE_MATCH_1}:-I${CMAKE_MATCH_2}>")
-      else()
-        list(APPEND REALM_INCLUDE_FLAGS "-I${_dir}")
-      endif()
-    endforeach()
-    hip_compile(LEGION_HIP_OBJS ${LEGION_HIP_SRC} HIPCC_OPTIONS
-      ${HIPCC_FLAGS}
-      ${HIP_GENCODE}
-      -I ${CMAKE_CURRENT_SOURCE_DIR}
-      -I ${CMAKE_CURRENT_SOURCE_DIR}/legion
-      -I ${PROJECT_BINARY_DIR}/runtime
-      ${REALM_INCLUDE_FLAGS}
-      -fPIC
-      DEBUG -g
-      RELEASE -O2
-      RELWITHDEBINFO -g -O2)
-    add_dependencies(hip_compile RealmRuntime)
-    target_sources(LegionRuntime PRIVATE ${LEGION_HIP_OBJS})
-    target_link_libraries(LegionRuntime PUBLIC ${HIP_LIBRARIES})
-
-    # complex reduction ops bring in a public dependency on hip thrust headers
-    if(Legion_REDOP_COMPLEX)
-      # set thrust package
-      # please download thrust from https://github.com/ROCmSoftwarePlatform/Thrust
-      if(NOT DEFINED THRUST_PATH)
-        set(THRUST_PATH $ENV{THRUST_PATH} CACHE PATH "Path to where Thrust has been installed")
-      endif()
-      target_include_directories(LegionRuntime PUBLIC ${HIP_INCLUDE_DIRS})
-      target_compile_definitions(LegionRuntime PUBLIC __HIP_PLATFORM_AMD__)
-    else()
-      target_include_directories(LegionRuntime PRIVATE ${HIP_INCLUDE_DIRS})
-      target_compile_definitions(LegionRuntime PRIVATE __HIP_PLATFORM_AMD__)
-    endif()
+    target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
   endif()
 endif()
 

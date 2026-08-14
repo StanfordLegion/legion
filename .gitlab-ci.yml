@@ -616,7 +616,6 @@ after_script:
 .hip_cuda: &hip_cuda125
   IS_NVIDIA_JOB: "1"
   USE_HIP: "1"
-  HIP_TARGET: "CUDA"
   # Unfortunately HIP cmake integration with nvidia backend requires 3.28+
   CMAKE_VERSION: "4.0.3"
   CMAKE_SHA256: "585ae9e013107bc8e7c7c9ce872cbdcbdff569e675b07ef57aacfb88c886faac"
@@ -626,7 +625,13 @@ after_script:
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
   WARN_AS_ERROR: "0"
+  # CMake variables:
+  HIP_PATH: "/opt/rocm"
+  HIP_ARCHITECTURES: "60;70;75;80"
+  HIP_PLATFORM: "nvidia"
+  # Legion Makefile variables:
   ROCM_PATH: "/opt/rocm"
+  HIP_TARGET: "CUDA"
   HIPCC_FLAGS: "-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_80,code=compute_80"
 
 ###
@@ -690,7 +695,7 @@ after_script:
         mv realm-* realm
       fi
       mkdir -p realm/build realm/install
-      REALM_CMAKE_ARGS="-DGASNet_ROOT="${GASNET_ROOT}" -DGASNET_CONDUIT=${CONDUIT} -DKokkos_ROOT="${Kokkos_DIR}" -DCPPTRACE_GET_SYMBOLS_WITH_NOTHING=ON -DREALM_BUILD_TESTS=ON -DREALM_BUILD_BENCHMARKS=ON -DCMAKE_HIP_PLATFORM=nvidia -DREALM_LOG_LEVEL=INFO"
+      REALM_CMAKE_ARGS="-DGASNet_ROOT="${GASNET_ROOT}" -DGASNET_CONDUIT=${CONDUIT} -DKokkos_ROOT="${Kokkos_DIR}" -DCPPTRACE_GET_SYMBOLS_WITH_NOTHING=ON -DREALM_BUILD_TESTS=ON -DREALM_BUILD_BENCHMARKS=ON -DCMAKE_HIP_PLATFORM=nvidia -DCMAKE_HIP_COMPILER=$CUDA/bin/nvcc -DCMAKE_HIP_ARCHITECTURES='${HIP_ARCHITECTURES}' -DREALM_LOG_LEVEL=INFO"
       if [[ "${REALM_NETWORKS}" != "ucx" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_UCX=OFF";
       else REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_UCX=ON"; fi
       if [[ -z "${GASNET_ROOT}${EMBED_GASNET}" ]]; then REALM_CMAKE_ARGS="${REALM_CMAKE_ARGS} -DREALM_ENABLE_GASNETEX=OFF";
@@ -1401,6 +1406,10 @@ nvidia_hip_cuda125_gcc10_cxx17_debug_cuda_legion:
   <<: [*nvidia, *tests]
   variables:
     <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *short, *shared]
+nvidia_hip_cuda125_gcc10_cxx17_debug_cmake_cuda_legion:
+  <<: [*nvidia, *tests]
+  variables:
+    <<: [*gcc11, *debug, *cxx17_normal, *hip_cuda125, *legion, *cmake, *ctest, *short, *shared]
 
 # CUDA tests:
 nvidia_cuda117_gcc10_cxx17_debug_cmake_cuda_dynamic_legion:

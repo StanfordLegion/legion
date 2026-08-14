@@ -79,6 +79,7 @@ endif()
 
 if(REALM_USE_HIP)
   list(APPEND REALM_SOURCES hip/hip_module.cc hip/hip_internal.cc hip/hip_access.cc)
+  list(APPEND REALM_HIP_SOURCES hip/hip_memcpy.hip)
 endif()
 
 if(REALM_USE_LLVM)
@@ -137,6 +138,7 @@ endif()
 # Replace me later
 list(TRANSFORM REALM_SOURCES PREPEND "${REALM_SOURCE_DIR}/")
 list(TRANSFORM REALM_CUDA_SOURCES PREPEND "${REALM_SOURCE_DIR}/")
+list(TRANSFORM REALM_HIP_SOURCES PREPEND "${REALM_SOURCE_DIR}/")
 
 # Generated sources
 # TODO(cperry): fix path so realm_defines.h lives in realm directory
@@ -220,5 +222,9 @@ set(REALM_RC_SOURCES
 )
 set(REALM_CUDA_SOURCES
     ${REALM_CUDA_SOURCES}
+    PARENT_SCOPE
+)
+set(REALM_HIP_SOURCES
+    ${REALM_HIP_SOURCES}
     PARENT_SCOPE
 )
