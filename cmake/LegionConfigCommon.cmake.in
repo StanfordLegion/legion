@@ -39,25 +39,46 @@ if(Legion_USE_CUDA)
   endif()
 endif()
 
+# HIP is a public dependency of Legion (its headers are used by Legion's own
+# installed headers), so make sure the hip::host target exists and the HIP
+# language is available before the Legion targets are imported
+set(Legion_USE_HIP @Legion_USE_HIP@)
+if(Legion_USE_HIP)
+  if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "@ROCM_PATH@" CACHE PATH "Path to where ROCm has been installed")
+  endif()
+  list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+  if(NOT HIP_ROOT_DIR)
+    set(HIP_ROOT_DIR "${ROCM_PATH}")
+  endif()
+  set(CMAKE_HIP_COMPILER_ROCM_ROOT "${HIP_ROOT_DIR}")
+  if(NOT DEFINED CMAKE_HIP_PLATFORM)
+    set(CMAKE_HIP_PLATFORM "@CMAKE_HIP_PLATFORM@")
+  endif()
+  set(HIP_PLATFORM "${CMAKE_HIP_PLATFORM}")
+  find_dependency(hip CONFIG)
+  if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+    set_target_properties(hip::host PROPERTIES
+      INTERFACE_COMPILE_DEFINITIONS "__HIP_PLATFORM_NVIDIA__"
+      INTERFACE_LINK_LIBRARIES CUDA::cudart
+    )
+    if(NOT DEFINED CMAKE_HIP_RUNTIME_LIBRARY)
+      set(CMAKE_HIP_RUNTIME_LIBRARY "Shared")
+    endif()
+  endif()
+  if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "@CMAKE_HIP_ARCHITECTURES@")
+  endif()
+  enable_language(HIP)
+  if(NOT CMAKE_HIP_STANDARD)
+    set(CMAKE_HIP_STANDARD @CMAKE_CXX_STANDARD@)
+    set(CMAKE_HIP_STANDARD_REQUIRED ON)
+  endif()
+endif()
+
 find_dependency(Realm)
 
 include(${CMAKE_CURRENT_LIST_DIR}/LegionTargets.cmake)
-
-# HIP is only a private dependency of Legion but has a few usage requirements
-# so we add it in here
-set(Legion_USE_HIP @Legion_USE_HIP@)
-if(Legion_USE_HIP)
-  set(Legion_HIP_TARGET @Legion_HIP_TARGET@)
-  find_package(HIP REQUIRED)
-endif()
-
-if(Legion_USE_HIP AND Legion_HIP_TARGET STREQUAL "ROCM" AND NOT Legion_HIP_HIPCC_FLAGS_SET)
-  # flags
-  set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} @HIPCC_FLAGS@ @HIP_GENCODE@")
-
-  # Make sure we don't get duplicates
-  set(Legion_HIP_HIPCC_FLAGS_SET ON)
-endif()
 
 # HWLOC is a private dependency and only needs to be pulled in for static
 # builds

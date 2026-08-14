@@ -76,6 +76,7 @@ make -j$(nproc)
 # (optional) run the unit tests
 ctest --output-on-failure
 ```
+
 The full list of CMake toggles is documented inside [`CMakeLists.txt`](CMakeLists.txt).  Common switches include:
 
 | Option | Default | Purpose |
