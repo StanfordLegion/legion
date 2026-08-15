@@ -1,5 +1,5 @@
 export USE_HIP="1"
-export ROCM_VERSION="${ROCM_VERSION:-6.0.0}"
+export ROCM_VERSION="${ROCM_VERSION:-7.2.0}"
 export CMAKE_HIP_ARCHITECTURES="gfx90a" # for CMake
 export HIP_ARCH="gfx90a" # for runtime.mk
 export GPU_ARCH="gfx90a" # for Regent

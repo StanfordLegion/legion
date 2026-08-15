@@ -230,7 +230,6 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
              '-DLegion_BUILD_BINDINGS=ON',
              '-DBUILD_SHARED_LIBS=ON',
             ] +
-            (['-DHIP_THRUST_ROOT_DIR=%s' % os.environ['THRUST_PATH']] if 'THRUST_PATH' in os.environ else []) +
             extra_flags +
             (['-DGASNet_ROOT=%s' % gasnet_dir] if gasnet_dir is not None else []) +
             (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +

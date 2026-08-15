@@ -11,23 +11,18 @@ echo "Running tests in $PWD"
 if [[ ${TEST_REGENT:-1} -eq 1 ]]; then
     mkdir -p "$CACHE_DIR"
     pushd "$CACHE_DIR"
-    if ! echo "32f6420330de4d7176396aa36929a76733fe5a1fbc5a0cf8b9a6d270f9630d8d  terra-Linux-x86_64-cc543db.tar.xz" | shasum -a 256 -c; then
-        wget -nv https://github.com/terralang/terra/releases/download/release-1.2.0/terra-Linux-x86_64-cc543db.tar.xz
+    if ! echo "7359c60f056a0300c1f3cbc11c26f370b62f6b8216190a78739b362ccf432593  terra-Linux-x86_64-bb02b25.tar.xz" | shasum -a 256 -c; then
+        wget -nv https://github.com/terralang/terra/releases/download/release-1.2.2/terra-Linux-x86_64-bb02b25.tar.xz
     fi
-    if ! echo "e86847217fdb8fa3bdde964540a3e945c171ea0a01004fa9b95fd41e8e9f20ac  clang+llvm-18.1.7-x86_64-linux-gnu.tar.xz" | shasum -a 256 -c; then
-        wget -nv https://github.com/terralang/llvm-build/releases/download/llvm-18.1.7/clang+llvm-18.1.7-x86_64-linux-gnu.tar.xz
+    if ! echo "a0bfebc31391ef0b31197c68deb5e3bf0a0e18aa55279cc39e85a18909e60663  clang+llvm-22.1.8-x86_64-linux-gnu.tar.xz" | shasum -a 256 -c; then
+        wget -nv https://github.com/terralang/llvm-build/releases/download/llvm-22.1.8/clang+llvm-22.1.8-x86_64-linux-gnu.tar.xz
     fi
     popd
-    tar xf "$CACHE_DIR/terra-Linux-x86_64-cc543db.tar.xz"
-    ln -s terra-Linux-x86_64-cc543db terra
-    tar xf "$CACHE_DIR/clang+llvm-18.1.7-x86_64-linux-gnu.tar.xz"
-    ln -s clang+llvm-18.1.7-x86_64-linux-gnu llvm
-    export REGENT_LLVM_PATH="$PWD/llvm"
+    tar xf "$CACHE_DIR/terra-Linux-x86_64-bb02b25.tar.xz"
+    ln -s "$PWD/terra-Linux-x86_64-bb02b25" language/terra
+    tar xf "$CACHE_DIR/clang+llvm-22.1.8-x86_64-linux-gnu.tar.xz"
+    export REGENT_LLVM_PATH="$PWD/clang+llvm-22.1.8-x86_64-linux-gnu"
 fi
-
-# download Thrust
-git clone https://github.com/ROCm/Thrust.git
-export THRUST_PATH="$PWD/Thrust"
 
 # download GASNet
 if [[ "$REALM_NETWORKS" == gasnet* ]]; then

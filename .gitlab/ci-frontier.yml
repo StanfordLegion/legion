@@ -122,12 +122,12 @@ legion_cmake_rocm720:
   variables:
     <<: [*legion, *cmake, *ctest, *rocm720, *nodes1]
 
-# regent_cmake_rocm624:
-#   <<: [*tokens, *tests]
-#   stage: test
-#   tags:
-#     - slurm
-#     - frontier
-#     - login12
-#   variables:
-#     <<: [*regent, *cmake, *rocm624, *nodes2]
+regent_cmake_rocm720:
+  <<: [*tokens, *tests]
+  stage: test
+  tags:
+    - slurm
+    - frontier
+    - login12
+  variables:
+    <<: [*regent, *cmake, *rocm720, *nodes2]
