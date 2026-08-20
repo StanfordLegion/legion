@@ -106,6 +106,8 @@ namespace Realm {
 #endif
   }
 
+  int LocalOpenMPProcessor::get_num_threads(void) const noexcept { return num_threads; }
+
   LocalOpenMPProcessor::~LocalOpenMPProcessor(void) { delete core_rsrv; }
 
   void LocalOpenMPProcessor::shutdown(void)
