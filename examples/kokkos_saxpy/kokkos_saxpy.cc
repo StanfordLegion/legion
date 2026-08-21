@@ -105,9 +105,12 @@ public:
     const SaxpyTaskArgs& args = *reinterpret_cast<const SaxpyTaskArgs *>(task->args);
     AccessorRO acc_x(regions[0], FID_X);
     AccessorRW acc_y(regions[1], FID_Y);
-  
+
     Rect<1> subspace = runtime->get_index_space_domain(ctx,
 						       task->regions[0].region.get_index_space());
+
+    execution_space work_space =
+      runtime->get_executing_processor(ctx).kokkos_work_space();
 
 #ifdef USE_KOKKOS_KERNELS
     // only do half the child tasks with kokkos-kernels because we want to
@@ -121,25 +124,26 @@ public:
       //  in appropriate subviews
       Kokkos::View<const float *,
 		   Kokkos::LayoutStride,
-		   typename execution_space::memory_space> x = acc_x.accessor;
+		   execution_space> x = acc_x.accessor;
       Kokkos::View<float *,
 		   Kokkos::LayoutStride,
-		   typename execution_space::memory_space> y = acc_y.accessor;
+		   execution_space> y = acc_y.accessor;
 
-      KokkosBlas::axpy(args.alpha, x, y);
+      KokkosBlas::axpy(work_space, args.alpha, x, y);
     } else
 #endif
     {
       Kokkos::Experimental::OffsetView<const float *,
 				       Kokkos::LayoutStride,
-				       typename execution_space::memory_space> x_ofs = acc_x.accessor;
+				       execution_space> x_ofs = acc_x.accessor;
       Kokkos::Experimental::OffsetView<float *,
 				       Kokkos::LayoutStride,
-				       typename execution_space::memory_space> y_ofs = acc_y.accessor;
+				       execution_space> y_ofs = acc_y.accessor;
 
-      Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
+      Kokkos::RangePolicy<execution_space> range(work_space,
 						 subspace.lo[0],
 						 subspace.hi[0] + 1);
+      log_app.info() << "concurrency " << range.space().concurrency();
       Kokkos::parallel_for(range,
 			   SaxpyFunctor<execution_space>(args.alpha, x_ofs, y_ofs));
     }
@@ -160,16 +164,20 @@ public:
     Rect<1> subspace = runtime->get_index_space_domain(ctx,
 						       task->regions[0].region.get_index_space());
 
+    execution_space work_space =
+      runtime->get_executing_processor(ctx).kokkos_work_space();
+
     AccessorRO acc_x(regions[0], task->regions[0].instance_fields[0]);
     AccessorRO acc_y(regions[1], task->regions[1].instance_fields[0]);
 
     Kokkos::Experimental::OffsetView<const float *,
 				     Kokkos::LayoutStride,
-				     typename execution_space::memory_space> x = acc_x.accessor;
+				     execution_space> x = acc_x.accessor;
     Kokkos::Experimental::OffsetView<const float *,
 				     Kokkos::LayoutStride,
-				     typename execution_space::memory_space> y = acc_y.accessor;
+				     execution_space> y = acc_y.accessor;
 
+    float result = 0.0f;
 #ifdef USE_KOKKOS_KERNELS
     // only do half the child tasks with kokkos-kernels because we want to
     //  test application-supplied kernels too
@@ -179,7 +187,7 @@ public:
       //  two ways of converting OffsetViews to Views:
       Kokkos::View<const float *,
 		   Kokkos::LayoutStride,
-		   typename execution_space::memory_space> x_rel, y_rel;
+		   execution_space> x_rel, y_rel;
 
       // option 1: if you're sure the OffsetView starts in the right place
       //   (i.e. the subspace on which you have privileges matches what
@@ -196,40 +204,28 @@ public:
 							   subspace.hi[0] + 1))
 	.view();
 
-      // the KokkosBlas::dot implementation that returns a float directly
-      //  performs a fence on all execution spaces, which is not permitted by
-      //  default in Legion - see:
-      //     https://github.com/kokkos/kokkos-kernels/issues/757
-      //
-      // instead, use the variant that fills a (managed) view and explicitly
-      //  copy back to a host mirror
-      float result_host;
-      {
-	Kokkos::View<float,
-		     typename execution_space::memory_space> result("result");
-	KokkosBlas::dot(result, x_rel, y_rel);
-
-	// can't use `kokkos_work_space` here because KokkosBlas::dot didn't
-	Kokkos::deep_copy(execution_space(), result_host, result);
-      }
-      execution_space().fence();
-      return result_host;
-    }
+      result = KokkosBlas::dot(work_space, x_rel, y_rel);
+    } else
 #endif
-    Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
-					       subspace.lo[0],
-					       subspace.hi[0] + 1);
-    float sum = 0.0f;
-    // Kokkos does not support CUDA lambdas by default - check that they
-    //  are present
+    {
+      Kokkos::RangePolicy<execution_space> range(work_space,
+					         subspace.lo[0],
+					         subspace.hi[0] + 1);
+      log_app.info() << "concurrency " << range.space().concurrency();
+      // Kokkos does not support CUDA lambdas by default up to v3.7
+      //  (does support them by default since v4.0, and the option is
+      //  deprecated since v4.1) - check that they are present
+#if KOKKOS_VERSION < 40100
 #if defined(KOKKOS_ENABLE_CUDA) && !defined(KOKKOS_ENABLE_CUDA_LAMBDA)
-    #error Kokkos built without --with-cuda_options=enable_lambda !
+#error Kokkos built without --with-cuda_options=enable_lambda !
 #endif
-    Kokkos::parallel_reduce(range,
-			    KOKKOS_LAMBDA ( int j, float &update ) {
-			      update += x(j) * y(j);
-			    }, sum);
-    return sum;
+#endif
+      Kokkos::parallel_reduce(range,
+			      KOKKOS_LAMBDA ( int j, float &update ) {
+                                update += x(j) * y(j);
+                              }, result);
+    }
+    return result;
   }
 };
 
@@ -250,6 +246,9 @@ public:
     Rect<1> subspace = runtime->get_index_space_domain(ctx,
 						       task->regions[0].region.get_index_space());
 
+    execution_space work_space =
+      runtime->get_executing_processor(ctx).kokkos_work_space();
+
     AccessorRW acc(regions[0], task->regions[0].instance_fields[0]);
 
     // you can use relative indexing for your own kernels too - just make
@@ -257,10 +256,10 @@ public:
     //  subregion!
     Kokkos::View<float *,
 		 Kokkos::LayoutStride,
-		 typename execution_space::memory_space> view = acc.accessor;
+		 execution_space> view = acc.accessor;
 
     size_t n_elements = subspace.hi[0] - subspace.lo[0] + 1;
-    Kokkos::RangePolicy<execution_space> range(runtime->get_executing_processor(ctx).kokkos_work_space(),
+    Kokkos::RangePolicy<execution_space> range(work_space,
 					       0, n_elements);
     Kokkos::parallel_for(range,
 			 KOKKOS_LAMBDA (int i) {
@@ -340,7 +339,7 @@ void top_level_task(const Task *task,
   {
     SaxpyTaskArgs args;
     args.alpha = 0.5f;
-    
+
     IndexTaskLauncher itl(SAXPY_TASK_ID, launch_space,
 			  TaskArgument(&args, sizeof(args)),
 			  ArgumentMap());

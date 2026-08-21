@@ -35,8 +35,6 @@ namespace Kokkos {
   template <unsigned>
   struct MemoryTraits;
   struct LayoutStride;
-  template <class, size_t, class>
-  struct Array;
   namespace Experimental {
     template <class, class...>
     class OffsetView;
