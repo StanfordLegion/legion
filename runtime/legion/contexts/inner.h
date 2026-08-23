@@ -1212,7 +1212,7 @@ namespace Legion {
       ctx::map<TraceID, LogicalTrace*> traces;
       LogicalTrace* current_trace;
       LogicalTrace* previous_trace;
-      uint64_t current_trace_blocking_index;
+      uint64_t current_trace_blocking_index = 0;
       // ID is either 0 for not replaying, 1 for replaying not idempotent,
       // 2 for replaying idempotent or the event id for signaling that
       // the status isn't ready

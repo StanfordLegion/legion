@@ -43,7 +43,7 @@ namespace Legion {
         size_t size;
       public:
         uint64_t opidx;
-        RtEvent finish_event;
+        RtEvent finish_event = RtEvent::NO_RT_EVENT;
         std::vector<Murmur3Hasher::Hash> hashes;  // only for storage
         std::vector<NonOverlappingRepeatsResult> result;
       public:
@@ -77,8 +77,8 @@ namespace Legion {
         { }
         void execute(void) const;
       public:
-        TraceRecognizer* recognizer;
-        FindRepeatsResult* result;
+        TraceRecognizer* recognizer = nullptr;
+        FindRepeatsResult* result = nullptr;
       };
     public:
       TraceRecognizer(

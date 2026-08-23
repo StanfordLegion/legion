@@ -56,25 +56,23 @@ namespace Legion {
         // TraceInfo's need to be default constructable.
         TraceInfo(void) = default;
         TraceInfo(uint64_t opidx_, uint64_t length_)
-          : opidx(opidx_), length(length_), last_visited_opidx(0),
-            decaying_visits(0), replays(0), last_idempotent_visit_opidx(0),
-            decaying_idempotent_visits(0.0), tid(0)
+          : opidx(opidx_), length(length_)
         { }
         // opidx that this trace was inserted at.
-        uint64_t opidx;
+        uint64_t opidx = 0;
         // length of the trace. This is used for scoring only.
-        uint64_t length;
+        uint64_t length = 0;
         // Fields for maintaining a decaying visit count.
-        uint64_t last_visited_opidx;
-        double decaying_visits;
+        uint64_t last_visited_opidx = 0;
+        double decaying_visits = 0.0;
         // Number of times the trace has been replayed.
-        uint64_t replays;
+        uint64_t replays = 0;
         // Number of times the trace has been visited in
         // an idempotent manner (tracked in a decaying manner).
-        uint64_t last_idempotent_visit_opidx;
-        double decaying_idempotent_visits;
+        uint64_t last_idempotent_visit_opidx = 0;
+        double decaying_idempotent_visits = 0.0;
         // ID for the trace. It is unset if replays == 0.
-        TraceID tid;
+        TraceID tid = 0;
         // visit updates the TraceInfo's decaying visit count when visited
         // at opidx.
         void visit(uint64_t opidx);
