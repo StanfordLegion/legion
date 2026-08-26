@@ -652,7 +652,16 @@ namespace Legion {
       options.parent_priority = parent_priority;
       mapper->invoke_select_task_options(this, options, prioritize);
       options_selected = true;
-      if (options.initial_proc.kind() == Processor::UTIL_PROC)
+      if (!options.initial_proc.exists())
+      {
+        Error error(LEGION_MAPPER_EXCEPTION);
+        error << "Invalid mapper output. Mapper " << *mapper
+              << " selected NO_PROC as the initial processor for " << *this
+              << " in 'select_task_options.' A valid application processor "
+                 "must be selected.";
+        error.raise();
+      }
+      else if (options.initial_proc.kind() == Processor::UTIL_PROC)
       {
         Error error(LEGION_MAPPER_EXCEPTION);
         error << "Invalid mapper output. Mapper " << *mapper

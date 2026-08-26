@@ -1,0 +1,36 @@
+S1 [Initial predicate] msgs=[]
+    n0:Gl r1 pin0 ssdT regT v0 own0 | n1:Ab r0 pin0 ssdF regF v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S2 [Pack] msgs=[('ref', 'n1')]
+    n0:Gl r1 pin0 ssdT regT v0 own0 | n1:Ab r0 pin0 ssdF regF v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S3 [ProgressNext] msgs=[('reg', 'n0')]
+    n0:Gl r1 pin0 ssdT regT v0 own0 | n1:Gl r1 pin0 ssdT regF v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S4 [ProgressNext] msgs=[('regresp', 'n1')]
+    n0:Gl r1 pin0 ssdT regT v0 own0 | n1:Gl r1 pin0 ssdT regF v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S5 [ProgressNext] msgs=[]
+    n0:Gl r1 pin0 ssdT regT v0 own0 | n1:Gl r1 pin0 ssdT regT v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S6 [DropRef] msgs=[('req', 'n1')]
+    n0:Gl r0 pin0 ssdT regT v0 own0 | n1:Gl r1 pin0 ssdT regT v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S7 [ProgressNext] msgs=[('resp', 'n0')]
+    n0:Gl r0 pin0 ssdT regT v0 own0 | n1:Gl r1 pin0 ssdT regT v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S8 [ProgressNext] msgs=[('upd', 'n1')]
+    n0:Gl r0 pin0 ssdT regT v0 own1 | n1:Gl r1 pin0 ssdT regT v0 own0 | n2:Ab r0 pin0 ssdF regF v0 own0
+S9 [ProgressNext] msgs=[]
+    n0:Gl r0 pin0 ssdT regT v0 own1 | n1:Gl r1 pin0 ssdT regT v0 own1 | n2:Ab r0 pin0 ssdF regF v0 own0
+S10 [DropRef] msgs=[('req', 'n0')]
+    n0:Gl r0 pin0 ssdT regT v0 own1 | n1:Gl r0 pin0 ssdT regT v0 own1 | n2:Ab r0 pin0 ssdF regF v0 own0
+S11 [ProgressNext] msgs=[('resp', 'n1')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Gl r0 pin0 ssdT regT v0 own1 | n2:Ab r0 pin0 ssdF regF v0 own0
+S12 [AcquireLocal] msgs=[('resp', 'n1')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Gl r1 pin0 ssdT regT v0 own1 | n2:Ab r0 pin0 ssdF regF v0 own0
+S13 [Spawn] msgs=[('restart', 'n1'), ('spawn', 'n2'), ('resp', 'n1')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Gl r1 pin1 ssdT regT v0 own1 | n2:Ab r0 pin0 ssdF regF v0 own0
+S14 [ProgressNext] msgs=[('reg', 'n0'), ('unpin', 'n1'), ('restart', 'n1'), ('resp', 'n1')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Gl r1 pin1 ssdT regT v0 own1 | n2:Gl r0 pin0 ssdF regF v0 own0
+S15 [ProgressNext] msgs=[('reg', 'n0'), ('restart', 'n1'), ('resp', 'n1')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Gl r1 pin0 ssdT regT v0 own1 | n2:Gl r0 pin0 ssdF regF v0 own0
+S16 [DropRef] msgs=[('reg', 'n0'), ('restart', 'n1'), ('resp', 'n1')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Gl r0 pin0 ssdT regT v0 own1 | n2:Gl r0 pin0 ssdF regF v0 own0
+S17 [ProgressNext] msgs=[('reg', 'n0'), ('restart', 'n1'), ('succ', 'n0')]
+    n0:Pe r0 pin0 ssdT regT v2 own1 | n1:Lo r0 pin0 ssdT regT v0 own1 | n2:Gl r0 pin0 ssdF regF v0 own0
+S18 [ProgressNext] msgs=[('reg', 'n0'), ('restart', 'n1'), ('succ', 'n2')]
+    n0:Lo r0 pin0 ssdT regT v0 own1 | n1:Lo r0 pin0 ssdT regT v0 own1 | n2:Gl r0 pin0 ssdF regF v0 own0

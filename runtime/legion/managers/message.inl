@@ -180,6 +180,8 @@ namespace Legion {
           break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           break;
+        case DISTRIBUTED_REGISTRATION_RESPONSE:
+          break;
         // Low priority so reference counting doesn't starve
         // out the rest of our work
         case DISTRIBUTED_DOWNGRADE_REQUEST:

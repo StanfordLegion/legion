@@ -1,0 +1,7 @@
+# Everything here except the scripts is a copy staged for rsync to
+# sapling (spec/configs from the parent dir, jar, result logs); the
+# parent-directory versions are canonical
+*
+!.gitignore
+!run_*.sbatch
+!submit_*.sh

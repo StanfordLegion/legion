@@ -1,0 +1,12 @@
+# TLC scratch state / checkpoints
+states*/
+# run logs (verdicts are summarized in RESULTS.md)
+log-*.out
+tlc-*.out
+*.log
+# driver artifacts
+done-*
+driver.lock
+# TLC binary: fetch tla2tools.jar (v2.19) from
+# https://github.com/tlaplus/tlaplus/releases
+tla2tools.jar

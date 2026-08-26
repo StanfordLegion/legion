@@ -64,11 +64,12 @@ namespace Legion {
             (k == UNBOUND_INSTANCE_KIND) ? Runtime::create_rt_user_event() :
                                            RtUserEvent::NO_RT_USER_EVENT),
         kind(k), producer_event(p_event), gc_state(init), pending_changes(0),
-        failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
-        valid_references(0), sent_valid_references(0),
-        received_valid_references(0), collect_lamport_clock(0),
-        pending_collect_lamport_clock(0), bump_collect_lamport_clock(false),
-        padded_reservations(nullptr)
+        collection_decided(false), failed_collection_count(0),
+        min_gc_priority(0), added_gc_events(0), valid_references(0),
+        sent_valid_references(0), received_valid_references(0),
+        total_sent_valid_references(0), total_received_valid_references(0),
+        collect_lamport_clock(0), pending_collect_lamport_clock(0),
+        bump_collect_lamport_clock(false), padded_reservations(nullptr)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,
@@ -496,35 +497,33 @@ namespace Legion {
         ApEvent user_event, std::set<RtEvent>& applied_events)
     //--------------------------------------------------------------------------
     {
+      // The recorded user must be COVERED by a valid reference held on
+      // some node -- but not necessarily this one, so we cannot assert
+      // local validity here. Example: a view on a remote node holds the
+      // manager valid there and forwards its copy-user registration to
+      // this (owner) node, whose local replica may be COLLECTABLE. The
+      // caller's obligation is to hold the covering reference until the
+      // applied events trigger, which prevents any collection round
+      // from committing while the registration is in flight (the round
+      // fails at the covering node). See TLA+ InstanceGC finding F1 for
+      // why an UNCOVERED record is unsound.
+      // The strongest local check is that we're not already collected;
+      // this is sound to test without the lock because gc_state is
+      // atomic and COLLECTED_GC_STATE is terminal (the internal path
+      // re-asserts it under the lock)
+      legion_assert(gc_state != COLLECTED_GC_STATE);
+      record_instance_user_internal(user_event, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::record_instance_user_internal(
+        ApEvent user_event, std::set<RtEvent>& applied_events)
+    //--------------------------------------------------------------------------
+    {
       AutoLock inst(inst_lock);
       legion_assert(gc_state != COLLECTED_GC_STATE);
-      legion_assert(added_gc_events < runtime->gc_epoch_size);
       if (is_owner() || (gc_state != PENDING_COLLECTED_GC_STATE))
-      {
-        if (gc_events.insert(user_event).second &&
-            (++added_gc_events == runtime->gc_epoch_size))
-        {
-          // We don't prune these when doing detailed legion spy so that we
-          // can check that there are no use-after-delete errors
-          if (spy_logging_level <= LIGHT_SPY_LOGGING)
-          {
-            // Go through and prune out any events that have triggered
-            for (std::set<ApEvent>::iterator it = gc_events.begin();
-                 it != gc_events.end();
-                 /*nothing*/)
-            {
-              if (it->has_triggered_faultignorant())
-              {
-                std::set<ApEvent>::iterator to_delete = it++;
-                gc_events.erase(to_delete);
-              }
-              else
-                it++;
-            }
-          }
-          added_gc_events = 0;
-        }
-      }
+        record_gc_event(user_event);
       else
       {
         const RtEvent applied = Runtime::create_rt_user_event();
@@ -538,6 +537,37 @@ namespace Legion {
         }
         rez.dispatch(owner_space);
         applied_events.insert(applied);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::record_gc_event(ApEvent user_event)
+    //--------------------------------------------------------------------------
+    {
+      // Must be called while holding the instance lock
+      legion_assert(added_gc_events < runtime->gc_epoch_size);
+      if (gc_events.insert(user_event).second &&
+          (++added_gc_events == runtime->gc_epoch_size))
+      {
+        // We don't prune these when doing detailed legion spy so that we
+        // can check that there are no use-after-delete errors
+        if (spy_logging_level <= LIGHT_SPY_LOGGING)
+        {
+          // Go through and prune out any events that have triggered
+          for (std::set<ApEvent>::iterator it = gc_events.begin();
+               it != gc_events.end();
+               /*nothing*/)
+          {
+            if (it->has_triggered_faultignorant())
+            {
+              std::set<ApEvent>::iterator to_delete = it++;
+              gc_events.erase(to_delete);
+            }
+            else
+              it++;
+          }
+        }
+        added_gc_events = 0;
       }
     }
 
@@ -557,7 +587,7 @@ namespace Legion {
       PhysicalManager* manager = static_cast<PhysicalManager*>(
           runtime->find_distributed_collectable(did));
       std::set<RtEvent> applied;
-      manager->record_instance_user(user_event, applied);
+      manager->record_instance_user_internal(user_event, applied);
       manager->unpack_global_ref(derez);
       if (!applied.empty())
         Runtime::trigger_event(done, Runtime::merge_events(applied));
@@ -1255,7 +1285,7 @@ namespace Legion {
         {
           const ApEvent remote = Runtime::merge_events(nullptr, gc_events);
           if (remote.exists())
-            manager->record_instance_user(remote, ready_events);
+            manager->record_instance_user_internal(remote, ready_events);
         }
         // If we have different numbers of sent and received valid
         // references then we need to tell the owner that too. We must also
@@ -1333,8 +1363,14 @@ namespace Legion {
       AutoLock i_lock(inst_lock);
       legion_assert(is_owner());
       legion_assert(gc_state != COLLECTED_GC_STATE);
-      sent_valid_references += sent;
-      received_valid_references += received;
+      // Fold remote reports into the ROUND-LOCAL accumulators, never the
+      // primary counters: the primaries are this node's cumulative
+      // pack/unpack log and must survive round failures unmodified (TLA+
+      // InstanceGC F2 -- the old restore-the-primaries scheme erased
+      // legitimate mid-round reference traffic). The accumulators are
+      // simply reset when the next round starts.
+      total_sent_valid_references += sent;
+      total_received_valid_references += received;
       // Aggregate the remote node's clock so the owner's collection decision
       // can detect a packed valid reference newer than this round's snapshot
       collect_lamport_clock = std::max(collect_lamport_clock, lamport_clock);
@@ -1446,6 +1482,20 @@ namespace Legion {
               break;
             }
           case PENDING_COLLECTED_GC_STATE:
+            {
+              // Poison the in-flight collection round (TLA+ InstanceGC
+              // F3, the same technique as the downgrade protocol's
+              // update_remote_instances poison): this new instance
+              // escaped the round's fan-out, and its counts can
+              // self-balance against an existing node's (a pack and a
+              // pack-back both stamped below the round snapshot), so
+              // neither the counts nor the clock can protect it. Failing
+              // the round makes the retry fan out over the full set of
+              // instances including this one.
+              failed_collection_count.fetch_add(1);
+              rez.serialize(gc_state);
+              break;
+            }
           case COLLECTED_GC_STATE:
             {
               rez.serialize(gc_state);
@@ -1482,27 +1532,31 @@ namespace Legion {
       // If it's already collected then we're done
       if (gc_state == COLLECTED_GC_STATE)
         return true;
-      bool has_local_references = false;
-      uint64_t local_valid_sent = 0, local_valid_received = 0;
       if (is_owner())
       {
         // Check to see if anyone is already performing a deletion
-        // on this manager, if so then deduplicate
-        if (gc_state == COLLECTABLE_GC_STATE)
+        // on this manager, if so then deduplicate. A new round may only
+        // begin once every waiter of the previous round has drained
+        // (pending_changes == 0): waiters capture collection_ready when
+        // they join, so starting a new round while any are still blocked
+        // strands them against overwritten round state and lets them
+        // decide a later, half-collected round (TLA+ InstanceGC F4).
+        if ((gc_state == COLLECTABLE_GC_STATE) && (pending_changes == 0))
         {
           gc_state = PENDING_COLLECTED_GC_STATE;
           failed_collection_count.store(0);
+          collection_decided = false;
+          // Reset the round-local accumulators for remote count reports;
+          // the primary counters are cumulative and are never touched by
+          // rounds (TLA+ InstanceGC F2)
+          total_sent_valid_references = 0;
+          total_received_valid_references = 0;
           // Start a new collection round: advance our clock to obtain this
           // round's snapshot and arm the bump so that any valid reference we
           // pack after freezing our counts advances the clock past the
           // snapshot and is therefore detectable as a causality violation.
           pending_collect_lamport_clock = ++collect_lamport_clock;
           bump_collect_lamport_clock = true;
-          // Pull a copy of these onto the stack in case we fail to
-          // collect and we need to restore them
-          local_valid_sent = sent_valid_references;
-          local_valid_received = received_valid_references;
-          has_local_references = true;
           std::vector<RtEvent> ready_events;
           if (collective_mapping != nullptr)
           {
@@ -1562,11 +1616,20 @@ namespace Legion {
           }
           if (!ready_events.empty())
             collection_ready = Runtime::merge_events(ready_events);
+          else
+            collection_ready = RtEvent::NO_RT_EVENT;
         }
         else
         {
-          legion_assert(gc_state == PENDING_COLLECTED_GC_STATE);
-          // Should alaready have outstanding changes for this deletion
+          // Either a round is in flight (PENDING), or a finished round's
+          // waiters have not all drained yet (COLLECTABLE with
+          // pending_changes > 0): join and wait; in the latter case the
+          // captured event has already triggered and we drain straight
+          // back out through the switch below without a new round
+          legion_assert(
+              (gc_state == PENDING_COLLECTED_GC_STATE) ||
+              (gc_state == COLLECTABLE_GC_STATE));
+          // Should already have outstanding changes for this deletion
           legion_assert(pending_changes > 0);
         }
         pending_changes++;
@@ -1586,34 +1649,42 @@ namespace Legion {
           case VALID_GC_STATE:
           case COLLECTABLE_GC_STATE:
             {
-              // Restore our local sent/received counts
-              if (has_local_references)
-              {
-                sent_valid_references = local_valid_sent;
-                received_valid_references = local_valid_received;
-              }
+              // An acquire won the race and saved the instance, so this
+              // round is over. Drain our pending change: EVERY wake path
+              // must decrement or the counter leaks and permanently
+              // parks the owner (TLA+ InstanceGC F4). No count
+              // restoration is needed: the primary counters were never
+              // modified by the round (F2).
+              collection_decided = true;
+              --pending_changes;
               break;
             }
           case PENDING_COLLECTED_GC_STATE:
             {
               // Precondition should have triggered if we're here
               legion_assert(collection_ready.has_triggered());
-              // Check to see if there were any collection guards we
-              // were unable to acquire on remote nodes or whether there
-              // are still packed valid reference outstanding
-              if ((failed_collection_count.load() > 0) ||
-                  (sent_valid_references != received_valid_references) ||
+              // Decide-once (TLA+ InstanceGC F4): if an earlier waker
+              // already decided this round failed, only drain --
+              // re-running the decision against reset or partially
+              // accumulated state could commit a deletion the round
+              // never earned. Otherwise check whether any collection
+              // guards failed on remote nodes, whether the global count
+              // balance (round accumulators plus our own cumulative
+              // counters, F2) shows packed valid references
+              // outstanding, or whether the clock shows a reference
+              // packed after this round's snapshot.
+              if (collection_decided || (failed_collection_count.load() > 0) ||
+                  ((total_sent_valid_references + sent_valid_references) !=
+                   (total_received_valid_references +
+                    received_valid_references)) ||
                   (collect_lamport_clock > pending_collect_lamport_clock))
               {
-                // Restore our local sent/received counts (but not the clock,
-                // which stays monotonic so the next round's snapshot exceeds
-                // any reference that caused this round to fail, guaranteeing
-                // forward progress once the traffic quiesces).
-                if (has_local_references)
-                {
-                  sent_valid_references = local_valid_sent;
-                  received_valid_references = local_valid_received;
-                }
+                collection_decided = true;
+                // The clock is not restored: it stays monotonic so the
+                // next round's snapshot exceeds any reference that
+                // caused this round to fail, guaranteeing forward
+                // progress once the traffic quiesces. The primary
+                // counters were never touched (F2).
                 // See if we're the last release, if not then we
                 // keep it in this state
                 if (--pending_changes == 0)
@@ -1621,6 +1692,11 @@ namespace Legion {
               }
               else
               {
+                collection_decided = true;
+                // Drain our own pending change before the deletion
+                // releases the lock (F4); later wakers drain through
+                // the COLLECTED case below
+                --pending_changes;
                 // Deletion success and we're the first ones to discover it
                 // Move to the deletion state and send the deletion messages
                 // to mark that we successfully performed the deletion
@@ -1697,6 +1773,9 @@ namespace Legion {
             }
           case COLLECTED_GC_STATE:
             {
+              // Someone else already performed the deletion; drain our
+              // pending change (F4)
+              --pending_changes;
               // Save the event for when the collection is done
               ready = collection_ready;
               return true;
